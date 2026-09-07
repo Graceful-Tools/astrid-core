@@ -257,6 +257,27 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// A list's chat, from the cache.
+    ///
+    /// Answers with the channel and the transcript projected — see [`crate::rows::chat`] for what
+    /// "mine", "sending" and "nobody said it" mean and why the shell is not asked to decide them.
+    Chat {
+        list_id: String,
+    },
+    /// Fetch the channels and then this list's messages.
+    ///
+    /// Separate from [`Command::Chat`] because opening a conversation should draw instantly from
+    /// the cache and catch up afterwards, the same order the task list uses.
+    RefreshChat {
+        list_id: String,
+    },
+    /// Say something. In the transcript before this returns, whatever the network is doing.
+    SendChatMessage {
+        channel_id: String,
+        content: String,
+        #[serde(default)]
+        reply_to_id: Option<String>,
+    },
     /// Who a list is shared with, and what this account may do about it.
     ///
     /// Reaches the network: membership is not a local fact, and a cached member list that is a day

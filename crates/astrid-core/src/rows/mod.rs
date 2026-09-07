@@ -16,6 +16,7 @@
 //! come to disagree about which day a task is due.
 
 pub mod assignee;
+pub mod chat;
 pub mod detail;
 pub mod due_picks;
 pub mod reminder_picks;

@@ -206,6 +206,21 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::Chat { list_id } => chat(app, &list_id),
+        Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
+        Command::SendChatMessage {
+            channel_id,
+            content,
+            reply_to_id,
+        } => {
+            let author = app.context.account().current_user_id().ok().flatten();
+            answer(app.context.chat().send(
+                &channel_id,
+                &content,
+                author.as_deref(),
+                reply_to_id.as_deref(),
+            ))
+        }
         Command::ListMembers { list_id } => list_members(app, &list_id).await,
         Command::InviteToList {
             list_id,
@@ -500,6 +515,58 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// A list's chat, from the cache.
+///
+/// `channelId` is null when this deployment has no channel for the list — chat is a feature a
+/// deployment can be without, and a shell that read that as an error would show a broken panel to
+/// everybody using a server that simply does not have it.
+fn chat(app: &App, list_id: &str) -> Response {
+    let channel = match app.context.chat().channel_for_list(list_id) {
+        Ok(channel) => channel,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let Some(channel) = channel else {
+        return Response::ok(serde_json::json!({
+            "channelId": serde_json::Value::Null,
+            "messages": [],
+        }));
+    };
+
+    let messages = app.context.chat().messages(&channel.id).unwrap_or_default();
+    let me = app.context.account().current_user_id().ok().flatten();
+    let people = app.store.users().unwrap_or_default();
+
+    Response::ok(serde_json::json!({
+        "channelId": channel.id,
+        "name": channel.name,
+        "messages": rows::chat::transcript(&messages, me.as_deref(), &people),
+    }))
+}
+
+/// Catch the chat up with the server.
+///
+/// The channels first: a list whose channel this client has never seen has nothing to fetch
+/// messages for, and that is the ordinary state the first time a conversation is opened.
+async fn refresh_chat(app: &App, list_id: &str) -> Response {
+    if let Err(error) = app.context.chat().refresh_channels().await {
+        return Response::failed(error.into());
+    }
+    let channel = match app.context.chat().channel_for_list(list_id) {
+        Ok(Some(channel)) => channel,
+        Ok(None) => {
+            return Response::ok(serde_json::json!({
+                "channelId": serde_json::Value::Null,
+                "messages": [],
+            }))
+        }
+        Err(error) => return Response::failed(error.into()),
+    };
+    if let Err(error) = app.context.chat().refresh_messages(&channel.id).await {
+        return Response::failed(error.into());
+    }
+    chat(app, list_id)
+}
 
 /// Who a list is shared with, and what this account may do about it.
 ///
@@ -1737,6 +1804,49 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A message typed offline is in the transcript at once, marked as still going. The panel is
+    /// drawn from the cache and catches up afterwards, the same order the task list uses.
+    #[tokio::test]
+    async fn a_message_is_in_the_transcript_before_it_is_sent() {
+        let app = app_with(StubTransport::new());
+        app.store
+            .upsert_channels(&[serde_json::from_value(json!({
+                "id": "c1", "listId": "l1", "name": "Work"
+            }))
+            .expect("a channel")])
+            .expect("stores");
+        app.store
+            .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+            .expect("stores");
+
+        call(
+            &app,
+            json!({ "kind": "sendChatMessage", "channelId": "c1", "content": "on my way" }),
+        )
+        .await;
+
+        let panel = call(&app, json!({ "kind": "chat", "listId": "l1" })).await;
+        let messages = panel["value"]["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["content"], "on my way");
+        assert_eq!(messages[0]["isMine"], true);
+        assert_eq!(messages[0]["isPending"], true);
+    }
+
+    /// Chat is a feature a deployment can be without. A shell that read "no channel" as an error
+    /// would show a broken panel to everybody on a server that simply does not have it.
+    #[tokio::test]
+    async fn a_list_with_no_channel_has_an_empty_chat_rather_than_an_error() {
+        let app = app_with(StubTransport::new());
+        let panel = call(&app, json!({ "kind": "chat", "listId": "l1" })).await;
+        assert_eq!(panel["ok"], true);
+        assert!(panel["value"]["channelId"].is_null());
+        assert!(panel["value"]["messages"]
+            .as_array()
+            .expect("messages")
+            .is_empty());
     }
 
     /// Membership comes with what this account may do about it, decided by the permission rules
