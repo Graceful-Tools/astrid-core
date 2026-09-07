@@ -20,4 +20,5 @@ pub mod auth;
 pub mod keyboard;
 pub mod model;
 pub mod permissions;
+pub mod platform;
 pub mod repeating;
