@@ -114,7 +114,16 @@ const customCases = [
   ['weekly on Mon/Wed/Fri, starting Monday', WEEKLY_MWF, '2024-01-15T09:00:00Z', 'DUE_DATE', 0],
   ['weekly on a single day wraps a whole week', { type: 'custom', unit: 'weeks', interval: 1, endCondition: 'never', weekdays: ['monday'] }, '2024-01-15T09:00:00Z', 'DUE_DATE', 0],
   ['monthly on the 15th', MONTHLY_15TH, '2024-01-15T14:00:00Z', 'DUE_DATE', 0],
+  // A custom monthly pattern anchored on the 31st. Web's SIMPLE monthly step clamps explicitly;
+  // this custom one does not, so the two disagree about the same question — and a client that
+  // clamps here would schedule a different date than the server's own arithmetic produces.
+  ['monthly on the 31st, into a short month', { type: 'custom', unit: 'months', interval: 1, endCondition: 'never', monthRepeatType: 'same_date', monthDay: 31 }, '2024-01-31T09:00:00Z', 'DUE_DATE', 0],
+  ['monthly on the 30th, into February', { type: 'custom', unit: 'months', interval: 1, endCondition: 'never', monthRepeatType: 'same_date', monthDay: 30 }, '2024-01-30T09:00:00Z', 'DUE_DATE', 0],
   ['the third Tuesday', THIRD_TUESDAY, '2024-01-16T10:00:00Z', 'DUE_DATE', 0],
+  // A fifth weekday can fall on the 29th, 30th or 31st, so the intermediate "same day next month"
+  // step can overflow before the weekday is even looked for. Dec 29 2024 is the fifth Sunday.
+  ['the fifth Sunday, from a 29th', { type: 'custom', unit: 'months', interval: 1, endCondition: 'never', monthRepeatType: 'same_weekday', monthWeekday: { weekday: 'sunday', weekOfMonth: 5 } }, '2024-12-29T10:00:00Z', 'DUE_DATE', 0],
+  ['the first Monday, from a 31st', { type: 'custom', unit: 'months', interval: 1, endCondition: 'never', monthRepeatType: 'same_weekday', monthWeekday: { weekday: 'monday', weekOfMonth: 1 } }, '2024-01-31T10:00:00Z', 'DUE_DATE', 0],
   ['every two years on a set month and day', { type: 'custom', unit: 'years', interval: 2, endCondition: 'never', month: 3, day: 10 }, '2024-06-15T12:00:00Z', 'DUE_DATE', 0],
   ['terminating exactly at the occurrence limit', { ...WEEKLY_MWF, endCondition: 'after_occurrences', endAfterOccurrences: 4 }, '2024-01-15T09:00:00Z', 'DUE_DATE', 3],
   ['one occurrence short of the limit', { ...WEEKLY_MWF, endCondition: 'after_occurrences', endAfterOccurrences: 4 }, '2024-01-15T09:00:00Z', 'DUE_DATE', 2],

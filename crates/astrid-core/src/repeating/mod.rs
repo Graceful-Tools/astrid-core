@@ -278,13 +278,29 @@ fn adding_months(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
         .unwrap_or(date)
 }
 
+/// Add months the way `Date.setMonth` does: the day of the month is kept, and a day the target
+/// month does not have spills forward. January 31st plus a month is **March 2nd**, not February
+/// 29th — February is skipped entirely.
+///
+/// That is not a typo, and it is not this crate's choice. `adding_months` above clamps because
+/// web's SIMPLE monthly step clamps, with an explicit `setUTCDate(0)`; web's CUSTOM monthly step a
+/// few files away does not, and the two are reachable from the same product question. See D5.
+fn adding_months_overflowing(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
+    let zero_based = date.month0() + months;
+    let year = date.year() + (zero_based / 12) as i32;
+    let month = zero_based % 12 + 1;
+    from_ymd_overflowing(year, month, date.day())
+        .map(|d| d.and_time(date.time()).and_utc())
+        .unwrap_or(date)
+}
+
 /// Add years the way `Date.setUTCFullYear` does: the day of the month is kept, and February 29th in
 /// a year that has no February 29th spills over into March.
 ///
 /// Deliberately NOT the month clamp above, even though clamping to February 28th is the friendlier
 /// answer and is what both Apple apps do. Web is the contract, and a yearly task must roll over to
 /// the same date whichever client the user completes it on. Recorded as D5 in docs/CONTRACTS.md,
-/// with web's own monthly/yearly inconsistency, because it is worth fixing everywhere at once.
+/// with web's own clamp/overflow inconsistency, because it is worth fixing everywhere at once.
 fn adding_years(date: DateTime<Utc>, years: i32) -> DateTime<Utc> {
     from_ymd_overflowing(date.year() + years, date.month(), date.day())
         .map(|d| d.and_time(date.time()).and_utc())
@@ -346,10 +362,15 @@ fn next_month_occurrence(
 ) -> Option<DateTime<Utc>> {
     let months = u32::try_from(interval).ok()?;
     match pattern.month_repeat_type? {
-        MonthRepeatType::SameDate => Some(adding_months(date, months)),
+        // Overflowing, not clamping: see `adding_months_overflowing`. A task set to the 31st skips
+        // February on every client, which is a shared bug rather than one to fix here alone.
+        MonthRepeatType::SameDate => Some(adding_months_overflowing(date, months)),
         MonthRepeatType::SameWeekday => {
             let month_weekday = pattern.month_weekday?;
-            let target_month = adding_months(date, months);
+            // The intermediate step decides only WHICH month to search, but it overflows too — so
+            // a fifth weekday sitting on the 31st searches the month after next. Matching web
+            // matters more than being right on its own here.
+            let target_month = adding_months_overflowing(date, months);
             let first_of_month =
                 chrono::NaiveDate::from_ymd_opt(target_month.year(), target_month.month(), 1)?;
             let offset = (i64::from(month_weekday.weekday.number())
@@ -783,6 +804,35 @@ mod tests {
                 i + 1
             );
         }
+    }
+
+    /// A custom monthly pattern on the 31st **skips February**, because web overflows here rather
+    /// than clamping the way its own simple monthly step does. Matching that is deliberate; the
+    /// reasoning, and why it is a cross-repo fix, is D5 in docs/CONTRACTS.md.
+    #[test]
+    fn a_custom_monthly_on_the_31st_overflows_the_way_web_does() {
+        let pattern = CustomRepeatingPattern {
+            r#type: Some("custom".into()),
+            unit: Some("months".into()),
+            interval: Some(1),
+            end_condition: Some(EndCondition::Never),
+            month_repeat_type: Some(MonthRepeatType::SameDate),
+            month_day: Some(31),
+            ..Default::default()
+        };
+        let result = calculate_custom_next_occurrence(
+            &pattern,
+            Some(utc(2024, 1, 31, 9, 0)),
+            utc(2024, 1, 31, 9, 0),
+            RepeatFrom::DueDate,
+            0,
+        );
+        let next = result.next_due_date.unwrap();
+        assert_eq!(
+            (next.month(), next.day()),
+            (3, 2),
+            "web rolls the overflow forward into March; February gets no occurrence at all"
+        );
     }
 
     /// "The third Tuesday of every month" — the date moves, the weekday and week-of-month do not.

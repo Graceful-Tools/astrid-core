@@ -272,6 +272,42 @@
       "newOccurrenceCount": 1
     },
     {
+      "name": "monthly on the 31st, into a short month",
+      "pattern": {
+        "type": "custom",
+        "unit": "months",
+        "interval": 1,
+        "endCondition": "never",
+        "monthRepeatType": "same_date",
+        "monthDay": 31
+      },
+      "currentDueDate": "2024-01-31T09:00:00Z",
+      "completionDate": "2024-01-31T09:00:00Z",
+      "repeatFrom": "DUE_DATE",
+      "currentOccurrenceCount": 0,
+      "nextDueDate": "2024-03-02T09:00:00.000Z",
+      "shouldTerminate": false,
+      "newOccurrenceCount": 1
+    },
+    {
+      "name": "monthly on the 30th, into February",
+      "pattern": {
+        "type": "custom",
+        "unit": "months",
+        "interval": 1,
+        "endCondition": "never",
+        "monthRepeatType": "same_date",
+        "monthDay": 30
+      },
+      "currentDueDate": "2024-01-30T09:00:00Z",
+      "completionDate": "2024-01-30T09:00:00Z",
+      "repeatFrom": "DUE_DATE",
+      "currentOccurrenceCount": 0,
+      "nextDueDate": "2024-03-01T09:00:00.000Z",
+      "shouldTerminate": false,
+      "newOccurrenceCount": 1
+    },
+    {
       "name": "the third Tuesday",
       "pattern": {
         "type": "custom",
@@ -289,6 +325,48 @@
       "repeatFrom": "DUE_DATE",
       "currentOccurrenceCount": 0,
       "nextDueDate": "2024-02-20T00:00:00.000Z",
+      "shouldTerminate": false,
+      "newOccurrenceCount": 1
+    },
+    {
+      "name": "the fifth Sunday, from a 29th",
+      "pattern": {
+        "type": "custom",
+        "unit": "months",
+        "interval": 1,
+        "endCondition": "never",
+        "monthRepeatType": "same_weekday",
+        "monthWeekday": {
+          "weekday": "sunday",
+          "weekOfMonth": 5
+        }
+      },
+      "currentDueDate": "2024-12-29T10:00:00Z",
+      "completionDate": "2024-12-29T10:00:00Z",
+      "repeatFrom": "DUE_DATE",
+      "currentOccurrenceCount": 0,
+      "nextDueDate": "2025-02-02T00:00:00.000Z",
+      "shouldTerminate": false,
+      "newOccurrenceCount": 1
+    },
+    {
+      "name": "the first Monday, from a 31st",
+      "pattern": {
+        "type": "custom",
+        "unit": "months",
+        "interval": 1,
+        "endCondition": "never",
+        "monthRepeatType": "same_weekday",
+        "monthWeekday": {
+          "weekday": "monday",
+          "weekOfMonth": 1
+        }
+      },
+      "currentDueDate": "2024-01-31T10:00:00Z",
+      "completionDate": "2024-01-31T10:00:00Z",
+      "repeatFrom": "DUE_DATE",
+      "currentOccurrenceCount": 0,
+      "nextDueDate": "2024-03-04T00:00:00.000Z",
       "shouldTerminate": false,
       "newOccurrenceCount": 1
     },

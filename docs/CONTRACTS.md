@@ -73,29 +73,35 @@ Closing it means moving web's custom path onto UTC methods, with the progression
 a non-UTC `TZ`. Until then this crate matches the UTC answer, which is what web produces when
 deployed in UTC.
 
-### D5 — February 29th plus a year
+### D5 — "this date does not exist next period" has two answers on web
 
-**This crate follows web:** it spills into March 1st.
+**This crate matches web case by case**, which means it clamps in exactly one place and overflows
+everywhere else. The fixture is what forced that: each of these was found by the generated cases
+disagreeing with a port that clamped consistently.
 
-Web's yearly step is `setUTCFullYear(year + 1)`, and JavaScript rolls a date that does not exist
-forward — February 29th 2024 becomes **March 1st 2025**. That half is measured: it is what the
-generated fixture records, and it is how this was found, because chrono's arithmetic clamps and the
-fixture disagreed with the port on its first run.
+| Step | Web | Example | Apple | Here |
+|---|---|---|---|---|
+| Simple monthly | **clamps**, with an explicit `setUTCDate(0)` | Jan 31 → **Feb 29** | clamps | clamps |
+| Simple yearly | overflows (`setUTCFullYear`) | Feb 29 2024 → **Mar 1 2025** | clamps | overflows |
+| Custom monthly, same date | overflows (`setMonth`) | Jan 31 → **Mar 2** | clamps | overflows |
+| Custom monthly, same weekday | overflows, then searches that month | 5th Sunday from Dec 29 → **Feb 2** | clamps | overflows |
 
-The Apple side is read rather than run: `RepeatingTaskHandler.swift` uses
-`Calendar.date(byAdding: .year)`, which clamps an invalid result to the last valid day, so both
-Apple apps should land on February 28th. Worth confirming on a device before the cross-repo fix,
-since the whole point of that fix is to make three clients agree.
+The custom monthly row is the one worth staring at. A task set to repeat on the **31st of every
+month skips February entirely** and lands on March 2nd, because JavaScript rolls the overflow
+forward rather than clamping. A user who set "the 31st" reasonably expects the end of February, and
+that is what web's own *simple* monthly step would give them — the same product question, answered
+two ways a few files apart.
 
-Web is also inconsistent with itself. Its *monthly* step clamps deliberately — January 31st plus a
-month is the 28th or 29th of February, with an explicit `setUTCDate(0)` to force it — while its
-yearly step spills. The same product question ("this date does not exist next period, now what?")
-has two answers a few lines apart.
+Clamping is very likely right in all four rows: an anniversary on February 29th belongs on February
+28th, and a monthly task on the 31st belongs on the last day of the month. But changing any of them
+here alone would make the same task land on a different date depending on which app the user
+completed it in, which is worse than the inconsistency. It changes on web first, then everywhere.
 
-Clamping is very likely the better behaviour: an anniversary on February 29th belongs on February
-28th, not on March 1st, and it is what two of the three clients already do. But changing it here
-alone would make a leap-day task land on a different date depending on which app the user completed
-it in, which is worse than the inconsistency. It changes on web first, then everywhere.
+Evidence: the web half is **measured** — it is what `contracts/fixtures/repeating.json` records
+from running web's own calculator. The Apple column is **read** from
+`RepeatingTaskHandler.swift`, which uses `Calendar.date(byAdding:)`; Foundation clamps an invalid
+result to the last valid day. Worth confirming on a device before the cross-repo fix, since the
+point of that fix is to make three clients agree.
 
 ### Settled behaviour (no divergence)
 
