@@ -15,6 +15,7 @@
 //! 4. Writes journal through the Outbox: idempotent, retrying, dependency-ordered.
 //! 5. No Windows dependency here — platform services arrive as callback traits.
 
+pub mod api;
 pub mod auth;
 pub mod keyboard;
 pub mod repeating;
