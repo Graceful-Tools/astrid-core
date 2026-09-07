@@ -1,0 +1,6 @@
+# Pinned so every machine and CI runner builds the same core.
+# Bump deliberately; a toolchain bump is a PR of its own.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
