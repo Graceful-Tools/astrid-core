@@ -206,6 +206,26 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::ListMembers { list_id } => list_members(app, &list_id).await,
+        Command::InviteToList {
+            list_id,
+            email,
+            role,
+        } => answer_done(app.context.lists().invite(&list_id, &email, &role).await),
+        Command::SetMemberRole {
+            list_id,
+            user_id,
+            role,
+        } => answer_done(
+            app.context
+                .lists()
+                .set_member_role(&list_id, &user_id, &role)
+                .await,
+        ),
+        Command::RemoveMember { list_id, user_id } => {
+            answer_done(app.context.lists().remove_member(&list_id, &user_id).await)
+        }
+        Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
         Command::BeginSignIn => match app.auth.begin() {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
@@ -480,6 +500,49 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// Who a list is shared with, and what this account may do about it.
+///
+/// The permissions come back with the members rather than being worked out in the shell: whether
+/// somebody may change a role is [`crate::permissions`], and a screen that decided it itself would
+/// be the fourth implementation of a rule whose failure mode is a control that 403s — or one that
+/// quietly is not offered to somebody who should have it.
+async fn list_members(app: &App, list_id: &str) -> Response {
+    let list = match app.context.lists().list(list_id) {
+        Ok(Some(list)) => list,
+        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let members = match app.context.lists().members(list_id).await {
+        Ok(members) => members,
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let me = app.context.account().current_user_id().ok().flatten();
+    let lists = app.context.lists();
+    let (can_manage_members, can_manage_list, can_delete) = match me.as_deref() {
+        Some(me) => (
+            lists.can_manage_members(me, &list),
+            lists.can_manage(me, &list),
+            lists.can_delete(me, &list),
+        ),
+        None => (false, false, false),
+    };
+
+    Response::ok(serde_json::json!({
+        "listId": list.id,
+        "name": list.name,
+        "ownerId": list.owner_id,
+        "canManageMembers": can_manage_members,
+        "canManageList": can_manage_list,
+        "canDeleteList": can_delete,
+        // Leaving is for a list somebody else owns: an owner leaving their own list would strand
+        // it, which is what deleting is for.
+        "canLeave": me.is_some() && list.owner_id.as_deref() != me.as_deref(),
+        "currentUserId": me,
+        "members": members,
+    }))
+}
 
 /// The board a list belongs to.
 ///
@@ -790,6 +853,15 @@ fn assignee_options(app: &App, task_id: &str) -> Response {
         "assigneeId": task.assignee_id,
         "options": options,
     }))
+}
+
+/// For a write whose answer is that it happened. `Response::done()` rather than `ok(())`, so the
+/// shell is not handed a `null` to decide something about.
+fn answer_done(result: crate::services::Result<()>) -> Response {
+    match result {
+        Ok(()) => Response::done(),
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 fn answer<T: serde::Serialize>(result: crate::services::Result<T>) -> Response {
@@ -1665,6 +1737,81 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// Membership comes with what this account may do about it, decided by the permission rules
+    /// rather than by a screen — the failure mode is a control that 403s, or one that quietly is
+    /// not offered to somebody who should have it.
+    #[tokio::test]
+    async fn list_members_come_with_what_this_account_may_do() {
+        let transport = StubTransport::new().push_json(
+            "/members",
+            200,
+            json!({
+                "members": [
+                    { "userId": "me", "role": "owner", "user": { "id": "me", "name": "Jon" } },
+                    { "userId": "dana", "role": "member", "user": { "id": "dana", "name": "Dana" } },
+                ]
+            }),
+        );
+        let app = app_with(transport);
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({
+                    "id": "l1", "name": "Work", "ownerId": "me", "privacy": "SHARED"
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+        app.store
+            .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+            .expect("stores");
+
+        let answered = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(
+            answered["value"]["members"]
+                .as_array()
+                .expect("members")
+                .len(),
+            2
+        );
+        assert_eq!(answered["value"]["canManageMembers"], true);
+        // The owner cannot leave their own list — that would strand it, which is what deleting is
+        // for.
+        assert_eq!(answered["value"]["canLeave"], false);
+    }
+
+    #[tokio::test]
+    async fn members_of_a_list_that_is_not_there_are_a_not_found() {
+        let app = app_with(StubTransport::new());
+        let answered = call(&app, json!({ "kind": "listMembers", "listId": "nope" })).await;
+        assert_eq!(answered["error"]["kind"], "notFound");
+    }
+
+    /// An invitation reaches the network rather than the Outbox: queuing one offline would show a
+    /// member who does not exist, and the optimistic row would be indistinguishable from a real one
+    /// to every permission check that read it afterwards.
+    #[tokio::test]
+    async fn an_invitation_goes_straight_to_the_server() {
+        let transport = StubTransport::new().push_json("/members", 200, json!({ "ok": true }));
+        let app = app_with(transport);
+
+        let answered = call(
+            &app,
+            json!({
+                "kind": "inviteToList",
+                "listId": "l1",
+                "email": "dana@example.test",
+                "role": "member",
+            }),
+        )
+        .await;
+        assert_eq!(answered["ok"], true);
+        assert_eq!(
+            call(&app, json!({ "kind": "outboxStats" })).await["value"]["pending"],
+            0,
+            "an invitation is not a local fact and does not belong in the Outbox"
+        );
     }
 
     /// A board answers with rows, so a card draws like a row, and the columns come back in the

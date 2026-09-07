@@ -257,6 +257,32 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// Who a list is shared with, and what this account may do about it.
+    ///
+    /// Reaches the network: membership is not a local fact, and a cached member list that is a day
+    /// old is how somebody removed last week is still offered a role.
+    ListMembers {
+        list_id: String,
+    },
+    /// Invite somebody by email.
+    InviteToList {
+        list_id: String,
+        email: String,
+        role: String,
+    },
+    SetMemberRole {
+        list_id: String,
+        user_id: String,
+        role: String,
+    },
+    RemoveMember {
+        list_id: String,
+        user_id: String,
+    },
+    /// Leave a list somebody else owns.
+    LeaveList {
+        list_id: String,
+    },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
     /// Start signing in. Answers with the URL for the shell to open in the browser.
