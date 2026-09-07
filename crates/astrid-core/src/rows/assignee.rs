@@ -61,7 +61,9 @@ impl AssigneeOption {
     fn person(user: &User, current_user_id: Option<&str>) -> Self {
         AssigneeOption {
             user_id: Some(user.id.clone()),
-            name: Some(user.display_name().to_string()),
+            // `known_name`, not `display_name`: the latter falls back to English, and the shell
+            // says the word for somebody we hold only an id for.
+            name: user.known_name().map(str::to_string),
             initials: user.initials(),
             image: user.image.clone(),
             is_current_user: current_user_id == Some(user.id.as_str()),

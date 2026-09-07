@@ -61,7 +61,12 @@ pub fn transcript(
             MessageRow {
                 id: message.id.clone(),
                 content: message.content.clone(),
-                author_name: author.as_ref().map(|user| user.display_name().to_string()),
+                // `known_name` rather than `display_name`, whose fallback is English. An author
+                // we know nothing about but an id is named by the shell.
+                author_name: author
+                    .as_ref()
+                    .and_then(|user| user.known_name())
+                    .map(str::to_string),
                 initials: author
                     .as_ref()
                     .map(|user| user.initials())

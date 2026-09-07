@@ -59,8 +59,31 @@ impl User {
         }
     }
 
+    /// The name we actually hold for somebody, if we hold one.
+    ///
+    /// `None` when there is neither a name nor an email — which is a real state, and one only the
+    /// shell can word. [`User::display_name`] answers it with English, and English must not cross
+    /// the boundary (rule 10), so anything projected for the screen uses this and lets the shell
+    /// say "Unknown user" in the reader's own language.
+    pub fn known_name(&self) -> Option<&str> {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                self.email
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|email| !email.is_empty())
+            })
+    }
+
     /// What to show where a name goes. Never empty: a person we hold only an id for still has to
     /// render as something.
+    ///
+    /// **Not for anything the shell draws** — the fallback is English. Use [`User::known_name`]
+    /// there. This exists for logs, for sorting, and for the places inside the core that need a
+    /// total function.
     pub fn display_name(&self) -> &str {
         self.name
             .as_deref()
