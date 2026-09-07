@@ -22,3 +22,4 @@ pub mod model;
 pub mod permissions;
 pub mod platform;
 pub mod repeating;
+pub mod store;
