@@ -14,10 +14,12 @@
 //!    Having the trait costs nothing now and avoids a rewrite then.
 
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::stream::{Stream, StreamExt};
 
 /// How long a single request may take before it is abandoned. Matches the Apple client's
 /// `Constants.API.timeout`.
@@ -101,6 +103,11 @@ pub enum TransportError {
     Unreachable(String),
     #[error("the request could not be built: {0}")]
     Invalid(String),
+    /// The server answered and refused. Only a stream reports this way: an ordinary request
+    /// carries its status in [`HttpResponse`], but a stream that is refused never becomes one, and
+    /// a 401 on the live stream has to be told apart from a network that is not there.
+    #[error("the server refused the stream with {0}")]
+    Refused(u16),
 }
 
 impl TransportError {
@@ -108,13 +115,37 @@ impl TransportError {
     /// including a malformed request, because the malformed part is usually a URL built from data
     /// that a later sync corrects.
     pub fn is_retryable(&self) -> bool {
-        !matches!(self, TransportError::Invalid(_))
+        match self {
+            TransportError::Invalid(_) => false,
+            TransportError::Refused(status) => *status >= 500,
+            _ => true,
+        }
     }
 }
+
+/// A long-lived stream of server-sent-event frames, already split on the blank line between them.
+pub type FrameStream = Pin<Box<dyn Stream<Item = Result<String, TransportError>> + Send>>;
 
 #[async_trait]
 pub trait HttpTransport: Send + Sync {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError>;
+
+    /// Open a long-lived event stream.
+    ///
+    /// Separate from [`HttpTransport::send`] because the two have nothing in common at the socket:
+    /// one reads a body to the end, the other must never do that. It lives on this trait anyway,
+    /// rather than in a module of its own, so the live stream is built by the same code that
+    /// attaches the session cookie and the platform header — the Apple client built its SSE
+    /// request by hand and that stream identified itself as nothing for a year.
+    ///
+    /// The default refuses: a transport that cannot stream should say so rather than silently
+    /// never delivering an event.
+    async fn open_stream(&self, request: HttpRequest) -> Result<FrameStream, TransportError> {
+        let _ = request;
+        Err(TransportError::Invalid(
+            "this transport does not open streams".to_string(),
+        ))
+    }
 }
 
 /// The real one, over the platform's TLS stack. See the workspace `Cargo.toml` for why it is the
@@ -189,6 +220,55 @@ impl HttpTransport for ReqwestTransport {
             headers,
             body,
         })
+    }
+
+    async fn open_stream(&self, request: HttpRequest) -> Result<FrameStream, TransportError> {
+        let method = reqwest::Method::from_bytes(request.method.as_str().as_bytes())
+            .map_err(|error| TransportError::Invalid(error.to_string()))?;
+        let mut builder = self
+            .client
+            .request(method, &request.url)
+            // No timeout: the whole point of this connection is to stay open with nothing on it.
+            // The request timeout that protects an ordinary call would close a healthy stream
+            // every thirty seconds, which reads as a server that keeps dropping the connection.
+            .timeout(Duration::from_secs(u32::MAX as u64));
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
+        }
+
+        let response = builder
+            .send()
+            .await
+            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(TransportError::Refused(status));
+        }
+
+        // Frames are separated by a blank line, and a frame can arrive across any number of TCP
+        // reads. Buffering until the separator is the only correct way to read this; splitting on
+        // whatever a read happened to contain produces frames that parse most of the time.
+        let mut buffer = String::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let frames = match chunk {
+                Ok(bytes) => {
+                    buffer.push_str(&String::from_utf8_lossy(&bytes));
+                    let mut frames = Vec::new();
+                    while let Some(end) = buffer.find(
+                        "
+
+",
+                    ) {
+                        let frame: String = buffer.drain(..end + 2).collect();
+                        frames.push(Ok(frame));
+                    }
+                    frames
+                }
+                Err(error) => vec![Err(TransportError::Unreachable(error.to_string()))],
+            };
+            futures_util::stream::iter(frames)
+        });
+        Ok(Box::pin(stream))
     }
 }
 

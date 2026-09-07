@@ -247,6 +247,36 @@ impl ApiClient {
         Ok(response)
     }
 
+    /// Open a long-lived event stream, with the same headers every other request carries.
+    ///
+    /// Built here rather than by the real-time module so the stream states the platform and sends
+    /// the session cookie. On Apple, SSE built its own request and identified itself as nothing —
+    /// which is a shame, because a live connection is the clearest evidence the app is open.
+    pub async fn open_stream(
+        &self,
+        request: Request,
+    ) -> Result<super::transport::FrameStream, ApiError> {
+        let mut http = self.build(request).await?;
+        // Replace rather than add: two Accept headers is a request that asks for both and is
+        // answered with whichever the server prefers, which is not a decision to leave open.
+        http.headers
+            .retain(|(name, _)| !name.eq_ignore_ascii_case("accept"));
+        http.headers
+            .push(("accept".to_string(), "text/event-stream".to_string()));
+        http.headers
+            .push(("cache-control".to_string(), "no-cache".to_string()));
+        match self.transport.open_stream(http).await {
+            Ok(frames) => Ok(frames),
+            // A refused stream carries a status, and 401 is the one that means "stop", not "wait".
+            Err(TransportError::Refused(401)) => Err(ApiError::Unauthorized),
+            Err(TransportError::Refused(status)) => Err(ApiError::Http {
+                status,
+                message: "the live stream was refused".to_string(),
+            }),
+            Err(error) => Err(ApiError::Transport(error)),
+        }
+    }
+
     /// Compose the request. Separated from sending so the guards can be tested without a
     /// transport, and so an Outbox entry can be rebuilt identically on a later attempt.
     pub async fn build(&self, request: Request) -> Result<HttpRequest, ApiError> {
