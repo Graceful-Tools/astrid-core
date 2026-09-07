@@ -100,6 +100,24 @@ pub enum Command {
         #[serde(default)]
         limit: Option<usize>,
     },
+    /// When to be reminded about one task, as offsets from its due time.
+    ReminderOptions {
+        task_id: String,
+    },
+    /// Which reminders have come due and have not been shown yet.
+    ///
+    /// Read while the app is running. The server owns push and email; this is only what a running
+    /// client can notice about a reminder whose time has arrived — see [`crate::reminders`].
+    RemindersDue,
+    /// Remember that a reminder was shown, so it is not shown again.
+    ReminderShown {
+        task_id: String,
+    },
+    /// Move a reminder forward and let it be shown again when it arrives.
+    SnoozeReminder {
+        task_id: String,
+        minutes: i64,
+    },
     /// The repeat presets, and how this task's repeat describes itself.
     ///
     /// The summary comes back as parts with resource keys rather than a sentence — see

@@ -95,6 +95,11 @@ pub enum Change {
         active: bool,
     },
     Settings,
+    /// A reminder has come due while the app was running.
+    ///
+    /// Carries nothing: the shell asks `remindersDue` for the list, so there is one answer to
+    /// "which reminders are outstanding" rather than one here and a different one there.
+    RemindersDue,
     /// Something the stream cannot describe changed — ask for a sync pass.
     NeedsSync,
 }
@@ -121,6 +126,16 @@ impl RealtimeSink {
             .lock()
             .expect("listener lock")
             .push(Box::new(listener));
+    }
+
+    /// Tell everyone about something that did not come from the stream.
+    ///
+    /// A reminder coming due is a change in what the app should be showing, and it reaches the
+    /// shell the same way a colleague's edit does — one subscription, not two.
+    pub fn publish(&self, change: Change) {
+        for listener in self.listeners.lock().expect("listener lock").iter() {
+            listener(&change);
+        }
     }
 
     /// Apply one frame and tell everyone what moved.

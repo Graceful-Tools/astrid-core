@@ -54,6 +54,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             include_completed,
             limit,
         } => search_tasks(app, &query, list_id, include_completed, limit),
+        Command::ReminderOptions { task_id } => reminder_options(app, &task_id),
+        Command::RemindersDue => reminders_due(app),
+        Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
+        Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
         Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
         Command::AssigneeOptions { task_id } => assignee_options(app, &task_id),
         Command::CurrentUser => match app.context.account().current_user() {
@@ -465,6 +469,86 @@ fn search_tasks(
     }))
 }
 
+/// When to be reminded about one task.
+fn reminder_options(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    Response::ok(serde_json::json!({
+        "reminderTime": task.reminder_time.map(|at| at.to_rfc3339()),
+        "picks": rows::reminder_picks::options(&task, app.clock.now()),
+    }))
+}
+
+/// The key a shown reminder is remembered under.
+///
+/// The value is the reminder's own time, not a flag: a snoozed reminder has a new time, so the
+/// same task can ask again without the mark having to be cleared by whoever moved it.
+fn shown_key(task_id: &str) -> String {
+    format!("reminder.shown.{task_id}")
+}
+
+/// Reminders whose time has come and which have not been shown.
+fn reminders_due(app: &App) -> Response {
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let now = app.clock.now();
+    let due = crate::reminders::due_now(&tasks, now, |id| {
+        let Some(task) = tasks.iter().find(|task| task.id == id) else {
+            return false;
+        };
+        let Some(at) = task.reminder_time else {
+            return false;
+        };
+        app.store
+            .metadata(&shown_key(id))
+            .ok()
+            .flatten()
+            .is_some_and(|stamp| stamp == at.to_rfc3339())
+    });
+    Response::ok(serde_json::json!({ "reminders": due }))
+}
+
+fn mark_reminder_shown(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let Some(at) = task.reminder_time else {
+        // Nothing to remember. Not an error: the reminder may have been cleared between the
+        // banner going up and somebody dismissing it.
+        return Response::done();
+    };
+    match app
+        .store
+        .set_metadata(&shown_key(task_id), &at.to_rfc3339())
+    {
+        Ok(()) => Response::done(),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// Move a reminder forward.
+///
+/// A write rather than a timer: an in-memory snooze is lost on a restart, and it leaves the
+/// server's copy of the reminder where it was, so the push still arrives at the original time.
+fn snooze_reminder(app: &App, task_id: &str, minutes: i64) -> Response {
+    let when = crate::reminders::snooze_until(app.clock.now(), minutes);
+    let changes = crate::services::TaskChanges {
+        reminder_time: Some(Some(when)),
+        ..Default::default()
+    };
+    match app.context.tasks().update(task_id, &changes) {
+        Ok(task) => Response::ok(task),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
 /// The repeat presets and this task's own repeat, described.
 ///
 /// Setting one is an ordinary `updateTask` carrying `repeating`, `repeatFrom` and
@@ -752,6 +836,7 @@ fn changes_from_json(value: &serde_json::Value) -> Result<TaskChanges, Failure> 
             "description" => changes.description = value.as_str().map(str::to_string),
             "priority" => changes.priority = value.as_i64().map(crate::model::Priority::from_i64),
             "dueDateTime" => changes.due_date_time = clearable_date(value),
+            "reminderTime" => changes.reminder_time = clearable_date(value),
             "isAllDay" => changes.is_all_day = value.as_bool(),
             "assigneeId" => {
                 changes.assignee_id = Some(value.as_str().map(str::to_string));
@@ -1410,6 +1495,86 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// The picker offers offsets from the due time, because "an hour before" is what somebody
+    /// means — and a task with nothing to be before can only have its reminder cleared.
+    #[tokio::test]
+    async fn reminder_options_are_offsets_from_the_due_time() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({
+                "kind": "createTask",
+                "title": "Call the vet",
+                "dueDateTime": "2026-09-20T09:00:00Z",
+            }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let offered = call(&app, json!({ "kind": "reminderOptions", "taskId": id })).await;
+        let picks = offered["value"]["picks"].as_array().expect("picks");
+        assert_eq!(picks[0]["titleKey"], "reminder.none");
+        assert!(picks.len() > 1);
+
+        let bare = call(&app, json!({ "kind": "createTask", "title": "Someday" })).await;
+        let bare_id = bare["value"]["id"].as_str().expect("an id").to_string();
+        let none = call(
+            &app,
+            json!({ "kind": "reminderOptions", "taskId": bare_id }),
+        )
+        .await;
+        assert_eq!(none["value"]["picks"].as_array().expect("picks").len(), 1);
+    }
+
+    /// A reminder is shown once. A banner that comes back every thirty seconds is one that gets
+    /// dismissed without being read.
+    #[tokio::test]
+    async fn a_reminder_is_offered_once_and_again_after_a_snooze() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Call the vet" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+        // A minute before the fixed clock, so it is inside the grace window.
+        let when = "2026-09-07T11:59:00Z";
+        call(
+            &app,
+            json!({
+                "kind": "updateTask",
+                "taskId": id,
+                "changes": { "reminderTime": when },
+            }),
+        )
+        .await;
+
+        let due = call(&app, json!({ "kind": "remindersDue" })).await;
+        assert_eq!(
+            due["value"]["reminders"].as_array().expect("a list").len(),
+            1
+        );
+
+        call(&app, json!({ "kind": "reminderShown", "taskId": id })).await;
+        let again = call(&app, json!({ "kind": "remindersDue" })).await;
+        assert!(again["value"]["reminders"]
+            .as_array()
+            .expect("a list")
+            .is_empty());
+
+        // Snoozing gives it a new time, so it may ask again — and not before it is due.
+        call(
+            &app,
+            json!({ "kind": "snoozeReminder", "taskId": id, "minutes": 10 }),
+        )
+        .await;
+        let snoozed = call(&app, json!({ "kind": "remindersDue" })).await;
+        assert!(snoozed["value"]["reminders"]
+            .as_array()
+            .expect("a list")
+            .is_empty());
     }
 
     /// A repeat describes itself in parts with resource keys, so the shell says it in its own

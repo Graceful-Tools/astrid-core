@@ -87,6 +87,9 @@ pub struct TaskChanges {
     pub description: Option<String>,
     pub priority: Option<Priority>,
     pub due_date_time: Option<Option<DateTime<Utc>>>,
+    /// When to be reminded. `Some(None)` clears it, which is how a reminder is turned off rather
+    /// than left in the past.
+    pub reminder_time: Option<Option<DateTime<Utc>>>,
     pub is_all_day: Option<bool>,
     pub completed: Option<bool>,
     pub completed_at: Option<Option<DateTime<Utc>>>,
@@ -124,6 +127,12 @@ impl TaskChanges {
         }
         if let Some(value) = self.due_date_time {
             task.due_date_time = value;
+        }
+        if let Some(value) = self.reminder_time {
+            task.reminder_time = value;
+            // A moved reminder has not been sent yet, whatever the server last said about the one
+            // before it.
+            task.reminder_sent = Some(false);
         }
         if let Some(value) = self.is_all_day {
             task.is_all_day = value;
@@ -192,6 +201,9 @@ impl TaskChanges {
         }
         if let Some(value) = self.due_date_time {
             set("dueDateTime", json!(value.map(date::format)));
+        }
+        if let Some(value) = self.reminder_time {
+            set("reminderTime", json!(value.map(date::format)));
         }
         if let Some(value) = self.is_all_day {
             set("isAllDay", json!(value));

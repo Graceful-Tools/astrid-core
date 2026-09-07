@@ -18,6 +18,7 @@
 pub mod assignee;
 pub mod detail;
 pub mod due_picks;
+pub mod reminder_picks;
 pub mod repeat;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};

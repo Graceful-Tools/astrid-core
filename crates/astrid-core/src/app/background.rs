@@ -57,6 +57,53 @@ pub async fn sync_loop(
     }
 }
 
+/// How often to look for a reminder that has come due.
+///
+/// Half a minute. A reminder is a promise about a time, and a minute's slack on "9:00" is the
+/// difference between useful and annoying; polling the cache is a SQLite read of tasks already in
+/// memory, so this costs nothing to do often.
+pub const REMINDER_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Watch for reminders coming due while the app runs.
+///
+/// The server owns push and email — it knows about quiet hours, digests and every device somebody
+/// owns. This is only the thing a running client can do that the server cannot: notice that a
+/// reminder has arrived for the app that is open in front of them. It announces; showing a banner
+/// and deciding what a banner even is belongs to the shell.
+pub async fn reminder_loop(
+    app: Arc<App>,
+    should_continue: impl Fn() -> bool + Send,
+    interval: Duration,
+) {
+    while should_continue() {
+        tokio::time::sleep(interval).await;
+        if !should_continue() {
+            return;
+        }
+        let Ok(tasks) = app.store.tasks() else {
+            continue;
+        };
+        let now = app.clock.now();
+        let due = crate::reminders::due_now(&tasks, now, |id| {
+            let Some(task) = tasks.iter().find(|task| task.id == id) else {
+                return false;
+            };
+            let Some(at) = task.reminder_time else {
+                return false;
+            };
+            app.store
+                .metadata(&format!("reminder.shown.{id}"))
+                .ok()
+                .flatten()
+                .is_some_and(|stamp| stamp == at.to_rfc3339())
+        });
+        if !due.is_empty() {
+            app.realtime()
+                .publish(crate::realtime::Change::RemindersDue);
+        }
+    }
+}
+
 /// The default interval: sixty seconds, matching the other clients.
 pub fn default_sync_interval() -> Duration {
     Duration::from_secs(policy::AUTO_SYNC_INTERVAL_SECS)
@@ -144,6 +191,65 @@ mod tests {
         .await;
 
         assert!(transport.requests().is_empty());
+    }
+
+    /// A reminder coming due announces itself once, through the same subscription a colleague's
+    /// edit arrives on. It does not mark itself shown — the shell does that when a banner is
+    /// actually on screen, because a banner that failed to appear must still be owed.
+    #[tokio::test(start_paused = true)]
+    async fn a_reminder_coming_due_is_announced() {
+        let app = app_with(StubTransport::new(), Arc::new(MemorySecureStore::new()));
+        let mut task = crate::model::Task::new("t1", "Call the vet");
+        task.reminder_time = crate::model::date::parse("2026-09-07T11:59:00Z");
+        app.store.upsert_task(&task).expect("stores");
+
+        let heard = Arc::new(AtomicUsize::new(0));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |change| {
+                if matches!(change, crate::realtime::Change::RemindersDue) {
+                    heard.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+        }
+
+        let ticks = AtomicUsize::new(0);
+        reminder_loop(
+            app,
+            || ticks.fetch_add(1, Ordering::SeqCst) < 2,
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert!(heard.load(Ordering::SeqCst) >= 1);
+    }
+
+    /// Nothing due, nothing said. A loop that announced every tick would wake the shell twice a
+    /// minute for the rest of the day.
+    #[tokio::test(start_paused = true)]
+    async fn nothing_due_says_nothing() {
+        let app = app_with(StubTransport::new(), Arc::new(MemorySecureStore::new()));
+        app.store
+            .upsert_task(&crate::model::Task::new("t1", "Call the vet"))
+            .expect("stores");
+
+        let heard = Arc::new(AtomicUsize::new(0));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |_| {
+                heard.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let ticks = AtomicUsize::new(0);
+        reminder_loop(
+            app,
+            || ticks.fetch_add(1, Ordering::SeqCst) < 3,
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert_eq!(heard.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(start_paused = true)]

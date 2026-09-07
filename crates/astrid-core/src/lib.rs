@@ -26,6 +26,7 @@ pub mod parse;
 pub mod permissions;
 pub mod platform;
 pub mod realtime;
+pub mod reminders;
 pub mod repeating;
 pub mod rows;
 pub mod services;
