@@ -164,15 +164,18 @@ impl ListService {
         Ok(self.context.store.lists()?)
     }
 
-    /// The lists a person can navigate into and file tasks in — everything except the status rows
-    /// that are board columns.
+    /// The lists a task can be filed in.
+    ///
+    /// Not the same as the lists a person can navigate into: a virtual list ("Today", "Not in a
+    /// List") is somewhere to look and a board column is a state, and neither is somewhere a task
+    /// can live. Offering either as a destination produces a task that belongs to a view.
     pub fn destinations(&self) -> Result<Vec<TaskList>> {
         Ok(self
             .context
             .store
             .lists()?
             .into_iter()
-            .filter(TaskList::is_domain_list)
+            .filter(|list| list.is_domain_list() && !list.is_virtual.unwrap_or(false))
             .collect())
     }
 
@@ -488,16 +491,17 @@ mod tests {
         assert_eq!(body["name"], "House");
     }
 
-    /// Board columns are not destinations. A picker that offered "Doing" as somewhere to file a
-    /// task would be offering a state, not a list.
+    /// Board columns and virtual lists are not destinations. A picker that offered "Doing" would
+    /// be offering a state, and one that offered "Today" would be offering a view.
     #[test]
-    fn status_rows_are_not_offered_as_destinations() {
+    fn status_rows_and_virtual_lists_are_not_offered_as_destinations() {
         let fixture = fixture();
         fixture
             .store
             .upsert_lists(&[
                 TaskList::new("l1", "Home"),
                 list_json(json!({ "id": "s1", "name": "Doing", "listType": "status" })),
+                list_json(json!({ "id": "v1", "name": "Today", "isVirtual": true })),
             ])
             .expect("stores");
         let destinations: Vec<String> = fixture

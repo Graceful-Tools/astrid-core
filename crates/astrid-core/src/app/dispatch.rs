@@ -422,8 +422,18 @@ fn rows_for_list(
         Err(error) => return Response::failed(error.into()),
     };
 
+    // A VIRTUAL list has no membership: it is a saved set of filters over everything the account
+    // has — "Today", "Not in a List", "I've Assigned". Sourcing it from membership, the way a real
+    // list is sourced, gives an empty screen with nothing to explain it, which is what makes this
+    // worth a branch rather than a clever query.
+    let source = if list.is_virtual.unwrap_or(false) {
+        app.store.tasks()
+    } else {
+        app.store.tasks_in_list(list_id)
+    };
+
     let (tasks, lists, users, current_user_id) = match (
-        app.store.tasks_in_list(list_id),
+        source,
         app.store.lists(),
         app.context.account().current_user_id(),
     ) {
@@ -1148,6 +1158,66 @@ mod tests {
         assert_eq!(times[0]["titleKey"], "picker.morning");
         assert_eq!(times[0]["dueDateTime"], "2026-09-07T09:00:00Z");
         assert!(times.iter().all(|time| time["isSelected"] == false));
+    }
+
+    /// A virtual list — "Today", "Not in a List", "I've Assigned" — has no membership. It is a
+    /// saved set of filters over everything, and sourcing it from membership the way a real list
+    /// is sourced gives an empty screen with nothing to explain it.
+    #[tokio::test]
+    async fn a_virtual_list_filters_everything_rather_than_its_own_membership() {
+        let app = app_with(StubTransport::new());
+
+        // A real list with one task in it, and a task in no list at all.
+        call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        let list_id = call(&app, json!({ "kind": "lists" })).await["value"][0]["id"]
+            .as_str()
+            .expect("an id")
+            .to_string();
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Buy milk", "listIds": [list_id] }),
+        )
+        .await;
+        call(&app, json!({ "kind": "createTask", "title": "Loose end" })).await;
+
+        // The "Not in a List" virtual list, exactly as the server stores it.
+        let virtual_list: crate::model::TaskList = serde_json::from_value(json!({
+            "id": "v-not-in-list",
+            "name": "Not in a List",
+            "isVirtual": true,
+            "virtualListType": "not-in-list",
+            "filterInLists": "not_in_list",
+            "filterCompletion": "default",
+            "sortBy": "auto"
+        }))
+        .expect("decodes");
+        app.store.upsert_list(&virtual_list).expect("stores");
+
+        let rows = call(
+            &app,
+            json!({ "kind": "rowsForList", "listId": "v-not-in-list" }),
+        )
+        .await;
+        assert_eq!(rows["value"]["total"], 1);
+        assert_eq!(rows["value"]["rows"][0]["title"], "Loose end");
+    }
+
+    /// And a virtual list with no filters shows everything, rather than everything in a list that
+    /// does not exist.
+    #[tokio::test]
+    async fn an_unfiltered_virtual_list_shows_the_whole_account() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createTask", "title": "one" })).await;
+        call(&app, json!({ "kind": "createTask", "title": "two" })).await;
+
+        let virtual_list: crate::model::TaskList = serde_json::from_value(json!({
+            "id": "v-all", "name": "Everything", "isVirtual": true
+        }))
+        .expect("decodes");
+        app.store.upsert_list(&virtual_list).expect("stores");
+
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": "v-all" })).await;
+        assert_eq!(rows["value"]["total"], 2);
     }
 
     #[tokio::test]

@@ -272,9 +272,16 @@ impl TaskService {
         let now = self.context.clock.now();
         let temp_id = outbox::new_temp_id();
 
+        // A virtual list ("Today", "Not in a List") is a saved set of filters, and a board column
+        // is a state. Neither is somewhere a task can be filed, and filing one there produces a
+        // task that belongs to a view — invisible in every real list, and impossible to find
+        // again. Dropping them here rather than at the call site means every path that creates a
+        // task is covered, including the one where the open list IS a virtual list.
+        let list_ids = self.filed_in(&draft.list_ids)?;
+
         let mut task = Task::new(temp_id.clone(), draft.title.clone());
         task.description = draft.description.clone();
-        task.list_ids = Some(draft.list_ids.clone());
+        task.list_ids = Some(list_ids.clone());
         task.priority = draft.priority;
         task.due_date_time = draft.due_date_time;
         task.is_all_day = draft.is_all_day;
@@ -294,7 +301,7 @@ impl TaskService {
         let body = json!({
             "title": draft.title,
             "description": draft.description,
-            "listIds": draft.list_ids,
+            "listIds": list_ids,
             "priority": draft.priority.as_i64(),
             "dueDateTime": draft.due_date_time.map(date::format),
             "isAllDay": draft.is_all_day,
@@ -447,6 +454,22 @@ impl TaskService {
                 ..Default::default()
             },
         )
+    }
+
+    /// The subset of `list_ids` a task can actually be filed in.
+    ///
+    /// An id the cache has never heard of is kept: it may be a list this device has not synced
+    /// yet, and dropping it would silently lose the filing. Only lists we know to be views or
+    /// states are removed.
+    fn filed_in(&self, list_ids: &[String]) -> Result<Vec<String>> {
+        let mut kept = Vec::with_capacity(list_ids.len());
+        for id in list_ids {
+            match self.context.store.list(id)? {
+                Some(list) if list.is_virtual.unwrap_or(false) || list.is_status_list() => {}
+                _ => kept.push(id.clone()),
+            }
+        }
+        Ok(kept)
     }
 
     fn require(&self, id: &str) -> Result<Task> {
@@ -963,6 +986,51 @@ mod tests {
         assert_eq!(entries[0].kind, kind::DELETE_TASK);
         assert_eq!(entries[0].payload["taskId"], "t1");
         assert_eq!(entries[0].status, Status::Pending);
+    }
+
+    /// A task filed into a view belongs nowhere: it is invisible in every real list and there is
+    /// no way to find it again.
+    #[test]
+    fn a_task_is_not_filed_into_a_virtual_list_or_a_board_column() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        let virtual_list: TaskList =
+            serde_json::from_str(r#"{"id":"v1","name":"Today","isVirtual":true}"#)
+                .expect("decodes");
+        let column: TaskList =
+            serde_json::from_str(r#"{"id":"s1","name":"Doing","listType":"status"}"#)
+                .expect("decodes");
+        fixture
+            .store
+            .upsert_lists(&[TaskList::new("l1", "Home"), virtual_list, column])
+            .expect("stores");
+
+        let created = fixture
+            .service
+            .create(
+                &TaskDraft::new("Buy milk")
+                    .in_list("l1")
+                    .in_list("v1")
+                    .in_list("s1"),
+            )
+            .expect("creates");
+
+        assert_eq!(created.effective_list_ids(), vec!["l1"]);
+        assert_eq!(
+            entries(&fixture.store)[0].payload["body"]["listIds"],
+            serde_json::json!(["l1"])
+        );
+    }
+
+    /// A list this device has not synced yet is not a view — dropping it would silently lose the
+    /// filing on the one device that had not caught up.
+    #[test]
+    fn a_list_the_cache_has_never_heard_of_is_kept() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        let created = fixture
+            .service
+            .create(&TaskDraft::new("Buy milk").in_list("not-synced-yet"))
+            .expect("creates");
+        assert_eq!(created.effective_list_ids(), vec!["not-synced-yet"]);
     }
 
     #[test]
