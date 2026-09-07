@@ -16,6 +16,7 @@
 //! come to disagree about which day a task is due.
 
 pub mod detail;
+pub mod due_picks;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 

@@ -39,6 +39,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             display_mode,
         } => task_detail(app, &task_id, display_mode),
+        Command::DueDateOptions { task_id } => due_date_options(app, &task_id),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),
@@ -315,6 +316,81 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
             "completed": subtask.completed,
             "isPending": crate::model::is_temp_id(&subtask.id),
         })).collect::<Vec<_>>(),
+    }))
+}
+
+/// The quick date and time choices for one task.
+///
+/// Each carries the instant it means, so the shell shows a label and sends back a value it did not
+/// have to compute. `isSelected` uses the same day arithmetic the row labels use, which is why
+/// `rows::day_offset` is public: a quick-pick row deciding for itself is how the tick lands on the
+/// wrong row for anybody west of UTC.
+fn due_date_options(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
+    // A task with no date yet is being given one from today, so the picks are anchored on now.
+    let anchor = task.due_date_time.unwrap_or(now);
+
+    let dates: Vec<serde_json::Value> = rows::due_picks::DATE_OPTIONS
+        .iter()
+        .map(|option| match option.days_from_today {
+            None => serde_json::json!({
+                "titleKey": option.title_key,
+                "dueDateTime": serde_json::Value::Null,
+                "isSelected": task.due_date_time.is_none(),
+            }),
+            Some(days) => {
+                let picked = if task.is_all_day {
+                    rows::due_picks::all_day_pick(days, now, offset)
+                } else {
+                    // Keep the time of day: choosing a date must not silently discard a time the
+                    // person already set.
+                    rows::due_picks::timed_pick(
+                        days - rows::day_offset(anchor, task.is_all_day, now, offset),
+                        anchor,
+                        offset,
+                    )
+                };
+                serde_json::json!({
+                    "titleKey": option.title_key,
+                    "dueDateTime": date::format(picked),
+                    "isSelected": task.due_date_time.is_some_and(|due| {
+                        rows::day_offset(due, task.is_all_day, now, offset) == days
+                    }),
+                })
+            }
+        })
+        .collect();
+
+    let times: Vec<serde_json::Value> = rows::due_picks::TIME_OPTIONS
+        .iter()
+        .map(|option| {
+            let picked = rows::due_picks::with_hour(option.hour, anchor, offset);
+            serde_json::json!({
+                "titleKey": option.title_key,
+                "hour": option.hour,
+                "dueDateTime": date::format(picked),
+                // An all-day task has no time, so nothing is selected until one is chosen.
+                "isSelected": !task.is_all_day
+                    && task.due_date_time.is_some_and(|due| {
+                        due.with_timezone(&offset).format("%H").to_string()
+                            == format!("{:02}", option.hour)
+                    }),
+            })
+        })
+        .collect();
+
+    Response::ok(serde_json::json!({
+        "isAllDay": task.is_all_day,
+        "dueDateTime": task.due_date_time.map(date::format),
+        "dates": dates,
+        "times": times,
     }))
 }
 
@@ -1010,6 +1086,68 @@ mod tests {
         let answer = call(&app, json!({ "kind": "taskDetail", "taskId": "nope" })).await;
         assert_eq!(answer["error"]["kind"], "notFound");
         assert_eq!(answer["error"]["id"], "nope");
+    }
+
+    /// The quick picks arrive with the instant each one means, so the shell shows a label and
+    /// sends back a value it did not have to compute.
+    #[tokio::test]
+    async fn the_quick_date_picks_carry_the_instants_they_mean() {
+        let app = app_with(StubTransport::new());
+        let created = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Water", "dueDateTime": "2026-09-07T00:00:00Z" }),
+        )
+        .await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": task_id })).await;
+        let dates = options["value"]["dates"].as_array().expect("an array");
+
+        // Clearing comes first, and it is a choice like any other.
+        assert_eq!(dates[0]["titleKey"], "picker.no_due_date");
+        assert!(dates[0]["dueDateTime"].is_null());
+
+        assert_eq!(dates[1]["titleKey"], "picker.today");
+        assert_eq!(dates[1]["dueDateTime"], "2026-09-07T00:00:00Z");
+        assert_eq!(dates[1]["isSelected"], true, "it is due today");
+        assert_eq!(dates[2]["dueDateTime"], "2026-09-08T00:00:00Z");
+        assert_eq!(dates[4]["dueDateTime"], "2026-09-14T00:00:00Z");
+    }
+
+    /// The tick goes on the row the task is actually set to, computed the same way the row label
+    /// is — a picker deciding for itself is how it lands on the wrong row west of UTC.
+    #[tokio::test]
+    async fn nothing_is_ticked_when_a_task_has_no_date() {
+        let app = app_with(StubTransport::new());
+        let created = call(&app, json!({ "kind": "createTask", "title": "Water" })).await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": task_id })).await;
+        let dates = options["value"]["dates"].as_array().expect("an array");
+        assert_eq!(
+            dates[0]["isSelected"], true,
+            "no due date is the selected choice"
+        );
+        assert!(dates[1..].iter().all(|date| date["isSelected"] == false));
+    }
+
+    /// An all-day task has no time of day, so no time is ticked until one is chosen.
+    #[tokio::test]
+    async fn an_all_day_task_has_no_time_selected() {
+        let app = app_with(StubTransport::new());
+        let created = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Water", "dueDateTime": "2026-09-07T00:00:00Z" }),
+        )
+        .await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": task_id })).await;
+        assert_eq!(options["value"]["isAllDay"], true);
+        let times = options["value"]["times"].as_array().expect("an array");
+        assert_eq!(times[0]["titleKey"], "picker.morning");
+        assert_eq!(times[0]["dueDateTime"], "2026-09-07T09:00:00Z");
+        assert!(times.iter().all(|time| time["isSelected"] == false));
     }
 
     #[tokio::test]

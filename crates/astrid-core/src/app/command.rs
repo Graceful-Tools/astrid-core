@@ -72,6 +72,16 @@ pub enum Command {
         #[serde(default)]
         display_mode: Option<String>,
     },
+    /// The quick date and time choices for a task, with the instant each one means and which
+    /// one it is already set to.
+    ///
+    /// Resolved here rather than in the shell because the arithmetic is the part that goes wrong:
+    /// a day is 23 or 25 hours across a daylight-saving boundary, an all-day date is stored
+    /// differently from a timed one, and "morning" means 09:00 where the reader is rather than in
+    /// UTC. Three clients read the same list in the same order — see `astrid_core::rows::due_picks`.
+    DueDateOptions {
+        task_id: String,
+    },
     /// A task's comments.
     Comments {
         task_id: String,
