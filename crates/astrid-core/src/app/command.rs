@@ -100,6 +100,24 @@ pub enum Command {
         #[serde(default)]
         limit: Option<usize>,
     },
+    /// The board a list belongs to: its columns, and the cards in each.
+    ///
+    /// Answers with rows, so a card draws like a row — see [`crate::board`] for why a column id is
+    /// a role rather than a list id.
+    Board {
+        list_id: String,
+        /// How many cards to carry per column. The count comes back whole.
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// Move a card to a column.
+    MoveTaskToColumn {
+        task_id: String,
+        column_id: String,
+        /// The list the board was opened from, so the move knows which project's columns to
+        /// resolve the target against.
+        list_id: String,
+    },
     /// When to be reminded about one task, as offsets from its due time.
     ReminderOptions {
         task_id: String,

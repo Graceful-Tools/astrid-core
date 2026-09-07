@@ -34,6 +34,12 @@ pub struct Project {
     pub members: Option<Vec<ProjectMember>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lists: Option<Vec<TaskList>>,
+    /// The board's own columns, and renames of the three defaults.
+    ///
+    /// Free-form JSON on the wire, and read rather than typed: an entry a newer web writes must not
+    /// stop a board drawing. [`crate::board::parse_custom_states`] is the only place that reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_states: Option<serde_json::Value>,
     #[serde(
         default,
         with = "date::optional",

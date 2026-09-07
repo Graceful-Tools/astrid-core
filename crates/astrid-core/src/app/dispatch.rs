@@ -54,6 +54,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             include_completed,
             limit,
         } => search_tasks(app, &query, list_id, include_completed, limit),
+        Command::Board { list_id, limit } => board(app, &list_id, limit),
+        Command::MoveTaskToColumn {
+            task_id,
+            column_id,
+            list_id,
+        } => move_task_to_column(app, &task_id, &column_id, &list_id),
         Command::ReminderOptions { task_id } => reminder_options(app, &task_id),
         Command::RemindersDue => reminders_due(app),
         Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
@@ -467,6 +473,170 @@ fn search_tasks(
         "offset": 0,
         "rows": serialize_rows(&TaskRow::build_all(window, &context)),
     }))
+}
+
+/// How many cards a column carries across the boundary unless the shell asks for more.
+///
+/// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
+/// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
+const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// The board a list belongs to.
+///
+/// Answers with rows so a card draws like a row: the same due labels, the same leading control,
+/// the same converters in the shell. The surface is `BoardCard`, which is what makes the leading
+/// control open the assignee picker rather than complete the task — tapping a face on a card is
+/// how you reassign it, and completing from a board is the Done column.
+fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response {
+    let lists = app.store.lists().unwrap_or_default();
+    let Some(opened) = lists.iter().find(|list| list.id == list_id) else {
+        return Response::failed(Failure::not_found("list", list_id));
+    };
+    // A list with no project has no board. Not an error — the shell asks before it knows.
+    let Some(project_id) = opened.project_id.clone() else {
+        return Response::ok(serde_json::json!({
+            "projectId": serde_json::Value::Null,
+            "columns": [],
+        }));
+    };
+
+    let project = app
+        .store
+        .projects()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|project| project.id == project_id);
+    let columns = crate::board::columns(
+        project
+            .as_ref()
+            .and_then(|project| project.custom_states.as_ref()),
+    );
+
+    let tasks = app.store.tasks().unwrap_or_default();
+    let cards: Vec<crate::model::Task> = crate::board::domain_tasks(&tasks, &lists, &project_id)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    let users: Vec<crate::model::User> = cards
+        .iter()
+        .filter_map(|task| task.assignee_id.as_deref())
+        .filter_map(|id| app.store.user(id).ok().flatten())
+        .collect();
+    let depths = std::collections::HashMap::new();
+    let counts = rows::subtask_counts(&tasks);
+    let current_user_id = app.context.account().current_user_id().ok().flatten();
+    let context = RowContext {
+        current_user_id: current_user_id.as_deref(),
+        display_mode: rows::DisplayMode::List,
+        surface: rows::Surface::BoardCard,
+        now: app.clock.now(),
+        offset: app.clock.utc_offset(),
+        lists: &lists,
+        users: &users,
+        // Cards are flat. A card indented under a parent in another column would be indented
+        // against nothing.
+        depths: &depths,
+        subtask_counts: &counts,
+    };
+
+    let limit = limit.unwrap_or(BOARD_COLUMN_LIMIT);
+    let drawn: Vec<serde_json::Value> = columns
+        .iter()
+        .map(|column| {
+            let held: Vec<&crate::model::Task> = cards
+                .iter()
+                .filter(|card| crate::board::column_for(card, &columns) == column.id)
+                .collect();
+            let window: Vec<crate::model::Task> = held
+                .iter()
+                .take(limit)
+                .map(|task| (*task).clone())
+                .collect();
+            serde_json::json!({
+                "id": column.id,
+                "name": column.name,
+                "description": column.description,
+                "kind": column.kind,
+                "total": held.len(),
+                "cards": serialize_rows(&TaskRow::build_all(&window, &context)),
+            })
+        })
+        .collect();
+
+    Response::ok(serde_json::json!({
+        "projectId": project_id,
+        "columns": drawn,
+    }))
+}
+
+/// Move a card to a column.
+///
+/// Done goes through the completion service rather than writing the flag, because a repeating card
+/// dragged to Done must roll forward to its next occurrence like every other completion — rule 2 of
+/// `docs/ASTRID.md` §0 does not stop applying because the gesture is a drag. Coming back out of
+/// Done un-completes through the same service, for the same reason.
+fn move_task_to_column(app: &App, task_id: &str, column_id: &str, list_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let project_id = lists
+        .iter()
+        .find(|list| list.id == list_id)
+        .and_then(|list| list.project_id.clone());
+    let project = project_id.and_then(|id| {
+        app.store
+            .projects()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|project| project.id == id)
+    });
+    let columns = crate::board::columns(
+        project
+            .as_ref()
+            .and_then(|project| project.custom_states.as_ref()),
+    );
+    let Some(target) = columns.iter().find(|column| column.id == column_id) else {
+        return Response::failed(Failure::bad_request("that column is not on this board"));
+    };
+
+    let moved = crate::board::resolve_move(&task, target, &lists);
+
+    // The memberships first: a completion that also has to shed a stale status membership should
+    // shed it whichever way the write is ordered, and doing it here keeps one path for it.
+    if moved.list_ids != task.effective_list_ids() {
+        if let Err(error) = app
+            .context
+            .tasks()
+            .set_lists(task_id, moved.list_ids.clone())
+        {
+            return Response::failed(error.into());
+        }
+    }
+
+    let changes = crate::services::TaskChanges {
+        status_role: Some(moved.status_role.clone()),
+        ..Default::default()
+    };
+    if let Err(error) = app.context.tasks().update(task_id, &changes) {
+        return Response::failed(error.into());
+    }
+
+    if moved.completed != task.completed {
+        return answer(
+            app.context
+                .tasks()
+                .complete(task_id, moved.completed, None, None),
+        );
+    }
+    match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => Response::ok(task),
+        Ok(None) => Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 /// When to be reminded about one task.
@@ -1495,6 +1665,165 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A board answers with rows, so a card draws like a row, and the columns come back in the
+    /// order the board shows them.
+    #[tokio::test]
+    async fn a_board_answers_with_its_columns_and_their_cards() {
+        let app = app_with(StubTransport::new());
+        let project = serde_json::json!({ "id": "p1", "name": "Ship it" });
+        app.store
+            .upsert_projects(&[serde_json::from_value(project).expect("a project")])
+            .expect("stores");
+        app.store
+            .upsert_list(
+                &serde_json::from_value(serde_json::json!({
+                    "id": "l1", "name": "Work", "projectId": "p1"
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it down", "listIds": ["l1"] }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        let columns = board["value"]["columns"].as_array().expect("columns");
+        assert_eq!(columns[0]["id"], "__virtual_inbox__");
+        assert_eq!(columns.last().expect("done")["id"], "__virtual_done__");
+        // A new card with no role is in the Inbox, and it arrives as a row.
+        assert_eq!(columns[0]["total"], 1);
+        assert_eq!(columns[0]["cards"][0]["title"], "Write it down");
+        assert!(columns[0]["cards"][0]["leading"].is_object());
+
+        // Moving it carries the role, and the card lands in that column.
+        call(
+            &app,
+            json!({
+                "kind": "moveTaskToColumn",
+                "taskId": id,
+                "columnId": "doing",
+                "listId": "l1",
+            }),
+        )
+        .await;
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        let columns = board["value"]["columns"].as_array().expect("columns");
+        let doing = columns
+            .iter()
+            .find(|column| column["id"] == "doing")
+            .expect("a doing column");
+        assert_eq!(doing["total"], 1);
+        assert_eq!(columns[0]["total"], 0);
+    }
+
+    /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does
+    /// not stop applying because the gesture is a drag.
+    #[tokio::test]
+    async fn a_repeating_card_dragged_to_done_rolls_over() {
+        let app = app_with(StubTransport::new());
+        app.store
+            .upsert_list(
+                &serde_json::from_value(serde_json::json!({
+                    "id": "l1", "name": "Work", "projectId": "p1"
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+        let made = call(
+            &app,
+            json!({
+                "kind": "createTask",
+                "title": "Water plants",
+                "listIds": ["l1"],
+                "dueDateTime": "2026-09-20T09:00:00Z",
+            }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+        call(
+            &app,
+            json!({
+                "kind": "updateTask",
+                "taskId": id,
+                "changes": { "repeating": "daily" },
+            }),
+        )
+        .await;
+
+        call(
+            &app,
+            json!({
+                "kind": "moveTaskToColumn",
+                "taskId": id,
+                "columnId": "__virtual_done__",
+                "listId": "l1",
+            }),
+        )
+        .await;
+
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": id })).await;
+        assert_eq!(
+            detail["value"]["task"]["completed"], false,
+            "a repeating card rolls forward instead of finishing"
+        );
+        // A daily repeat counted from the completion date, which is what a task carries unless it
+        // says otherwise: finished on the 7th, so it comes back on the 8th — at the time of day it
+        // was already due, rather than the moment it happened to be ticked off.
+        assert_eq!(
+            detail["value"]["task"]["dueDateTime"],
+            "2026-09-08T09:00:00Z"
+        );
+    }
+
+    /// A list with no project has no board. Not an error: the shell asks before it knows.
+    #[tokio::test]
+    async fn a_list_with_no_project_has_no_board() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let board = call(&app, json!({ "kind": "board", "listId": id })).await;
+        assert!(board["value"]["projectId"].is_null());
+        assert!(board["value"]["columns"]
+            .as_array()
+            .expect("columns")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_column_that_is_not_on_this_board_is_refused() {
+        let app = app_with(StubTransport::new());
+        app.store
+            .upsert_list(
+                &serde_json::from_value(serde_json::json!({
+                    "id": "l1", "name": "Work", "projectId": "p1"
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it down", "listIds": ["l1"] }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let answered = call(
+            &app,
+            json!({
+                "kind": "moveTaskToColumn",
+                "taskId": id,
+                "columnId": "nowhere",
+                "listId": "l1",
+            }),
+        )
+        .await;
+        assert_eq!(answered["error"]["kind"], "badRequest");
     }
 
     /// The picker offers offsets from the due time, because "an hour before" is what somebody

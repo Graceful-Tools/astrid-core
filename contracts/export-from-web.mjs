@@ -119,10 +119,17 @@ function exportPermissions() {
   return runDriver('permissions.mjs', 'permissions')
 }
 
+// Which column a card is in, and what a move writes, are branching rules with precedence — and the
+// column id is a role rather than a list id, which web itself got wrong twice. Run, not read.
+function exportBoard() {
+  return runDriver('board.mjs', 'board')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
   'permissions.json': exportPermissions,
+  'board.json': exportBoard,
 }
 
 let failed = false

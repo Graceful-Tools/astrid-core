@@ -20,6 +20,7 @@ rather than going unnoticed at runtime.
 | `shortcuts.json` | `hooks/useKeyboardShortcuts.ts` — the `KEYBOARD_SHORTCUTS` table plus the `if (selectedTask)` guard read from the dispatch switch | `astrid_core::keyboard` |
 | `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded | `astrid_core::repeating` |
 | `permissions.json` | `lib/list-permissions.ts` — **executed**: a case matrix run through web's own rules, recording all eight predicates per case | `astrid_core::permissions` |
+| `board.json` | `lib/project-status.ts` — **executed**: three board configurations by eight cards, recording which column each card is in, what every move writes, and what a new card carries | `astrid_core::board` |
 
 ## Two kinds of export
 
