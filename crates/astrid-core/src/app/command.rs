@@ -86,6 +86,20 @@ pub enum Command {
     Comments {
         task_id: String,
     },
+    /// Find a task by what it says.
+    ///
+    /// Over the cache, which is where every client searches: there is no server search endpoint,
+    /// and the Apple service's "online" path reads the same cached array its offline path does.
+    /// So this is instant, works on a train, and is the same set of rules everywhere.
+    SearchTasks {
+        query: String,
+        #[serde(default)]
+        list_id: Option<String>,
+        #[serde(default)]
+        include_completed: Option<bool>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     /// The signed-in user.
     CurrentUser,
     /// Whether there is a stored session. Not whether it is still valid — only the server knows

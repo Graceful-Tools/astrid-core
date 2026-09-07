@@ -48,6 +48,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             "signedIn": app.auth.is_signed_in().await,
             "waitingForCallback": app.auth.is_waiting(),
         })),
+        Command::SearchTasks {
+            query,
+            list_id,
+            include_completed,
+            limit,
+        } => search_tasks(app, &query, list_id, include_completed, limit),
         Command::CurrentUser => match app.context.account().current_user() {
             Ok(user) => Response::ok(user),
             Err(error) => Response::failed(error.into()),
@@ -391,6 +397,61 @@ fn due_date_options(app: &App, task_id: &str) -> Response {
         "dueDateTime": task.due_date_time.map(date::format),
         "dates": dates,
         "times": times,
+    }))
+}
+
+/// Search the cache, and answer with rows rather than tasks.
+///
+/// Rows, because a result list is a list: it draws the same way, needs the same due labels and the
+/// same leading control, and returning raw tasks would leave the shell to project them — which is
+/// the one thing it is not allowed to do.
+fn search_tasks(
+    app: &App,
+    query: &str,
+    list_id: Option<String>,
+    include_completed: Option<bool>,
+    limit: Option<usize>,
+) -> Response {
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let scope = crate::services::search::SearchScope {
+        list_id,
+        include_completed: include_completed.unwrap_or(true),
+    };
+    let found = crate::services::search::matches(&tasks, query, &scope);
+    let total = found.len();
+    let window = &found[..limit.unwrap_or(total).min(total)];
+
+    let lists = app.store.lists().unwrap_or_default();
+    let users: Vec<crate::model::User> = window
+        .iter()
+        .filter_map(|task| task.assignee_id.as_deref())
+        .filter_map(|id| app.store.user(id).ok().flatten())
+        .collect();
+    let depths = std::collections::HashMap::new();
+    let counts = rows::subtask_counts(&tasks);
+    let current_user_id = app.context.account().current_user_id().ok().flatten();
+
+    let context = RowContext {
+        current_user_id: current_user_id.as_deref(),
+        display_mode: rows::DisplayMode::List,
+        surface: rows::Surface::ListRow,
+        now: app.clock.now(),
+        offset: app.clock.utc_offset(),
+        lists: &lists,
+        users: &users,
+        // Results are flat. A search result indented under a parent that did not match reads as a
+        // hierarchy that is not there.
+        depths: &depths,
+        subtask_counts: &counts,
+    };
+
+    Response::ok(serde_json::json!({
+        "total": total,
+        "offset": 0,
+        "rows": serialize_rows(&TaskRow::build_all(window, &context)),
     }))
 }
 
@@ -1218,6 +1279,54 @@ mod tests {
 
         let rows = call(&app, json!({ "kind": "rowsForList", "listId": "v-all" })).await;
         assert_eq!(rows["value"]["total"], 2);
+    }
+
+    /// Search answers with rows, so a result list draws exactly like any other list.
+    #[tokio::test]
+    async fn search_answers_with_rows_over_the_cache() {
+        let app = app_with(StubTransport::new());
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Book flights" }),
+        )
+        .await;
+        call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+
+        let found = call(&app, json!({ "kind": "searchTasks", "query": "book" })).await;
+        assert_eq!(found["value"]["total"], 1);
+        assert_eq!(found["value"]["rows"][0]["title"], "Book flights");
+        // A row, with everything a row has.
+        assert!(found["value"]["rows"][0]["leading"].is_object());
+    }
+
+    /// Results are flat: one indented under a parent that did not match reads as a hierarchy that
+    /// is not there.
+    #[tokio::test]
+    async fn search_results_are_not_indented() {
+        let app = app_with(StubTransport::new());
+        let parent = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan the trip" }),
+        )
+        .await;
+        let parent_id = parent["value"]["id"].as_str().expect("an id").to_string();
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Book flights", "parentTaskId": parent_id }),
+        )
+        .await;
+
+        let found = call(&app, json!({ "kind": "searchTasks", "query": "flights" })).await;
+        assert_eq!(found["value"]["rows"][0]["depth"], 0);
+    }
+
+    #[tokio::test]
+    async fn a_search_too_short_to_mean_anything_finds_nothing() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+
+        let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
+        assert_eq!(found["value"]["total"], 0);
     }
 
     #[tokio::test]

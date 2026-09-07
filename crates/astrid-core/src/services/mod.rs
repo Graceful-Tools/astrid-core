@@ -19,6 +19,7 @@ pub mod auth;
 pub mod chat;
 pub mod comment;
 pub mod list;
+pub mod search;
 pub mod task;
 
 pub use account::AccountService;
