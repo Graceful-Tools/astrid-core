@@ -4,6 +4,7 @@
 //! All paths are `/api/v1/...`.
 
 pub mod client;
+pub mod endpoints;
 pub mod pagination;
 pub mod path;
 pub mod platform;

@@ -129,21 +129,23 @@ const MIGRATIONS: &[&str] = &[
     -- a timestamp: two entries created in the same millisecond still have an order, and that order
     -- is the one the user performed them in.
     CREATE TABLE outbox (
-        sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
-        id            TEXT NOT NULL UNIQUE,
-        kind          TEXT NOT NULL,
-        subject_id    TEXT NOT NULL,
-        depends_on    TEXT,
-        payload       TEXT NOT NULL,
-        attempts      INTEGER NOT NULL DEFAULT 0,
-        next_attempt  TEXT,
-        last_error    TEXT,
-        state         TEXT NOT NULL DEFAULT 'pending',
-        created_at    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL
+        sequence          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id                TEXT NOT NULL UNIQUE,
+        kind              TEXT NOT NULL,
+        payload           TEXT NOT NULL,
+        client_request_id TEXT NOT NULL,
+        depends_on        TEXT NOT NULL DEFAULT '[]',
+        temp_id           TEXT,
+        status            TEXT NOT NULL DEFAULT 'pending',
+        attempts          INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at   TEXT NOT NULL,
+        last_error        TEXT,
+        result            TEXT,
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL
     );
-    CREATE INDEX outbox_by_state ON outbox(state, sequence);
-    CREATE INDEX outbox_by_subject ON outbox(subject_id);
+    CREATE INDEX outbox_by_status ON outbox(status, sequence);
+    CREATE INDEX outbox_by_temp_id ON outbox(temp_id);
 
     -- The mapping from a temporary id this device minted to the id the server gave it. Kept after
     -- the entry that created it is gone, because a deep link, a notification or a queued edit can
