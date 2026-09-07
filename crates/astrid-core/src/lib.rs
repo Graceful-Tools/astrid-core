@@ -25,6 +25,7 @@ pub mod permissions;
 pub mod platform;
 pub mod realtime;
 pub mod repeating;
+pub mod rows;
 pub mod services;
 pub mod store;
 pub mod sync;
