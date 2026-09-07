@@ -39,6 +39,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),
         },
+        Command::IsSignedIn => Response::ok(serde_json::json!({
+            "signedIn": app.auth.is_signed_in().await,
+            "waitingForCallback": app.auth.is_waiting(),
+        })),
         Command::CurrentUser => match app.context.account().current_user() {
             Ok(user) => Response::ok(user),
             Err(error) => Response::failed(error.into()),
@@ -152,10 +156,24 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
-        Command::SignOut => match app.context.account().sign_out().await {
-            Ok(()) => Response::done(),
+        Command::BeginSignIn => match app.auth.begin() {
+            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),
         },
+        Command::CompleteSignIn { callback_url } => answer(app.auth.complete(&callback_url).await),
+        Command::CancelSignIn => {
+            app.auth.cancel();
+            Response::done()
+        }
+        Command::SignOut => {
+            // The flow in progress goes with the session. Leaving it would let a callback from
+            // before the sign-out complete afterwards and sign the user back in.
+            app.auth.cancel();
+            match app.context.account().sign_out().await {
+                Ok(()) => Response::done(),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
     }
 }
 
@@ -612,6 +630,93 @@ mod tests {
         let report = call(&app, json!({ "kind": "sync" })).await;
         assert_eq!(report["ok"], true);
         assert_eq!(report["value"]["fetched"], false);
+    }
+
+    /// The sign-in commands, end to end through the door the shell uses.
+    #[tokio::test]
+    async fn signing_in_goes_out_through_the_browser_and_comes_back_through_a_callback() {
+        let app = app_with(StubTransport::new().push_json(
+            "/api/v1/auth/desktop/exchange",
+            200,
+            json!({
+                "sessionToken": "eyJhbGciOi.token",
+                "expiresAt": "2026-10-07T12:00:00Z",
+                "sessionCookieName": "next-auth.session-token",
+                "user": { "id": "u1", "email": "ada@example.com", "name": "Ada" }
+            }),
+        ));
+        assert_eq!(
+            call(&app, json!({ "kind": "isSignedIn" })).await["value"]["signedIn"],
+            false
+        );
+
+        let began = call(&app, json!({ "kind": "beginSignIn" })).await;
+        let url = began["value"]["authorizeUrl"].as_str().expect("a URL");
+        let state = url::Url::parse(url)
+            .expect("a URL")
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("a state");
+
+        let completed = call(
+            &app,
+            json!({
+                "kind": "completeSignIn",
+                "callbackUrl": format!("astrid://auth/callback?code=abc&state={state}")
+            }),
+        )
+        .await;
+        assert_eq!(completed["value"]["id"], "u1");
+        assert_eq!(
+            call(&app, json!({ "kind": "isSignedIn" })).await["value"]["signedIn"],
+            true
+        );
+        assert_eq!(
+            call(&app, json!({ "kind": "currentUser" })).await["value"]["email"],
+            "ada@example.com"
+        );
+    }
+
+    /// Any web page can open the callback scheme. Without a flow in progress there is nothing to
+    /// check it against, so it is refused.
+    #[tokio::test]
+    async fn a_callback_nobody_asked_for_is_refused() {
+        let app = app_with(StubTransport::new());
+        let answer = call(
+            &app,
+            json!({ "kind": "completeSignIn", "callbackUrl": "astrid://auth/callback?code=abc&state=x" }),
+        )
+        .await;
+        assert_eq!(answer["ok"], false);
+    }
+
+    /// A callback that arrives after signing out must not sign the user back in.
+    #[tokio::test]
+    async fn signing_out_abandons_a_sign_in_in_progress() {
+        let app = app_with(StubTransport::new());
+        let began = call(&app, json!({ "kind": "beginSignIn" })).await;
+        let url = began["value"]["authorizeUrl"]
+            .as_str()
+            .expect("a URL")
+            .to_string();
+        let state = url::Url::parse(&url)
+            .expect("a URL")
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("a state");
+
+        call(&app, json!({ "kind": "signOut" })).await;
+        let late = call(
+            &app,
+            json!({
+                "kind": "completeSignIn",
+                "callbackUrl": format!("astrid://auth/callback?code=abc&state={state}")
+            }),
+        )
+        .await;
+        assert_eq!(late["ok"], false);
     }
 
     #[tokio::test]

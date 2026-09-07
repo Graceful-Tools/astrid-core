@@ -68,6 +68,9 @@ pub enum Command {
     },
     /// The signed-in user.
     CurrentUser,
+    /// Whether there is a stored session. Not whether it is still valid — only the server knows
+    /// that, and it says so with a 401.
+    IsSignedIn,
     /// The Outbox's state, for the "not synced yet" indicator.
     OutboxStats,
 
@@ -151,6 +154,14 @@ pub enum Command {
     },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
+    /// Start signing in. Answers with the URL for the shell to open in the browser.
+    BeginSignIn,
+    /// Finish signing in, from the URL Windows activated the app with.
+    CompleteSignIn {
+        callback_url: String,
+    },
+    /// Abandon the sign-in in progress — the user closed the browser prompt.
+    CancelSignIn,
     /// Forget everything: the cache, the journal, the credential.
     SignOut,
 }

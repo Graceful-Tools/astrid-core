@@ -33,7 +33,7 @@ use crate::api::{ApiClient, HttpTransport, ReqwestTransport};
 use crate::outbox::Runner;
 use crate::platform::{Clock, SecureStore, SystemClock};
 use crate::realtime::RealtimeSink;
-use crate::services::Context;
+use crate::services::{AuthService, Context};
 use crate::store::Store;
 use crate::sync::SyncManager;
 
@@ -64,6 +64,9 @@ pub struct App {
     pub(crate) store: Arc<Store>,
     pub(crate) client: Arc<ApiClient>,
     pub(crate) clock: Arc<dyn Clock>,
+    /// Held rather than made per call: it carries the flow between opening the browser and the
+    /// callback coming back, and a fresh one would have nothing to check the callback against.
+    pub(crate) auth: Arc<AuthService>,
 }
 
 impl App {
@@ -103,8 +106,10 @@ impl App {
         ));
         let realtime = Arc::new(RealtimeSink::new(store.clone()));
 
+        let context = Context::new(client.clone(), store.clone(), clock.clone());
         Ok(App {
-            context: Context::new(client.clone(), store.clone(), clock.clone()),
+            auth: Arc::new(context.auth()),
+            context,
             runner,
             sync,
             realtime,
@@ -144,6 +149,11 @@ impl App {
 
     pub fn client(&self) -> &Arc<ApiClient> {
         &self.client
+    }
+
+    /// Sign-in, which the shell needs directly: it opens the browser and receives the activation.
+    pub fn auth(&self) -> &Arc<AuthService> {
+        &self.auth
     }
 }
 

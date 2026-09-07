@@ -15,12 +15,14 @@
 //! shapes.
 
 pub mod account;
+pub mod auth;
 pub mod chat;
 pub mod comment;
 pub mod list;
 pub mod task;
 
 pub use account::AccountService;
+pub use auth::AuthService;
 pub use chat::ChatService;
 pub use comment::CommentService;
 pub use list::{ListChanges, ListService};
@@ -70,6 +72,12 @@ impl Context {
 
     pub fn account(&self) -> AccountService {
         AccountService::new(self.clone())
+    }
+
+    /// Sign-in. Unlike the others this one holds state — the flow between opening the browser and
+    /// the callback arriving — so the app keeps ONE of these rather than making one per call.
+    pub fn auth(&self) -> AuthService {
+        AuthService::new(self.clone())
     }
 }
 
