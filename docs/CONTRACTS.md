@@ -78,10 +78,14 @@ deployed in UTC.
 **This crate follows web:** it spills into March 1st.
 
 Web's yearly step is `setUTCFullYear(year + 1)`, and JavaScript rolls a date that does not exist
-forward — February 29th 2024 becomes **March 1st 2025**. Both Apple apps use
-`Calendar.date(byAdding: .year)`, which **clamps to February 28th**, and so does chrono's month
-arithmetic, which is how this was found: the generated fixture disagreed with the port on its first
-run.
+forward — February 29th 2024 becomes **March 1st 2025**. That half is measured: it is what the
+generated fixture records, and it is how this was found, because chrono's arithmetic clamps and the
+fixture disagreed with the port on its first run.
+
+The Apple side is read rather than run: `RepeatingTaskHandler.swift` uses
+`Calendar.date(byAdding: .year)`, which clamps an invalid result to the last valid day, so both
+Apple apps should land on February 28th. Worth confirming on a device before the cross-repo fix,
+since the whole point of that fix is to make three clients agree.
 
 Web is also inconsistent with itself. Its *monthly* step clamps deliberately — January 31st plus a
 month is the 28th or 29th of February, with an explicit `setUTCDate(0)` to force it — while its
