@@ -2,4 +2,5 @@
 //!
 //! Mirrors `astrid-ios/Astrid App/Core/Authentication/`.
 
+pub mod desktop_handoff;
 pub mod session_cookie;

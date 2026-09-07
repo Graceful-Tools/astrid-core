@@ -153,10 +153,48 @@ bare JWT when it renews a session. The renewed value is swapped **inside** the s
   one truncates the token silently.
 - Never store a bare token. It would be sent as a nameless `Cookie` header, the server would find no
   session, and the user would be signed out on the very launch meant to keep them signed in.
+- **On first sign-in there is nothing stored to learn the name from**, and the two names are not
+  interchangeable. The exchange response therefore states `sessionCookieName`, and
+  `replacing_token_named` uses it. Assuming the production name against a dev server — or the
+  reverse — signs in successfully and then reads as signed out on the very next request.
 
 ---
 
-## 4. Adding a contract
+## 4. Desktop hand-off sign-in
+
+Canonical: `astrid-web/lib/auth/desktop-handoff.ts` and the two routes it serves.
+Here: `astrid_core::auth::desktop_handoff`.
+
+The app cannot host the sign-in page, so it opens the system browser at `/auth/desktop`, the user
+signs in with whatever the web already supports, and the browser returns a one-time code through
+`astrid://auth/callback`.
+
+**Any local program can register the same URL scheme.** That single fact produces every rule here,
+and both halves enforce them independently:
+
+| Rule | Server | Here |
+|---|---|---|
+| S256 only; `plain` is refused | `validateGrantRequest` | `CODE_CHALLENGE_METHOD`, no other path |
+| The redirect URI is a per-client constant, never read from a request | `DesktopClient.redirectUri` | `CALLBACK_HOST` + `CALLBACK_PATH` |
+| `state` is compared before the code is used | echoed, not trusted | `parse_callback` refuses on mismatch **and on absence** |
+| A code is single-use and dies in five minutes | conditional-write claim | — |
+| A wrong verifier burns the code | claim precedes verification | — |
+| The verifier never leaves the client | — | only its SHA-256 is ever sent |
+
+Two details worth keeping straight, because both are easy to get wrong in a way that only fails
+against a live server:
+
+- **The challenge hashes the verifier's ASCII bytes**, not the entropy the verifier was encoded
+  from. RFC 7636 §4.2. The test locks the published Appendix B vector.
+- **`astrid://auth/callback` parses as host `auth`, path `/callback`.** Both are checked, so
+  `astrid://task/123` — a real activation this app receives — cannot be mistaken for a sign-in.
+
+The state comparison is not constant-time and does not need to be: `state` binds a callback to the
+flow that started it, and it travels in the same URL as the code anyway. The secret is the verifier.
+
+---
+
+## 5. Adding a contract
 
 1. Change the canonical implementation in astrid-web, with tests.
 2. Teach `contracts/export-from-web.mjs` to export the cases, and regenerate.

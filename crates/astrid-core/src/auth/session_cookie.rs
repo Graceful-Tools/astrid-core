@@ -29,6 +29,17 @@ pub const DEFAULT_SESSION_COOKIE_NAME: &str = "next-auth.session-token";
 /// Other cookies matter: the CSRF one travels here too, and dropping it breaks the next write
 /// rather than the next read — a far more confusing failure than an outright sign-out.
 pub fn replacing_token(stored: Option<&str>, token: &str) -> String {
+    replacing_token_named(stored, DEFAULT_SESSION_COOKIE_NAME, token)
+}
+
+/// As [`replacing_token`], but naming the cookie to use when there is nothing stored yet.
+///
+/// First sign-in has no stored header to learn the name from, and the two names are not
+/// interchangeable: production issues the `__Secure-` prefixed one and development does not.
+/// The exchange response states which, so the very first authenticated request carries a name
+/// the server will actually look for. Every later renewal keeps whatever is already stored,
+/// which is why the name is only consulted when nothing matches.
+pub fn replacing_token_named(stored: Option<&str>, name: &str, token: &str) -> String {
     let pairs: Vec<&str> = stored
         .unwrap_or_default()
         .split(';')
@@ -37,7 +48,7 @@ pub fn replacing_token(stored: Option<&str>, token: &str) -> String {
         .collect();
 
     if pairs.is_empty() {
-        return format!("{DEFAULT_SESSION_COOKIE_NAME}={token}");
+        return format!("{name}={token}");
     }
 
     let mut replaced = false;
@@ -45,9 +56,9 @@ pub fn replacing_token(stored: Option<&str>, token: &str) -> String {
     for pair in pairs {
         // Split on the FIRST `=` only: base64url padding can put `=` inside the value, and
         // splitting on every one would silently truncate the token.
-        let name = pair.split('=').next().unwrap_or(pair);
-        if SESSION_COOKIE_NAMES.contains(&name) {
-            out.push(format!("{name}={token}"));
+        let pair_name = pair.split('=').next().unwrap_or(pair);
+        if SESSION_COOKIE_NAMES.contains(&pair_name) {
+            out.push(format!("{pair_name}={token}"));
             replaced = true;
         } else {
             out.push(pair.to_string());
@@ -55,7 +66,7 @@ pub fn replacing_token(stored: Option<&str>, token: &str) -> String {
     }
 
     if !replaced {
-        out.push(format!("{DEFAULT_SESSION_COOKIE_NAME}={token}"));
+        out.push(format!("{name}={token}"));
     }
     out.join("; ")
 }
