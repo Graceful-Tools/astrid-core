@@ -14,6 +14,7 @@
 // client consumes the same artifacts; the output format will not change when it does.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -85,7 +86,29 @@ function exportShortcuts() {
   return { shortcuts }
 }
 
-const EXPORTS = { 'shortcuts.json': exportShortcuts }
+
+// Repeating rollover is arithmetic, not a table, so the only honest way to lock it is to RUN the
+// canonical implementation and record what it returns. A child process does it, with TZ pinned:
+// web's custom-pattern path uses local date methods, so its results depend on the machine's
+// timezone (docs/CONTRACTS.md D4) and an unpinned fixture would encode whoever generated it.
+function exportRepeating() {
+  const driver = join(here, 'drivers', 'repeating.mjs')
+  const run = spawnSync(process.execPath, [driver, webRoot], {
+    env: { ...process.env, TZ: 'UTC' },
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  })
+  if (run.status !== 0) {
+    throw new Error(`repeating driver failed (exit ${run.status}):
+${run.stderr}`)
+  }
+  return JSON.parse(run.stdout)
+}
+
+const EXPORTS = {
+  'shortcuts.json': exportShortcuts,
+  'repeating.json': exportRepeating,
+}
 
 let failed = false
 mkdirSync(join(here, 'fixtures'), { recursive: true })

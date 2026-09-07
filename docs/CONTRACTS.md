@@ -52,6 +52,47 @@ Tuesday. Same reasoning as D2: the fix belongs on web, and until then matching m
 
 `same_date` monthly patterns are unaffected — they keep their time.
 
+### D4 — web's custom-pattern path depends on the server's timezone
+
+**This crate is UTC.** The fixture is generated with `TZ=UTC` so it records one defined behaviour.
+
+Web's *simple* patterns use `setUTC*`, but its *custom* patterns use local date methods —
+`setMonth`, `getDay`, `new Date(year, month, 1)`. Measured on a machine at UTC-8, "the third
+Tuesday of the month" comes back as `2024-02-20T08:00:00Z`: local midnight, not UTC midnight. The
+same input on a UTC machine gives `2024-02-20T00:00:00Z`.
+
+So the result of a custom rollover depends on where the code runs. Two users completing the same
+task from clients in different zones get instants eight hours apart, and for an all-day task the
+displayed date can differ by a day. It also means the answer changes if the server moves.
+
+Weekly patterns happen to be unaffected — they advance by whole days from an anchor, and the
+weekday of a UTC instant is the same in any zone that does not shift it across midnight — but that
+is luck, not design.
+
+Closing it means moving web's custom path onto UTC methods, with the progression tests re-run under
+a non-UTC `TZ`. Until then this crate matches the UTC answer, which is what web produces when
+deployed in UTC.
+
+### D5 — February 29th plus a year
+
+**This crate follows web:** it spills into March 1st.
+
+Web's yearly step is `setUTCFullYear(year + 1)`, and JavaScript rolls a date that does not exist
+forward — February 29th 2024 becomes **March 1st 2025**. Both Apple apps use
+`Calendar.date(byAdding: .year)`, which **clamps to February 28th**, and so does chrono's month
+arithmetic, which is how this was found: the generated fixture disagreed with the port on its first
+run.
+
+Web is also inconsistent with itself. Its *monthly* step clamps deliberately — January 31st plus a
+month is the 28th or 29th of February, with an explicit `setUTCDate(0)` to force it — while its
+yearly step spills. The same product question ("this date does not exist next period, now what?")
+has two answers a few lines apart.
+
+Clamping is very likely the better behaviour: an anniversary on February 29th belongs on February
+28th, not on March 1st, and it is what two of the three clients already do. But changing it here
+alone would make a leap-day task land on a different date depending on which app the user completed
+it in, which is worse than the inconsistency. It changes on web first, then everywhere.
+
 ### Settled behaviour (no divergence)
 
 - **"Until date" is inclusive and compared by date, not instant.** "Repeat until Dec 15" means an

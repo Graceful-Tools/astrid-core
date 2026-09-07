@@ -18,6 +18,18 @@ rather than going unnoticed at runtime.
 | Fixture | Canonical source | Consumed by |
 |---|---|---|
 | `shortcuts.json` | `hooks/useKeyboardShortcuts.ts` — the `KEYBOARD_SHORTCUTS` table plus the `if (selectedTask)` guard read from the dispatch switch | `astrid_core::keyboard` |
+| `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded | `astrid_core::repeating` |
+
+## Two kinds of export
+
+Some contracts are **tables**, and the exporter reads them out of the source. Others are
+**arithmetic**, and the only honest way to lock those is to run the canonical implementation and
+record what it returns — `drivers/repeating.mjs` imports `types/repeating.ts` and executes it. Node
+runs the TypeScript directly, so no build step and none of astrid-web's dependencies are involved.
+
+A driver runs with `TZ=UTC`. Web's custom repeat path uses local date methods, so its results depend
+on the machine's timezone (see `docs/CONTRACTS.md` D4); without pinning, the fixture would record
+whichever zone the person generating it happened to be in.
 
 Planned, as each module is ported (plan §3): repeating-task rollover, the list permission matrix,
 all-day date handling, the smart-task parser, wire shapes, the task leading control, and the

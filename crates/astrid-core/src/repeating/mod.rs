@@ -83,6 +83,7 @@ pub enum MonthRepeatType {
 
 /// "The third Tuesday", as stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MonthWeekday {
     pub weekday: Weekday,
     /// 1-5 (first through fifth week of the month).
@@ -157,7 +158,7 @@ pub fn calculate_simple_next_occurrence(
         Repeating::Daily => adding_days(anchor, 1),
         Repeating::Weekly => adding_days(anchor, 7),
         Repeating::Monthly => adding_months(anchor, 1),
-        Repeating::Yearly => adding_months(anchor, 12),
+        Repeating::Yearly => adding_years(anchor, 1),
         // Neither is a simple pattern: custom patterns route to
         // `calculate_custom_next_occurrence`, and a task that never repeats is not completed
         // through this path at all. Returning the anchor mirrors the Swift default arm.
@@ -277,6 +278,27 @@ fn adding_months(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
         .unwrap_or(date)
 }
 
+/// Add years the way `Date.setUTCFullYear` does: the day of the month is kept, and February 29th in
+/// a year that has no February 29th spills over into March.
+///
+/// Deliberately NOT the month clamp above, even though clamping to February 28th is the friendlier
+/// answer and is what both Apple apps do. Web is the contract, and a yearly task must roll over to
+/// the same date whichever client the user completes it on. Recorded as D5 in docs/CONTRACTS.md,
+/// with web's own monthly/yearly inconsistency, because it is worth fixing everywhere at once.
+fn adding_years(date: DateTime<Utc>, years: i32) -> DateTime<Utc> {
+    from_ymd_overflowing(date.year() + years, date.month(), date.day())
+        .map(|d| d.and_time(date.time()).and_utc())
+        .unwrap_or(date)
+}
+
+/// Build a date the way JavaScript's date setters do: a day number past the end of the month rolls
+/// forward into the next one rather than failing. `from_ymd_opt` would return `None` there, and
+/// falling back to "leave the date alone" would silently stop a series.
+fn from_ymd_overflowing(year: i32, month: u32, day: u32) -> Option<chrono::NaiveDate> {
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+    first.checked_add_signed(chrono::Duration::days(i64::from(day).saturating_sub(1)))
+}
+
 /// The date the next occurrence is measured from: the chosen base date, wearing the time of day the
 /// task was due. Both modes preserve the due time — completing a 9am task at 11pm must not move it
 /// to 11pm forever.
@@ -355,10 +377,11 @@ fn next_year_occurrence(
     let year = date.year() + interval;
     let month = pattern.month.unwrap_or_else(|| date.month());
     let day = pattern.day.unwrap_or_else(|| date.day());
-    chrono::NaiveDate::from_ymd_opt(year, month, day)
+    // Overflowing rather than failing, for the same reason as `adding_years`: web's date setters
+    // roll a day past the month's end forward, and a pattern saying "February 30th" passes web's
+    // own validity check, so it has to land somewhere rather than stalling the series.
+    from_ymd_overflowing(year, month, day)
         .map(|d| d.and_time(date.time()).and_utc())
-        // An impossible date (February 30th, say) leaves the task where it was rather than
-        // silently rescheduling it to a day the user never chose.
         .unwrap_or(date)
 }
 
@@ -528,6 +551,25 @@ mod tests {
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.year(), next.month(), next.day()), (2025, 6, 15));
+    }
+
+    /// February 29th plus a year has no February 29th to land on, and web spills it into March
+    /// rather than clamping to the 28th — the opposite of what web does for a monthly rollover, and
+    /// the opposite of what both Apple apps do here. Matching web is the contract; see D5 in
+    /// docs/CONTRACTS.md for why this is a cross-repo fix rather than a local one.
+    #[test]
+    fn a_leap_day_task_rolls_into_march_the_way_web_does() {
+        let result = calculate_simple_next_occurrence(
+            Repeating::Yearly,
+            Some(utc(2024, 2, 29, 9, 0)),
+            utc(2024, 2, 29, 9, 0),
+            RepeatFrom::DueDate,
+            0,
+            None,
+        );
+        let next = result.next_due_date.unwrap();
+        assert_eq!((next.year(), next.month(), next.day()), (2025, 3, 1));
+        assert_eq!(next.hour(), 9, "the time of day still survives");
     }
 
     #[test]
