@@ -100,6 +100,13 @@ pub enum Command {
         #[serde(default)]
         limit: Option<usize>,
     },
+    /// The repeat presets, and how this task's repeat describes itself.
+    ///
+    /// The summary comes back as parts with resource keys rather than a sentence — see
+    /// [`crate::rows::repeat`], where the reason is written down.
+    RepeatOptions {
+        task_id: String,
+    },
     /// Who this task can be assigned to, in the order the picker shows them.
     ///
     /// One rule for every surface: the detail pane, the row picker and later the board all ask

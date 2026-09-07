@@ -54,6 +54,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             include_completed,
             limit,
         } => search_tasks(app, &query, list_id, include_completed, limit),
+        Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
         Command::AssigneeOptions { task_id } => assignee_options(app, &task_id),
         Command::CurrentUser => match app.context.account().current_user() {
             Ok(user) => Response::ok(user),
@@ -314,6 +315,14 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
             offset,
         )),
         "isOverdue": filters::is_overdue(&task, now, offset),
+        // A custom repeat cannot describe itself in a chip: "Custom" says nothing, and the pattern
+        // does not fit beside a date and a time. The detail gives it its own row, worded exactly
+        // as the picker words it, or the same repeat reads two ways on one screen.
+        "repeatSummary": rows::repeat::summary(
+            task.repeating,
+            task.repeating_data.as_ref(),
+            task.repeat_from,
+        ),
         "listChips": chips,
         "assignee": assignee,
         "comments": comments,
@@ -453,6 +462,30 @@ fn search_tasks(
         "total": total,
         "offset": 0,
         "rows": serialize_rows(&TaskRow::build_all(window, &context)),
+    }))
+}
+
+/// The repeat presets and this task's own repeat, described.
+///
+/// Setting one is an ordinary `updateTask` carrying `repeating`, `repeatFrom` and
+/// `repeatingData` — the same three fields the API takes — so there is no separate write.
+fn repeat_options(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    Response::ok(serde_json::json!({
+        "repeating": task.repeating,
+        "repeatFrom": task.repeat_from,
+        "pattern": task.repeating_data,
+        "presets": rows::repeat::presets(task.repeating),
+        "summary": rows::repeat::summary(
+            task.repeating,
+            task.repeating_data.as_ref(),
+            task.repeat_from,
+        ),
     }))
 }
 
@@ -1377,6 +1410,63 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A repeat describes itself in parts with resource keys, so the shell says it in its own
+    /// words and in its own order.
+    #[tokio::test]
+    async fn repeat_options_describe_the_current_repeat() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Water plants" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+        call(
+            &app,
+            json!({
+                "kind": "updateTask",
+                "taskId": id,
+                "changes": { "repeating": "weekly" },
+            }),
+        )
+        .await;
+
+        let offered = call(&app, json!({ "kind": "repeatOptions", "taskId": id })).await;
+        assert_eq!(offered["value"]["presets"][0]["value"], "never");
+        assert_eq!(offered["value"]["summary"][0]["key"], "repeat.weekly");
+        let selected = offered["value"]["presets"]
+            .as_array()
+            .expect("presets")
+            .iter()
+            .filter(|preset| preset["isSelected"] == true)
+            .count();
+        assert_eq!(selected, 1);
+    }
+
+    /// The detail screen carries the same sentence the picker shows, from the same function.
+    #[tokio::test]
+    async fn the_detail_screen_describes_the_repeat_the_same_way() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Water plants" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+        call(
+            &app,
+            json!({
+                "kind": "updateTask",
+                "taskId": id,
+                "changes": { "repeating": "daily" },
+            }),
+        )
+        .await;
+
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": id })).await;
+        assert_eq!(detail["value"]["repeatSummary"][0]["key"], "repeat.daily");
     }
 
     /// The picker offers unassigned first and knows which row is the current one, so the shell
