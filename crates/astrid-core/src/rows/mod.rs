@@ -15,6 +15,8 @@
 //! it is also what stops the date arithmetic being retyped in XAML — which is how two platforms
 //! come to disagree about which day a task is due.
 
+pub mod detail;
+
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
 use crate::filters;

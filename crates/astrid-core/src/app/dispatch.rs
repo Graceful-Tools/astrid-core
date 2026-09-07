@@ -35,6 +35,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(None) => Response::failed(Failure::not_found("task", task_id)),
             Err(error) => Response::failed(error.into()),
         },
+        Command::TaskDetail {
+            task_id,
+            display_mode,
+        } => task_detail(app, &task_id, display_mode),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),
@@ -237,6 +241,81 @@ fn action_name(action: crate::keyboard::ShortcutAction) -> &'static str {
         A::IndentTask => "indentTask",
         A::ShowShortcuts => "showShortcuts",
     }
+}
+
+/// Everything one task's detail screen needs, in one answer.
+///
+/// The field ORDER comes with it. That is not decoration: the same four rows are shown on web, on
+/// both Apple clients and here, and the order they appear in is a product decision written down
+/// once — see `crate::rows::detail`. A shell that laid them out itself would be the fifth place
+/// to get it wrong.
+fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
+    let mode = Command::display_mode(display_mode.as_deref());
+
+    let lists = app.store.lists().unwrap_or_default();
+    let chips: Vec<serde_json::Value> = task
+        .effective_list_ids()
+        .iter()
+        .filter_map(|id| lists.iter().find(|list| &list.id == id))
+        .filter(|list| list.is_domain_list())
+        .map(|list| {
+            serde_json::json!({
+                "id": list.id, "name": list.name, "color": list.display_color()
+            })
+        })
+        .collect();
+
+    let assignee = task.assignee.clone().or_else(|| {
+        task.assignee_id
+            .as_deref()
+            .and_then(|id| app.store.user(id).ok().flatten())
+    });
+
+    let comments = app.context.comments().for_task(task_id).unwrap_or_default();
+
+    // Subtasks are the children of this task, in the order they were added — the order somebody
+    // breaking a task down expects to read them back in.
+    let mut subtasks: Vec<crate::model::Task> = app
+        .store
+        .tasks()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|candidate| candidate.parent_task_id.as_deref() == Some(task_id))
+        .collect();
+    subtasks.sort_by_key(|subtask| (subtask.created_at, subtask.id.clone()));
+
+    Response::ok(serde_json::json!({
+        "task": task,
+        "fieldOrder": rows::detail::field_order(mode)
+            .iter()
+            .map(|field| field.name())
+            .collect::<Vec<_>>(),
+        "priorityGlyph": rows::detail::priority_glyph(task.priority),
+        "due": due_json(&rows::DueLabel::for_due(
+            task.due_date_time,
+            task.is_all_day,
+            now,
+            offset,
+        )),
+        "isOverdue": filters::is_overdue(&task, now, offset),
+        "listChips": chips,
+        "assignee": assignee,
+        "comments": comments,
+        "subtasks": subtasks.iter().map(|subtask| serde_json::json!({
+            "id": subtask.id,
+            "title": subtask.title,
+            "completed": subtask.completed,
+            "isPending": crate::model::is_temp_id(&subtask.id),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 fn answer<T: serde::Serialize>(result: crate::services::Result<T>) -> Response {
@@ -862,6 +941,75 @@ mod tests {
         assert!(shortcuts
             .iter()
             .any(|entry| entry["action"] == "newTask" && entry["requiresSelection"] == false));
+    }
+
+    /// The whole detail screen in one answer, with the field order that makes four clients agree.
+    #[tokio::test]
+    async fn the_detail_screen_arrives_assembled() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        let list_id = call(&app, json!({ "kind": "lists" })).await["value"][0]["id"]
+            .as_str()
+            .expect("an id")
+            .to_string();
+        let created = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan the trip", "listIds": [list_id] }),
+        )
+        .await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Book flights", "parentTaskId": task_id }),
+        )
+        .await;
+        call(
+            &app,
+            json!({ "kind": "postComment", "taskId": task_id, "content": "asked Sam" }),
+        )
+        .await;
+        call(
+            &app,
+            json!({ "kind": "updateTask", "taskId": task_id, "changes": { "priority": 3 } }),
+        )
+        .await;
+
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        let value = &detail["value"];
+        assert_eq!(value["task"]["title"], "Plan the trip");
+        assert_eq!(
+            value["fieldOrder"],
+            json!(["assignee", "when", "priority", "lists"]),
+            "the order is the contract; changing it is a cross-repo change"
+        );
+        assert_eq!(value["priorityGlyph"], "!!!");
+        assert_eq!(value["listChips"][0]["name"], "Home");
+        assert_eq!(value["subtasks"][0]["title"], "Book flights");
+        assert_eq!(value["comments"][0]["content"], "asked Sam");
+    }
+
+    /// Project mode has no assignee or priority row — both live behind the leading control.
+    #[tokio::test]
+    async fn project_mode_asks_for_a_shorter_detail_screen() {
+        let app = app_with(StubTransport::new());
+        let created = call(&app, json!({ "kind": "createTask", "title": "x" })).await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let detail = call(
+            &app,
+            json!({ "kind": "taskDetail", "taskId": task_id, "displayMode": "project" }),
+        )
+        .await;
+        assert_eq!(detail["value"]["fieldOrder"], json!(["when", "lists"]));
+    }
+
+    #[tokio::test]
+    async fn asking_for_a_task_that_is_not_there_says_which_one() {
+        let app = app_with(StubTransport::new());
+        let answer = call(&app, json!({ "kind": "taskDetail", "taskId": "nope" })).await;
+        assert_eq!(answer["error"]["kind"], "notFound");
+        assert_eq!(answer["error"]["id"], "nope");
     }
 
     #[tokio::test]

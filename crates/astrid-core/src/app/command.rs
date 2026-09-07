@@ -62,6 +62,16 @@ pub enum Command {
     Task {
         task_id: String,
     },
+    /// Everything one task's detail screen needs: the task, its comments, its subtasks, its list
+    /// chips, and the order to lay the fields out in.
+    ///
+    /// One command rather than five, because the field order is a cross-platform product decision
+    /// and a shell that assembled the screen itself would be the fifth place to get it wrong.
+    TaskDetail {
+        task_id: String,
+        #[serde(default)]
+        display_mode: Option<String>,
+    },
     /// A task's comments.
     Comments {
         task_id: String,
