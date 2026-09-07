@@ -301,6 +301,15 @@ impl Store {
         })
     }
 
+    /// Every user we hold. Small by construction — the people on your lists, not a directory.
+    pub fn users(&self) -> Result<Vec<User>> {
+        self.with(|connection| {
+            let mut statement = connection.prepare("SELECT json FROM users")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
     pub fn upsert_comments(&self, comments: &[Comment]) -> Result<()> {
         self.transaction(|connection| {
             for comment in comments {

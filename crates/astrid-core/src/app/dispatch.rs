@@ -54,6 +54,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             include_completed,
             limit,
         } => search_tasks(app, &query, list_id, include_completed, limit),
+        Command::AssigneeOptions { task_id } => assignee_options(app, &task_id),
         Command::CurrentUser => match app.context.account().current_user() {
             Ok(user) => Response::ok(user),
             Err(error) => Response::failed(error.into()),
@@ -452,6 +453,55 @@ fn search_tasks(
         "total": total,
         "offset": 0,
         "rows": serialize_rows(&TaskRow::build_all(window, &context)),
+    }))
+}
+
+/// Who this task can be assigned to.
+///
+/// Assigning itself is an ordinary `updateTask` with an `assigneeId` — null clears it — so there
+/// is no separate write here. This is only the question of who may be offered.
+///
+/// Agents come from the account rather than from the task's lists, so they are whichever cached
+/// users say they are agents. Until the core fetches the agent roster (M3) that is only the ones
+/// seen embedded in a response; an agent nobody has met yet is simply not offered, which is
+/// better than offering a bare id.
+fn assignee_options(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let lists = app.store.lists().unwrap_or_default();
+    let known = app.store.users().unwrap_or_default();
+    let agents: Vec<crate::model::User> = known
+        .iter()
+        .filter(|user| user.is_agent())
+        .cloned()
+        .collect();
+
+    let current_user = app.context.account().current_user().ok().flatten();
+    // The task's own assignee record is the last resort, and never wins over the id: a stale
+    // embedded record is how the previous person stays on screen (task 42013da7).
+    let assignee = crate::rows::assignee::resolve(
+        task.assignee_id.as_deref(),
+        &[known.as_slice()],
+        task.assignee.as_ref(),
+    );
+
+    let list_ids = task.effective_list_ids();
+    let options = crate::rows::assignee::options(&crate::rows::assignee::AssigneeSources {
+        lists: &lists,
+        task_list_ids: &list_ids,
+        agents: &agents,
+        current_assignee: assignee.as_ref(),
+        current_user: current_user.as_ref(),
+        ..Default::default()
+    });
+
+    Response::ok(serde_json::json!({
+        "assigneeId": task.assignee_id,
+        "options": options,
     }))
 }
 
@@ -1327,6 +1377,33 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// The picker offers unassigned first and knows which row is the current one, so the shell
+    /// draws a tick beside it without deciding anything.
+    #[tokio::test]
+    async fn assignee_options_offer_unassigned_and_say_who_holds_the_task() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Book flights" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let offered = call(&app, json!({ "kind": "assigneeOptions", "taskId": id })).await;
+        assert_eq!(
+            offered["value"]["options"][0]["userId"],
+            serde_json::Value::Null
+        );
+        assert_eq!(offered["value"]["assigneeId"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn assignee_options_for_a_task_that_is_not_there_are_a_not_found() {
+        let app = app_with(StubTransport::new());
+        let answered = call(&app, json!({ "kind": "assigneeOptions", "taskId": "nope" })).await;
+        assert_eq!(answered["error"]["kind"], "notFound");
     }
 
     #[tokio::test]

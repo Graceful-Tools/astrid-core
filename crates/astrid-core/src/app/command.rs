@@ -100,6 +100,14 @@ pub enum Command {
         #[serde(default)]
         limit: Option<usize>,
     },
+    /// Who this task can be assigned to, in the order the picker shows them.
+    ///
+    /// One rule for every surface: the detail pane, the row picker and later the board all ask
+    /// this. On iOS the picker built the list inline, and the board could not offer an AI agent
+    /// at all — see [`crate::rows::assignee`].
+    AssigneeOptions {
+        task_id: String,
+    },
     /// The signed-in user.
     CurrentUser,
     /// Whether there is a stored session. Not whether it is still valid — only the server knows

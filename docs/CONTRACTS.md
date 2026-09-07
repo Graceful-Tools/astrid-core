@@ -300,6 +300,23 @@ undated ones are dropped. The rule holds for every other filter and fails for th
   an unknown filter falls through to "keep it" like everything else. Web first, then here, then
   astrid-ios.
 
+### D8 — the two Apple clients order the assignee picker differently
+
+iOS (`AssigneeOptions.build`) sorts **agents first, then you, then everyone by name**, and offers no
+unassigned row — its picker adds one in the view. The Mac (`MacAssigneeOptions.build`) offers
+**"no one" first, then you, then everyone by name**, and has no agents at all: its picker predates
+agents being assignable, so an account's agents cannot be chosen from the Mac detail pane.
+
+- **Where it bites:** the same task, opened on an iPhone and on a Mac, offers a different set of
+  people in a different order. On the Mac an AI agent cannot be assigned from the detail pane at
+  all, though a task already held by one displays correctly.
+- **This crate takes iOS's ordering and the Mac's unassigned row.** iOS's is the one written
+  deliberately to stop surfaces drifting (task 1484ea4a), and unassigned is a real choice — a
+  picker that cannot express it cannot take a task off somebody. One function,
+  `astrid_core::rows::assignee::options`, answers for every surface.
+- **The fix is on the Mac**: build its options from the same rule, which is one call once the agent
+  roster is available to it.
+
 ---
 
 ## 7. Adding a contract

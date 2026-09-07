@@ -40,6 +40,25 @@ pub struct User {
 }
 
 impl User {
+    /// Someone we hold only an id for.
+    ///
+    /// The resolver never answers "nobody" for an id it does not recognise: a minimal record still
+    /// renders initials and still resolves a cached photo, where nothing at all left the previously
+    /// drawn avatar on screen (task 42013da7).
+    pub fn new(id: impl Into<String>) -> Self {
+        User {
+            id: id.into(),
+            email: None,
+            name: None,
+            image: None,
+            created_at: None,
+            default_due_time: None,
+            is_pending: None,
+            is_ai_agent: None,
+            ai_agent_type: None,
+        }
+    }
+
     /// What to show where a name goes. Never empty: a person we hold only an id for still has to
     /// render as something.
     pub fn display_name(&self) -> &str {
