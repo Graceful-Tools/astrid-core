@@ -268,7 +268,41 @@ client can produce would be worse than the gap.
 
 ---
 
-## 6. Adding a contract
+## 6. List filtering and sorting
+
+Canonical: `astrid-web`'s list view; shared on Apple by
+`astrid-ios/Astrid App/Core/Filters/ListTaskFiltering.swift`, which iOS and Mac both call. Here:
+[`astrid_core::filters`]. Not yet fixture-locked — the exporter cannot run web's list view — so it
+is a port with tests rather than a generated contract.
+
+The governing rule on all three clients is that **an unrecognised filter value keeps everything**.
+These values are stored on the server and synced between clients, so a build from six months ago
+will meet values it has never heard of, and treating one as "matches nothing" empties somebody's
+list on their screen for no visible reason.
+
+### D7 — an unrecognised due-date filter hides undated tasks
+
+Every client answers a task with **no due date** before it looks at the filter value:
+
+```
+guard let dueDateTime = task.dueDateTime else { return filter == "no_date" }
+```
+
+So for a value none of them recognise, dated tasks are kept (the `default:` arm returns true) and
+undated ones are dropped. The rule holds for every other filter and fails for this one.
+
+- **Where it bites:** a client older than a due-date filter value the server has learned shows a
+  list with every undated task missing. Undated tasks are the majority in most lists.
+- **This crate follows the existing behaviour**, reproduced deliberately with a test that says so
+  — a client that fixed it alone would show a different list from the other two, which is worse
+  than the bug.
+- **The fix is one line on each of three clients**: answer the undated case inside the `match`, so
+  an unknown filter falls through to "keep it" like everything else. Web first, then here, then
+  astrid-ios.
+
+---
+
+## 7. Adding a contract
 
 1. Change the canonical implementation in astrid-web, with tests.
 2. Teach `contracts/export-from-web.mjs` to export the cases, and regenerate.

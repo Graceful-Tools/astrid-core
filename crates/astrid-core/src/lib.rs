@@ -17,6 +17,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod filters;
 pub mod keyboard;
 pub mod model;
 pub mod outbox;

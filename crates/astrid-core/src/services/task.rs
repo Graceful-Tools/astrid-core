@@ -384,7 +384,7 @@ impl TaskService {
             return self.update(id, &changes);
         }
 
-        let outcome = next_occurrence(&current, now);
+        let outcome = next_occurrence(&current, now, self.context.clock.utc_offset());
         match outcome.next_due_date {
             Some(next_due) => {
                 // It rolls forward: still open, due next time round.
@@ -472,12 +472,16 @@ pub struct TimerResult {
 /// Delegates to [`crate::repeating`] and does no pattern math of its own. An inline copy in the
 /// iOS service once ignored `weekdays`, so a Mon/Wed/Fri task jumped a whole week instead of
 /// moving to the next selected day — rule 4 of `docs/ASTRID.md` §0 exists because of it.
-fn next_occurrence(task: &Task, now: DateTime<Utc>) -> repeating::NextOccurrence {
+fn next_occurrence(
+    task: &Task,
+    now: DateTime<Utc>,
+    offset: chrono::FixedOffset,
+) -> repeating::NextOccurrence {
     let repeat_from = match task.repeat_from.unwrap_or(RepeatFromMode::CompletionDate) {
         RepeatFromMode::DueDate => repeating::RepeatFrom::DueDate,
         RepeatFromMode::CompletionDate => repeating::RepeatFrom::CompletionDate,
     };
-    let completion = effective_completion_date(task, repeat_from, now);
+    let completion = effective_completion_date(task, repeat_from, now, offset);
     let occurrence_count = task.occurrence_count.unwrap_or(0) as i32;
 
     if task.repeating == Some(Repeating::Custom) {
@@ -522,17 +526,18 @@ fn next_occurrence(task: &Task, now: DateTime<Utc>) -> repeating::NextOccurrence
 
 /// The instant a completion anchors on.
 ///
-/// For an all-day task repeating from its completion, the anchor is the **calendar day** the task
-/// was completed on, at the all-day anchor hour — not the exact moment. Completing an all-day task
-/// at 21:00 local is 05:00 UTC the next day; anchoring on that would move every completion one day
-/// later than the person's own calendar says, once per evening.
+/// For an all-day task repeating from its completion, the anchor is the calendar day the person
+/// completed it on — **their** day, stored the way all-day dates are stored. Ticking one off at
+/// 21:00 in California is 04:00 UTC the next day; anchoring on that instant would move every
+/// evening completion a day past their own calendar, and the next occurrence with it.
 fn effective_completion_date(
     task: &Task,
     repeat_from: repeating::RepeatFrom,
     now: DateTime<Utc>,
+    offset: chrono::FixedOffset,
 ) -> DateTime<Utc> {
     if task.is_all_day && repeat_from == repeating::RepeatFrom::CompletionDate {
-        return date::all_day_instant(date::all_day_date(now));
+        return date::all_day_today(now, offset);
     }
     now
 }
@@ -568,6 +573,12 @@ mod tests {
     }
 
     fn fixture(now: &str) -> Fixture {
+        fixture_in_zone(now, 0)
+    }
+
+    /// The same, somewhere other than UTC. Several rules here are about the reader's calendar day
+    /// rather than the instant, and a test that never leaves UTC cannot tell the two apart.
+    fn fixture_in_zone(now: &str, offset_hours: i32) -> Fixture {
         let store = Arc::new(Store::in_memory().expect("opens"));
         let context = Context::new(
             Arc::new(ApiClient::new(
@@ -576,7 +587,7 @@ mod tests {
                 Arc::new(MemorySecureStore::new()),
             )),
             store.clone(),
-            Arc::new(FixedClock::at(at(now))),
+            Arc::new(FixedClock::at(at(now)).in_zone(offset_hours)),
         );
         Fixture {
             service: context.tasks(),
@@ -871,12 +882,13 @@ mod tests {
     /// moves every evening completion a day past the person's own calendar.
     #[test]
     fn an_all_day_completion_anchors_on_the_day_not_the_moment() {
-        let fixture = fixture("2026-09-08T05:00:00Z");
+        // 22:00 on the 7th in California, which is 05:00 on the 8th in UTC.
+        let fixture = fixture_in_zone("2026-09-08T05:00:00Z", -7);
         let mut task = Task::new("t1", "Water the plants");
         task.repeating = Some(Repeating::Daily);
         task.repeat_from = Some(RepeatFromMode::CompletionDate);
         task.is_all_day = true;
-        task.due_date_time = Some(at("2026-09-07T12:00:00Z"));
+        task.due_date_time = Some(at("2026-09-07T00:00:00Z"));
         fixture.store.upsert_task(&task).expect("stores");
 
         let rolled = fixture
@@ -885,8 +897,9 @@ mod tests {
             .expect("completes");
         assert_eq!(
             rolled.due_date_time,
-            Some(at("2026-09-09T12:00:00Z")),
-            "anchored on the 8th at the all-day hour, so next is the 9th"
+            Some(at("2026-09-08T00:00:00Z")),
+            "completed on the 7th where the person is, so it is next due on the 8th — anchoring \
+             on the UTC instant would have said the 9th, skipping a day every evening"
         );
     }
 

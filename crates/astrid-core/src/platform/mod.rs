@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 
 /// The key the session `Cookie` header is stored under. One name, used by the client and by
 /// sign-in, so a rename cannot sign everyone out.
@@ -95,6 +95,19 @@ impl SecureStore for MemorySecureStore {
 /// test that will be flaky on a loaded CI machine, and one that cannot reach a leap day at all.
 pub trait Clock: Send + Sync {
     fn now(&self) -> DateTime<Utc>;
+
+    /// The device's current offset from UTC.
+    ///
+    /// A seam rather than a call to the system, because "what day is it here?" is a question the
+    /// filters have to answer and a test has to be able to ask from Auckland and from Los Angeles
+    /// without moving. Everything stored is UTC — see [`crate::model::date`] — but a timed task
+    /// due at 23:00 on the 7th is due *today* for the person looking at it and tomorrow for UTC,
+    /// and the list they are reading has to agree with their own calendar.
+    ///
+    /// Defaults to UTC so an implementation that has no opinion is at least consistent.
+    fn utc_offset(&self) -> FixedOffset {
+        FixedOffset::east_opt(0).expect("UTC is a valid offset")
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -104,19 +117,32 @@ impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
+
+    fn utc_offset(&self) -> FixedOffset {
+        *chrono::Local::now().offset()
+    }
 }
 
 /// A clock a test moves by hand.
 #[derive(Debug)]
 pub struct FixedClock {
     now: Mutex<DateTime<Utc>>,
+    offset: Mutex<FixedOffset>,
 }
 
 impl FixedClock {
     pub fn at(now: DateTime<Utc>) -> Self {
         FixedClock {
             now: Mutex::new(now),
+            offset: Mutex::new(FixedOffset::east_opt(0).expect("UTC is a valid offset")),
         }
+    }
+
+    /// Put the test somewhere else in the world. `hours` may be negative.
+    pub fn in_zone(self, hours: i32) -> Self {
+        *self.offset.lock().expect("clock lock") =
+            FixedOffset::east_opt(hours * 3600).expect("a real offset");
+        self
     }
 
     /// Parse-or-panic, for the many tests that want a readable literal.
@@ -137,6 +163,10 @@ impl FixedClock {
 impl Clock for FixedClock {
     fn now(&self) -> DateTime<Utc> {
         *self.now.lock().expect("clock lock")
+    }
+
+    fn utc_offset(&self) -> FixedOffset {
+        *self.offset.lock().expect("clock lock")
     }
 }
 

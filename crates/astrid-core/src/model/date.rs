@@ -11,23 +11,30 @@
 //! would make otherwise identical round-trips differ in the database and in every `updatedAt`
 //! comparison sync makes.
 //!
-//! ## All-day is not a time zone
+//! ## All-day is a calendar date wearing an instant's clothes
 //!
-//! An all-day task's `dueDateTime` is an instant like any other, but only its **calendar day** is
-//! meaningful, and the day that matters is the one the person who set it was looking at. The wire
-//! format cannot express that, so the rule the clients share is: an all-day date is written at
-//! **noon UTC** and read back by taking its UTC calendar day. Noon, not midnight, is what keeps a
-//! reader in UTC-11 or UTC+13 on the same day as the writer — midnight UTC is the previous day in
-//! the Americas, which is how a "due today" task used to render as overdue before anyone had done
-//! anything wrong.
+//! An all-day task's `dueDateTime` is an instant like any other on the wire, but only its
+//! **calendar day** is meaningful. The convention all three clients follow is Google Calendar's,
+//! and `astrid-web/lib/date-comparison.ts` states it: an all-day date is stored at **midnight
+//! UTC**, and the day it means is its **UTC** calendar day.
+//!
+//! The half that is easy to get wrong is the comparison, not the storage. "Is this due today?" is
+//! answered by taking the reader's **local** calendar day, re-expressing that day as midnight UTC,
+//! and comparing it with the stored value — `getLocalDateAsUTCMidnight` against
+//! `getUTCDateMidnight` on web, and the same pairing here. Comparing the stored instant with `now`
+//! instead makes a task due today read as overdue from midnight UTC onwards, which is
+//! mid-afternoon in California.
+//!
+//! So: [`all_day_instant`] writes a day, [`all_day_date`] reads one back, and anything asking
+//! "which day is it where the reader is?" goes through the reader's offset and says so.
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
 use serde::de::{self, Deserializer, Unexpected};
 use serde::{Deserialize, Serializer};
 
-/// The hour an all-day date is anchored at, in UTC. See the module note: this is what keeps every
-/// reader on the writer's calendar day regardless of their offset.
-pub const ALL_DAY_ANCHOR_HOUR: u32 = 12;
+/// The hour an all-day date is stored at, in UTC. Midnight, matching
+/// `astrid-web/lib/date-comparison.ts` and the Google Calendar convention the sync providers use.
+pub const ALL_DAY_ANCHOR_HOUR: u32 = 0;
 
 /// Parse an instant the way the Apple client's decoder does: fractional seconds first, then
 /// without.
@@ -49,14 +56,26 @@ pub fn format(at: DateTime<Utc>) -> String {
 pub fn all_day_instant(day: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(
         &day.and_hms_opt(ALL_DAY_ANCHOR_HOUR, 0, 0)
-            .expect("noon is a valid time on every day"),
+            .expect("midnight is a valid time on every day"),
     )
 }
 
-/// The calendar day an all-day instant means. Always read in UTC — reading it in the device's zone
-/// is the bug the noon anchor exists to survive, and doing both would defeat it.
+/// The calendar day an all-day instant means.
+///
+/// **Always read in UTC**, whatever the reader's offset. Reading it locally moves the date for
+/// anyone west of UTC — a 25 December task prints as the 24th. The reader's own day enters the
+/// comparison on the other side, not here; see the module note.
 pub fn all_day_date(at: DateTime<Utc>) -> NaiveDate {
     at.date_naive()
+}
+
+/// The instant to store for an all-day task due on the reader's today.
+///
+/// Their calendar day, re-expressed as midnight UTC — `getLocalDateAsUTCMidnight` on web. Using
+/// `now`'s UTC date instead would file a task created at 22:00 in California under tomorrow, every
+/// evening.
+pub fn all_day_today(now: DateTime<Utc>, offset: chrono::FixedOffset) -> DateTime<Utc> {
+    all_day_instant(now.with_timezone(&offset).date_naive())
 }
 
 /// serde adapter for `Option<DateTime<Utc>>` fields, which is nearly all of them.
@@ -142,12 +161,25 @@ mod tests {
         assert!(parse("2026-13-45T99:99:99Z").is_none());
     }
 
-    /// Noon, not midnight. At midnight UTC a reader in New York is still on the previous day, and
-    /// "due today" renders as overdue for a third of the planet.
+    /// Midnight UTC, matching web and the convention the sync providers use. Storing anything else
+    /// makes every date this client writes land a day out on one of the other two clients.
     #[test]
-    fn an_all_day_date_is_anchored_at_noon_utc() {
+    fn an_all_day_date_is_stored_at_midnight_utc() {
         let day = NaiveDate::from_ymd_opt(2026, 9, 7).expect("a real day");
-        assert_eq!(format(all_day_instant(day)), "2026-09-07T12:00:00Z");
+        assert_eq!(format(all_day_instant(day)), "2026-09-07T00:00:00Z");
+    }
+
+    /// The reader's day, not UTC's. A task created at 22:00 in California is due today for the
+    /// person creating it; `now`'s UTC date would file it under tomorrow every evening.
+    #[test]
+    fn todays_all_day_date_is_the_readers_day_rather_than_utcs() {
+        let california = chrono::FixedOffset::east_opt(-7 * 3600).expect("an offset");
+        // 22:00 on the 7th in California is 05:00 on the 8th in UTC.
+        let evening = parse("2026-09-08T05:00:00Z").expect("an instant");
+        assert_eq!(
+            format(all_day_today(evening, california)),
+            "2026-09-07T00:00:00Z"
+        );
     }
 
     #[test]
