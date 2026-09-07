@@ -194,7 +194,81 @@ flow that started it, and it travels in the same URL as the code anyway. The sec
 
 ---
 
-## 5. Adding a contract
+## 5. List permissions
+
+Canonical: `astrid-web/lib/list-permissions.ts`.
+Apple: `astrid-ios/Astrid App/Models/TaskList.swift` (`role(for:)`) and `Core/Lists/ListPermissions.swift`.
+Here: `astrid_core::permissions`, locked by `contracts/fixtures/permissions.json`.
+
+**This crate follows web**, which the fixture makes literal: the expected answers are produced by
+running web's own functions over the case matrix.
+
+Precedence is the part worth stating, because it is invisible from any single predicate: ownership
+beats an admin membership, an admin membership beats a plain one, and **any** membership beats the
+public-viewer fallback. That last step is what stops a real collaborator on a public list being
+silently downgraded to read-only.
+
+Two answers surprise people, and both are deliberate on web:
+
+- **A viewer may edit their own task on a public *collaborative* list**, and a **member may not edit
+  someone else's**. Authorship, not role, decides on that one list type. Copy-only lists are the
+  other way round: role decides and authorship is irrelevant.
+- **Ownership is `ownerId` OR the `owner` relation.** Payloads exist that carry the relation and a
+  different id; a client comparing only `ownerId` locks the real owner out of their own list.
+
+### D6 — the Swift port resolves roles more strictly than web
+
+**This crate follows web. The divergence is on the Apple side, and it costs real users access.**
+
+`TaskList.role(for:)` matches membership rows with `$0.role == "admin"` and `$0.role == "member"`,
+exactly and case-sensitively, and matches the member only on `userId`. Web lowercases the role,
+treats presence in `listMembers` as membership whatever the role says, and also matches on the
+nested `user.id`.
+
+| Membership row | Web | Apple | Here |
+|---|---|---|---|
+| `role: "admin"` | admin | admin | admin |
+| `role: "ADMIN"` | admin | **none**, or viewer on a public list | admin |
+| `role: "MEMBER"` | member | **none**, or viewer on a public list | member |
+| unrecognised or empty role | member | **none**, or viewer on a public list | member |
+| stale `userId`, correct `user.id` | member | **none** | member |
+
+The uppercase rows are not hypothetical: `app/api/v1/lists` created members as `'MEMBER'`, which is
+why web was changed to lowercase in the first place (astrid-web task e2803305). Every user added
+through that path is, on Apple, either locked out of a private list or silently demoted to a viewer
+on a public one — able to see the list and unable to do anything with it, with no error explaining
+why.
+
+Evidence: the web column is **measured** — it is what `contracts/fixtures/permissions.json` records
+from running `lib/list-permissions.ts`. The Apple column is **read** from `TaskList.swift`; it
+should be confirmed against a device before the fix, since the point of the fix is to make three
+clients agree. Worth a task in the iOS queue.
+
+### The role a client cannot compute
+
+Web derives a role from three more places, and **none of their fields exist on `V1List`**, the shape
+a client receives from `/api/v1/lists`:
+
+| Source | Fields it needs |
+|---|---|
+| Project owner or project member (cascades to every list in the project) | `project.ownerId`, `project.members` |
+| Sibling membership on a **status** list (a board column) | `project.lists[].listMembers`, `listType` |
+| Legacy denormalised `admins` / `members` arrays | `admins`, `members` |
+
+So a list reached purely through project membership arrives with the user in none of its
+`listMembers`, and every client computing a role locally sees **no access at all** — for a list the
+server was happy to return. The visible effect is a list that renders as read-only, or whose
+controls are all disabled, for someone who is a full collaborator on the board.
+
+This is not something a client can fix. Either `/api/v1/lists` gains a resolved `role` field for the
+requesting user — the cleaner answer, since the server has already done the work to decide the list
+is visible — or the project relations join the payload. Until then this crate answers only what the
+wire shape can support, which is why the fixture does not contain those cases: locking in answers no
+client can produce would be worse than the gap.
+
+---
+
+## 6. Adding a contract
 
 1. Change the canonical implementation in astrid-web, with tests.
 2. Teach `contracts/export-from-web.mjs` to export the cases, and regenerate.

@@ -91,23 +91,38 @@ function exportShortcuts() {
 // canonical implementation and record what it returns. A child process does it, with TZ pinned:
 // web's custom-pattern path uses local date methods, so its results depend on the machine's
 // timezone (docs/CONTRACTS.md D4) and an unpinned fixture would encode whoever generated it.
-function exportRepeating() {
-  const driver = join(here, 'drivers', 'repeating.mjs')
+// TZ is pinned for every driver, not just the repeating one. Web's custom repeat path uses local
+// date methods (docs/CONTRACTS.md D4), and a fixture generated in another zone would silently
+// encode whoever ran it. Pinning it here means a new driver cannot forget.
+function runDriver(file, label) {
+  const driver = join(here, 'drivers', file)
   const run = spawnSync(process.execPath, [driver, webRoot], {
     env: { ...process.env, TZ: 'UTC' },
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
   })
   if (run.status !== 0) {
-    throw new Error(`repeating driver failed (exit ${run.status}):
+    throw new Error(`${label} driver failed (exit ${run.status}):
 ${run.stderr}`)
   }
   return JSON.parse(run.stdout)
 }
 
+function exportRepeating() {
+  return runDriver('repeating.mjs', 'repeating')
+}
+
+// Permission rules branch and have precedence between them, so they are RUN rather than parsed for
+// the same reason the repeating arithmetic is. See the driver for which branches are deliberately
+// left out — the ones no client's data can reach.
+function exportPermissions() {
+  return runDriver('permissions.mjs', 'permissions')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
+  'permissions.json': exportPermissions,
 }
 
 let failed = false

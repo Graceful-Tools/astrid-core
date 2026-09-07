@@ -18,4 +18,5 @@
 pub mod api;
 pub mod auth;
 pub mod keyboard;
+pub mod permissions;
 pub mod repeating;

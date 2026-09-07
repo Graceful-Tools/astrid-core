@@ -19,6 +19,7 @@ rather than going unnoticed at runtime.
 |---|---|---|
 | `shortcuts.json` | `hooks/useKeyboardShortcuts.ts` — the `KEYBOARD_SHORTCUTS` table plus the `if (selectedTask)` guard read from the dispatch switch | `astrid_core::keyboard` |
 | `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded | `astrid_core::repeating` |
+| `permissions.json` | `lib/list-permissions.ts` — **executed**: a case matrix run through web's own rules, recording all eight predicates per case | `astrid_core::permissions` |
 
 ## Two kinds of export
 
@@ -26,6 +27,13 @@ Some contracts are **tables**, and the exporter reads them out of the source. Ot
 **arithmetic**, and the only honest way to lock those is to run the canonical implementation and
 record what it returns — `drivers/repeating.mjs` imports `types/repeating.ts` and executes it. Node
 runs the TypeScript directly, so no build step and none of astrid-web's dependencies are involved.
+
+Modules beyond `types/repeating.ts` import astrid-web's `@/…` alias, which Node cannot resolve on
+its own. `drivers/alias-loader.mjs` installs a resolve hook that maps it onto the checkout, rather
+than requiring a Next.js build to read four pure functions. Two modules are stubbed — the logger
+(pino and its transports) and prisma (which opens a database connection at import). The prisma stub
+throws on every access, so a driver that ever did reach the database would fail loudly instead of
+quietly exporting a fixture built from nulls.
 
 A driver runs with `TZ=UTC`. Web's custom repeat path uses local date methods, so its results depend
 on the machine's timezone (see `docs/CONTRACTS.md` D4); without pinning, the fixture would record
