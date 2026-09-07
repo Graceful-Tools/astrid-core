@@ -19,6 +19,7 @@ pub mod assignee;
 pub mod chat;
 pub mod detail;
 pub mod due_picks;
+pub mod filter_picks;
 pub mod reminder_picks;
 pub mod repeat;
 

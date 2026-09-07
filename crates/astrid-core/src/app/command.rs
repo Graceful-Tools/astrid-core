@@ -257,6 +257,13 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// What a list is filtered and sorted by, and what else it could be.
+    ///
+    /// Setting one is an ordinary `updateList` carrying the field the group names, so there is no
+    /// separate write.
+    FilterOptions {
+        list_id: String,
+    },
     /// A list's chat, from the cache.
     ///
     /// Answers with the channel and the transcript projected — see [`crate::rows::chat`] for what

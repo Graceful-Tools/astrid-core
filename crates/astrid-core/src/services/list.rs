@@ -34,6 +34,15 @@ pub struct ListChanges {
     pub default_priority: Option<Option<i64>>,
     pub default_due_time: Option<Option<String>>,
     pub filter_completion: Option<Option<String>>,
+    /// The other six saved filters. Every one of them was already applied by
+    /// [`crate::filters`] and settable by nothing, so a filter set on web could be read here and
+    /// never changed.
+    pub filter_priority: Option<Option<String>>,
+    pub filter_due_date: Option<Option<String>>,
+    pub filter_assignee: Option<Option<String>>,
+    pub filter_repeating: Option<Option<String>>,
+    pub filter_assigned_by: Option<Option<String>>,
+    pub filter_in_lists: Option<Option<String>>,
     pub recently_completed_window: Option<Option<crate::model::RecentlyCompletedWindow>>,
 }
 
@@ -85,6 +94,24 @@ impl ListChanges {
         if let Some(value) = &self.default_due_time {
             list.default_due_time = value.clone();
         }
+        if let Some(value) = &self.filter_priority {
+            list.filter_priority = value.clone();
+        }
+        if let Some(value) = &self.filter_due_date {
+            list.filter_due_date = value.clone();
+        }
+        if let Some(value) = &self.filter_assignee {
+            list.filter_assignee = value.clone();
+        }
+        if let Some(value) = &self.filter_repeating {
+            list.filter_repeating = value.clone();
+        }
+        if let Some(value) = &self.filter_assigned_by {
+            list.filter_assigned_by = value.clone();
+        }
+        if let Some(value) = &self.filter_in_lists {
+            list.filter_in_lists = value.clone();
+        }
         if let Some(value) = &self.filter_completion {
             list.filter_completion = value.clone();
         }
@@ -133,6 +160,24 @@ impl ListChanges {
         }
         if let Some(value) = &self.default_due_time {
             set("defaultDueTime", json!(value));
+        }
+        if let Some(value) = &self.filter_priority {
+            set("filterPriority", json!(value));
+        }
+        if let Some(value) = &self.filter_due_date {
+            set("filterDueDate", json!(value));
+        }
+        if let Some(value) = &self.filter_assignee {
+            set("filterAssignee", json!(value));
+        }
+        if let Some(value) = &self.filter_repeating {
+            set("filterRepeating", json!(value));
+        }
+        if let Some(value) = &self.filter_assigned_by {
+            set("filterAssignedBy", json!(value));
+        }
+        if let Some(value) = &self.filter_in_lists {
+            set("filterInLists", json!(value));
         }
         if let Some(value) = &self.filter_completion {
             set("filterCompletion", json!(value));

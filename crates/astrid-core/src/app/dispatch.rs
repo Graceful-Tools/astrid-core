@@ -206,6 +206,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::FilterOptions { list_id } => filter_options(app, &list_id),
         Command::Chat { list_id } => chat(app, &list_id),
         Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
         Command::SendChatMessage {
@@ -515,6 +516,24 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// What a list is filtered and sorted by, and what else it could be.
+///
+/// The rules are `crate::filters`; this is the sheet. Every value here is one those rules match on
+/// — they are saved on the list and read by every client, so a value spelled differently would be
+/// a filter the others keep and this one silently ignores.
+fn filter_options(app: &App, list_id: &str) -> Response {
+    let list = match app.context.lists().list(list_id) {
+        Ok(Some(list)) => list,
+        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    Response::ok(serde_json::json!({
+        "listId": list.id,
+        "isFiltered": rows::filter_picks::is_filtered(&list),
+        "groups": rows::filter_picks::groups(&list),
+    }))
+}
 
 /// A list's chat, from the cache.
 ///
@@ -1208,6 +1227,16 @@ fn list_changes_from_json(
             }
             "defaultPriority" => changes.default_priority = Some(value.as_i64()),
             "defaultDueTime" => changes.default_due_time = Some(value.as_str().map(str::to_string)),
+            "filterPriority" => changes.filter_priority = Some(value.as_str().map(str::to_string)),
+            "filterDueDate" => changes.filter_due_date = Some(value.as_str().map(str::to_string)),
+            "filterAssignee" => changes.filter_assignee = Some(value.as_str().map(str::to_string)),
+            "filterRepeating" => {
+                changes.filter_repeating = Some(value.as_str().map(str::to_string))
+            }
+            "filterAssignedBy" => {
+                changes.filter_assigned_by = Some(value.as_str().map(str::to_string))
+            }
+            "filterInLists" => changes.filter_in_lists = Some(value.as_str().map(str::to_string)),
             "filterCompletion" => {
                 changes.filter_completion = Some(value.as_str().map(str::to_string))
             }
@@ -1804,6 +1833,53 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// The sheet offers the values the rules match on, and setting one is an ordinary list edit —
+    /// which is what makes a filter set here mean the same thing on web.
+    #[tokio::test]
+    async fn a_filter_can_be_read_and_then_set() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let offered = call(&app, json!({ "kind": "filterOptions", "listId": id })).await;
+        assert_eq!(offered["value"]["isFiltered"], false);
+        let groups = offered["value"]["groups"].as_array().expect("groups");
+        let due = groups
+            .iter()
+            .find(|group| group["field"] == "filterDueDate")
+            .expect("a due-date group");
+        assert_eq!(due["picks"][0]["value"], "all");
+        assert_eq!(due["picks"][0]["isSelected"], true);
+
+        call(
+            &app,
+            json!({
+                "kind": "updateList",
+                "listId": id,
+                "changes": { "filterDueDate": "today" },
+            }),
+        )
+        .await;
+
+        let again = call(&app, json!({ "kind": "filterOptions", "listId": id })).await;
+        assert_eq!(again["value"]["isFiltered"], true);
+        let due = again["value"]["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .find(|group| group["field"] == "filterDueDate")
+            .expect("a due-date group")
+            .clone();
+        let selected: Vec<&str> = due["picks"]
+            .as_array()
+            .expect("picks")
+            .iter()
+            .filter(|pick| pick["isSelected"] == true)
+            .map(|pick| pick["value"].as_str().expect("a value"))
+            .collect();
+        assert_eq!(selected, vec!["today"]);
     }
 
     /// A message typed offline is in the transcript at once, marked as still going. The panel is
