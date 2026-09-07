@@ -73,6 +73,26 @@ pub enum Command {
     IsSignedIn,
     /// The Outbox's state, for the "not synced yet" indicator.
     OutboxStats,
+    /// What a pressed key means, given what is on screen.
+    ///
+    /// The shell asks rather than knowing, because the bare-key scheme is a cross-platform
+    /// contract locked by `contracts/fixtures/shortcuts.json` — including the part that is easiest
+    /// to get wrong, which is *when a key is allowed to fire at all*. A shell that dispatched from
+    /// its own table would drift from web the first time somebody added a shortcut there.
+    ///
+    /// Pure: no cache, no network, no clock. It is safe to ask on the UI thread while a key is
+    /// being handled.
+    ResolveShortcut {
+        key: String,
+        #[serde(default)]
+        has_selection: bool,
+        #[serde(default)]
+        is_text_field_focused: bool,
+        #[serde(default)]
+        is_modal_presented: bool,
+    },
+    /// The whole scheme, for a shortcuts sheet.
+    Shortcuts,
 
     // ── Writes. These update the cache and journal the change. ───────────────────────────────
     CreateTask {

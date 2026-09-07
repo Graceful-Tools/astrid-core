@@ -47,6 +47,34 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(user) => Response::ok(user),
             Err(error) => Response::failed(error.into()),
         },
+        Command::ResolveShortcut {
+            key,
+            has_selection,
+            is_text_field_focused,
+            is_modal_presented,
+        } => {
+            let context = crate::keyboard::Context {
+                has_selection,
+                is_text_field_focused,
+                is_modal_presented,
+            };
+            Response::ok(serde_json::json!({
+                "action": crate::keyboard::action_for(&key, context).map(action_name),
+            }))
+        }
+        Command::Shortcuts => Response::ok(
+            crate::keyboard::ALL
+                .iter()
+                .map(|binding| {
+                    serde_json::json!({
+                        "keys": binding.keys,
+                        "action": action_name(binding.action),
+                        "requiresSelection": binding.requires_selection,
+                        "title": binding.title,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        ),
         Command::OutboxStats => match crate::outbox::journal::stats(&app.store) {
             Ok(stats) => Response::ok(serde_json::json!({
                 "pending": stats.pending,
@@ -174,6 +202,40 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
+    }
+}
+
+/// The stable name the shell dispatches on.
+///
+/// Spelled out rather than derived from the enum's `Debug`, because these strings cross the
+/// boundary and a rename made for Rust reasons would silently stop a keystroke doing anything.
+fn action_name(action: crate::keyboard::ShortcutAction) -> &'static str {
+    use crate::keyboard::ShortcutAction as A;
+    match action {
+        A::NewTask => "newTask",
+        A::CompleteTask => "completeTask",
+        A::DueDateEarlier => "dueDateEarlier",
+        A::DueDateLater => "dueDateLater",
+        A::JumpToDate => "jumpToDate",
+        A::Postpone => "postpone",
+        A::RemoveDueDate => "removeDueDate",
+        A::EditLists => "editLists",
+        A::EditTitle => "editTitle",
+        A::EditDescription => "editDescription",
+        A::AddComment => "addComment",
+        A::AssignNoOne => "assignNoOne",
+        A::PriorityNone => "priorityNone",
+        A::PriorityLow => "priorityLow",
+        A::PriorityMedium => "priorityMedium",
+        A::PriorityHigh => "priorityHigh",
+        A::DeleteTask => "deleteTask",
+        A::TogglePanel => "togglePanel",
+        A::CycleFilters => "cycleFilters",
+        A::SelectPrevious => "selectPrevious",
+        A::SelectNext => "selectNext",
+        A::OutdentTask => "outdentTask",
+        A::IndentTask => "indentTask",
+        A::ShowShortcuts => "showShortcuts",
     }
 }
 
@@ -460,6 +522,7 @@ fn list_changes_from_json(
 mod tests {
     use super::super::tests::app_with;
     use crate::api::StubTransport;
+    use crate::app::{App, Config};
     use serde_json::json;
 
     async fn call(app: &super::App, command: serde_json::Value) -> serde_json::Value {
@@ -717,6 +780,88 @@ mod tests {
         )
         .await;
         assert_eq!(late["ok"], false);
+    }
+
+    /// The shell asks what a key means rather than knowing. The guard — never while typing,
+    /// never inside a modal, selection-scoped actions need a selection — is the half of the
+    /// contract that is easiest to get wrong and impossible to see in a shortcut table.
+    #[tokio::test]
+    async fn a_key_resolves_to_an_action_only_when_it_is_allowed_to_fire() {
+        let app = app_with(StubTransport::new());
+
+        let ready = call(
+            &app,
+            json!({ "kind": "resolveShortcut", "key": "x", "hasSelection": true }),
+        )
+        .await;
+        assert_eq!(ready["value"]["action"], "completeTask");
+
+        // Selection-scoped, with nothing selected.
+        let unselected = call(&app, json!({ "kind": "resolveShortcut", "key": "x" })).await;
+        assert!(unselected["value"]["action"].is_null());
+
+        // Typing.
+        let typing = call(
+            &app,
+            json!({
+                "kind": "resolveShortcut", "key": "x",
+                "hasSelection": true, "isTextFieldFocused": true
+            }),
+        )
+        .await;
+        assert!(typing["value"]["action"].is_null());
+
+        // A modal is open.
+        let modal = call(
+            &app,
+            json!({
+                "kind": "resolveShortcut", "key": "x",
+                "hasSelection": true, "isModalPresented": true
+            }),
+        )
+        .await;
+        assert!(modal["value"]["action"].is_null());
+    }
+
+    /// A Windows `VirtualKey` reads as `ArrowDown`; web and Mac write the glyph. Both resolve, so
+    /// the shell does not have to translate before asking.
+    #[tokio::test]
+    async fn an_arrow_key_resolves_under_either_name() {
+        let app = app_with(StubTransport::new());
+        for key in ["ArrowDown", "\u{2193}", "j"] {
+            let answer = call(&app, json!({ "kind": "resolveShortcut", "key": key })).await;
+            assert_eq!(answer["value"]["action"], "selectNext", "for {key}");
+        }
+    }
+
+    /// Resolving a key touches nothing. It has to be safe to ask while a key is being handled.
+    #[tokio::test]
+    async fn resolving_a_shortcut_reaches_no_network() {
+        let transport = std::sync::Arc::new(StubTransport::new());
+        let app = App::with_parts(
+            &Config {
+                cache_path: ":memory:".into(),
+                base_url: "https://astrid.cc".into(),
+            },
+            std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+            transport.clone(),
+            std::sync::Arc::new(crate::platform::FixedClock::parsed("2026-09-07T12:00:00Z")),
+        )
+        .expect("starts");
+
+        call(&app, json!({ "kind": "resolveShortcut", "key": "n" })).await;
+        assert!(transport.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_whole_scheme_is_available_for_a_help_sheet() {
+        let app = app_with(StubTransport::new());
+        let answer = call(&app, json!({ "kind": "shortcuts" })).await;
+        let shortcuts = answer["value"].as_array().expect("an array");
+        assert!(shortcuts.len() > 10);
+        assert!(shortcuts
+            .iter()
+            .any(|entry| entry["action"] == "newTask" && entry["requiresSelection"] == false));
     }
 
     #[tokio::test]
