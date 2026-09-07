@@ -16,6 +16,7 @@
 //! 5. No Windows dependency here — platform services arrive as callback traits.
 
 pub mod api;
+pub mod app;
 pub mod auth;
 pub mod filters;
 pub mod keyboard;
