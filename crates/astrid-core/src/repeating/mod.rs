@@ -425,6 +425,53 @@ impl Weekday {
     }
 }
 
+/// Read a pattern as it arrived on the wire.
+///
+/// The model's [`crate::model::CustomRepeatingPattern`] holds the server's free-form strings; the
+/// type here holds what this module can act on. The conversion between them is where leniency
+/// lives, and it goes one way on purpose: a value nobody here recognises becomes `None` rather
+/// than failing, and a pattern missing what its unit needs yields no next occurrence rather than a
+/// guess.
+///
+/// Two types rather than one because the two jobs disagree. The wire shape must decode anything
+/// the server sends — a `unit` this build has never heard of must not fail the task it arrived on
+/// — while the calculator must never have to ask what `"munday"` means halfway through a month
+/// rollover. Collapsing them would mean either a strict decode that loses tasks or a calculator
+/// full of string comparisons.
+pub fn pattern_from_wire(wire: &crate::model::CustomRepeatingPattern) -> CustomRepeatingPattern {
+    /// Read one of this module's string enums, or nothing if the server sent a value this build
+    /// does not know.
+    fn known<T: serde::de::DeserializeOwned>(value: &Option<String>) -> Option<T> {
+        let text = value.as_deref()?;
+        serde_json::from_value(serde_json::Value::String(text.to_string())).ok()
+    }
+
+    CustomRepeatingPattern {
+        r#type: wire.r#type.clone(),
+        unit: wire.unit.clone(),
+        interval: wire.interval.map(|value| value as i32),
+        end_condition: known(&wire.end_condition),
+        end_after_occurrences: wire.end_after_occurrences.map(|value| value as i32),
+        end_until_date: wire.end_until_date,
+        weekdays: wire.weekdays.as_ref().map(|days| {
+            days.iter()
+                .filter_map(|day| known(&Some(day.clone())))
+                .collect()
+        }),
+        month_repeat_type: known(&wire.month_repeat_type),
+        month_day: wire.month_day.and_then(|value| u32::try_from(value).ok()),
+        month_weekday: wire.month_weekday.as_ref().and_then(|value| {
+            let weekday = known(&Some(value.weekday.clone()))?;
+            Some(MonthWeekday {
+                weekday,
+                week_of_month: u32::try_from(value.week_of_month).ok()?,
+            })
+        }),
+        month: wire.month.and_then(|value| u32::try_from(value).ok()),
+        day: wire.day.and_then(|value| u32::try_from(value).ok()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

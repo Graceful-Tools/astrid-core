@@ -153,7 +153,11 @@ impl Entry {
     /// came back" happens.
     pub fn serialization_key(&self) -> String {
         if let Some(temp_id) = &self.temp_id {
-            return format!("task:{temp_id}");
+            // Neutral prefix: a temp id belongs to whatever it names — a task, a comment, a list —
+            // and every write against it shares one lane. Naming the lane after the entity would
+            // mean deciding which entity from the kind, which is exactly the coupling the temp id
+            // exists to avoid.
+            return format!("pending:{temp_id}");
         }
         let field = |name: &str| {
             self.payload
@@ -220,8 +224,8 @@ mod tests {
         let create = entry(kind::CREATE_TASK, serde_json::json!({})).for_temp_id("temp_1");
         let update = entry(kind::UPDATE_TASK, serde_json::json!({ "taskId": "temp_1" }))
             .for_temp_id("temp_1");
-        assert_eq!(create.serialization_key(), "task:temp_1");
-        assert_eq!(update.serialization_key(), "task:temp_1");
+        assert_eq!(create.serialization_key(), "pending:temp_1");
+        assert_eq!(update.serialization_key(), "pending:temp_1");
     }
 
     /// Every unnameable entry sharing one lane would serialise writes that have nothing to do with

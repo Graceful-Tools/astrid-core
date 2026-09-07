@@ -331,6 +331,17 @@ impl Store {
         })
     }
 
+    pub fn comment(&self, id: &str) -> Result<Option<Comment>> {
+        self.with(|connection| {
+            let json: Option<String> = connection
+                .query_row("SELECT json FROM comments WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?;
+            json.map(|json| decode(&json)).transpose()
+        })
+    }
+
     pub fn delete_comment(&self, id: &str) -> Result<()> {
         self.with(|connection| {
             connection.execute("DELETE FROM comments WHERE id = ?1", [id])?;

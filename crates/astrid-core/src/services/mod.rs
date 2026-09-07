@@ -1,0 +1,88 @@
+//! The control points. Everything the shell asks for goes through one of these.
+//!
+//! Ported from `astrid-ios/Astrid App/Core/Services/`. Rule 1 of `docs/ASTRID.md` §0 — all backend
+//! writes go through a service — is not about layering for its own sake. A service is where the
+//! three things that must happen together happen together:
+//!
+//! 1. the cache is updated optimistically, so the UI answers immediately;
+//! 2. the write is journalled to the Outbox, so it survives being offline, being killed, and being
+//!    retried;
+//! 3. the rules that go with the write are applied — repeat rollover, permission checks, list
+//!    membership.
+//!
+//! Anything that calls the API client directly gets the first without the second, or the second
+//! without the third. Every "it looked like it saved" bug in the sibling repos is one of those two
+//! shapes.
+
+pub mod account;
+pub mod chat;
+pub mod comment;
+pub mod list;
+pub mod task;
+
+pub use account::AccountService;
+pub use chat::ChatService;
+pub use comment::CommentService;
+pub use list::{ListChanges, ListService};
+pub use task::{TaskChanges, TaskDraft, TaskService};
+
+use std::sync::Arc;
+
+use crate::api::ApiClient;
+use crate::platform::Clock;
+use crate::store::Store;
+
+/// What every service needs, held once.
+///
+/// Cheap to clone (three `Arc`s) so services can be constructed per call site rather than passed
+/// around as a bundle — which keeps a service from quietly acquiring state of its own.
+#[derive(Clone)]
+pub struct Context {
+    pub client: Arc<ApiClient>,
+    pub store: Arc<Store>,
+    pub clock: Arc<dyn Clock>,
+}
+
+impl Context {
+    pub fn new(client: Arc<ApiClient>, store: Arc<Store>, clock: Arc<dyn Clock>) -> Self {
+        Context {
+            client,
+            store,
+            clock,
+        }
+    }
+
+    pub fn tasks(&self) -> TaskService {
+        TaskService::new(self.clone())
+    }
+
+    pub fn lists(&self) -> ListService {
+        ListService::new(self.clone())
+    }
+
+    pub fn comments(&self) -> CommentService {
+        CommentService::new(self.clone())
+    }
+
+    pub fn chat(&self) -> ChatService {
+        ChatService::new(self.clone())
+    }
+
+    pub fn account(&self) -> AccountService {
+        AccountService::new(self.clone())
+    }
+}
+
+/// What a service can fail with.
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError {
+    #[error(transparent)]
+    Api(#[from] crate::api::ApiError),
+    #[error(transparent)]
+    Store(#[from] crate::store::StoreError),
+    /// The thing being acted on is not in the cache and could not be fetched.
+    #[error("no {kind} with id {id}")]
+    NotFound { kind: &'static str, id: String },
+}
+
+pub type Result<T> = std::result::Result<T, ServiceError>;

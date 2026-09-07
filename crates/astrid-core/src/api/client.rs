@@ -161,6 +161,14 @@ impl ApiClient {
         &self.base_url
     }
 
+    /// The credential store this client authenticates from.
+    ///
+    /// Exposed so sign-in and sign-out write the session to the same place every request reads it
+    /// from. Two references to one store, rather than two stores that agree until they do not.
+    pub fn secure_store(&self) -> &Arc<dyn SecureStore> {
+        &self.secure_store
+    }
+
     pub fn get(&self, path: impl Into<String>) -> Request {
         Request::new(Method::Get, path)
     }
