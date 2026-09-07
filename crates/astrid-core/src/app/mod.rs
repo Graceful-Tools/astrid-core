@@ -22,6 +22,7 @@
 //! The cost is a JSON encode per call. That is real, and it is why the read commands the list view
 //! uses return only the rows in view — see [`Command::RowsForList`] — rather than a whole account.
 
+pub mod background;
 mod command;
 mod dispatch;
 
