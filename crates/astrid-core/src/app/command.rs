@@ -257,6 +257,30 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// The files on a task: its own, and its comments'.
+    ///
+    /// There is no "attach to task" endpoint anywhere — a file reaches a task by being uploaded and
+    /// then named by a comment — so this is the only way to answer "what is attached to this?".
+    Attachments {
+        task_id: String,
+    },
+    /// Fetch a file's bytes and answer with the path they were written to.
+    DownloadAttachment {
+        task_id: String,
+        file_id: String,
+    },
+    /// Upload a file from this machine and post a comment carrying it.
+    ///
+    /// Needs a connection: the Outbox journal holds JSON, and a queued photo would be megabytes in
+    /// the write journal that still nobody else could see. Offline this fails rather than looking
+    /// like it worked.
+    AttachFile {
+        task_id: String,
+        /// A path on this machine, from the file picker.
+        path: String,
+        #[serde(default)]
+        content: Option<String>,
+    },
     /// What a list is filtered and sorted by, and what else it could be.
     ///
     /// Setting one is an ordinary `updateList` carrying the field the group names, so there is no
@@ -449,6 +473,9 @@ impl From<crate::services::ServiceError> for Failure {
             // trying again unchanged will not help — which is what `refused` means to the shell.
             ServiceError::Api(error) => Failure::bad_request(error.to_string()),
             ServiceError::Store(error) => Failure::cache(error.to_string()),
+            // A file on this machine: the same shape of problem as the cache, and the same thing
+            // for the shell to do about it, which is say so rather than retry.
+            ServiceError::LocalFile(error) => Failure::cache(error),
             ServiceError::NotFound { kind, id } => Failure::not_found(kind, id),
         }
     }

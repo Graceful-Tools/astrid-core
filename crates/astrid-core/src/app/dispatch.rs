@@ -175,6 +175,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 &content,
                 author.as_deref(),
                 crate::model::CommentType::Text,
+                None,
             ))
         }
         Command::DeleteComment { comment_id } => match app.context.comments().delete(&comment_id) {
@@ -206,6 +207,15 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::Attachments { task_id } => attachments(app, &task_id),
+        Command::DownloadAttachment { task_id, file_id } => {
+            download_attachment(app, &task_id, &file_id).await
+        }
+        Command::AttachFile {
+            task_id,
+            path,
+            content,
+        } => attach_file(app, &task_id, &path, content.as_deref()).await,
         Command::FilterOptions { list_id } => filter_options(app, &list_id),
         Command::Chat { list_id } => chat(app, &list_id),
         Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
@@ -516,6 +526,74 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// The files on a task, and whether each is already on this machine.
+fn attachments(app: &App, task_id: &str) -> Response {
+    let service = app.context.attachments(app.attachment_cache());
+    match service.for_task(task_id) {
+        Ok(files) => Response::ok(serde_json::json!({
+            "files": files
+                .iter()
+                .map(|file| serde_json::json!({
+                    "id": file.id,
+                    "name": file.name,
+                    "size": file.size,
+                    "mimeType": file.mime_type,
+                    // So the shell can offer "Open" rather than "Download" for one already here.
+                    "isCached": service.is_cached(file),
+                    "path": service.cached_path(file).to_string_lossy(),
+                }))
+                .collect::<Vec<_>>(),
+        })),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// Fetch one file and say where it landed.
+async fn download_attachment(app: &App, task_id: &str, file_id: &str) -> Response {
+    let service = app.context.attachments(app.attachment_cache());
+    let file = match service.for_task(task_id) {
+        Ok(files) => files.into_iter().find(|file| file.id == file_id),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let Some(file) = file else {
+        return Response::failed(Failure::not_found("attachment", file_id));
+    };
+    match service.download(&file).await {
+        Ok(path) => Response::ok(serde_json::json!({ "path": path.to_string_lossy() })),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// Upload a file and post the comment that carries it.
+///
+/// One command rather than two, because a file uploaded with no comment naming it is a file nobody
+/// can reach: it exists on the server and appears on no task.
+async fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    // The list decides who may read the file afterwards, so the server is told which one.
+    let list_id = task.effective_list_ids().into_iter().next();
+    let context = serde_json::json!({ "listId": list_id });
+
+    let service = app.context.attachments(app.attachment_cache());
+    let uploaded = match service.upload(std::path::Path::new(path), context).await {
+        Ok(file) => file,
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let author = app.context.account().current_user_id().ok().flatten();
+    answer(app.context.comments().post(
+        task_id,
+        content.unwrap_or_default(),
+        author.as_deref(),
+        crate::model::CommentType::Attachment,
+        Some(&uploaded),
+    ))
+}
 
 /// What a list is filtered and sorted by, and what else it could be.
 ///
@@ -1833,6 +1911,60 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A file reaches a task through a comment — there is no attach-to-task endpoint anywhere —
+    /// so the attachments on a task are its own files plus its comments'.
+    #[tokio::test]
+    async fn attachments_are_gathered_from_the_task_and_its_comments() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan the trip" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        // A comment carrying a file, as one arrives from the server.
+        app.store
+            .upsert_comments(&[serde_json::from_value(json!({
+                "id": "c1",
+                "taskId": id,
+                "content": "the itinerary",
+                "secureFiles": [{
+                    "id": "f1",
+                    "originalName": "itinerary.pdf",
+                    "fileSize": 1024,
+                    "mimeType": "application/pdf",
+                }],
+            }))
+            .expect("a comment")])
+            .expect("stores");
+
+        let found = call(&app, json!({ "kind": "attachments", "taskId": id })).await;
+        let files = found["value"]["files"].as_array().expect("files");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["name"], "itinerary.pdf");
+        // Not downloaded yet, so the shell offers to fetch it rather than to open it.
+        assert_eq!(files[0]["isCached"], false);
+    }
+
+    #[tokio::test]
+    async fn downloading_a_file_that_is_not_on_the_task_is_a_not_found() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan the trip" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let answered = call(
+            &app,
+            json!({ "kind": "downloadAttachment", "taskId": id, "fileId": "nope" }),
+        )
+        .await;
+        assert_eq!(answered["error"]["kind"], "notFound");
     }
 
     /// The sheet offers the values the rules match on, and setting one is an ordinary list edit —

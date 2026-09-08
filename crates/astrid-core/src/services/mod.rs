@@ -15,6 +15,7 @@
 //! shapes.
 
 pub mod account;
+pub mod attachment;
 pub mod auth;
 pub mod chat;
 pub mod comment;
@@ -23,6 +24,7 @@ pub mod search;
 pub mod task;
 
 pub use account::AccountService;
+pub use attachment::AttachmentService;
 pub use auth::AuthService;
 pub use chat::ChatService;
 pub use comment::CommentService;
@@ -67,6 +69,12 @@ impl Context {
         CommentService::new(self.clone())
     }
 
+    /// Files on tasks. Needs the cache directory, which is the only service that does — it is
+    /// the one that puts something on disk beside the database.
+    pub fn attachments(&self, cache_dir: impl AsRef<std::path::Path>) -> AttachmentService {
+        AttachmentService::new(self.clone(), cache_dir)
+    }
+
     pub fn chat(&self) -> ChatService {
         ChatService::new(self.clone())
     }
@@ -92,6 +100,10 @@ pub enum ServiceError {
     /// The thing being acted on is not in the cache and could not be fetched.
     #[error("no {kind} with id {id}")]
     NotFound { kind: &'static str, id: String },
+    /// A file on this machine could not be read or written. Distinct from a store failure: the
+    /// database is fine, and what failed is somebody's disk, their permissions, or a path.
+    #[error("could not use a local file: {0}")]
+    LocalFile(String),
 }
 
 pub type Result<T> = std::result::Result<T, ServiceError>;

@@ -20,6 +20,9 @@ pub const LISTS: &str = "/api/v1/lists";
 pub const PROJECTS: &str = "/api/v1/projects";
 pub const CHAT_CHANNELS: &str = "/api/v1/chat/channels";
 pub const CAPABILITIES: &str = "/api/v1/capabilities";
+/// Where a new file is uploaded. Multipart: the bytes, and a JSON context saying which list it
+/// belongs to, which is how the server decides who may read it afterwards.
+pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
 pub const ME: &str = "/api/v1/users/me";
 pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
@@ -56,6 +59,11 @@ pub fn comment(id: &str) -> String {
 
 pub fn list(id: &str) -> String {
     format!("{LISTS}/{}", escaped_path_component(id))
+}
+
+/// One file's bytes. The same path with `?info=true` answers with its metadata instead.
+pub fn secure_file(file_id: &str) -> String {
+    format!("/api/v1/secure-files/{}", escaped_path_component(file_id))
 }
 
 pub fn list_members(list_id: &str) -> String {

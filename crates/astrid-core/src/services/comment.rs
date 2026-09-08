@@ -42,12 +42,17 @@ impl CommentService {
     }
 
     /// Post a comment. It is in the thread before this returns.
+    /// Say something on a task.
+    ///
+    /// `file` is an already-uploaded attachment. The comment carries its id and the server resolves
+    /// it — there is no "attach to task" endpoint, which is why a file always arrives this way.
     pub fn post(
         &self,
         task_id: &str,
         content: &str,
         author_id: Option<&str>,
         comment_type: CommentType,
+        file: Option<&crate::model::SecureFile>,
     ) -> Result<Comment> {
         let now = self.context.clock.now();
         let temp_id = outbox::new_temp_id();
@@ -60,6 +65,9 @@ impl CommentService {
             "authorId": author_id,
             "createdAt": crate::model::date::format(now),
             "clientRequestId": temp_id,
+            // Carried on the optimistic comment so the attachment is on screen the moment it is
+            // posted rather than after the next fetch.
+            "secureFiles": file.map(std::slice::from_ref),
         }))
         .expect("a comment built from known fields always decodes");
         self.context
@@ -70,7 +78,11 @@ impl CommentService {
             kind::CREATE_COMMENT,
             json!({
                 "taskId": task_id,
-                "body": { "content": content, "type": comment_type }
+                "body": {
+                    "content": content,
+                    "type": comment_type,
+                    "fileId": file.map(|file| file.id.clone()),
+                }
             }),
             &temp_id,
             now,
@@ -159,7 +171,7 @@ mod tests {
         let fixture = fixture(StubTransport::new());
         let posted = fixture
             .service
-            .post("t1", "on it", Some("u1"), CommentType::Text)
+            .post("t1", "on it", Some("u1"), CommentType::Text, None)
             .expect("posts");
 
         assert!(crate::model::is_temp_id(&posted.id));
@@ -178,7 +190,7 @@ mod tests {
         let fixture = fixture(StubTransport::new());
         let posted = fixture
             .service
-            .post("t1", "on it", Some("u1"), CommentType::Text)
+            .post("t1", "on it", Some("u1"), CommentType::Text, None)
             .expect("posts");
         assert_eq!(
             posted.client_request_id.as_deref(),
@@ -195,7 +207,7 @@ mod tests {
         let fixture = fixture(StubTransport::new());
         let posted = fixture
             .service
-            .post("t1", "oops", Some("u1"), CommentType::Text)
+            .post("t1", "oops", Some("u1"), CommentType::Text, None)
             .expect("posts");
         fixture.service.delete(&posted.id).expect("deletes");
 
@@ -215,7 +227,7 @@ mod tests {
         let fixture = fixture(StubTransport::new());
         let posted = fixture
             .service
-            .post("t1", "oops", Some("u1"), CommentType::Text)
+            .post("t1", "oops", Some("u1"), CommentType::Text, None)
             .expect("posts");
         fixture.service.delete(&posted.id).expect("deletes");
 

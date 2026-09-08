@@ -103,6 +103,9 @@ pub struct Request {
     path: String,
     query: Vec<(String, String)>,
     body: Option<serde_json::Value>,
+    /// A body that is not JSON: its content type, and its bytes. Used by the one thing that sends
+    /// a file.
+    raw: Option<(String, Vec<u8>)>,
 }
 
 impl Request {
@@ -112,7 +115,14 @@ impl Request {
             path: path.into(),
             query: Vec::new(),
             body: None,
+            raw: None,
         }
+    }
+
+    /// A body of bytes, with the content type to send them under.
+    pub fn bytes(mut self, content_type: impl Into<String>, body: Vec<u8>) -> Self {
+        self.raw = Some((content_type.into(), body));
+        self
     }
 
     /// Add a query parameter. Absent values are skipped rather than sent empty — `?assignee=` and
@@ -320,12 +330,16 @@ impl ApiClient {
             headers.push(("cookie".to_string(), cookie));
         }
 
-        let body = match request.body {
-            Some(value) => {
+        let body = match (request.raw, request.body) {
+            (Some((content_type, bytes)), _) => {
+                headers.push(("content-type".to_string(), content_type));
+                Some(bytes)
+            }
+            (None, Some(value)) => {
                 headers.push(("content-type".to_string(), "application/json".to_string()));
                 Some(serde_json::to_vec(&value).map_err(|e| ApiError::Decode(e.to_string()))?)
             }
-            None => None,
+            (None, None) => None,
         };
 
         Ok(HttpRequest {

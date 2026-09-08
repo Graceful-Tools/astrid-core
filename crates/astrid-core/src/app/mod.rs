@@ -68,6 +68,9 @@ pub struct App {
     /// Held rather than made per call: it carries the flow between opening the browser and the
     /// callback coming back, and a fresh one would have nothing to check the callback against.
     pub(crate) auth: Arc<AuthService>,
+    /// Where downloaded attachments are kept: `attachments/` beside the database, so one directory
+    /// holds everything this installation stores and deleting it is a complete reset.
+    pub(crate) attachment_cache: std::path::PathBuf,
 }
 
 impl App {
@@ -108,6 +111,12 @@ impl App {
         let realtime = Arc::new(RealtimeSink::new(store.clone()));
 
         let context = Context::new(client.clone(), store.clone(), clock.clone());
+        // Beside the database, whatever the shell chose as its data directory — including a test's
+        // temporary one, which is what keeps a test run out of somebody's real cache.
+        let attachment_cache = std::path::Path::new(&config.cache_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("attachments");
         Ok(App {
             auth: Arc::new(context.auth()),
             context,
@@ -117,7 +126,13 @@ impl App {
             store,
             client,
             clock,
+            attachment_cache,
         })
+    }
+
+    /// Where downloaded attachments are kept.
+    pub(crate) fn attachment_cache(&self) -> &std::path::Path {
+        &self.attachment_cache
     }
 
     /// Run one command.
