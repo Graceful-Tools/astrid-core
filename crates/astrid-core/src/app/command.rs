@@ -443,6 +443,14 @@ pub enum Command {
         #[serde(default)]
         content: Option<String>,
     },
+    /// Which look the app wears, and the ones it could.
+    ///
+    /// Per installation rather than per account — a laptop in the evening and a desktop under an
+    /// office light are different questions. See [`crate::theme`].
+    Theme,
+    SetTheme {
+        theme: crate::theme::Theme,
+    },
     /// The My Tasks entry for the sidebar: the view the app opens on.
     MyTasksList,
     /// What My Tasks is filtered and sorted by.

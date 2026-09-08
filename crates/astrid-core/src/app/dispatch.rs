@@ -284,6 +284,32 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::UnlinkList { provider, link_id } => {
             answer_done(app.context.external().unlink(provider, &link_id).await)
         }
+        Command::Theme => {
+            let chosen = app
+                .store
+                .metadata(crate::theme::KEY)
+                .ok()
+                .flatten()
+                .map(|value| crate::theme::Theme::parse(&value))
+                .unwrap_or_default();
+            Response::ok(serde_json::json!({
+                "theme": chosen,
+                "isDark": chosen.is_dark(),
+                "choices": crate::theme::Theme::all()
+                    .iter()
+                    .map(|theme| theme.wire())
+                    .collect::<Vec<_>>(),
+            }))
+        }
+        Command::SetTheme { theme } => {
+            match app.store.set_metadata(crate::theme::KEY, theme.wire()) {
+                Ok(()) => Response::ok(serde_json::json!({
+                    "theme": theme,
+                    "isDark": theme.is_dark(),
+                })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::MyTasksList => Response::ok(app.context.lists().my_tasks()),
         Command::MyTasksFilters => match app.context.account().my_tasks_preferences() {
             Ok(filters) => Response::ok(filters),
@@ -2845,6 +2871,52 @@ mod tests {
         call(&app, json!({ "kind": "signOut" })).await;
 
         assert!(!pending.exists());
+    }
+
+    // ── The look ─────────────────────────────────────────────────────────────────────────────
+
+    /// Somebody who has never opened settings is looking at Ocean, and the picker offers it first.
+    #[tokio::test]
+    async fn the_theme_starts_as_the_brand_look() {
+        let app = app_with(StubTransport::new());
+
+        let answer = call(&app, json!({ "kind": "theme" })).await;
+
+        assert_eq!(answer["value"]["theme"], "ocean");
+        assert_eq!(
+            answer["value"]["isDark"], false,
+            "ocean is a light appearance"
+        );
+        assert_eq!(
+            answer["value"]["choices"],
+            json!(["ocean", "light", "dark", "auto"])
+        );
+    }
+
+    /// It belongs to the machine, so it has to survive being asked for again.
+    #[tokio::test]
+    async fn a_chosen_theme_is_remembered() {
+        let app = app_with(StubTransport::new());
+
+        let set = call(&app, json!({ "kind": "setTheme", "theme": "dark" })).await;
+        assert_eq!(set["ok"], true, "{set}");
+        assert_eq!(set["value"]["isDark"], true);
+
+        let held = call(&app, json!({ "kind": "theme" })).await;
+        assert_eq!(held["value"]["theme"], "dark");
+    }
+
+    /// Auto has no appearance of its own — the system decides, and the shell has to be told that
+    /// rather than being handed a guess.
+    #[tokio::test]
+    async fn auto_leaves_the_appearance_to_the_system() {
+        let app = app_with(StubTransport::new());
+
+        call(&app, json!({ "kind": "setTheme", "theme": "auto" })).await;
+        let held = call(&app, json!({ "kind": "theme" })).await;
+
+        assert_eq!(held["value"]["theme"], "auto");
+        assert!(held["value"]["isDark"].is_null());
     }
 
     // ── My Tasks ─────────────────────────────────────────────────────────────────────────────
