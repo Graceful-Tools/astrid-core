@@ -146,6 +146,103 @@ impl AgentService {
         Ok(())
     }
 
+    // ── The webhook: where an account's own agent is told about work ──────────────────────────
+
+    /// The webhook settings, and the lists of events and agents a picker is built from.
+    ///
+    /// Answers for an account that has never configured one, which is why it is not a 404 on the
+    /// server either: the screen needs the option lists before there is anything to option.
+    pub async fn webhook_settings(&self) -> Result<serde_json::Value> {
+        let request = self.context.client.get(endpoints::WEBHOOK_SETTINGS);
+        Ok(self.context.client.send(request).await?)
+    }
+
+    /// Save where deliveries go, and what is delivered.
+    ///
+    /// `regenerate_secret` asks for a new signing secret. The server answers with it once and
+    /// never again — it signs every delivery, and a server that echoed it would let any reader
+    /// forge events into somebody's agent.
+    pub async fn save_webhook(
+        &self,
+        url: &str,
+        enabled: bool,
+        events: &[String],
+        agents: &[String],
+        regenerate_secret: bool,
+    ) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .put(endpoints::WEBHOOK_SETTINGS)
+            .value(json!({
+                "webhookUrl": url,
+                "enabled": enabled,
+                "events": events,
+                "agents": agents,
+                "regenerateSecret": regenerate_secret,
+            }));
+        Ok(self.context.client.send(request).await?)
+    }
+
+    pub async fn delete_webhook(&self) -> Result<()> {
+        let request = self.context.client.delete(endpoints::WEBHOOK_SETTINGS);
+        self.context.client.send(request).await?;
+        Ok(())
+    }
+
+    /// Send a `test.ping` to the configured URL.
+    ///
+    /// The only way to know a webhook works is to fire one: the URL is somebody else's server, and
+    /// a saved URL that nothing has ever reached is a setting that looks configured and is not.
+    pub async fn test_webhook(&self) -> Result<serde_json::Value> {
+        let request = self.context.client.post(endpoints::WEBHOOK_SETTINGS);
+        Ok(self.context.client.send(request).await?)
+    }
+
+    // ── Custom agents: the ones an account registers itself ───────────────────────────────────
+
+    /// The agents this account has registered.
+    ///
+    /// Unwrapped here rather than in the shell: the envelope is the server's, and a screen that
+    /// had to know its field name would be a screen that breaks when the server renames it.
+    pub async fn custom_agents(&self) -> Result<Vec<serde_json::Value>> {
+        let request = self.context.client.get(endpoints::CUSTOM_AGENTS);
+        let answer = self.context.client.send(request).await?;
+        Ok(answer
+            .get("agents")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Register one, and answer with what the server made — including the credentials it will
+    /// show only this once.
+    ///
+    /// `list_ids` limits what the agent can see. Absent means the account's lists, which is a
+    /// bigger grant than most people want and is why the screen asks.
+    pub async fn register_custom_agent(
+        &self,
+        name: &str,
+        list_ids: Option<Vec<String>>,
+    ) -> Result<serde_json::Value> {
+        let mut body = json!({ "agentName": name });
+        if let Some(list_ids) = list_ids {
+            body["listIds"] = json!(list_ids);
+        }
+        let request = self
+            .context
+            .client
+            .post(endpoints::CUSTOM_AGENT_REGISTER)
+            .value(body);
+        Ok(self.context.client.send(request).await?)
+    }
+
+    pub async fn delete_custom_agent(&self, id: &str) -> Result<()> {
+        let request = self.context.client.delete(endpoints::custom_agent(id));
+        self.context.client.send(request).await?;
+        Ok(())
+    }
+
     /// Whether the account's Copilot integration is connected.
     pub async fn copilot_status(&self) -> Result<serde_json::Value> {
         let request = self.context.client.get(endpoints::COPILOT_STATUS);

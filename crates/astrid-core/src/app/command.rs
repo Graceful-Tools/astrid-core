@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::rows::{DisplayMode, Surface};
 
+/// A flag that is on unless the caller says otherwise — `enabled`, most often, where
+/// omitting it should mean "yes" rather than silently turning something off.
+pub(crate) fn yes() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 // `rename_all` names the variants, `rename_all_fields` names the fields inside them. Both are
 // needed: without the second, `{"kind":"list","listId":"l1"}` reads as a command with no id and
@@ -262,6 +268,43 @@ pub enum Command {
     /// One command, like the external-sync panel, because a screen that drew the agents before it
     /// knew which had a credential would show "needs setup" on all of them and then correct itself.
     Agents,
+    /// Where an account's own agent is told about work.
+    ///
+    /// Answers for an account that has never configured one: the screen builds its event and agent
+    /// pickers from this, so there is something to answer with before there is anything to set.
+    WebhookSettings,
+    /// Save where deliveries go, and what is delivered.
+    SaveWebhook {
+        url: String,
+        #[serde(default = "crate::app::command::yes")]
+        enabled: bool,
+        #[serde(default)]
+        events: Vec<String>,
+        #[serde(default)]
+        agents: Vec<String>,
+        /// Ask for a new signing secret. The server answers with it once and never again.
+        #[serde(default)]
+        regenerate_secret: bool,
+    },
+    DeleteWebhook,
+    /// Fire a `test.ping` at the configured URL.
+    ///
+    /// The only way to know a webhook works: the URL is somebody else's server, and one nothing
+    /// has ever reached is a setting that looks configured and is not.
+    TestWebhook,
+    /// The agents this account has registered of its own.
+    CustomAgents,
+    /// Register one. Answers with the credentials the server will show only this once.
+    RegisterCustomAgent {
+        name: String,
+        /// What the agent may see. Absent is every list this account has, which is a bigger grant
+        /// than most people mean.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        list_ids: Option<Vec<String>>,
+    },
+    DeleteCustomAgent {
+        agent_id: String,
+    },
     /// Start connecting Copilot, or stop.
     ///
     /// The same browser hand-off as every other provider: somebody's GitHub password belongs in

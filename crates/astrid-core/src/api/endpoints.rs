@@ -41,6 +41,17 @@ pub const AGENT_MODES: &str = "/api/v1/users/me/agent-modes";
 /// Which services have a key. The server answers with that, never with the key.
 pub const AI_CREDENTIALS: &str = "/api/v1/users/me/ai-credentials";
 pub const AI_CREDENTIALS_TEST: &str = "/api/v1/users/me/ai-credentials/test";
+/// Where an account's own agent is told about work, and the secret that signs it.
+pub const WEBHOOK_SETTINGS: &str = "/api/v1/users/me/webhook-settings";
+/// The agents an account has registered of its own.
+pub const CUSTOM_AGENTS: &str = "/api/v1/custom-agents/agents";
+pub const CUSTOM_AGENT_REGISTER: &str = "/api/v1/custom-agents/register";
+
+/// One registered agent.
+pub fn custom_agent(id: &str) -> String {
+    format!("{CUSTOM_AGENTS}/{id}")
+}
+
 pub const COPILOT_STATUS: &str = "/api/v1/integrations/copilot/status";
 pub const COPILOT_AUTHORIZE: &str = "/api/v1/integrations/copilot/authorize";
 pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";

@@ -208,6 +208,31 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
         Command::Agents => agents(app).await,
+        Command::WebhookSettings => answer(app.context.agents().webhook_settings().await),
+        Command::SaveWebhook {
+            url,
+            enabled,
+            events,
+            agents,
+            regenerate_secret,
+        } => answer(
+            app.context
+                .agents()
+                .save_webhook(&url, enabled, &events, &agents, regenerate_secret)
+                .await,
+        ),
+        Command::DeleteWebhook => answer_done(app.context.agents().delete_webhook().await),
+        Command::TestWebhook => answer(app.context.agents().test_webhook().await),
+        Command::CustomAgents => answer(app.context.agents().custom_agents().await),
+        Command::RegisterCustomAgent { name, list_ids } => answer(
+            app.context
+                .agents()
+                .register_custom_agent(&name, list_ids)
+                .await,
+        ),
+        Command::DeleteCustomAgent { agent_id } => {
+            answer_done(app.context.agents().delete_custom_agent(&agent_id).await)
+        }
         Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),
@@ -2412,6 +2437,120 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// An app whose conversation the test can read back.
+    fn app_and_transport(transport: StubTransport) -> (App, std::sync::Arc<StubTransport>) {
+        let transport = std::sync::Arc::new(transport);
+        let app = App::with_parts(
+            &Config {
+                cache_path: ":memory:".into(),
+                base_url: "https://astrid.cc".into(),
+            },
+            std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+            transport.clone(),
+            std::sync::Arc::new(crate::platform::FixedClock::parsed("2026-09-07T12:00:00Z")),
+        )
+        .expect("starts");
+        (app, transport)
+    }
+
+    // ── The webhook, and the agents an account registers itself ──────────────────────────────
+
+    /// An account that has never configured a webhook still needs the event and agent lists: the
+    /// screen builds its pickers from them, so this is not a 404 on the server either.
+    #[tokio::test]
+    async fn the_webhook_settings_answer_before_anything_is_configured() {
+        let app = app_with(StubTransport::new().push_json(
+            "webhook-settings",
+            200,
+            json!({
+                "configured": false,
+                "availableEvents": ["task.created"],
+                "availableAgents": ["astrid"],
+            }),
+        ));
+
+        let settings = call(&app, json!({ "kind": "webhookSettings" })).await;
+
+        assert_eq!(settings["ok"], true, "{settings}");
+        assert_eq!(settings["value"]["configured"], false);
+        assert_eq!(settings["value"]["availableEvents"][0], "task.created");
+    }
+
+    /// Omitting `enabled` must not turn somebody's webhook off. It is the field a screen leaves
+    /// out when it is only changing the URL.
+    #[tokio::test]
+    async fn saving_a_webhook_without_saying_enabled_leaves_it_on() {
+        let (app, transport) = app_and_transport(StubTransport::new().push_json(
+            "webhook-settings",
+            200,
+            json!({ "configured": true, "enabled": true }),
+        ));
+
+        call(
+            &app,
+            json!({
+                "kind": "saveWebhook",
+                "url": "https://example.com/hook",
+                "events": ["task.created"],
+            }),
+        )
+        .await;
+
+        let sent = transport.requests();
+        let body: serde_json::Value =
+            serde_json::from_slice(&sent[0].body.clone().unwrap_or_default()).expect("a body");
+        assert_eq!(body["enabled"], true);
+        assert_eq!(body["webhookUrl"], "https://example.com/hook");
+        assert_eq!(body["regenerateSecret"], false, "not unless asked");
+    }
+
+    /// The credentials come back once and never again, so the answer has to reach the screen
+    /// rather than being reduced to "it worked".
+    #[tokio::test]
+    async fn registering_an_agent_hands_back_what_the_server_made() {
+        let (app, transport) = app_and_transport(StubTransport::new().push_json(
+            "custom-agents/register",
+            200,
+            json!({ "agent": { "id": "a1" }, "clientSecret": "shown-once" }),
+        ));
+
+        let made = call(
+            &app,
+            json!({ "kind": "registerCustomAgent", "name": "builder", "listIds": ["l1"] }),
+        )
+        .await;
+
+        assert_eq!(made["ok"], true, "{made}");
+        assert_eq!(made["value"]["clientSecret"], "shown-once");
+        let sent = transport.requests();
+        let body: serde_json::Value =
+            serde_json::from_slice(&sent[0].body.clone().unwrap_or_default()).expect("a body");
+        assert_eq!(body["agentName"], "builder");
+        assert_eq!(body["listIds"][0], "l1");
+    }
+
+    /// Absent means every list this account has, which is a bigger grant than most people mean —
+    /// so it must be absent rather than an empty array, which would mean "nothing".
+    #[tokio::test]
+    async fn registering_without_naming_lists_sends_no_list_field_at_all() {
+        let (app, transport) = app_and_transport(StubTransport::new().push_json(
+            "custom-agents/register",
+            200,
+            json!({ "agent": { "id": "a1" } }),
+        ));
+
+        call(
+            &app,
+            json!({ "kind": "registerCustomAgent", "name": "builder" }),
+        )
+        .await;
+
+        let sent = transport.requests();
+        let body: serde_json::Value =
+            serde_json::from_slice(&sent[0].body.clone().unwrap_or_default()).expect("a body");
+        assert!(body.get("listIds").is_none(), "{body}");
     }
 
     /// A hub that refused to draw because one of its four requests failed would be a screen
