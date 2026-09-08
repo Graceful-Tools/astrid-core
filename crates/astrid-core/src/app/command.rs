@@ -262,6 +262,12 @@ pub enum Command {
     /// One command, like the external-sync panel, because a screen that drew the agents before it
     /// knew which had a credential would show "needs setup" on all of them and then correct itself.
     Agents,
+    /// Start connecting Copilot, or stop.
+    ///
+    /// The same browser hand-off as every other provider: somebody's GitHub password belongs in
+    /// their browser.
+    ConnectCopilot,
+    DisconnectCopilot,
     /// Change how one agent runs.
     SetAgentMode {
         agent: String,

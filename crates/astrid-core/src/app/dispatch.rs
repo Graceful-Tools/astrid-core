@@ -208,6 +208,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
         Command::Agents => agents(app).await,
+        Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
+            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::DisconnectCopilot => answer_done(app.context.agents().disconnect_copilot().await),
         Command::SetAgentMode { agent, mode } => {
             answer(app.context.agents().set_mode(&agent, mode).await)
         }
