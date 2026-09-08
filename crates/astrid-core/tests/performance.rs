@@ -89,6 +89,27 @@ async fn a_window_of_rows_is_fast_on_a_huge_list() {
     );
 }
 
+/// My Tasks is the view the app opens on, so it is the first thing anybody waits for.
+///
+/// It reads every task in the account rather than one list's membership, which is what makes it
+/// worth its own guard: the scope, the filters and the sort all run over the whole set.
+#[tokio::test]
+async fn my_tasks_is_fast_on_a_huge_account() {
+    let app = app_with_tasks(TASKS);
+
+    let (elapsed, answer) = time(
+        &app,
+        json!({ "kind": "rowsForList", "listId": "virtual:my-tasks", "offset": 0, "limit": 50 }),
+    )
+    .await;
+
+    assert_eq!(answer["value"]["rows"].as_array().expect("rows").len(), 50);
+    assert!(
+        elapsed < BUDGET,
+        "the first window of My Tasks out of {TASKS} took {elapsed:?}"
+    );
+}
+
 /// Scrolling: the thousandth window must cost what the first one did.
 ///
 /// This is the one that would catch a window implemented by building every row and slicing.
