@@ -153,6 +153,37 @@ pub fn clear_pending(store: &Store, provider: &str, remote_id: &str) -> Result<(
     write(store, &key, &held)
 }
 
+/// Remote lists auto-linking must never offer again.
+///
+/// Deleting a mirrored list is the same shape of problem as deleting a mirrored task: in an
+/// all-lists mode the next pass would see an unlinked remote list and helpfully make it again. So
+/// the refusal is written down here, and pushed up to the account on the next pass so the other
+/// devices stop offering it too.
+fn excluded_key(provider: &str) -> String {
+    format!("sync.excluded.{provider}")
+}
+
+pub fn exclude(store: &Store, provider: &str, container_id: &str) -> Result<()> {
+    let key = excluded_key(provider);
+    let mut ids = read(store, &key);
+    if ids.iter().any(|id| id.as_str() == Some(container_id)) {
+        return Ok(());
+    }
+    ids.push(serde_json::Value::String(container_id.to_string()));
+    if ids.len() > OWN_CAP {
+        ids.drain(..ids.len() - OWN_CAP);
+    }
+    write(store, &key, &ids)
+}
+
+/// Every remote list this device has said no to.
+pub fn excluded(store: &Store, provider: &str) -> Vec<String> {
+    read(store, &excluded_key(provider))
+        .into_iter()
+        .filter_map(|id| id.as_str().map(str::to_string))
+        .collect()
+}
+
 /// The map a deletion is looked up in: local task id → its remote twin.
 ///
 /// This is the other half of "capture at delete time". Deleting a task is a local, offline,
@@ -331,6 +362,18 @@ mod tests {
         let held = tombstoned(&store, "google");
         assert!(!held.contains(&"id-0".to_string()));
         assert!(held.contains(&format!("id-{}", OWN_CAP + 1)));
+    }
+
+    /// Deleting a mirrored list has to be remembered, or an all-lists mode makes it again on
+    /// the next pass — and again after that.
+    #[test]
+    fn a_list_somebody_deleted_stops_being_offered() {
+        let store = store();
+        exclude(&store, "google", "c1").expect("excludes");
+        exclude(&store, "google", "c1").expect("excludes");
+
+        assert_eq!(excluded(&store, "google"), vec!["c1".to_string()]);
+        assert!(excluded(&store, "github").is_empty());
     }
 
     #[test]

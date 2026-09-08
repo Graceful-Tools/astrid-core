@@ -310,6 +310,17 @@ pub enum Command {
         provider: crate::services::Provider,
         link_id: String,
     },
+    /// How Google lists get linked, and what a list made here is called.
+    GoogleSyncMode,
+    /// How Google lists get linked: one at a time by hand, or all of them.
+    ///
+    /// The choice is the account's, not this machine's, so it follows somebody to their laptop.
+    SetGoogleSyncMode {
+        mode: crate::external::auto_link::SyncMode,
+        /// Appended to the name of a list made here for a remote one. Absent leaves it alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        suffix: Option<String>,
+    },
     /// Run one Google pass over every linked list.
     ///
     /// GitHub needs no equivalent: a cron on the server does that one, so a list linked here syncs

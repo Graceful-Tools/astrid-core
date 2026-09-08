@@ -317,6 +317,27 @@ agents being assignable, so an account's agents cannot be chosen from the Mac de
 - **The fix is on the Mac**: build its options from the same rule, which is one call once the agent
   roster is available to it.
 
+### D9 — auto-link duplicates a list on Apple when the list cannot reach the server
+
+Apple's auto-link creates the Astrid counterpart of a remote list by awaiting
+`ListService.createList`. Offline that returns a temporary id, Apple skips the link with a message,
+and — crucially — filters temporary ids out of the lists that may be *adopted* on the next pass. So
+the next pass sees no list of that name, creates another, and does so again every five minutes
+until the connection comes back.
+
+- **Where it bites:** somebody who turns on an all-lists mode on a train ends up with several lists
+  called "Groceries", one per pass, and has to delete them by hand.
+- **This crate lets a pending list be adopted.** A list still carrying a temporary id stays in the
+  adoptable set, so the next pass adopts the one already made rather than making another; it is
+  still refused as a *link* target, for the reason Apple refuses it — a link attached to an id
+  about to change is a link to nothing. `AutoLinkReport::waiting_to_be_created` counts them.
+- **Why diverge here at all**, when the rule is to port faithfully: the module's own documentation
+  says duplicating somebody's list "is not a small bug — it duplicates somebody's list on every
+  pass until they notice", and reproducing it would mean shipping that on purpose. The planner's
+  own adoption rules already express the fix; only Apple's temp-id filter stands in the way.
+- **The fix on Apple** is the same one-line change: keep temporary ids in the adoptable set and
+  refuse them only at the link step.
+
 ---
 
 ## 7. Adding a contract

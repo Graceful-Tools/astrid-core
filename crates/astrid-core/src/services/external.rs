@@ -28,6 +28,7 @@ use serde_json::json;
 
 use super::{Context, Result};
 use crate::api::endpoints;
+use crate::external::auto_link::{self, SyncMode};
 use crate::external::decisions::{self, PullOutcome};
 use crate::external::ledger;
 use crate::model::{date, Task};
@@ -107,6 +108,42 @@ struct RemoteItem {
 
 /// The name the ledger files Google's deletions under.
 const PROVIDER_KEY: &str = "google";
+
+/// And the one it files list-to-container links under, so deleting a list can be remembered the
+/// same way deleting a task is. Separate from the tasks' own store: the ids mean different things.
+const LIST_PROVIDER_KEY: &str = "google.lists";
+
+/// How this account wants its lists linked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoLinkSettings {
+    pub mode: SyncMode,
+    /// Appended to the name of an Astrid list made for a remote one, when set.
+    pub suffix: String,
+    /// Remote lists somebody has said no to — a list deleted here, most often.
+    pub excluded: Vec<String>,
+}
+
+/// What one round of auto-linking did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLinkReport {
+    pub linked: usize,
+    pub lists_created: usize,
+    pub containers_created: usize,
+    /// Lists made here that cannot be linked until they reach the server.
+    pub waiting_to_be_created: usize,
+    pub failed: usize,
+}
+
+/// The name a mode travels under in the integration's metadata.
+fn mode_wire(mode: SyncMode) -> &'static str {
+    match mode {
+        SyncMode::Manual => "manual",
+        SyncMode::AllGoogleToAstrid => "all_google_to_astrid",
+        SyncMode::AllAstridToGoogle => "all_astrid_to_google",
+        SyncMode::AllBidirectional => "all_bidirectional",
+    }
+}
 
 /// What one pass did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -241,13 +278,29 @@ impl ExternalSyncService {
                     .get(endpoints::sync_links(provider.slug())),
             )
             .await?;
-        Ok(answer
+        let links: Vec<ExternalLink> = answer
             .get("links")
             .cloned()
             .map(serde_json::from_value::<Vec<ExternalLink>>)
             .transpose()
             .unwrap_or_default()
-            .unwrap_or_default())
+            .unwrap_or_default();
+        // Written down for the same reason the task links are: deleting a list is local and
+        // offline, and by then the link is gone.
+        if provider == Provider::GoogleTasks {
+            ledger::remember_links(
+                &self.context.store,
+                LIST_PROVIDER_KEY,
+                "google",
+                links.iter().map(|link| {
+                    (
+                        link.astrid_list_id.clone(),
+                        link.remote_container_id.clone(),
+                    )
+                }),
+            )?;
+        }
+        Ok(links)
     }
 
     pub async fn link(
@@ -322,6 +375,280 @@ impl ExternalSyncService {
             }
         }
         Ok(removed)
+    }
+
+    // ── Auto-linking ─────────────────────────────────────────────────────────────────────────
+
+    /// How this account links lists, and what it calls the ones it makes.
+    ///
+    /// The choice lives in the integration's metadata rather than on this machine, so somebody who
+    /// turns on "every list" at a desk does not have to turn it on again on a laptop.
+    pub async fn auto_link_settings(&self) -> Result<AutoLinkSettings> {
+        Ok(Self::read_settings(&self.status().await?))
+    }
+
+    fn read_settings(status: &serde_json::Value) -> AutoLinkSettings {
+        let metadata = status
+            .get("integrations")
+            .and_then(|value| value.as_array())
+            .and_then(|integrations| {
+                integrations.iter().find(|integration| {
+                    integration.get("provider").and_then(|value| value.as_str())
+                        == Some(Provider::GoogleTasks.wire())
+                })
+            })
+            .and_then(|integration| integration.get("metadata"));
+        let text = |key: &str| {
+            metadata
+                .and_then(|metadata| metadata.get(key))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        AutoLinkSettings {
+            // An unknown mode is manual. A metadata value this build does not recognise must not
+            // start creating lists on somebody's account.
+            mode: match text("googleSyncMode").as_str() {
+                "all_google_to_astrid" => SyncMode::AllGoogleToAstrid,
+                "all_astrid_to_google" => SyncMode::AllAstridToGoogle,
+                "all_bidirectional" => SyncMode::AllBidirectional,
+                _ => SyncMode::Manual,
+            },
+            suffix: text("listSuffix"),
+            excluded: text("excludedTasklists")
+                .split(',')
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect(),
+        }
+    }
+
+    /// Choose how lists get linked.
+    pub async fn set_auto_link_mode(&self, mode: SyncMode, suffix: Option<&str>) -> Result<()> {
+        let mut metadata = json!({ "googleSyncMode": mode_wire(mode) });
+        if let Some(suffix) = suffix {
+            metadata["listSuffix"] = json!(suffix);
+        }
+        let request = self
+            .context
+            .client
+            .patch(endpoints::INTEGRATIONS)
+            .value(json!({
+                "provider": Provider::GoogleTasks.wire(),
+                "metadata": metadata,
+            }));
+        self.context.client.send(request).await?;
+        Ok(())
+    }
+
+    /// Give every unlinked list on either side a counterpart, according to the account's mode.
+    ///
+    /// Nothing here decides anything: the plan comes from [`crate::external::auto_link`], which is
+    /// where the adoption rules and their tests live. This is the part that carries it out.
+    ///
+    /// One failure does not stop the rest. Linking eight lists and giving up at the first one that
+    /// answers badly leaves seven unlinked for a reason nobody can see.
+    pub async fn auto_link_google(&self) -> Result<AutoLinkReport> {
+        let settings = self.auto_link_settings().await?;
+        let mut report = AutoLinkReport::default();
+        if settings.mode == SyncMode::Manual {
+            return Ok(report);
+        }
+
+        let (containers, default_id) = self.containers(Provider::GoogleTasks).await?;
+        let links = self.links(Provider::GoogleTasks).await?;
+        // What this device has said no to, plus what the account has. Pushed up when they differ,
+        // so a list deleted on this machine stops being offered on the others.
+        let excluded = self.share_exclusions(&settings).await;
+        let linked_container_ids: Vec<String> = links
+            .iter()
+            .map(|link| link.remote_container_id.clone())
+            .collect();
+        let linked_list_ids: Vec<String> = links
+            .iter()
+            .map(|link| link.astrid_list_id.clone())
+            .collect();
+
+        // The default remote list pairs with My Tasks rather than with a list of its own, unless
+        // an older setup linked it by hand — see `auto_link::candidates`.
+        let inward = matches!(
+            settings.mode,
+            SyncMode::AllGoogleToAstrid | SyncMode::AllBidirectional
+        );
+        let all: Vec<auto_link::ListRef> = containers
+            .iter()
+            .map(|container| auto_link::ListRef {
+                id: container.id.clone(),
+                name: container.name.clone(),
+            })
+            .collect();
+        let tasklists: Vec<auto_link::ListRef> =
+            auto_link::candidates(&all, default_id.as_deref(), &linked_container_ids, inward)
+                .into_iter()
+                .filter(|tasklist| !excluded.contains(&tasklist.id))
+                .cloned()
+                .collect();
+
+        let lists: Vec<auto_link::ListRef> = self
+            .context
+            .store
+            .lists()?
+            .into_iter()
+            .filter(|list| list.is_domain_list() && list.is_virtual != Some(true))
+            .map(|list| auto_link::ListRef {
+                id: list.id,
+                name: list.name,
+            })
+            .collect();
+
+        match settings.mode {
+            SyncMode::Manual => {}
+            SyncMode::AllBidirectional => {
+                let (here, there) = auto_link::bidirectional(
+                    &tasklists,
+                    &lists,
+                    &linked_container_ids,
+                    &linked_list_ids,
+                    &settings.suffix,
+                );
+                self.link_inward(&here, &mut report).await;
+                self.link_outward(&there, &mut report).await;
+            }
+            SyncMode::AllGoogleToAstrid => {
+                let unlinked: Vec<auto_link::ListRef> = lists
+                    .iter()
+                    .filter(|list| !linked_list_ids.contains(&list.id))
+                    .cloned()
+                    .collect();
+                let plan = auto_link::google_to_astrid(
+                    &tasklists,
+                    &linked_container_ids,
+                    &unlinked,
+                    &settings.suffix,
+                );
+                self.link_inward(&plan, &mut report).await;
+            }
+            SyncMode::AllAstridToGoogle => {
+                let unlinked: Vec<auto_link::ListRef> = tasklists
+                    .iter()
+                    .filter(|tasklist| !linked_container_ids.contains(&tasklist.id))
+                    .cloned()
+                    .collect();
+                let plan = auto_link::astrid_to_google(&lists, &linked_list_ids, &unlinked);
+                self.link_outward(&plan, &mut report).await;
+            }
+        }
+        Ok(report)
+    }
+
+    /// The exclusions this device and the account hold between them.
+    ///
+    /// Best effort on the sharing: an auto-link that refused to run because it could not write a
+    /// setting would be worse than one whose other devices learn a pass later.
+    async fn share_exclusions(&self, settings: &AutoLinkSettings) -> Vec<String> {
+        let mine = ledger::excluded(&self.context.store, PROVIDER_KEY);
+        let mut union = settings.excluded.clone();
+        for id in mine {
+            if !union.contains(&id) {
+                union.push(id);
+            }
+        }
+        if union.len() != settings.excluded.len() {
+            let request = self
+                .context
+                .client
+                .patch(endpoints::INTEGRATIONS)
+                .value(json!({
+                    "provider": Provider::GoogleTasks.wire(),
+                    "metadata": { "excludedTasklists": union.join(",") },
+                }));
+            let _ = self.context.client.send(request).await;
+        }
+        union
+    }
+
+    /// Remote lists that need an Astrid one.
+    async fn link_inward(
+        &self,
+        plan: &[auto_link::AdoptOrCreateHere],
+        report: &mut AutoLinkReport,
+    ) {
+        for action in plan {
+            let list_id = match &action.adopt_list_id {
+                Some(id) => id.clone(),
+                None => match self.context.lists().create(&action.new_list_name, None) {
+                    Ok(list) => {
+                        report.lists_created += 1;
+                        list.id
+                    }
+                    Err(_) => {
+                        report.failed += 1;
+                        continue;
+                    }
+                },
+            };
+            // A list that has not reached the server has a temporary id, and linking a remote list
+            // to it would attach the link to something about to be given a different id. It waits
+            // for the next pass, which adopts it by name rather than making a second one.
+            if crate::model::is_temp_id(&list_id) {
+                report.waiting_to_be_created += 1;
+                continue;
+            }
+            match self
+                .link(Provider::GoogleTasks, &list_id, &action.tasklist_id)
+                .await
+            {
+                Ok(_) => report.linked += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+    }
+
+    /// Astrid lists that need a remote one.
+    async fn link_outward(
+        &self,
+        plan: &[auto_link::AdoptOrCreateThere],
+        report: &mut AutoLinkReport,
+    ) {
+        for action in plan {
+            let container_id = match &action.adopt_tasklist_id {
+                Some(id) => id.clone(),
+                None => match self.create_container(&action.new_tasklist_name).await {
+                    Ok(id) => {
+                        report.containers_created += 1;
+                        id
+                    }
+                    Err(_) => {
+                        report.failed += 1;
+                        continue;
+                    }
+                },
+            };
+            match self
+                .link(Provider::GoogleTasks, &action.list_id, &container_id)
+                .await
+            {
+                Ok(_) => report.linked += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+    }
+
+    /// Make a Google task list, and answer with its id.
+    async fn create_container(&self, name: &str) -> Result<String> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::GOOGLE_TASKLISTS)
+            .value(json!({ "title": name }));
+        let answer = self.context.client.send(request).await?;
+        Ok(answer
+            .get("tasklist")
+            .and_then(|tasklist| tasklist.get("id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// Bring in what changed on the other side.
@@ -592,6 +919,61 @@ mod tests {
         }
     }
 
+    /// The same, with the caller scripting the whole conversation.
+    fn fixture_with(transport: StubTransport) -> Fixture {
+        let transport = Arc::new(transport);
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let context = Context::new(
+            Arc::new(ApiClient::new(
+                "https://astrid.cc",
+                transport.clone(),
+                Arc::new(MemorySecureStore::new()),
+            )),
+            store.clone(),
+            Arc::new(FixedClock::at(
+                date::parse("2026-09-07T12:00:00Z").expect("an instant"),
+            )),
+        );
+        Fixture {
+            service: context.external(),
+            store,
+            transport,
+        }
+    }
+
+    /// An account in one of the all-lists modes, with one remote list and no links.
+    fn auto_link_transport(mode: &str) -> StubTransport {
+        StubTransport::new()
+            .push_json(
+                "/api/v1/integrations",
+                200,
+                json!({
+                    "integrations": [{
+                        "provider": "GOOGLE_TASKS",
+                        "metadata": { "googleSyncMode": mode },
+                    }],
+                }),
+            )
+            .push_json(
+                "google/tasklists",
+                200,
+                json!({
+                    "tasklists": [{ "id": "c1", "name": "Groceries" }],
+                    "defaultId": "default-list",
+                }),
+            )
+            .push_json("google/links", 200, json!({ "links": [] }))
+            .fallback(Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: b"{}".to_vec(),
+            }))
+    }
+
+    fn a_list(id: &str, name: &str) -> crate::model::TaskList {
+        crate::model::TaskList::new(id, name)
+    }
+
     fn link() -> ExternalLink {
         ExternalLink {
             id: "link-1".into(),
@@ -620,6 +1002,148 @@ mod tests {
         let held = ledger::tombstoned(&fixture.store, PROVIDER_KEY);
         assert!(held.contains(&"r1".to_string()));
         assert!(held.contains(&"r2".to_string()));
+    }
+
+    // ── Auto-linking ─────────────────────────────────────────────────────────────────────────
+
+    /// The whole point of the adoption rules: somebody with "Groceries" on both sides ends up with
+    /// one list, not two called the same thing.
+    #[tokio::test]
+    async fn a_remote_list_adopts_the_local_one_of_the_same_name() {
+        let fixture = fixture_with(auto_link_transport("all_google_to_astrid"));
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Groceries"))
+            .expect("writes");
+
+        let report = fixture.service.auto_link_google().await.expect("links");
+
+        assert_eq!(report.linked, 1);
+        assert_eq!(report.lists_created, 0, "nothing was duplicated");
+        let linked = fixture
+            .transport
+            .requests()
+            .into_iter()
+            .find(|request| {
+                request.url.contains("google/links") && request.method.as_str() == "POST"
+            })
+            .expect("a link was made");
+        let body: serde_json::Value =
+            serde_json::from_slice(&linked.body.unwrap_or_default()).expect("a body");
+        assert_eq!(body["astridListId"], "cm3real");
+        assert_eq!(body["remoteContainerId"], "c1");
+    }
+
+    /// Manual is the default and has to stay one: a mode this build does not recognise must not
+    /// start making lists on somebody's account.
+    #[tokio::test]
+    async fn manual_mode_links_nothing() {
+        let fixture = fixture_with(auto_link_transport("manual"));
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Groceries"))
+            .expect("writes");
+
+        let report = fixture.service.auto_link_google().await.expect("links");
+
+        assert_eq!(report, AutoLinkReport::default());
+    }
+
+    #[tokio::test]
+    async fn a_mode_this_build_does_not_know_is_manual() {
+        let fixture = fixture_with(auto_link_transport("all_the_things_v3"));
+        let settings = fixture.service.auto_link_settings().await.expect("reads");
+        assert_eq!(settings.mode, SyncMode::Manual);
+    }
+
+    /// A list made here has a temporary id until it reaches the server. Linking a remote list to
+    /// that id would attach the link to something about to be given a different one.
+    #[tokio::test]
+    async fn a_list_made_here_waits_for_its_real_id_before_it_is_linked() {
+        let fixture = fixture_with(auto_link_transport("all_google_to_astrid"));
+
+        let report = fixture.service.auto_link_google().await.expect("links");
+
+        assert_eq!(report.lists_created, 1);
+        assert_eq!(report.waiting_to_be_created, 1);
+        assert_eq!(report.linked, 0);
+        assert!(
+            fixture
+                .store
+                .lists()
+                .expect("reads")
+                .iter()
+                .any(|list| list.name == "Groceries"),
+            "and the list is there, so the next pass adopts it rather than making another"
+        );
+    }
+
+    /// Without this, deleting an auto-linked list is pointless: the next pass sees an unlinked
+    /// remote list and makes it again, and again after that.
+    #[tokio::test]
+    async fn a_remote_list_somebody_said_no_to_is_not_offered_again() {
+        let fixture = fixture_with(auto_link_transport("all_google_to_astrid"));
+        ledger::exclude(&fixture.store, PROVIDER_KEY, "c1").expect("excludes");
+
+        let report = fixture.service.auto_link_google().await.expect("links");
+
+        assert_eq!(report, AutoLinkReport::default());
+        assert!(
+            fixture.transport.requests().iter().any(|request| {
+                request.method.as_str() == "PATCH" && request.url.contains("integrations")
+            }),
+            "and the account is told, so the other devices stop offering it too"
+        );
+    }
+
+    /// The default remote list pairs with My Tasks, not with a list of its own — so a mode that
+    /// only mirrors outward leaves it alone.
+    #[tokio::test]
+    async fn the_default_remote_list_is_not_made_into_an_ordinary_list_when_mirroring_outward() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/integrations",
+                    200,
+                    json!({
+                        "integrations": [{
+                            "provider": "GOOGLE_TASKS",
+                            "metadata": { "googleSyncMode": "all_astrid_to_google" },
+                        }],
+                    }),
+                )
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({
+                        "tasklists": [{ "id": "default-list", "name": "My Tasks" }],
+                        "defaultId": "default-list",
+                    }),
+                )
+                .push_json("google/links", 200, json!({ "links": [] }))
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({ "tasklist": { "id": "c9", "name": "Work" } }),
+                )
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Work"))
+            .expect("writes");
+
+        let report = fixture.service.auto_link_google().await.expect("links");
+
+        assert_eq!(
+            report.containers_created, 1,
+            "the local list got a remote one of its own"
+        );
+        assert_eq!(report.linked, 1);
     }
 
     /// An account with no Google integration, and an account whose metadata has no tombstones,

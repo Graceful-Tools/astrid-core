@@ -330,8 +330,14 @@ impl ListService {
     /// Delete a list. The tasks in it are the server's business — it decides what happens to a task
     /// that was only in this list, and guessing here would show the user an answer the next sync
     /// contradicts.
+    /// Delete a list.
+    ///
+    /// If it mirrored a remote one, the remote list is written down as excluded first — in an
+    /// all-lists mode the next pass would see an unlinked remote list and helpfully make this one
+    /// again, and again after that.
     pub fn delete(&self, id: &str) -> Result<()> {
         let now = self.context.clock.now();
+        self.exclude_mirrored_list(id);
         self.context.store.delete_list(id)?;
 
         let entry = outbox::build(
@@ -346,6 +352,19 @@ impl ListService {
         };
         journal::enqueue(&self.context.store, &entry)?;
         Ok(())
+    }
+
+    /// Say no to the remote list this one mirrored, if it mirrored one.
+    ///
+    /// Best effort, and for the same reasons as the task ledger: the link is gone by the time a
+    /// pass could look it up, and a list somebody asked to delete has to go whatever happens here.
+    fn exclude_mirrored_list(&self, id: &str) {
+        use crate::external::ledger;
+        let store = &self.context.store;
+        if let Some((container_id, _)) = ledger::twin(store, "google.lists", id) {
+            let _ = ledger::exclude(store, "google", &container_id);
+            let _ = ledger::forget_link(store, "google.lists", id);
+        }
     }
 
     pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<TaskList> {
@@ -472,6 +491,46 @@ mod tests {
 
     fn fixture() -> Fixture {
         fixture_with(StubTransport::new())
+    }
+
+    /// Deleting a mirrored list has to be remembered here, because the link is gone the moment
+    /// the list is — and in an all-lists mode the next pass would make the list again.
+    #[test]
+    fn deleting_a_mirrored_list_says_no_to_the_remote_one() {
+        let fixture = fixture();
+        crate::external::ledger::remember_links(
+            &fixture.store,
+            "google.lists",
+            "google",
+            [("l1".to_string(), "c1".to_string())],
+        )
+        .expect("remembers");
+        fixture
+            .store
+            .upsert_list(&TaskList::new("l1", "Groceries"))
+            .expect("writes");
+
+        fixture.service.delete("l1").expect("deletes");
+
+        assert_eq!(
+            crate::external::ledger::excluded(&fixture.store, "google"),
+            vec!["c1".to_string()]
+        );
+    }
+
+    /// A list nobody mirrored has no remote counterpart to refuse, and excluding one would have
+    /// auto-link quietly skipping a list the person never asked it to.
+    #[test]
+    fn deleting_an_unmirrored_list_excludes_nothing() {
+        let fixture = fixture();
+        fixture
+            .store
+            .upsert_list(&TaskList::new("l1", "Groceries"))
+            .expect("writes");
+
+        fixture.service.delete("l1").expect("deletes");
+
+        assert!(crate::external::ledger::excluded(&fixture.store, "google").is_empty());
     }
 
     fn fixture_with(transport: StubTransport) -> Fixture {

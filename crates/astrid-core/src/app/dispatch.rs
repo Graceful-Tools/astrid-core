@@ -254,6 +254,19 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::UnlinkList { provider, link_id } => {
             answer_done(app.context.external().unlink(provider, &link_id).await)
         }
+        Command::GoogleSyncMode => match app.context.external().auto_link_settings().await {
+            Ok(settings) => Response::ok(serde_json::json!({
+                "mode": settings.mode,
+                "suffix": settings.suffix,
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::SetGoogleSyncMode { mode, suffix } => answer_done(
+            app.context
+                .external()
+                .set_auto_link_mode(mode, suffix.as_deref())
+                .await,
+        ),
         Command::SyncExternal => sync_external(app).await,
         Command::HasSeenTour => Response::ok(serde_json::json!({
             "seen": app
@@ -1168,6 +1181,9 @@ async fn external_sync(app: &App, list_id: &str) -> Response {
 /// One Google pass over every linked list.
 async fn sync_external(app: &App) -> Response {
     let external = app.context.external();
+    // Before the passes, so a list added on either side since the last one is linked and then
+    // synced in the same round rather than a round later.
+    let auto_linked = external.auto_link_google().await.unwrap_or_default();
     let links = match external.links(crate::services::Provider::GoogleTasks).await {
         Ok(links) => links,
         Err(error) => return Response::failed(error.into()),
@@ -1185,7 +1201,7 @@ async fn sync_external(app: &App) -> Response {
             })),
         }
     }
-    Response::ok(serde_json::json!({ "passes": passes }))
+    Response::ok(serde_json::json!({ "passes": passes, "autoLinked": auto_linked }))
 }
 
 /// Where "the tour has been seen" is remembered.
@@ -2262,6 +2278,26 @@ mod tests {
             .as_array()
             .expect("containers")
             .is_empty());
+    }
+
+    /// The mode is the account's, so the screen has to read it back rather than remember what it
+    /// last set — somebody who turned on "every list" at a desk sees that on their laptop.
+    #[tokio::test]
+    async fn the_google_sync_mode_is_read_from_the_account() {
+        let app = app_with(StubTransport::new().push_json(
+            "/api/v1/integrations",
+            200,
+            json!({
+                "integrations": [{
+                    "provider": "GOOGLE_TASKS",
+                    "metadata": { "googleSyncMode": "all_bidirectional", "listSuffix": "(G)" },
+                }],
+            }),
+        ));
+
+        let answer = call(&app, json!({ "kind": "googleSyncMode" })).await;
+        assert_eq!(answer["value"]["mode"], "all_bidirectional");
+        assert_eq!(answer["value"]["suffix"], "(G)");
     }
 
     /// The panel reads "connected" by matching the server's own provider name, so a name we
