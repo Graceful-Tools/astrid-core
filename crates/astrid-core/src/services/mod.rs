@@ -15,6 +15,7 @@
 //! shapes.
 
 pub mod account;
+pub mod agents;
 pub mod attachment;
 pub mod auth;
 pub mod chat;
@@ -26,6 +27,7 @@ pub mod task;
 pub mod timer;
 
 pub use account::AccountService;
+pub use agents::{AgentMode, AgentService};
 pub use attachment::AttachmentService;
 pub use auth::AuthService;
 pub use chat::ChatService;
@@ -81,6 +83,11 @@ impl Context {
     /// Mirroring lists into and out of other people's task systems.
     pub fn external(&self) -> ExternalSyncService {
         ExternalSyncService::new(self.clone())
+    }
+
+    /// The AI agents: how they run, and what they run with.
+    pub fn agents(&self) -> AgentService {
+        AgentService::new(self.clone())
     }
 
     pub fn chat(&self) -> ChatService {

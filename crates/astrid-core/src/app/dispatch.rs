@@ -207,6 +207,25 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::Agents => agents(app).await,
+        Command::SetAgentMode { agent, mode } => {
+            answer(app.context.agents().set_mode(&agent, mode).await)
+        }
+        Command::SaveAgentCredential { service_id, key } => answer_done(
+            app.context
+                .agents()
+                .save_credential(&service_id, &key)
+                .await,
+        ),
+        Command::TestAgentCredential { service_id } => {
+            match app.context.agents().test_credential(&service_id).await {
+                Ok(works) => Response::ok(serde_json::json!({ "works": works })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::DeleteAgentCredential { service_id } => {
+            answer_done(app.context.agents().delete_credential(&service_id).await)
+        }
         Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
         Command::ConnectProvider { provider } => {
             match app.context.external().authorize_url(provider).await {
@@ -1053,6 +1072,38 @@ fn reminder_options(app: &App, task_id: &str) -> Response {
     Response::ok(serde_json::json!({
         "reminderTime": task.reminder_time.map(|at| at.to_rfc3339()),
         "picks": rows::reminder_picks::options(&task, app.clock.now()),
+    }))
+}
+
+/// The Agent Hub in one answer: the agents, their modes, the credentials, and Copilot.
+///
+/// Each part is allowed to be missing. A deployment without Copilot answers 404 for it, and a hub
+/// that refused to draw because one of four requests failed would be a screen nobody could use to
+/// fix the thing that failed.
+async fn agents(app: &App) -> Response {
+    let service = app.context.agents();
+    let modes = service
+        .modes()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let credentials = service
+        .credentials()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let copilot = service
+        .copilot_status()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "connected": false }));
+
+    Response::ok(serde_json::json!({
+        "agents": modes.get("agents").cloned().unwrap_or(serde_json::json!([])),
+        "modes": modes.get("modes").cloned().unwrap_or(serde_json::json!({})),
+        "credentials": credentials
+            .get("services")
+            .or_else(|| credentials.get("keys"))
+            .cloned()
+            .unwrap_or(serde_json::json!([])),
+        "copilot": copilot,
     }))
 }
 
@@ -2173,6 +2224,21 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A hub that refused to draw because one of its four requests failed would be a screen
+    /// nobody could use to fix the thing that failed.
+    #[tokio::test]
+    async fn the_agent_hub_draws_even_when_parts_of_it_are_missing() {
+        let app = app_with(StubTransport::new());
+
+        let hub = call(&app, json!({ "kind": "agents" })).await;
+        assert_eq!(hub["ok"], true);
+        assert!(hub["value"]["agents"]
+            .as_array()
+            .expect("agents")
+            .is_empty());
+        assert_eq!(hub["value"]["copilot"]["connected"], false);
     }
 
     /// Nothing connected is a state the panel exists to show, not an error to report.

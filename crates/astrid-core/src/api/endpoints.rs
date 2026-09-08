@@ -31,6 +31,15 @@ pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
 // GitHub, and the client does it for Google.
 
 pub const INTEGRATIONS: &str = "/api/v1/integrations";
+
+// ─── The agents ───────────────────────────────────────────────────────────────────────────────
+
+pub const AGENT_MODES: &str = "/api/v1/users/me/agent-modes";
+/// Which services have a key. The server answers with that, never with the key.
+pub const AI_CREDENTIALS: &str = "/api/v1/users/me/ai-credentials";
+pub const AI_CREDENTIALS_TEST: &str = "/api/v1/users/me/ai-credentials/test";
+pub const COPILOT_STATUS: &str = "/api/v1/integrations/copilot/status";
+pub const COPILOT_AUTHORIZE: &str = "/api/v1/integrations/copilot/authorize";
 pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";
 pub const GOOGLE_TASKS: &str = "/api/v1/sync/google/tasks";
 pub const GOOGLE_TASK_LINKS: &str = "/api/v1/sync/google/task-links";

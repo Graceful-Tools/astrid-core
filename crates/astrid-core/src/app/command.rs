@@ -257,6 +257,28 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// The Agent Hub: every agent, the mode it is set to, and whether it has what it needs.
+    ///
+    /// One command, like the external-sync panel, because a screen that drew the agents before it
+    /// knew which had a credential would show "needs setup" on all of them and then correct itself.
+    Agents,
+    /// Change how one agent runs.
+    SetAgentMode {
+        agent: String,
+        mode: crate::services::AgentMode,
+    },
+    /// Store a key for one service. Straight to the server; never cached here.
+    SaveAgentCredential {
+        service_id: String,
+        key: String,
+    },
+    /// Ask the server whether a stored key works.
+    TestAgentCredential {
+        service_id: String,
+    },
+    DeleteAgentCredential {
+        service_id: String,
+    },
     /// What a list's external sync looks like: what is connected, what it could be linked to,
     /// and what it is linked to.
     ///
