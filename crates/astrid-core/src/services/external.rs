@@ -152,6 +152,8 @@ pub struct PassReport {
     pub pulled: usize,
     pub applied: usize,
     pub deleted_locally: usize,
+    /// Task links written down this pass, so a twin is patched next time rather than remade.
+    pub linked: usize,
     /// Twins removed over there, for tasks deleted here.
     pub removed_remotely: usize,
     pub pushed: usize,
@@ -684,7 +686,12 @@ impl ExternalSyncService {
         let task_links = self.task_links(&link.remote_container_id).await?;
         let tombstoned = ledger::tombstoned(&self.context.store, PROVIDER_KEY);
         for item in &items {
-            let linked_task_id = task_links.get(&item.remote_id).cloned();
+            // The server's map first, then this device's own. A task pulled while offline is
+            // not on the server's map yet, and without the local answer the next pass would pull
+            // the same item in a second time.
+            let linked_task_id = task_links.get(&item.remote_id).cloned().or_else(|| {
+                ledger::local_task_for(&self.context.store, PROVIDER_KEY, &item.remote_id)
+            });
             let local = linked_task_id
                 .as_deref()
                 .and_then(|id| self.context.store.task(id).ok().flatten());
@@ -707,8 +714,25 @@ impl ExternalSyncService {
                 }
                 PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                 PullOutcome::Apply => {
-                    self.apply(item, link, local, &task_links)?;
+                    let task = self.apply(item, link, local, &task_links)?;
                     report.applied += 1;
+                    // Written down here as well as on the server: this is what a second pass reads
+                    // when the first one's task has not reached astrid-web yet.
+                    ledger::remember_links(
+                        &self.context.store,
+                        PROVIDER_KEY,
+                        &link.remote_container_id,
+                        [(task.id.clone(), item.remote_id.clone())],
+                    )?;
+                    // Only when it is new to us. Re-sending an existing link every pass is a write
+                    // per task per five minutes for something that has not changed.
+                    if linked_task_id.is_none()
+                        && self
+                            .record_task_link(&task.id, &item.remote_id, &link.remote_container_id)
+                            .await
+                    {
+                        report.linked += 1;
+                    }
                 }
             }
         }
@@ -769,30 +793,52 @@ impl ExternalSyncService {
         Ok(map)
     }
 
-    /// Write one pulled item into the cache.
+    /// Write one pulled item, and answer with the local task it became.
+    ///
+    /// Through the task service, not straight into the cache. A pulled task has to reach
+    /// astrid-web — it is an Astrid task now, and one that existed only in this machine's cache
+    /// would be invisible on the web, absent on the phone, and gone at the next sign-out.
     fn apply(
         &self,
         item: &RemoteItem,
         link: &ExternalLink,
         local: Option<Task>,
         task_links: &std::collections::HashMap<String, String>,
-    ) -> Result<()> {
-        let now = self.context.clock.now();
-        let mut task = local.unwrap_or_else(|| {
-            // A remote id makes a stable local id for something that came from over there, so a
-            // second pass updates the same row rather than making another one.
-            Task::new(format!("ext_{}", item.remote_id), item.title.clone())
-        });
-
-        task.title = item.title.clone();
-        if let Some(notes) = &item.notes {
-            task.description = notes.clone();
-        }
+    ) -> Result<Task> {
+        let tasks = self.context.tasks();
+        // Nesting, when the parent is a task we hold. The key is scoped to the container because
+        // Google reuses short task ids between lists — see `external::decisions::parent_key`.
+        let parent = decisions::parent_key(&link.remote_container_id, item.parent.as_deref())
+            .and_then(|key| task_links.get(&key).cloned());
         // Google Tasks has no time of day, so a due date is a calendar day — which is exactly what
         // an all-day task is here.
-        if let Some(due) = &item.due_date {
-            task.due_date_time = date::parse(due);
-            task.is_all_day = true;
+        let due = item.due_date.as_deref().and_then(date::parse);
+
+        let Some(task) = local else {
+            let mut draft = crate::services::TaskDraft::new(item.title.clone());
+            draft.description = item.notes.clone().unwrap_or_default();
+            draft.list_ids = vec![link.astrid_list_id.clone()];
+            draft.due_date_time = due;
+            draft.is_all_day = due.is_some();
+            draft.parent_task_id = parent;
+            return tasks.create(&draft);
+        };
+
+        let mut changes = crate::services::TaskChanges::default();
+        if task.title != item.title {
+            changes.title = Some(item.title.clone());
+        }
+        if let Some(notes) = &item.notes {
+            if &task.description != notes {
+                changes.description = Some(notes.clone());
+            }
+        }
+        if due.is_some() && task.due_date_time != due {
+            changes.due_date_time = Some(due);
+            changes.is_all_day = Some(true);
+        }
+        if task.parent_task_id != parent {
+            changes.parent_task_id = Some(parent);
         }
         if decisions::should_adopt_remote_completion(
             item.completed,
@@ -801,20 +847,43 @@ impl ExternalSyncService {
             true,
             task.is_repeating(),
         ) {
-            task.completed = item.completed;
-            task.completed_at = item.completed.then_some(now);
+            // Through the completion path, because a repeating task rolls forward rather than
+            // being ticked off — see `TaskService::complete`.
+            return tasks.complete(&task.id, item.completed, Some(&task), None);
         }
-        // Nesting, when the parent is a task we hold. The key is scoped to the container because
-        // Google reuses short task ids between lists — see `external::decisions::parent_key`.
-        task.parent_task_id =
-            decisions::parent_key(&link.remote_container_id, item.parent.as_deref())
-                .and_then(|key| task_links.get(&key).cloned());
+        if changes == crate::services::TaskChanges::default() {
+            return Ok(task);
+        }
+        tasks.update(&task.id, &changes)
+    }
 
-        // The link's list, so a pulled task appears where somebody expects it.
-        task.list_ids = Some(vec![link.astrid_list_id.clone()]);
-        task.updated_at = Some(now);
-        self.context.store.upsert_task(&task)?;
-        Ok(())
+    /// Tell the server which remote item a task mirrors.
+    ///
+    /// Without this the link exists nowhere: the next pass reads an empty map, sees a task with no
+    /// remote twin, and creates a second one over there — every pass, for ever.
+    ///
+    /// A task still carrying a temporary id is skipped rather than sent: the link row is a foreign
+    /// key onto the task, and the server rejects an id it has never seen. The next pass, once the
+    /// Outbox has been through, does it.
+    async fn record_task_link(&self, task_id: &str, remote_id: &str, container_id: &str) -> bool {
+        let task_id = self
+            .context
+            .store
+            .resolve_id(task_id)
+            .unwrap_or_else(|_| task_id.to_string());
+        if crate::model::is_temp_id(&task_id) {
+            return false;
+        }
+        let request = self
+            .context
+            .client
+            .put(endpoints::GOOGLE_TASK_LINKS)
+            .value(json!({
+                "astridTaskId": task_id,
+                "remoteId": remote_id,
+                "remoteContainerId": container_id,
+            }));
+        self.context.client.send(request).await.is_ok()
     }
 
     /// Send what changed here since the last pass.
@@ -852,6 +921,7 @@ impl ExternalSyncService {
                 continue;
             }
 
+            let known = by_task.get(&task.id).copied();
             let request = self
                 .context
                 .client
@@ -862,10 +932,20 @@ impl ExternalSyncService {
                     "notes": task.description,
                     "dueDate": task.due_date_time.map(date::format),
                     "completed": task.completed,
-                    "remoteId": by_task.get(&task.id),
+                    "remoteId": known,
                 }));
-            self.context.client.send(request).await?;
+            let answer = self.context.client.send(request).await?;
             pushed += 1;
+
+            // A create has made a remote twin that only this response knows about. Writing the
+            // link down is what stops the next pass making a second one — and a third, and one
+            // every five minutes after that.
+            if known.is_none() {
+                if let Some(remote_id) = answer.get("remoteId").and_then(|value| value.as_str()) {
+                    self.record_task_link(&task.id, remote_id, &link.remote_container_id)
+                        .await;
+                }
+            }
         }
 
         self.context.store.set_metadata(&key, &date::format(now))?;
@@ -1002,6 +1082,166 @@ mod tests {
         let held = ledger::tombstoned(&fixture.store, PROVIDER_KEY);
         assert!(held.contains(&"r1".to_string()));
         assert!(held.contains(&"r2".to_string()));
+    }
+
+    // ── The link that stops a twin being made twice ──────────────────────────────────────────
+
+    /// The bug this pins: a push that does not write the link down leaves the next pass with no
+    /// remote id, so it creates a *second* Google task — and one more every five minutes after.
+    #[tokio::test]
+    async fn a_pushed_task_is_linked_so_the_next_pass_patches_it_rather_than_making_another() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                // The pull: nothing to bring in.
+                .push_json("google/tasks", 200, json!({ "items": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                // The push, and the link that follows it.
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json(
+                    "google/tasks",
+                    200,
+                    json!({ "remoteId": "tasklist-1:r9", "remoteUpdatedAt": "2026-09-07T12:00:00Z" }),
+                )
+                .push_json("google/task-links", 200, json!({ "link": {} }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        let mut task = crate::model::Task::new("cm3real", "Buy milk");
+        task.list_ids = Some(vec!["l1".into()]);
+        fixture.store.upsert_task(&task).expect("writes");
+
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        let linked = fixture
+            .transport
+            .requests()
+            .into_iter()
+            .find(|request| {
+                request.method.as_str() == "PUT" && request.url.contains("google/task-links")
+            })
+            .expect("the link was written down");
+        let body: serde_json::Value =
+            serde_json::from_slice(&linked.body.unwrap_or_default()).expect("a body");
+        assert_eq!(body["astridTaskId"], "cm3real");
+        assert_eq!(body["remoteId"], "tasklist-1:r9");
+        assert_eq!(body["remoteContainerId"], "tasklist-1");
+    }
+
+    /// The link row is a foreign key onto the task, so the server rejects an id it has never seen.
+    /// Sending one would be a guaranteed 400 on every pass until the Outbox caught up.
+    #[tokio::test]
+    async fn a_task_that_has_not_reached_the_server_is_not_linked_yet() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json("google/tasks", 200, json!({ "items": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        let mut task = crate::model::Task::new("temp_abc", "Buy milk");
+        task.list_ids = Some(vec!["l1".into()]);
+        fixture.store.upsert_task(&task).expect("writes");
+
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert!(
+            !fixture
+                .transport
+                .requests()
+                .iter()
+                .any(|request| request.method.as_str() == "PUT"),
+            "nothing was linked, and nothing was pushed either"
+        );
+    }
+
+    /// A pulled task is an Astrid task now. One written only to this machine's cache would be
+    /// invisible on the web, absent on the phone, and gone at the next sign-out.
+    #[tokio::test]
+    async fn a_pulled_task_is_written_through_the_journal_so_it_reaches_the_server() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "google/tasks",
+                    200,
+                    json!({ "items": [{ "remoteId": "tasklist-1:r1", "title": "Buy milk" }] }),
+                )
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.applied, 1);
+        let queued = crate::outbox::journal::all(&fixture.store).expect("reads");
+        assert!(
+            queued
+                .iter()
+                .any(|entry| entry.kind == crate::outbox::kind::CREATE_TASK),
+            "the create is on its way to astrid-web, not only in the cache"
+        );
+    }
+
+    /// Two passes before the Outbox has been through must not pull the same item in twice. The
+    /// server does not know the link yet, so only this device's own note stops the duplicate.
+    #[tokio::test]
+    async fn a_second_pass_before_the_task_reaches_the_server_does_not_pull_it_in_again() {
+        let items = json!({ "items": [{ "remoteId": "tasklist-1:r1", "title": "Buy milk" }] });
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json("google/tasks", 200, items.clone())
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/tasks", 200, items)
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("one");
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("two");
+
+        let held = fixture.store.tasks().expect("reads");
+        assert_eq!(
+            held.iter().filter(|task| task.title == "Buy milk").count(),
+            1,
+            "one task, not one per pass"
+        );
     }
 
     // ── Auto-linking ─────────────────────────────────────────────────────────────────────────

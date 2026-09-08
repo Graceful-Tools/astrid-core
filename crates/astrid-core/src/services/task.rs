@@ -81,7 +81,7 @@ impl TaskDraft {
 /// not pedantry — "remove the due date" and "leave the due date alone" are both common, they reach
 /// the server as `null` and as absent, and a type that cannot tell them apart makes one of them
 /// impossible to express.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,

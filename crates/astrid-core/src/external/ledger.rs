@@ -234,6 +234,27 @@ pub fn twin(store: &Store, provider: &str, task_id: &str) -> Option<(String, Str
     Some((remote_id.to_string(), container_id.to_string()))
 }
 
+/// The local task mirroring a remote item, as far as this device knows.
+///
+/// The other direction of [`twin`], and the reason it exists: a task pulled while offline has a
+/// temporary id and cannot be linked on the server yet, so without a local answer the next pass
+/// would see no twin and pull the same item in a second time. The id is resolved on the way out —
+/// the temporary row is replaced by a real one when the Outbox gets through, and the cache would
+/// otherwise be pointing at a task that no longer exists.
+pub fn local_task_for(store: &Store, provider: &str, remote_id: &str) -> Option<String> {
+    let prefix = format!("{remote_id}/");
+    let cache = read_cache(store, provider);
+    let (task_id, _) = cache.iter().find(|(_, entry)| {
+        entry
+            .as_str()
+            .is_some_and(|entry| entry.starts_with(&prefix))
+    })?;
+    let resolved = store
+        .resolve_id(task_id)
+        .unwrap_or_else(|_| task_id.to_string());
+    store.task(&resolved).ok().flatten().map(|task| task.id)
+}
+
 /// Drop one task's link, once its deletion has been written down.
 pub fn forget_link(store: &Store, provider: &str, task_id: &str) -> Result<()> {
     let mut cache = read_cache(store, provider);
