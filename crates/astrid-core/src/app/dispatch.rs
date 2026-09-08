@@ -207,6 +207,22 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::Settings => settings(app),
+        Command::RefreshSettings => {
+            // The user first: a settings screen with no name on it looks broken in a way the
+            // settings themselves do not.
+            let _ = app.context.account().refresh_current_user().await;
+            match app.context.account().refresh_settings().await {
+                Ok(_) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::UpdateReminderSettings { changes } => {
+            match update_reminder_settings(app, changes).await {
+                Ok(()) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::StartTimer { task_id } => start_timer(app, &task_id),
         Command::StopTimer { task_id } => stop_timer(app, &task_id),
         Command::Attachments { task_id } => attachments(app, &task_id),
@@ -531,6 +547,57 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// The account screen: who is signed in, their reminder settings, and the choices for them.
+///
+/// The offsets come from the same list the per-task reminder picker uses, so "15 minutes before"
+/// means one thing in this app rather than two.
+fn settings(app: &App) -> Response {
+    let account = app.context.account();
+    let settings = account.settings().unwrap_or_else(|_| serde_json::json!({}));
+    let reminders = settings
+        .get("reminderSettings")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let offsets: Vec<serde_json::Value> = rows::reminder_picks::OFFSETS
+        .iter()
+        .map(
+            |(title_key, minutes)| serde_json::json!({ "titleKey": title_key, "minutes": minutes }),
+        )
+        .collect();
+
+    Response::ok(serde_json::json!({
+        "user": account.current_user().ok().flatten(),
+        "reminderSettings": reminders,
+        "offsets": offsets,
+        // What the server should schedule a digest against. The reader's zone, from the clock the
+        // core was given, rather than a string the shell types.
+        "timezone": app.clock.utc_offset().to_string(),
+    }))
+}
+
+/// Merge changes into the stored reminder settings and write them back.
+async fn update_reminder_settings(
+    app: &App,
+    changes: serde_json::Value,
+) -> crate::services::Result<()> {
+    let account = app.context.account();
+    let mut reminders = account
+        .settings()?
+        .get("reminderSettings")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let (Some(target), Some(source)) = (reminders.as_object_mut(), changes.as_object()) {
+        for (key, value) in source {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+    account
+        .update_settings(serde_json::json!({ "reminderSettings": reminders }))
+        .await?;
+    Ok(())
+}
 
 /// What a task's timer is doing, running or not.
 fn timer_state(app: &App, task: &crate::model::Task) -> crate::services::timer::TimerState {
@@ -1992,6 +2059,58 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// The settings screen draws from the cache and offers the same reminder offsets the per-task
+    /// picker does, so "15 minutes before" means one thing in this app rather than two.
+    #[tokio::test]
+    async fn the_settings_screen_reads_from_the_cache() {
+        let app = app_with(StubTransport::new());
+        app.store
+            .set_metadata(
+                "account.settings",
+                r#"{"reminderSettings":{"enablePushReminders":true,"defaultReminderTime":15}}"#,
+            )
+            .expect("stores");
+
+        let answered = call(&app, json!({ "kind": "settings" })).await;
+        assert_eq!(
+            answered["value"]["reminderSettings"]["enablePushReminders"],
+            true
+        );
+        let offsets = answered["value"]["offsets"].as_array().expect("offsets");
+        assert_eq!(offsets[0]["titleKey"], "reminder.at_due_time");
+        assert!(offsets.iter().any(|offset| offset["minutes"] == 15));
+    }
+
+    /// One toggle at a time: a screen sending a single field must not clear the rest.
+    #[tokio::test]
+    async fn changing_one_reminder_setting_keeps_the_others() {
+        let transport = StubTransport::new().push_json("/settings", 200, json!({ "ok": true }));
+        let app = app_with(transport);
+        app.store
+            .set_metadata(
+                "account.settings",
+                r#"{"reminderSettings":{"enablePushReminders":true,"enableEmailReminders":true}}"#,
+            )
+            .expect("stores");
+
+        let answered = call(
+            &app,
+            json!({
+                "kind": "updateReminderSettings",
+                "changes": { "enablePushReminders": false },
+            }),
+        )
+        .await;
+        assert_eq!(
+            answered["value"]["reminderSettings"]["enablePushReminders"],
+            false
+        );
+        assert_eq!(
+            answered["value"]["reminderSettings"]["enableEmailReminders"], true,
+            "the setting nobody touched is still there"
+        );
     }
 
     /// A timer survives a restart, because the start time is in the cache rather than in memory —

@@ -257,6 +257,19 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// The account: who is signed in, and what their reminder settings are.
+    ///
+    /// From the cache, so the screen draws instantly. [`Command::RefreshSettings`] catches it up.
+    Settings,
+    /// Fetch the account and its settings from the server.
+    RefreshSettings,
+    /// Change the reminder settings.
+    ///
+    /// The fields are the server's — `enablePushReminders`, `dailyDigestTime`, and so on — merged
+    /// into what is already stored, so a screen can send one toggle without restating the rest.
+    UpdateReminderSettings {
+        changes: serde_json::Value,
+    },
     /// Start timing a task.
     ///
     /// The start time goes in the cache rather than in memory, so a timer survives a restart — on
