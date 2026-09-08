@@ -359,10 +359,16 @@ impl TaskRow {
     }
 
     /// Build every row for a list of tasks, in the order given.
-    pub fn build_all(tasks: &[Task], context: &RowContext<'_>) -> Vec<TaskRow> {
+    ///
+    /// Generic over what the slice holds, so the row pipeline can hand over the references it
+    /// already has rather than copying ten thousand tasks to build fifty rows.
+    pub fn build_all<T: std::borrow::Borrow<Task>>(
+        tasks: &[T],
+        context: &RowContext<'_>,
+    ) -> Vec<TaskRow> {
         tasks
             .iter()
-            .map(|task| TaskRow::build(task, context))
+            .map(|task| TaskRow::build(task.borrow(), context))
             .collect()
     }
 }

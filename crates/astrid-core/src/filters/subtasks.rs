@@ -68,14 +68,17 @@ pub fn payload_value(original: Option<bool>, edited: Option<bool>) -> Option<boo
 /// everything, used to find children at any depth. `is_visible` decides which children show —
 /// usually the same completion rule the parent rows went through, so a completed subtask under an
 /// open parent obeys the list's completion filter rather than appearing regardless.
-pub fn splice(
-    top_level: &[Task],
-    all_tasks: &[Task],
+/// The same, borrowed — which is what the row pipeline uses, because a list of ten thousand has
+/// no use for a second copy of itself on every refresh.
+pub fn splice_refs<'a, T: std::borrow::Borrow<Task>>(
+    top_level: &'a [T],
+    all_tasks: &'a [Task],
     indented: bool,
     is_visible: impl Fn(&Task) -> bool,
-) -> Vec<Task> {
+) -> Vec<&'a Task> {
+    let top: Vec<&Task> = top_level.iter().map(|task| task.borrow()).collect();
     if !indented {
-        return top_level.to_vec();
+        return top;
     }
 
     let mut by_parent: std::collections::HashMap<&str, Vec<&Task>> =
@@ -86,7 +89,7 @@ pub fn splice(
         }
     }
     if by_parent.is_empty() {
-        return top_level.to_vec();
+        return top;
     }
 
     // Children of one parent are ordered oldest first — the order they were added in, which is the
@@ -101,21 +104,33 @@ pub fn splice(
         });
     }
 
-    let mut out = Vec::with_capacity(top_level.len());
-    for task in top_level {
+    let mut out = Vec::with_capacity(top.len());
+    for task in top {
         append_subtree(task, &by_parent, &is_visible, 0, &mut out);
     }
     out
 }
 
-fn append_subtree(
-    task: &Task,
-    by_parent: &std::collections::HashMap<&str, Vec<&Task>>,
+pub fn splice(
+    top_level: &[Task],
+    all_tasks: &[Task],
+    indented: bool,
+    is_visible: impl Fn(&Task) -> bool,
+) -> Vec<Task> {
+    splice_refs(top_level, all_tasks, indented, is_visible)
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+fn append_subtree<'a>(
+    task: &'a Task,
+    by_parent: &std::collections::HashMap<&str, Vec<&'a Task>>,
     is_visible: &impl Fn(&Task) -> bool,
     depth: usize,
-    out: &mut Vec<Task>,
+    out: &mut Vec<&'a Task>,
 ) {
-    out.push(task.clone());
+    out.push(task);
     if depth >= MAX_SPLICE_DEPTH {
         return;
     }

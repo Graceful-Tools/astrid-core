@@ -888,10 +888,9 @@ fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response {
     );
 
     let tasks = app.store.tasks().unwrap_or_default();
-    let cards: Vec<crate::model::Task> = crate::board::domain_tasks(&tasks, &lists, &project_id)
-        .into_iter()
-        .cloned()
-        .collect();
+    // Borrowed, like the row pipeline: a board of ten thousand cards has no use for a second copy
+    // of itself every time somebody moves one.
+    let cards: Vec<&crate::model::Task> = crate::board::domain_tasks(&tasks, &lists, &project_id);
 
     let users: Vec<crate::model::User> = cards
         .iter()
@@ -921,20 +920,17 @@ fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response {
         .map(|column| {
             let held: Vec<&crate::model::Task> = cards
                 .iter()
+                .copied()
                 .filter(|card| crate::board::column_for(card, &columns) == column.id)
                 .collect();
-            let window: Vec<crate::model::Task> = held
-                .iter()
-                .take(limit)
-                .map(|task| (*task).clone())
-                .collect();
+            let window = &held[..limit.min(held.len())];
             serde_json::json!({
                 "id": column.id,
                 "name": column.name,
                 "description": column.description,
                 "kind": column.kind,
                 "total": held.len(),
-                "cards": serialize_rows(&TaskRow::build_all(&window, &context)),
+                "cards": serialize_rows(&TaskRow::build_all(window, &context)),
             })
         })
         .collect();
@@ -1232,7 +1228,10 @@ fn rows_for_list(
         (_, _, Err(error)) => return Response::failed(error.into()),
     };
 
-    let filtered = filters::filter_for_list(
+    // Borrowed the whole way down. A list of ten thousand is read once and then referred to: the
+    // owned versions of these would copy every task twice per refresh, and a refresh happens every
+    // time anybody touches anything in the list.
+    let filtered = filters::filter_refs(
         &tasks,
         &list,
         current_user_id.as_deref(),
@@ -1241,10 +1240,10 @@ fn rows_for_list(
     );
 
     // Subtasks are spliced under their parents, so the top-level set is what gets sorted.
-    let mut top_level: Vec<crate::model::Task> = filtered
+    let mut top_level: Vec<&crate::model::Task> = filtered
         .iter()
         .filter(|task| task.parent_task_id.is_none())
-        .cloned()
+        .copied()
         .collect();
     filters::sort_by_setting(
         &mut top_level,
@@ -1254,7 +1253,7 @@ fn rows_for_list(
 
     let visible: std::collections::HashSet<&str> =
         filtered.iter().map(|task| task.id.as_str()).collect();
-    let ordered = filters::subtasks::splice(
+    let ordered = filters::subtasks::splice_refs(
         &top_level,
         &tasks,
         filters::subtasks::should_splice(list.show_subtasks, None),

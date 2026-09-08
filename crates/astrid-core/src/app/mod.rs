@@ -130,6 +130,16 @@ impl App {
         })
     }
 
+    /// The cache, for tests that need to seed one.
+    ///
+    /// Public because the performance tests build an account of ten thousand tasks and going
+    /// through `createTask` ten thousand times would measure the write path instead. Nothing
+    /// outside this crate's own tests uses it: the FFI exposes commands and nothing else, so the
+    /// shell could not reach the store if it wanted to.
+    pub fn store(&self) -> &Arc<Store> {
+        &self.store
+    }
+
     /// Where downloaded attachments are kept.
     pub(crate) fn attachment_cache(&self) -> &std::path::Path {
         &self.attachment_cache

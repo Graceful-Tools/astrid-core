@@ -27,14 +27,18 @@ use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
 
 use crate::model::{Privacy, Task, TaskList};
 
-/// Apply every saved filter on `list` to `tasks`.
-pub fn filter_for_list(
-    tasks: &[Task],
+/// Apply every saved filter on `list` to `tasks`, keeping what passes.
+///
+/// Borrowed, because the caller that matters — one list's rows, on every refresh — has ten
+/// thousand tasks and no use for a second copy of them. [`filter_for_list`] is the owned version
+/// for anything that does.
+pub fn filter_refs<'a>(
+    tasks: &'a [Task],
     list: &TaskList,
     current_user_id: Option<&str>,
     now: DateTime<Utc>,
     offset: FixedOffset,
-) -> Vec<Task> {
+) -> Vec<&'a Task> {
     let completion = list.filter_completion.as_deref().unwrap_or("default");
     let window = list.recently_completed_window.as_ref();
 
@@ -62,6 +66,19 @@ pub fn filter_for_list(
                 && matches_assigned_by(task, list.filter_assigned_by.as_deref(), current_user_id)
                 && matches_in_lists(task, list.filter_in_lists.as_deref())
         })
+        .collect()
+}
+
+/// The same, owned. One clone of everything that passed.
+pub fn filter_for_list(
+    tasks: &[Task],
+    list: &TaskList,
+    current_user_id: Option<&str>,
+    now: DateTime<Utc>,
+    offset: FixedOffset,
+) -> Vec<Task> {
+    filter_refs(tasks, list, current_user_id, now, offset)
+        .into_iter()
         .cloned()
         .collect()
 }
@@ -196,22 +213,34 @@ fn matches_in_lists(task: &Task, filter: Option<&str>) -> bool {
 ///
 /// Completed tasks sink to the bottom in the value-based orders: a list where a finished task sits
 /// between two live ones reads as unsorted, whatever the setting says.
-pub fn sort_by_setting(tasks: &mut [Task], sort_by: Option<&str>, manual_order: Option<&[String]>) {
+///
+/// Generic over what the slice holds so a caller that has references — which the row pipeline does,
+/// to avoid copying ten thousand tasks per refresh — sorts them without owning them first.
+pub fn sort_by_setting<T: std::borrow::Borrow<Task>>(
+    tasks: &mut [T],
+    sort_by: Option<&str>,
+    manual_order: Option<&[String]>,
+) {
+    let completed_last = |a: &T, b: &T| completed_last(a.borrow(), b.borrow());
+    let due_date_order = |a: &T, b: &T| due_date_order(a.borrow(), b.borrow());
+    let created_at_of = |task: &T| created_at_of(task.borrow());
+    let priority_of = |task: &T| task.borrow().priority;
+    let id_of = |task: &T| task.borrow().id.clone();
     match sort_by.unwrap_or("auto") {
         "priority" => tasks.sort_by(|a, b| {
             completed_last(a, b)
-                .then_with(|| b.priority.cmp(&a.priority))
+                .then_with(|| priority_of(b).cmp(&priority_of(a)))
                 .then_with(|| due_date_order(a, b))
         }),
         "when" => tasks.sort_by(|a, b| {
             completed_last(a, b)
                 .then_with(|| due_date_order(a, b))
-                .then_with(|| b.priority.cmp(&a.priority))
+                .then_with(|| priority_of(b).cmp(&priority_of(a)))
         }),
         "createdAt" => tasks.sort_by_key(|task| std::cmp::Reverse(created_at_of(task))),
         "manual" => match manual_order.filter(|order| !order.is_empty()) {
             Some(order) => {
-                let position = |task: &Task| order.iter().position(|id| id == &task.id);
+                let position = |task: &T| order.iter().position(|id| id == &id_of(task));
                 tasks.sort_by(|a, b| match (position(a), position(b)) {
                     (Some(a), Some(b)) => a.cmp(&b),
                     // A task the saved order has never seen — created since, or on another
@@ -228,7 +257,7 @@ pub fn sort_by_setting(tasks: &mut [Task], sort_by: Option<&str>, manual_order: 
         // "auto", and anything a newer build introduced.
         _ => tasks.sort_by(|a, b| {
             completed_last(a, b)
-                .then_with(|| b.priority.cmp(&a.priority))
+                .then_with(|| priority_of(b).cmp(&priority_of(a)))
                 .then_with(|| due_date_order(a, b))
                 .then_with(|| created_at_of(a).cmp(&created_at_of(b)))
         }),
