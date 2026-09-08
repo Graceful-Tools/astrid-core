@@ -113,10 +113,20 @@ impl App {
         let context = Context::new(client.clone(), store.clone(), clock.clone());
         // Beside the database, whatever the shell chose as its data directory — including a test's
         // temporary one, which is what keeps a test run out of somebody's real cache.
-        let attachment_cache = std::path::Path::new(&config.cache_path)
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("attachments");
+        //
+        // An in-memory cache has no directory to be beside, and the empty parent it yields lands
+        // in whatever the working directory happens to be — for a test run, the repository. So it
+        // gets one of its own, which nothing is expected to outlive the process.
+        let attachment_cache = match config.cache_path.as_str() {
+            ":memory:" => std::env::temp_dir().join(format!(
+                "astrid-attachments-{}",
+                crate::outbox::new_temp_id()
+            )),
+            path => std::path::Path::new(path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("attachments"),
+        };
         Ok(App {
             auth: Arc::new(context.auth()),
             context,

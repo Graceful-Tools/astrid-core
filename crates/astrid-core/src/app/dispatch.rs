@@ -413,6 +413,14 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             // The flow in progress goes with the session. Leaving it would let a callback from
             // before the sign-out complete afterwards and sign the user back in.
             app.auth.cancel();
+            // Files waiting to be uploaded go too. The journal that would have sent them is about
+            // to be wiped, so they are bytes belonging to the departing account with nothing left
+            // to send them — and the next person on this machine should not be holding them.
+            let _ = std::fs::remove_dir_all(
+                app.context
+                    .attachments(app.attachment_cache())
+                    .pending_dir(),
+            );
             match app.context.account().sign_out().await {
                 Ok(()) => Response::done(),
                 Err(error) => Response::failed(error.into()),
@@ -2548,6 +2556,37 @@ mod tests {
             .expect("reads")
             .iter()
             .any(|entry| entry.kind == crate::outbox::kind::UPLOAD_ATTACHMENT));
+    }
+
+    /// A file waiting to be uploaded belongs to whoever queued it. The journal that would have
+    /// sent it is wiped on sign-out, so leaving the bytes would hand the next person on this
+    /// machine somebody else's file with nothing left to send it.
+    #[tokio::test]
+    async fn signing_out_takes_the_files_waiting_to_be_uploaded_with_it() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+        let scratch = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+        std::fs::write(&scratch, b"a receipt").expect("writes");
+        call(
+            &app,
+            json!({
+                "kind": "attachFile",
+                "taskId": task_id,
+                "path": scratch.to_string_lossy(),
+            }),
+        )
+        .await;
+        let _ = std::fs::remove_file(&scratch);
+        let pending = app
+            .context
+            .attachments(app.attachment_cache())
+            .pending_dir();
+        assert!(pending.exists());
+
+        call(&app, json!({ "kind": "signOut" })).await;
+
+        assert!(!pending.exists());
     }
 
     // ── My Tasks ─────────────────────────────────────────────────────────────────────────────
