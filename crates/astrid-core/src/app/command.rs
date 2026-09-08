@@ -257,6 +257,16 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// The three numbers on the signed-in account's profile.
+    ProfileStats,
+    /// Write everything this account has to a file on this machine.
+    ///
+    /// `format` is `json` or `csv`. The path comes from the shell's save dialog, because choosing
+    /// where a file goes is the one part of this the core should not decide.
+    ExportAccount {
+        format: String,
+        path: String,
+    },
     /// The account: who is signed in, and what their reminder settings are.
     ///
     /// From the cache, so the screen draws instantly. [`Command::RefreshSettings`] catches it up.

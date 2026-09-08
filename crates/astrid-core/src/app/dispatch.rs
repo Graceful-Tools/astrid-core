@@ -207,6 +207,26 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::ProfileStats => {
+            let me = app.context.account().current_user_id().ok().flatten();
+            match me {
+                Some(id) => answer(app.context.account().stats(&id).await),
+                // Signed out there is nobody to have statistics about, and zeroes would read as an
+                // account that has done nothing.
+                None => Response::failed(Failure::unauthorized()),
+            }
+        }
+        Command::ExportAccount { format, path } => {
+            match app
+                .context
+                .account()
+                .export(&format, std::path::Path::new(&path))
+                .await
+            {
+                Ok(bytes) => Response::ok(serde_json::json!({ "path": path, "bytes": bytes })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::Settings => settings(app),
         Command::RefreshSettings => {
             // The user first: a settings screen with no name on it looks broken in a way the

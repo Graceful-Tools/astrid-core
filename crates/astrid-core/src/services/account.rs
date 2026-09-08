@@ -169,6 +169,33 @@ impl AccountService {
 
     /// Search for people to assign or invite. Straight to the server — a search answered from a
     /// cache that only holds people you have already worked with cannot find anyone new.
+    /// The three numbers on somebody's profile: finished, inspired, supported.
+    ///
+    /// Fetched rather than counted here. They are about the whole account across every device, and
+    /// a client counting its own cache would answer with whatever it happens to have synced.
+    pub async fn stats(&self, user_id: &str) -> Result<serde_json::Value> {
+        let request = self.context.client.get(endpoints::user_profile(user_id));
+        let answer = self.context.client.send(request).await?;
+        Ok(answer.get("stats").cloned().unwrap_or(json!({})))
+    }
+
+    /// Everything this account has, as bytes, written to `path`.
+    ///
+    /// Straight to a file rather than back across the boundary: an export is megabytes of somebody's
+    /// entire history, and carrying it through JSON to hand it to a save dialog would be work for
+    /// its own sake.
+    pub async fn export(&self, format: &str, path: &std::path::Path) -> Result<u64> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::EXPORT)
+            .query("format", Some(format.to_string()));
+        let response = self.context.client.send_raw(request).await?;
+        std::fs::write(path, &response.body)
+            .map_err(|error| super::ServiceError::LocalFile(error.to_string()))?;
+        Ok(response.body.len() as u64)
+    }
+
     pub async fn search_users(&self, query: &str) -> Result<Vec<User>> {
         let request = self
             .context

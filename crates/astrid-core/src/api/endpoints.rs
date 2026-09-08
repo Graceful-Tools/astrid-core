@@ -26,6 +26,13 @@ pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
 pub const ME: &str = "/api/v1/users/me";
 pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
+/// Everything this account has, as one file. `?format=json` or `?format=csv`.
+pub const EXPORT: &str = "/api/v1/users/me/export";
+
+/// Somebody's profile: who they are, and the three numbers under it.
+pub fn user_profile(user_id: &str) -> String {
+    format!("/api/v1/users/{}/profile", escaped_path_component(user_id))
+}
 pub const PUBLIC_LISTS: &str = "/api/v1/public/lists";
 
 /// The envelope key each collection route answers under.
