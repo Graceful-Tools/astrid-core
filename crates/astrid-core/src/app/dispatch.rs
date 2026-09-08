@@ -229,6 +229,23 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         ),
         Command::DeleteWebhook => answer_done(app.context.agents().delete_webhook().await),
         Command::TestWebhook => answer(app.context.agents().test_webhook().await),
+        Command::ApiAccess => answer(app.context.api_access().oauth_clients().await),
+        Command::CreateMcpToken => match app.context.api_access().mcp_token().await {
+            // Named rather than returned bare: the shell binds to a field, and a bare string would
+            // make adding anything beside it a breaking change to every caller.
+            Ok(token) => Response::ok(serde_json::json!({ "token": token })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RevokeMcpTokens => answer_done(app.context.api_access().revoke_mcp_tokens().await),
+        Command::CreateOAuthClient { name } => {
+            answer(app.context.api_access().create_oauth_client(&name).await)
+        }
+        Command::DeleteOAuthClient { client_id } => answer_done(
+            app.context
+                .api_access()
+                .delete_oauth_client(&client_id)
+                .await,
+        ),
         Command::CustomAgents => answer(app.context.agents().custom_agents().await),
         Command::RegisterCustomAgent { name, list_ids } => answer(
             app.context
@@ -2525,6 +2542,108 @@ mod tests {
         )
         .expect("starts");
         (app, transport)
+    }
+
+    // ── API access: the credentials handed to something that is not a person ─────────────────
+
+    /// The whole point of the panel: a client that is already signed in mints its own credential
+    /// rather than sending its user to a browser to do what the client is authorised for.
+    #[tokio::test]
+    async fn a_signed_in_client_mints_its_own_mcp_token() {
+        let app = app_with(StubTransport::new().push_json(
+            "mobile-mcp-token",
+            200,
+            json!({ "token": "mcp_live_abc", "userId": "u1" }),
+        ));
+
+        let minted = call(&app, json!({ "kind": "createMcpToken" })).await;
+
+        assert_eq!(minted["ok"], true, "{minted}");
+        assert_eq!(minted["value"]["token"], "mcp_live_abc");
+    }
+
+    /// The secret exists in plaintext exactly once, in this answer. A creation that reported only
+    /// success would leave the pair unusable and unrecoverable.
+    #[tokio::test]
+    async fn registering_a_pair_answers_with_the_secret_shown_once() {
+        let app = app_with(StubTransport::new().push_json(
+            "oauth/clients",
+            201,
+            json!({
+                "client": {
+                    "clientId": "astrid_client_abc",
+                    "clientSecret": "shown-once",
+                    "name": "Windows fixall",
+                },
+                "warning": "Save the client_secret now",
+            }),
+        ));
+
+        let minted = call(
+            &app,
+            json!({ "kind": "createOAuthClient", "name": "Windows fixall" }),
+        )
+        .await;
+
+        assert_eq!(minted["ok"], true, "{minted}");
+        assert_eq!(minted["value"]["clientId"], "astrid_client_abc");
+        assert_eq!(minted["value"]["clientSecret"], "shown-once");
+    }
+
+    /// Listing hands back no secret at all — the server holds a hash, and a field that was
+    /// sometimes a secret and sometimes null is a field somebody will try to read.
+    #[tokio::test]
+    async fn listing_the_pairs_never_carries_a_secret() {
+        let app = app_with(StubTransport::new().push_json(
+            "oauth/clients",
+            200,
+            json!({
+                "clients": [
+                    {
+                        "clientId": "astrid_client_abc",
+                        "name": "CI",
+                        "scopes": ["tasks:read"],
+                        "isActive": true,
+                    },
+                ],
+            }),
+        ));
+
+        let panel = call(&app, json!({ "kind": "apiAccess" })).await;
+
+        assert_eq!(panel["ok"], true, "{panel}");
+        assert_eq!(
+            panel["value"]["clients"][0]["clientId"],
+            "astrid_client_abc"
+        );
+        assert!(panel["value"]["clients"][0]["clientSecret"].is_null());
+    }
+
+    /// The delete route matches the public half. Sending anything else answers 404, which on
+    /// screen is a pair that will not go away.
+    #[tokio::test]
+    async fn revoking_a_pair_addresses_it_by_its_public_half() {
+        let (app, transport) = app_and_transport(StubTransport::new().push_json(
+            "oauth/clients",
+            200,
+            json!({ "success": true }),
+        ));
+
+        let done = call(
+            &app,
+            json!({ "kind": "deleteOAuthClient", "clientId": "astrid_client_abc" }),
+        )
+        .await;
+
+        assert_eq!(done["ok"], true, "{done}");
+        let sent = transport.requests();
+        assert!(
+            sent.iter().any(|request| request
+                .url
+                .ends_with("/api/v1/oauth/clients/astrid_client_abc")),
+            "addressed by the public half; sent: {:?}",
+            sent.iter().map(|request| &request.url).collect::<Vec<_>>()
+        );
     }
 
     // ── The webhook, and the agents an account registers itself ──────────────────────────────

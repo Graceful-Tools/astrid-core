@@ -16,6 +16,7 @@
 
 pub mod account;
 pub mod agents;
+pub mod api_access;
 pub mod attachment;
 pub mod auth;
 pub mod chat;
@@ -88,6 +89,11 @@ impl Context {
     /// The AI agents: how they run, and what they run with.
     pub fn agents(&self) -> AgentService {
         AgentService::new(self.clone())
+    }
+
+    /// The credentials this account hands to something that is not a person.
+    pub fn api_access(&self) -> api_access::ApiAccessService {
+        api_access::ApiAccessService::new(self.clone())
     }
 
     pub fn chat(&self) -> ChatService {

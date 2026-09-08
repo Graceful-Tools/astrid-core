@@ -292,6 +292,26 @@ pub enum Command {
     /// The only way to know a webhook works: the URL is somebody else's server, and one nothing
     /// has ever reached is a setting that looks configured and is not.
     TestWebhook,
+    /// The client-credentials pairs this account has registered.
+    ///
+    /// Read-only, so a panel can be opened without minting anything. Nothing here answers with a
+    /// secret: the server stores a hash and shows plaintext once, at creation.
+    ApiAccess,
+    /// Mint an MCP token for this device, or hand back the one it already has.
+    ///
+    /// The server decides which. Asking twice gives the same token rather than a second one, so a
+    /// screen that lost its copy can get it back without revoking anything.
+    CreateMcpToken,
+    /// Revoke every MCP token minted from a device. All of them: the endpoint takes no id.
+    RevokeMcpTokens,
+    /// Register a client-credentials pair, and answer with the secret shown only this once.
+    CreateOAuthClient {
+        name: String,
+    },
+    /// Revoke one pair, addressed by its public half.
+    DeleteOAuthClient {
+        client_id: String,
+    },
     /// The agents this account has registered of its own.
     CustomAgents,
     /// Register one. Answers with the credentials the server will show only this once.

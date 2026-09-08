@@ -52,6 +52,22 @@ pub fn custom_agent(id: &str) -> String {
     format!("{CUSTOM_AGENTS}/{id}")
 }
 
+// ─── API access ───────────────────────────────────────────────────────────────────────────────
+
+/// This device swapping the session it holds for a token it can put in a header.
+///
+/// Cookie-authenticated on purpose: only a client that is already signed in may mint one. It mints
+/// or RETURNS a 90-day token, so asking twice does not litter the account with credentials nobody
+/// is holding.
+pub const MOBILE_MCP_TOKEN: &str = "/api/v1/auth/mobile-mcp-token";
+/// Client-credentials pairs, for a machine that is not this one.
+pub const OAUTH_CLIENTS: &str = "/api/v1/oauth/clients";
+
+/// One registered pair.
+pub fn oauth_client(client_id: &str) -> String {
+    format!("{OAUTH_CLIENTS}/{client_id}")
+}
+
 pub const COPILOT_STATUS: &str = "/api/v1/integrations/copilot/status";
 pub const COPILOT_AUTHORIZE: &str = "/api/v1/integrations/copilot/authorize";
 pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";
