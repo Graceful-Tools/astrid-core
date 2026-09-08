@@ -207,6 +207,30 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
+        Command::ConnectProvider { provider } => {
+            match app.context.external().authorize_url(provider).await {
+                Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::DisconnectProvider { provider } => {
+            answer_done(app.context.external().disconnect(provider).await)
+        }
+        Command::LinkList {
+            provider,
+            list_id,
+            container_id,
+        } => answer(
+            app.context
+                .external()
+                .link(provider, &list_id, &container_id)
+                .await,
+        ),
+        Command::UnlinkList { provider, link_id } => {
+            answer_done(app.context.external().unlink(provider, &link_id).await)
+        }
+        Command::SyncExternal => sync_external(app).await,
         Command::HasSeenTour => Response::ok(serde_json::json!({
             "seen": app
                 .store
@@ -1030,6 +1054,82 @@ fn reminder_options(app: &App, task_id: &str) -> Response {
         "reminderTime": task.reminder_time.map(|at| at.to_rfc3339()),
         "picks": rows::reminder_picks::options(&task, app.clock.now()),
     }))
+}
+
+/// Everything one list's external-sync panel needs.
+///
+/// Answers even when nothing is connected: "not connected" is the state the panel exists to show,
+/// and a failure there would leave somebody looking at an error instead of a button.
+async fn external_sync(app: &App, list_id: &str) -> Response {
+    let external = app.context.external();
+    let status = external
+        .status()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+
+    let mut providers = Vec::new();
+    for provider in [
+        crate::services::Provider::GoogleTasks,
+        crate::services::Provider::GitHub,
+    ] {
+        let connected = status
+            .get("integrations")
+            .and_then(|value| value.as_array())
+            .map(|integrations| {
+                integrations.iter().any(|integration| {
+                    integration.get("provider").and_then(|value| value.as_str())
+                        == Some(provider.wire())
+                })
+            })
+            .unwrap_or(false);
+
+        // Only when connected: asking for somebody's task lists before they have said yes to the
+        // provider is a request that can only 401.
+        let (containers, links) = if connected {
+            (
+                external.containers(provider).await.unwrap_or_default().0,
+                external.links(provider).await.unwrap_or_default(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let linked = links
+            .iter()
+            .find(|link| link.astrid_list_id == list_id)
+            .cloned();
+
+        providers.push(serde_json::json!({
+            "provider": provider,
+            "connected": connected,
+            "containers": containers,
+            "link": linked,
+        }));
+    }
+
+    Response::ok(serde_json::json!({ "listId": list_id, "providers": providers }))
+}
+
+/// One Google pass over every linked list.
+async fn sync_external(app: &App) -> Response {
+    let external = app.context.external();
+    let links = match external.links(crate::services::Provider::GoogleTasks).await {
+        Ok(links) => links,
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let mut passes = Vec::new();
+    for link in &links {
+        match external.sync_google_link(link).await {
+            Ok(report) => passes.push(serde_json::json!({ "linkId": link.id, "report": report })),
+            // One list failing is not the others failing. A pass that stopped at the first error
+            // would leave every list after it stale because one repository went away.
+            Err(error) => passes.push(serde_json::json!({
+                "linkId": link.id,
+                "error": error.to_string(),
+            })),
+        }
+    }
+    Response::ok(serde_json::json!({ "passes": passes }))
 }
 
 /// Where "the tour has been seen" is remembered.
@@ -2073,6 +2173,74 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// Nothing connected is a state the panel exists to show, not an error to report.
+    #[tokio::test]
+    async fn the_external_panel_answers_even_with_nothing_connected() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let panel = call(&app, json!({ "kind": "externalSync", "listId": id })).await;
+        assert_eq!(panel["ok"], true);
+        let providers = panel["value"]["providers"].as_array().expect("providers");
+        assert_eq!(providers.len(), 2);
+        assert_eq!(providers[0]["connected"], false);
+        assert!(providers[0]["containers"]
+            .as_array()
+            .expect("containers")
+            .is_empty());
+    }
+
+    /// A pull applies what came back and commits the cursor only after it has — a client killed
+    /// mid-pass re-pulls rather than skipping what it never wrote down.
+    #[tokio::test]
+    async fn a_google_pass_applies_what_it_pulled_and_then_commits() {
+        let transport = StubTransport::new()
+            .push_json(
+                "/sync/google/links",
+                200,
+                json!({
+                    "links": [{
+                        "id": "link-1",
+                        "astridListId": "l1",
+                        "remoteContainerId": "tasklist-1",
+                    }],
+                }),
+            )
+            .push_json(
+                "/sync/google/tasks?",
+                200,
+                json!({
+                    "items": [{
+                        "remoteId": "tasklist-1:abc",
+                        "title": "Buy oat milk",
+                        "completed": false,
+                        "dueDate": "2026-09-20T00:00:00Z",
+                    }],
+                    "cursor": "2026-09-07T12:00:00Z",
+                }),
+            )
+            .push_json("/sync/google/task-links", 200, json!({ "taskLinks": [] }))
+            .fallback(Ok(crate::api::transport::HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            }));
+        let app = app_with(transport);
+        app.store
+            .upsert_list(&crate::model::TaskList::new("l1", "Work"))
+            .expect("stores");
+
+        let answered = call(&app, json!({ "kind": "syncExternal" })).await;
+        let passes = answered["value"]["passes"].as_array().expect("passes");
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0]["report"]["applied"], 1);
+
+        // And the pulled task is in the list it was linked to.
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": "l1" })).await;
+        assert_eq!(rows["value"]["rows"][0]["title"], "Buy oat milk");
     }
 
     /// Once. A tour that came back every launch would be the first thing anybody turned off.

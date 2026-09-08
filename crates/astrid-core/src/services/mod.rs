@@ -19,6 +19,7 @@ pub mod attachment;
 pub mod auth;
 pub mod chat;
 pub mod comment;
+pub mod external;
 pub mod list;
 pub mod search;
 pub mod task;
@@ -29,6 +30,7 @@ pub use attachment::AttachmentService;
 pub use auth::AuthService;
 pub use chat::ChatService;
 pub use comment::CommentService;
+pub use external::{ExternalSyncService, Provider};
 pub use list::{ListChanges, ListService};
 pub use task::{TaskChanges, TaskDraft, TaskService};
 
@@ -74,6 +76,11 @@ impl Context {
     /// the one that puts something on disk beside the database.
     pub fn attachments(&self, cache_dir: impl AsRef<std::path::Path>) -> AttachmentService {
         AttachmentService::new(self.clone(), cache_dir)
+    }
+
+    /// Mirroring lists into and out of other people's task systems.
+    pub fn external(&self) -> ExternalSyncService {
+        ExternalSyncService::new(self.clone())
     }
 
     pub fn chat(&self) -> ChatService {

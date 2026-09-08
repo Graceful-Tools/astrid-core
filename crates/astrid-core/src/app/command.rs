@@ -257,6 +257,36 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// What a list's external sync looks like: what is connected, what it could be linked to,
+    /// and what it is linked to.
+    ///
+    /// One command rather than three, because the screen needs all of it before it can draw a
+    /// single row — and three round trips to fill one panel is three chances to show it half done.
+    ExternalSync {
+        list_id: String,
+    },
+    /// The URL to open in a browser to connect a provider.
+    ConnectProvider {
+        provider: crate::services::Provider,
+    },
+    DisconnectProvider {
+        provider: crate::services::Provider,
+    },
+    /// Mirror a list to a container on the other side.
+    LinkList {
+        provider: crate::services::Provider,
+        list_id: String,
+        container_id: String,
+    },
+    UnlinkList {
+        provider: crate::services::Provider,
+        link_id: String,
+    },
+    /// Run one Google pass over every linked list.
+    ///
+    /// GitHub needs no equivalent: a cron on the server does that one, so a list linked here syncs
+    /// whether or not this app is running.
+    SyncExternal,
     /// Whether the first-run tour has been seen on this machine.
     ///
     /// In the cache rather than in the account: it is about this installation — where its hotkey

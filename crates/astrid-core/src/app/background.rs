@@ -104,6 +104,49 @@ pub async fn reminder_loop(
     }
 }
 
+/// How often to mirror the Google-linked lists.
+///
+/// Five minutes. Google Tasks has no webhooks, so a client polls — "on foreground/nudge", as the
+/// route puts it — and this is the nudge. A minute would be four extra round trips an hour for a
+/// system nobody edits from two places in the same minute.
+pub const EXTERNAL_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Mirror the Google-linked lists, while the app runs.
+///
+/// Only Google: GitHub is a cron on the server, so a list linked to a repository syncs whether or
+/// not this app is open. Never while signed out, for the same reason the sync pass is not.
+pub async fn external_loop(
+    app: Arc<App>,
+    should_continue: impl Fn() -> bool + Send,
+    interval: Duration,
+) {
+    while should_continue() {
+        tokio::time::sleep(interval).await;
+        if !should_continue() {
+            return;
+        }
+        if !app.auth.is_signed_in().await {
+            continue;
+        }
+        let external = app.context.external();
+        let Ok(links) = external.links(crate::services::Provider::GoogleTasks).await else {
+            continue;
+        };
+        for link in &links {
+            match external.sync_google_link(link).await {
+                Ok(report) => tracing::debug!(
+                    link = %link.id,
+                    applied = report.applied,
+                    pushed = report.pushed,
+                    "external pass"
+                ),
+                // One list failing is not the others failing.
+                Err(error) => tracing::debug!(link = %link.id, %error, "external pass failed"),
+            }
+        }
+    }
+}
+
 /// The default interval: sixty seconds, matching the other clients.
 pub fn default_sync_interval() -> Duration {
     Duration::from_secs(policy::AUTO_SYNC_INTERVAL_SECS)

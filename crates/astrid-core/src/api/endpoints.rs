@@ -23,6 +23,31 @@ pub const CAPABILITIES: &str = "/api/v1/capabilities";
 /// Where a new file is uploaded. Multipart: the bytes, and a JSON context saying which list it
 /// belongs to, which is how the server decides who may read it afterwards.
 pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
+
+// ─── External sync ────────────────────────────────────────────────────────────────────────────
+//
+// The server holds the tokens for both providers and proxies their APIs, so a client never sees a
+// Google or GitHub credential. What differs is who drives the mirroring: a cron does it for
+// GitHub, and the client does it for Google.
+
+pub const INTEGRATIONS: &str = "/api/v1/integrations";
+pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";
+pub const GOOGLE_TASKS: &str = "/api/v1/sync/google/tasks";
+pub const GOOGLE_TASK_LINKS: &str = "/api/v1/sync/google/task-links";
+pub const GITHUB_REPOSITORIES: &str = "/api/v1/github/repositories";
+
+/// Where a provider's browser hand-off starts.
+pub fn integration_authorize(provider: &str) -> String {
+    format!(
+        "/api/v1/integrations/{}/authorize",
+        escaped_path_component(provider)
+    )
+}
+
+/// One provider's list ↔ container links.
+pub fn sync_links(provider: &str) -> String {
+    format!("/api/v1/sync/{}/links", escaped_path_component(provider))
+}
 pub const ME: &str = "/api/v1/users/me";
 pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
