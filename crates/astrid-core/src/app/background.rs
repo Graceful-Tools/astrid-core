@@ -131,12 +131,19 @@ pub async fn external_loop(
         let external = app.context.external();
         // Before the passes: a list made on either side since the last round gets its counterpart
         // and is then synced in the same round. A no-op in manual mode, which is the default.
-        match external.auto_link_google().await {
+        let auto_linked = external.auto_link_google().await;
+        match &auto_linked {
             Ok(report) if report.linked > 0 => {
                 tracing::debug!(linked = report.linked, "auto-linked")
             }
             Ok(_) => {}
             Err(error) => tracing::debug!(%error, "auto-link failed"),
+        }
+        // My Tasks against Google's default list, when the mode asks for it.
+        if let Ok(Some(container)) = auto_linked.map(|report| report.my_tasks_container) {
+            if let Err(error) = external.sync_my_tasks(&container).await {
+                tracing::debug!(%error, "My Tasks pass failed");
+            }
         }
         let Ok(links) = external.links(crate::services::Provider::GoogleTasks).await else {
             continue;

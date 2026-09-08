@@ -106,6 +106,15 @@ struct RemoteItem {
     parent: Option<String>,
 }
 
+/// Where a pulled task goes.
+///
+/// A linked list has one; My Tasks has none — it is "assigned to me, in no list", which is a
+/// property of the task rather than a place to put it.
+enum Placement {
+    InList(String),
+    MyTasks(String),
+}
+
 /// The name the ledger files Google's deletions under.
 const PROVIDER_KEY: &str = "google";
 
@@ -133,6 +142,12 @@ pub struct AutoLinkReport {
     /// Lists made here that cannot be linked until they reach the server.
     pub waiting_to_be_created: usize,
     pub failed: usize,
+    /// Google's default list, when My Tasks should mirror against it.
+    ///
+    /// Absent in manual mode, and absent when an older setup linked that list to an ordinary
+    /// Astrid list by hand — then the link is authoritative and this phase must not sync the same
+    /// thing twice.
+    pub my_tasks_container: Option<String>,
 }
 
 /// The name a mode travels under in the integration's metadata.
@@ -350,19 +365,24 @@ impl ExternalSyncService {
     /// retrying for ever because somebody deleted it over there too is not a failure worth keeping.
     /// Anything else is left pending, so a server having a bad minute does not lose the deletion.
     async fn remove_deleted_twins(&self, link: &ExternalLink) -> Result<usize> {
+        self.remove_twins(&link.remote_container_id, &[("linkId", &link.id)])
+            .await
+    }
+
+    /// The same, addressed either by link or by remote list — My Tasks has no link to name.
+    async fn remove_twins(&self, container_id: &str, address: &[(&str, &str)]) -> Result<usize> {
         let store = &self.context.store;
         let mut removed = 0;
-        for (remote_id, container_id) in ledger::pending(store, PROVIDER_KEY) {
+        for (remote_id, pending_container) in ledger::pending(store, PROVIDER_KEY) {
             // This container's only: a pass for one list must not delete out of another.
-            if container_id != link.remote_container_id {
+            if pending_container != container_id {
                 continue;
             }
-            let request = self
-                .context
-                .client
-                .delete(endpoints::GOOGLE_TASKS)
-                .query("linkId", Some(link.id.clone()))
-                .query("remoteId", Some(remote_id.clone()));
+            let mut request = self.context.client.delete(endpoints::GOOGLE_TASKS);
+            for (name, value) in address {
+                request = request.query(name, Some((*value).to_string()));
+            }
+            let request = request.query("remoteId", Some(remote_id.clone()));
             match self.context.client.send(request).await {
                 Ok(_) => {
                     ledger::clear_pending(store, PROVIDER_KEY, &remote_id)?;
@@ -503,6 +523,13 @@ impl ExternalSyncService {
                 name: list.name,
             })
             .collect();
+
+        report.my_tasks_container = default_id
+            .as_deref()
+            .filter(|id| {
+                auto_link::my_tasks_phase_active(settings.mode, Some(id), &linked_container_ids)
+            })
+            .map(str::to_string);
 
         match settings.mode {
             SyncMode::Manual => {}
@@ -653,6 +680,213 @@ impl ExternalSyncService {
             .to_string())
     }
 
+    // ── My Tasks ↔ the default remote list ───────────────────────────────────────────────────
+
+    /// Mirror My Tasks — unlisted tasks assigned to you — against Google's default list.
+    ///
+    /// Google's default list is where its own apps put a task nobody filed anywhere, which is what
+    /// My Tasks is here. Pairing them with an ordinary list link would need an Astrid list that
+    /// does not exist, so this runs beside the links rather than through one: no link row, no
+    /// cursor, always the full listing.
+    ///
+    /// Which half runs follows the mode, the same as everywhere else: a mode that only mirrors
+    /// outward does not pull, and one that only mirrors inward does not push.
+    pub async fn sync_my_tasks(&self, tasklist_id: &str) -> Result<PassReport> {
+        let Some(user_id) = self.context.account().current_user_id()? else {
+            return Ok(PassReport::default());
+        };
+        let settings = self.auto_link_settings().await?;
+        let pulls = matches!(
+            settings.mode,
+            SyncMode::AllGoogleToAstrid | SyncMode::AllBidirectional
+        );
+        let pushes = matches!(
+            settings.mode,
+            SyncMode::AllAstridToGoogle | SyncMode::AllBidirectional
+        );
+
+        let mut report = PassReport {
+            removed_remotely: self
+                .remove_twins(tasklist_id, &[("tasklistId", tasklist_id)])
+                .await?,
+            ..Default::default()
+        };
+
+        let request = self
+            .context
+            .client
+            .get(endpoints::GOOGLE_TASKS)
+            .query("tasklistId", Some(tasklist_id.to_string()));
+        let answer = self.context.client.send(request).await?;
+        let items: Vec<RemoteItem> = answer
+            .get("items")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .unwrap_or_default()
+            .unwrap_or_default();
+        report.pulled = items.len();
+        report.truncated = answer
+            .get("truncated")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+
+        let task_links = self.task_links(tasklist_id).await?;
+        if pulls {
+            let tombstoned = ledger::tombstoned(&self.context.store, PROVIDER_KEY);
+            for item in &items {
+                let linked_task_id = task_links.get(&item.remote_id).cloned().or_else(|| {
+                    ledger::local_task_for(&self.context.store, PROVIDER_KEY, &item.remote_id)
+                });
+                let local = linked_task_id
+                    .as_deref()
+                    .and_then(|id| self.context.store.task(id).ok().flatten());
+                match decisions::pull_outcome(
+                    item.deleted.unwrap_or(false),
+                    linked_task_id.is_some(),
+                    local.is_some(),
+                    tombstoned.contains(&item.remote_id),
+                ) {
+                    PullOutcome::DeleteLocalTwin => {
+                        if let Some(task) = &local {
+                            self.context.tasks().delete(&task.id)?;
+                            report.deleted_locally += 1;
+                        }
+                        ledger::record_tombstone(
+                            &self.context.store,
+                            PROVIDER_KEY,
+                            &item.remote_id,
+                        )?;
+                    }
+                    PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
+                    PullOutcome::Apply => {
+                        let task = self.apply(
+                            item,
+                            tasklist_id,
+                            &Placement::MyTasks(user_id.clone()),
+                            local,
+                            &task_links,
+                        )?;
+                        report.applied += 1;
+                        ledger::remember_links(
+                            &self.context.store,
+                            PROVIDER_KEY,
+                            tasklist_id,
+                            [(task.id.clone(), item.remote_id.clone())],
+                        )?;
+                        if linked_task_id.is_none()
+                            && self
+                                .record_task_link(&task.id, &item.remote_id, tasklist_id)
+                                .await
+                        {
+                            report.linked += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if pushes {
+            report.pushed = self
+                .push_my_tasks(tasklist_id, &user_id, &task_links)
+                .await?;
+        }
+        Ok(report)
+    }
+
+    /// Send the unlisted tasks assigned to you, and close out the twins of tasks that have left.
+    async fn push_my_tasks(
+        &self,
+        tasklist_id: &str,
+        user_id: &str,
+        task_links: &std::collections::HashMap<String, String>,
+    ) -> Result<usize> {
+        let key = format!("external.pushed.myTasks.{tasklist_id}");
+        let since = self
+            .context
+            .store
+            .metadata(&key)?
+            .and_then(|stamp| date::parse(&stamp));
+        let now = self.context.clock.now();
+        let by_task: std::collections::HashMap<&String, &String> = task_links
+            .iter()
+            .map(|(remote, task)| (task, remote))
+            .collect();
+
+        let held = self.context.store.tasks()?;
+        let mine = |task: &Task| {
+            task.list_ids.as_ref().is_none_or(|lists| lists.is_empty())
+                && task.assignee_id.as_deref() == Some(user_id)
+        };
+
+        let mut pushed = 0;
+        for task in held.iter().filter(|task| mine(task)) {
+            if crate::model::is_temp_id(&task.id) {
+                continue;
+            }
+            let changed = match (since, task.updated_at) {
+                (Some(since), Some(updated)) => updated > since,
+                _ => true,
+            };
+            if !changed {
+                continue;
+            }
+            let known = by_task.get(&task.id).copied();
+            let request = self
+                .context
+                .client
+                .post(endpoints::GOOGLE_TASKS)
+                .value(json!({
+                    "tasklistId": tasklist_id,
+                    "title": task.title,
+                    "notes": task.description,
+                    "dueDate": task.due_date_time.map(date::format),
+                    "completed": task.completed,
+                    "remoteId": known,
+                }));
+            let answer = self.context.client.send(request).await?;
+            pushed += 1;
+            if known.is_none() {
+                if let Some(remote_id) = answer.get("remoteId").and_then(|value| value.as_str()) {
+                    self.record_task_link(&task.id, remote_id, tasklist_id)
+                        .await;
+                }
+            }
+        }
+
+        // A task that has LEFT My Tasks — it gained a list, or lost the assignment that put it
+        // here — still has a twin in the default list, which then acts as a second home for
+        // something that already has one. Close it out. A deleted task is not this: that goes
+        // through the ledger.
+        for (remote_id, task_id) in task_links {
+            let Some(task) = self.context.store.task(task_id).ok().flatten() else {
+                continue;
+            };
+            if mine(&task) {
+                continue;
+            }
+            let request = self
+                .context
+                .client
+                .delete(endpoints::GOOGLE_TASKS)
+                .query("tasklistId", Some(tasklist_id.to_string()))
+                .query("remoteId", Some(remote_id.clone()));
+            match self.context.client.send(request).await {
+                Ok(_) => {}
+                Err(crate::api::ApiError::Http { status, .. })
+                    if decisions::remote_already_gone(status) => {}
+                // A real failure is worth another go rather than a tombstone on a twin that is
+                // still there.
+                Err(_) => continue,
+            }
+            ledger::record_tombstone(&self.context.store, PROVIDER_KEY, remote_id)?;
+            ledger::forget_link(&self.context.store, PROVIDER_KEY, task_id)?;
+        }
+
+        self.context.store.set_metadata(&key, &date::format(now))?;
+        Ok(pushed)
+    }
+
     /// Bring in what changed on the other side.
     async fn pull(&self, link: &ExternalLink) -> Result<PassReport> {
         let request = self
@@ -714,7 +948,13 @@ impl ExternalSyncService {
                 }
                 PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                 PullOutcome::Apply => {
-                    let task = self.apply(item, link, local, &task_links)?;
+                    let task = self.apply(
+                        item,
+                        &link.remote_container_id,
+                        &Placement::InList(link.astrid_list_id.clone()),
+                        local,
+                        &task_links,
+                    )?;
                     report.applied += 1;
                     // Written down here as well as on the server: this is what a second pass reads
                     // when the first one's task has not reached astrid-web yet.
@@ -801,14 +1041,15 @@ impl ExternalSyncService {
     fn apply(
         &self,
         item: &RemoteItem,
-        link: &ExternalLink,
+        container_id: &str,
+        placement: &Placement,
         local: Option<Task>,
         task_links: &std::collections::HashMap<String, String>,
     ) -> Result<Task> {
         let tasks = self.context.tasks();
         // Nesting, when the parent is a task we hold. The key is scoped to the container because
         // Google reuses short task ids between lists — see `external::decisions::parent_key`.
-        let parent = decisions::parent_key(&link.remote_container_id, item.parent.as_deref())
+        let parent = decisions::parent_key(container_id, item.parent.as_deref())
             .and_then(|key| task_links.get(&key).cloned());
         // Google Tasks has no time of day, so a due date is a calendar day — which is exactly what
         // an all-day task is here.
@@ -817,7 +1058,13 @@ impl ExternalSyncService {
         let Some(task) = local else {
             let mut draft = crate::services::TaskDraft::new(item.title.clone());
             draft.description = item.notes.clone().unwrap_or_default();
-            draft.list_ids = vec![link.astrid_list_id.clone()];
+            match placement {
+                // The link's list, so a pulled task appears where somebody expects it.
+                Placement::InList(list_id) => draft.list_ids = vec![list_id.clone()],
+                // My Tasks is not a list: it is "assigned to me, in no list", so that is what a
+                // task pulled from the default remote list has to become.
+                Placement::MyTasks(user_id) => draft.assignee_id = Some(user_id.clone()),
+            }
             draft.due_date_time = due;
             draft.is_all_day = due.is_some();
             draft.parent_task_id = parent;
@@ -1244,6 +1491,169 @@ mod tests {
         );
     }
 
+    // ── My Tasks ↔ the default remote list ───────────────────────────────────────────────────
+
+    /// The account has to be known before My Tasks means anything: it is "assigned to me", and
+    /// without a "me" there is nothing to mirror.
+    fn signed_in(fixture: &Fixture) {
+        let mut user = crate::model::User::new("u1");
+        user.name = Some("Ada".into());
+        fixture
+            .store
+            .set_metadata(
+                "account.current-user",
+                &serde_json::to_string(&user).expect("encodes"),
+            )
+            .expect("writes");
+    }
+
+    /// One conversation, in the order the pass has it: the deletion pass, the full listing, and
+    /// the task links each half asks for.
+    fn my_tasks_transport(mode: &str, items: serde_json::Value) -> StubTransport {
+        StubTransport::new()
+            .push_json(
+                "/api/v1/integrations",
+                200,
+                json!({
+                    "integrations": [{
+                        "provider": "GOOGLE_TASKS",
+                        "metadata": { "googleSyncMode": mode },
+                    }],
+                }),
+            )
+            .push_json("google/tasks", 200, json!({ "items": items }))
+            .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+            .fallback(Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: b"{}".to_vec(),
+            }))
+    }
+
+    /// A task Google filed nowhere becomes a task Astrid filed nowhere, assigned to you. Putting
+    /// it in a list would be inventing a list nobody made.
+    #[tokio::test]
+    async fn a_task_from_the_default_remote_list_becomes_an_unlisted_task_of_yours() {
+        let fixture = fixture_with(my_tasks_transport(
+            "all_google_to_astrid",
+            json!([{ "remoteId": "default-list:r1", "title": "Ring the dentist" }]),
+        ));
+        signed_in(&fixture);
+
+        let report = fixture
+            .service
+            .sync_my_tasks("default-list")
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.applied, 1);
+        let made = fixture
+            .store
+            .tasks()
+            .expect("reads")
+            .into_iter()
+            .find(|task| task.title == "Ring the dentist")
+            .expect("the task");
+        assert_eq!(made.assignee_id.as_deref(), Some("u1"));
+        assert!(
+            made.list_ids.unwrap_or_default().is_empty(),
+            "unlisted, which is what My Tasks means"
+        );
+    }
+
+    /// A mode that only mirrors outward does not pull, here as everywhere else.
+    #[tokio::test]
+    async fn my_tasks_does_not_pull_in_a_mode_that_only_mirrors_outward() {
+        let fixture = fixture_with(my_tasks_transport(
+            "all_astrid_to_google",
+            json!([{ "remoteId": "default-list:r1", "title": "Ring the dentist" }]),
+        ));
+        signed_in(&fixture);
+
+        let report = fixture
+            .service
+            .sync_my_tasks("default-list")
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.applied, 0);
+        assert!(fixture.store.tasks().expect("reads").is_empty());
+    }
+
+    /// A task that gained a list, or lost the assignment that put it in My Tasks, still has a twin
+    /// in the default list — a second home for something that already has one.
+    #[tokio::test]
+    async fn a_task_that_has_left_my_tasks_has_its_twin_closed_out() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/integrations",
+                    200,
+                    json!({
+                        "integrations": [{
+                            "provider": "GOOGLE_TASKS",
+                            "metadata": { "googleSyncMode": "all_bidirectional" },
+                        }],
+                    }),
+                )
+                .push_json("google/tasks", 200, json!({ "items": [] }))
+                .push_json(
+                    "google/task-links",
+                    200,
+                    json!({
+                        "taskLinks": [{ "remoteId": "default-list:r1", "taskId": "cm3real" }],
+                    }),
+                )
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        signed_in(&fixture);
+        // It has a list now, so it is not My Tasks any more.
+        let mut task = crate::model::Task::new("cm3real", "Ring the dentist");
+        task.assignee_id = Some("u1".into());
+        task.list_ids = Some(vec!["l1".into()]);
+        fixture.store.upsert_task(&task).expect("writes");
+
+        fixture
+            .service
+            .sync_my_tasks("default-list")
+            .await
+            .expect("a pass");
+
+        assert!(
+            fixture.transport.requests().iter().any(|request| {
+                request.method.as_str() == "DELETE" && request.url.contains("remoteId=default-list")
+            }),
+            "the twin in the default list was closed out"
+        );
+        assert!(
+            ledger::tombstoned(&fixture.store, PROVIDER_KEY)
+                .contains(&"default-list:r1".to_string()),
+            "and never re-imported"
+        );
+        assert!(
+            fixture.store.task("cm3real").expect("reads").is_some(),
+            "the task itself is untouched — it lives in its list now"
+        );
+    }
+
+    /// Signed out there is no "me", so there is nothing this could mean.
+    #[tokio::test]
+    async fn my_tasks_does_nothing_when_nobody_is_signed_in() {
+        let fixture = fixture_with(my_tasks_transport("all_bidirectional", json!([])));
+
+        let report = fixture
+            .service
+            .sync_my_tasks("default-list")
+            .await
+            .expect("a pass");
+
+        assert_eq!(report, PassReport::default());
+    }
+
     // ── Auto-linking ─────────────────────────────────────────────────────────────────────────
 
     /// The whole point of the adoption rules: somebody with "Groceries" on both sides ends up with
@@ -1327,7 +1737,9 @@ mod tests {
 
         let report = fixture.service.auto_link_google().await.expect("links");
 
-        assert_eq!(report, AutoLinkReport::default());
+        assert_eq!(report.linked, 0);
+        assert_eq!(report.lists_created, 0);
+        assert_eq!(report.failed, 0);
         assert!(
             fixture.transport.requests().iter().any(|request| {
                 request.method.as_str() == "PATCH" && request.url.contains("integrations")

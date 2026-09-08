@@ -1201,7 +1201,17 @@ async fn sync_external(app: &App) -> Response {
             })),
         }
     }
-    Response::ok(serde_json::json!({ "passes": passes, "autoLinked": auto_linked }))
+    // My Tasks — unlisted tasks assigned to you — against Google's default list, which is where
+    // Google's own apps put a task nobody filed anywhere. Only in the all-lists modes.
+    let my_tasks = match &auto_linked.my_tasks_container {
+        Some(container) => external.sync_my_tasks(container).await.ok(),
+        None => None,
+    };
+    Response::ok(serde_json::json!({
+        "passes": passes,
+        "autoLinked": auto_linked,
+        "myTasks": my_tasks,
+    }))
 }
 
 /// Where "the tour has been seen" is remembered.
