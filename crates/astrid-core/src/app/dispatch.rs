@@ -204,7 +204,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Err(error) => Response::failed(error.into()),
         },
         Command::RefreshComments { task_id } => {
-            answer(app.context.comments().refresh(&task_id).await)
+            // Projected the same way the detail projects them, so a refresh cannot draw a comment
+            // differently from the screen it lands in.
+            match app.context.comments().refresh(&task_id).await {
+                Ok(comments) => Response::ok(rows::comment::rows(&comments)),
+                Err(error) => Response::failed(error.into()),
+            }
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
         Command::Agents => agents(app).await,
@@ -383,6 +388,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             path,
             content,
         } => attach_file(app, &task_id, &path, content.as_deref()),
+        Command::ClipboardPaste {
+            files,
+            image_extension,
+            has_text,
+        } => clipboard_paste(app, files, image_extension, has_text),
         Command::FilterOptions { list_id } => filter_options(app, &list_id),
         Command::SetFilter {
             list_id,
@@ -494,7 +504,10 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
             .and_then(|id| app.store.user(id).ok().flatten())
     });
 
-    let comments = app.context.comments().for_task(task_id).unwrap_or_default();
+    // Projected rather than sent raw: a comment's own files are what a screen has to draw, and
+    // whether there is a bubble at all is a rule — see `rows::comment`.
+    let comments =
+        rows::comment::rows(&app.context.comments().for_task(task_id).unwrap_or_default());
 
     // Subtasks are the children of this task, in the order they were added — the order somebody
     // breaking a task down expects to read them back in.
@@ -892,6 +905,32 @@ fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>) -> R
         crate::model::CommentType::Attachment,
         Some(&file),
     ))
+}
+
+/// What a paste should attach, if anything.
+fn clipboard_paste(
+    app: &App,
+    files: Vec<String>,
+    image_extension: Option<String>,
+    has_text: bool,
+) -> Response {
+    let board = crate::paste::Clipboard {
+        files,
+        image_extension,
+        has_text,
+    };
+    match crate::paste::decide(&board, app.clock.now(), app.clock.utc_offset()) {
+        crate::paste::Paste::Files(files) => {
+            Response::ok(serde_json::json!({ "action": "files", "files": files }))
+        }
+        crate::paste::Paste::Image { name } => {
+            Response::ok(serde_json::json!({ "action": "image", "name": name }))
+        }
+        // Named rather than empty: "nothing to attach" and "the core did not understand you" are
+        // different answers, and a shell that could not tell them apart would swallow a text paste
+        // on the day this command grows a new shape.
+        crate::paste::Paste::Text => Response::ok(serde_json::json!({ "action": "text" })),
+    }
 }
 
 /// What a list is filtered and sorted by, and what else it could be.
@@ -2584,6 +2623,86 @@ mod tests {
             .as_array()
             .expect("containers")
             .is_empty());
+    }
+
+    /// A file attached here comes back on a comment, so the detail has to carry it. Drawing only
+    /// the text is what makes attaching look broken from the outside.
+    #[tokio::test]
+    async fn a_comment_carries_its_files_into_the_detail() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+        let comment: crate::model::Comment = serde_json::from_value(json!({
+            "id": "c1",
+            "taskId": task_id,
+            "content": "",
+            "secureFiles": [{
+                "id": "f1",
+                "originalName": "shot.png",
+                "fileSize": 2048,
+                "mimeType": "image/png",
+            }],
+        }))
+        .expect("a comment");
+        app.store
+            .upsert_comments(std::slice::from_ref(&comment))
+            .expect("stores");
+
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+
+        let comments = detail["value"]["comments"].as_array().expect("comments");
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0]["showsText"], false, "no empty bubble");
+        assert_eq!(comments[0]["files"][0]["name"], "shot.png");
+        assert_eq!(comments[0]["files"][0]["rendersInline"], true);
+    }
+
+    /// The clipboard is the shell's to read and the core's to interpret, so the answer has to name
+    /// what to do rather than leaving the shell to work it out again.
+    #[tokio::test]
+    async fn a_pasted_file_beats_the_picture_of_it() {
+        let app = app_with(StubTransport::new());
+
+        let answer = call(
+            &app,
+            json!({
+                "kind": "clipboardPaste",
+                "files": [r"C:\shots\one.png"],
+                "imageExtension": "png",
+            }),
+        )
+        .await;
+
+        assert_eq!(answer["value"]["action"], "files");
+        assert_eq!(answer["value"]["files"][0], r"C:\shots\one.png");
+    }
+
+    /// An ordinary paste stays an ordinary paste, which is the trade this whole path is careful
+    /// about.
+    #[tokio::test]
+    async fn a_paste_with_nothing_attachable_is_left_to_type() {
+        let app = app_with(StubTransport::new());
+
+        let answer = call(&app, json!({ "kind": "clipboardPaste", "hasText": true })).await;
+
+        assert_eq!(answer["value"]["action"], "text");
+    }
+
+    #[tokio::test]
+    async fn a_pasted_screenshot_comes_back_with_a_name() {
+        let app = app_with(StubTransport::new());
+
+        let answer = call(
+            &app,
+            json!({ "kind": "clipboardPaste", "imageExtension": "png" }),
+        )
+        .await;
+
+        assert_eq!(answer["value"]["action"], "image");
+        assert_eq!(
+            answer["value"]["name"],
+            "Pasted Image 2026-09-07 at 12.00.00.png"
+        );
     }
 
     // ── Attaching a file ─────────────────────────────────────────────────────────────────────

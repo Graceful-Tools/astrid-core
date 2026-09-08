@@ -457,6 +457,20 @@ pub enum Command {
         #[serde(flatten)]
         filters: crate::filters::my_tasks::Preferences,
     },
+    /// What is on the clipboard, and which of it somebody meant to attach.
+    ///
+    /// Reading the clipboard is the shell's job; deciding what it means is not — see
+    /// [`crate::paste`] for why files beat a rendition of them and why text is left alone.
+    ClipboardPaste {
+        /// Files the board names on disk, in the order it lists them.
+        #[serde(default)]
+        files: Vec<String>,
+        /// The format of an image with no file behind it. Absent when there is no image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image_extension: Option<String>,
+        #[serde(default)]
+        has_text: bool,
+    },
     /// What a list is filtered and sorted by, and what else it could be.
     ///
     /// Answers for My Tasks too, from the account's preferences rather than a list row.
