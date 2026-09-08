@@ -36,6 +36,13 @@ pub struct CommentRow {
     pub shows_text: bool,
     /// The files this comment carries.
     pub files: Vec<FileRow>,
+    /// Which side of the thread it sits on.
+    ///
+    /// A chat transcript is unreadable without it: every bubble on the same side is one voice, and
+    /// a thread drawn all on one side says the other person never replied.
+    pub is_mine: bool,
+    /// Nobody wrote it — the server did. Drawn as a centred note rather than as either voice.
+    pub is_system: bool,
 }
 
 /// One file on a comment.
@@ -80,7 +87,7 @@ pub fn renders_inline(mime_type: &str) -> bool {
 ///
 /// A comment with neither text nor files is dropped rather than drawn as an empty row — see
 /// [`is_empty`]. That is the one this module exists for.
-pub fn rows(comments: &[Comment]) -> Vec<CommentRow> {
+pub fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
     comments
         .iter()
         .filter(|comment| !is_empty(comment))
@@ -94,6 +101,10 @@ pub fn rows(comments: &[Comment]) -> Vec<CommentRow> {
                 .map(|author| author.display_name().to_string()),
             is_pending: crate::model::is_temp_id(&comment.id),
             shows_text: shows_text(&comment.content),
+            // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
+            // system comment on the reader's own side.
+            is_mine: me.is_some() && comment.author_id.as_deref() == me,
+            is_system: comment.author_id.is_none(),
             files: files_of(comment)
                 .into_iter()
                 .map(|file| FileRow {
@@ -125,11 +136,14 @@ mod tests {
     /// what "it did not attach" looks like.
     #[test]
     fn a_file_posted_without_a_caption_draws_the_file_and_no_text() {
-        let rows = rows(&[comment(json!({
-            "id": "c1",
-            "content": "",
-            "secureFiles": [a_file("image/png")],
-        }))]);
+        let rows = rows(
+            &[comment(json!({
+                "id": "c1",
+                "content": "",
+                "secureFiles": [a_file("image/png")],
+            }))],
+            None,
+        );
 
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].shows_text, "no empty bubble beside the picture");
@@ -139,11 +153,14 @@ mod tests {
 
     #[test]
     fn a_caption_and_a_file_draw_both() {
-        let rows = rows(&[comment(json!({
-            "id": "c1",
-            "content": "here it is",
-            "secureFiles": [a_file("image/png")],
-        }))]);
+        let rows = rows(
+            &[comment(json!({
+                "id": "c1",
+                "content": "here it is",
+                "secureFiles": [a_file("image/png")],
+            }))],
+            None,
+        );
 
         assert!(rows[0].shows_text);
         assert_eq!(rows[0].files.len(), 1);
@@ -161,10 +178,13 @@ mod tests {
     /// something the server sent that this build has no way to show.
     #[test]
     fn a_comment_with_nothing_in_it_is_not_drawn() {
-        let rows = rows(&[
-            comment(json!({ "id": "c1", "content": "" })),
-            comment(json!({ "id": "c2", "content": "said something" })),
-        ]);
+        let rows = rows(
+            &[
+                comment(json!({ "id": "c1", "content": "" })),
+                comment(json!({ "id": "c2", "content": "said something" })),
+            ],
+            None,
+        );
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "c2");
@@ -184,10 +204,39 @@ mod tests {
         assert!(!renders_inline(""));
     }
 
+    /// A thread drawn all on one side says the other person never replied.
+    #[test]
+    fn a_comment_sits_on_the_side_of_whoever_wrote_it() {
+        let rows = rows(
+            &[
+                comment(json!({ "id": "c1", "content": "mine", "authorId": "u1" })),
+                comment(json!({ "id": "c2", "content": "theirs", "authorId": "u2" })),
+                comment(json!({ "id": "c3", "content": "the server's" })),
+            ],
+            Some("u1"),
+        );
+
+        assert!(rows[0].is_mine);
+        assert!(!rows[1].is_mine);
+        assert!(!rows[2].is_mine, "nobody's is not mine");
+        assert!(rows[2].is_system);
+        assert!(!rows[0].is_system);
+    }
+
+    /// Signed out, nothing is mine. `None == None` would otherwise claim every system comment.
+    #[test]
+    fn signed_out_nothing_is_mine() {
+        let rows = rows(&[comment(json!({ "id": "c1", "content": "x" }))], None);
+        assert!(!rows[0].is_mine);
+    }
+
     /// The same meaning it has in a chat transcript: queued, not failed.
     #[test]
     fn a_comment_still_in_the_outbox_says_so() {
-        let rows = rows(&[comment(json!({ "id": "temp_abc", "content": "just said" }))]);
+        let rows = rows(
+            &[comment(json!({ "id": "temp_abc", "content": "just said" }))],
+            None,
+        );
         assert!(rows[0].is_pending);
     }
 }

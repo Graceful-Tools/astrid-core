@@ -206,8 +206,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::RefreshComments { task_id } => {
             // Projected the same way the detail projects them, so a refresh cannot draw a comment
             // differently from the screen it lands in.
+            let me = app.context.account().current_user_id().ok().flatten();
             match app.context.comments().refresh(&task_id).await {
-                Ok(comments) => Response::ok(rows::comment::rows(&comments)),
+                Ok(comments) => Response::ok(rows::comment::rows(&comments, me.as_deref())),
                 Err(error) => Response::failed(error.into()),
             }
         }
@@ -532,8 +533,15 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
 
     // Projected rather than sent raw: a comment's own files are what a screen has to draw, and
     // whether there is a bubble at all is a rule — see `rows::comment`.
-    let comments =
-        rows::comment::rows(&app.context.comments().for_task(task_id).unwrap_or_default());
+    let comments = rows::comment::rows(
+        &app.context.comments().for_task(task_id).unwrap_or_default(),
+        app.context
+            .account()
+            .current_user_id()
+            .ok()
+            .flatten()
+            .as_deref(),
+    );
 
     // Subtasks are the children of this task, in the order they were added — the order somebody
     // breaking a task down expects to read them back in.
@@ -1334,11 +1342,10 @@ async fn agents(app: &App) -> Response {
     Response::ok(serde_json::json!({
         "agents": modes.get("agents").cloned().unwrap_or(serde_json::json!([])),
         "modes": modes.get("modes").cloned().unwrap_or(serde_json::json!({})),
-        "credentials": credentials
-            .get("services")
-            .or_else(|| credentials.get("keys"))
-            .cloned()
-            .unwrap_or(serde_json::json!([])),
+        // Projected, not passed through: the endpoint answers with a MAP of the services a key
+        // has already been stored for, and a service with no key — the row somebody opened this
+        // screen to fill in — is simply absent from it. See `rows::credential`.
+        "credentials": rows::credential::rows(&credentials),
         "copilot": copilot,
     }))
 }

@@ -18,6 +18,7 @@
 pub mod assignee;
 pub mod chat;
 pub mod comment;
+pub mod credential;
 pub mod detail;
 pub mod due_picks;
 pub mod filter_picks;
