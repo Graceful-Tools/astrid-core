@@ -23,6 +23,7 @@ pub mod filters;
 pub mod keyboard;
 pub mod model;
 pub mod outbox;
+pub mod palette;
 pub mod parse;
 pub mod permissions;
 pub mod platform;

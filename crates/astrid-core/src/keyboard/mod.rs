@@ -57,6 +57,42 @@ pub struct KeyBinding {
     pub title: &'static str,
 }
 
+/// The name an action travels under.
+///
+/// One string per action, used by the shortcut answer, by the palette, and by the shell that
+/// carries them out. Living here rather than beside one of its callers is what stops the palette
+/// naming an action one thing and the keyboard naming it another — which would be two
+/// implementations of "new task" wearing the same label.
+pub fn action_name(action: ShortcutAction) -> &'static str {
+    use ShortcutAction as A;
+    match action {
+        A::NewTask => "newTask",
+        A::CompleteTask => "completeTask",
+        A::DueDateEarlier => "dueDateEarlier",
+        A::DueDateLater => "dueDateLater",
+        A::JumpToDate => "jumpToDate",
+        A::Postpone => "postpone",
+        A::RemoveDueDate => "removeDueDate",
+        A::EditLists => "editLists",
+        A::EditTitle => "editTitle",
+        A::EditDescription => "editDescription",
+        A::AddComment => "addComment",
+        A::AssignNoOne => "assignNoOne",
+        A::PriorityNone => "priorityNone",
+        A::PriorityLow => "priorityLow",
+        A::PriorityMedium => "priorityMedium",
+        A::PriorityHigh => "priorityHigh",
+        A::DeleteTask => "deleteTask",
+        A::TogglePanel => "togglePanel",
+        A::CycleFilters => "cycleFilters",
+        A::SelectPrevious => "selectPrevious",
+        A::SelectNext => "selectNext",
+        A::OutdentTask => "outdentTask",
+        A::IndentTask => "indentTask",
+        A::ShowShortcuts => "showShortcuts",
+    }
+}
+
 /// The canonical shared table. Keys, guards and order mirror web `KEYBOARD_SHORTCUTS`.
 pub const ALL: &[KeyBinding] = &[
     KeyBinding {

@@ -82,7 +82,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 is_modal_presented,
             };
             Response::ok(serde_json::json!({
-                "action": crate::keyboard::action_for(&key, context).map(action_name),
+                "action": crate::keyboard::action_for(&key, context).map(crate::keyboard::action_name),
             }))
         }
         Command::Shortcuts => Response::ok(
@@ -91,7 +91,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .map(|binding| {
                     serde_json::json!({
                         "keys": binding.keys,
-                        "action": action_name(binding.action),
+                        "action": crate::keyboard::action_name(binding.action),
                         "requiresSelection": binding.requires_selection,
                         "title": binding.title,
                     })
@@ -207,6 +207,13 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::Palette { query } => {
+            let lists = app.store.lists().unwrap_or_default();
+            let tasks = app.store.tasks().unwrap_or_default();
+            Response::ok(serde_json::json!({
+                "rows": crate::palette::search(&query, &lists, &tasks),
+            }))
+        }
         Command::ProfileStats => {
             let me = app.context.account().current_user_id().ok().flatten();
             match me {
@@ -316,36 +323,6 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
 ///
 /// Spelled out rather than derived from the enum's `Debug`, because these strings cross the
 /// boundary and a rename made for Rust reasons would silently stop a keystroke doing anything.
-fn action_name(action: crate::keyboard::ShortcutAction) -> &'static str {
-    use crate::keyboard::ShortcutAction as A;
-    match action {
-        A::NewTask => "newTask",
-        A::CompleteTask => "completeTask",
-        A::DueDateEarlier => "dueDateEarlier",
-        A::DueDateLater => "dueDateLater",
-        A::JumpToDate => "jumpToDate",
-        A::Postpone => "postpone",
-        A::RemoveDueDate => "removeDueDate",
-        A::EditLists => "editLists",
-        A::EditTitle => "editTitle",
-        A::EditDescription => "editDescription",
-        A::AddComment => "addComment",
-        A::AssignNoOne => "assignNoOne",
-        A::PriorityNone => "priorityNone",
-        A::PriorityLow => "priorityLow",
-        A::PriorityMedium => "priorityMedium",
-        A::PriorityHigh => "priorityHigh",
-        A::DeleteTask => "deleteTask",
-        A::TogglePanel => "togglePanel",
-        A::CycleFilters => "cycleFilters",
-        A::SelectPrevious => "selectPrevious",
-        A::SelectNext => "selectNext",
-        A::OutdentTask => "outdentTask",
-        A::IndentTask => "indentTask",
-        A::ShowShortcuts => "showShortcuts",
-    }
-}
-
 /// Everything one task's detail screen needs, in one answer.
 ///
 /// The field ORDER comes with it. That is not decoration: the same four rows are shown on web, on
@@ -2078,6 +2055,31 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// The palette answers from the cache, ranked, with commands first — so the keyboard action
+    /// for "new task" is reachable from the box that exists to reach things.
+    #[tokio::test]
+    async fn the_palette_finds_commands_lists_and_tasks() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Buy oat milk" }),
+        )
+        .await;
+
+        let found = call(&app, json!({ "kind": "palette", "query": "milk" })).await;
+        let rows = found["value"]["rows"].as_array().expect("rows");
+        assert!(rows.iter().any(|row| row["title"] == "Buy oat milk"));
+
+        // Fuzzy, and in order: "hm" finds "Home" by its letters.
+        let fuzzy = call(&app, json!({ "kind": "palette", "query": "hm" })).await;
+        assert!(fuzzy["value"]["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .any(|row| row["title"] == "Home"));
     }
 
     /// The settings screen draws from the cache and offers the same reminder offsets the per-task

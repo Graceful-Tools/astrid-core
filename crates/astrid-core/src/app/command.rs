@@ -257,6 +257,14 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// Everything one box can find: commands, lists, tasks, ranked.
+    ///
+    /// The matcher is the Mac's, character for character — see [`crate::palette`]. The ranking is
+    /// what a palette *is*, and two clients that rank differently are two products.
+    Palette {
+        #[serde(default)]
+        query: String,
+    },
     /// The three numbers on the signed-in account's profile.
     ProfileStats,
     /// Write everything this account has to a file on this machine.
