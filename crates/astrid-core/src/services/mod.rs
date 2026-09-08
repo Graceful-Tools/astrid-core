@@ -22,6 +22,7 @@ pub mod comment;
 pub mod list;
 pub mod search;
 pub mod task;
+pub mod timer;
 
 pub use account::AccountService;
 pub use attachment::AttachmentService;

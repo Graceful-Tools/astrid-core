@@ -207,6 +207,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::StartTimer { task_id } => start_timer(app, &task_id),
+        Command::StopTimer { task_id } => stop_timer(app, &task_id),
         Command::Attachments { task_id } => attachments(app, &task_id),
         Command::DownloadAttachment { task_id, file_id } => {
             download_attachment(app, &task_id, &file_id).await
@@ -371,6 +373,9 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
             offset,
         )),
         "isOverdue": filters::is_overdue(&task, now, offset),
+        // The timer, running or not: the section is shown while one runs, and a task with recorded
+        // time keeps its caption, so hiding the section never hides the data.
+        "timer": timer_state(app, &task),
         // A custom repeat cannot describe itself in a chip: "Custom" says nothing, and the pattern
         // does not fit beside a date and a time. The detail gives it its own row, worded exactly
         // as the picker words it, or the same repeat reads two ways on one screen.
@@ -526,6 +531,82 @@ fn search_tasks(
 /// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
 /// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
 const BOARD_COLUMN_LIMIT: usize = 50;
+
+/// What a task's timer is doing, running or not.
+fn timer_state(app: &App, task: &crate::model::Task) -> crate::services::timer::TimerState {
+    let started = app
+        .store
+        .metadata(&crate::services::timer::started_key(&task.id))
+        .ok()
+        .flatten()
+        .and_then(|stamp| crate::model::date::parse(&stamp));
+    crate::services::timer::TimerState {
+        is_running: started.is_some(),
+        started_at: started,
+        logged_minutes: task.timer_duration.unwrap_or(0),
+        last_value: task.last_timer_value.clone(),
+    }
+}
+
+/// Start timing a task.
+///
+/// Starting one that is already running keeps the original start rather than resetting it: two
+/// clicks on a button should not quietly discard the first ten minutes.
+fn start_timer(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let key = crate::services::timer::started_key(task_id);
+    if app.store.metadata(&key).ok().flatten().is_none() {
+        let now = crate::model::date::format(app.clock.now());
+        if let Err(error) = app.store.set_metadata(&key, &now) {
+            return Response::failed(error.into());
+        }
+    }
+    Response::ok(timer_state(app, &task))
+}
+
+/// Stop timing, and add what the session was worth to the task.
+fn stop_timer(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let key = crate::services::timer::started_key(task_id);
+    let started = app
+        .store
+        .metadata(&key)
+        .ok()
+        .flatten()
+        .and_then(|stamp| crate::model::date::parse(&stamp));
+    let Some(started) = started else {
+        // Nothing was running. Not an error: two clicks on Stop is an ordinary thing to do.
+        return Response::ok(timer_state(app, &task));
+    };
+
+    let minutes = crate::services::timer::minutes_between(started, app.clock.now());
+    // Empty rather than deleted: the store keeps metadata by key, and an empty value reads as "not
+    // running" everywhere it is looked at — `date::parse` answers None for it.
+    if let Err(error) = app.store.set_metadata(&key, "") {
+        return Response::failed(error.into());
+    }
+
+    if minutes == 0 {
+        return Response::ok(timer_state(app, &task));
+    }
+    let changes = crate::services::TaskChanges {
+        timer_duration: Some(Some(task.timer_duration.unwrap_or(0) + minutes)),
+        last_timer_value: Some(Some(crate::services::timer::last_value(minutes))),
+        ..Default::default()
+    };
+    match app.context.tasks().update(task_id, &changes) {
+        Ok(task) => Response::ok(timer_state(app, &task)),
+        Err(error) => Response::failed(error.into()),
+    }
+}
 
 /// The files on a task, and whether each is already on this machine.
 fn attachments(app: &App, task_id: &str) -> Response {
@@ -1911,6 +1992,64 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// A timer survives a restart, because the start time is in the cache rather than in memory —
+    /// which is the one thing this does that Apple's does not.
+    #[tokio::test]
+    async fn a_timer_records_what_the_session_was_worth() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it up" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let started = call(&app, json!({ "kind": "startTimer", "taskId": id })).await;
+        assert_eq!(started["value"]["isRunning"], true);
+
+        // The clock is fixed in these tests, so the session is zero minutes and records nothing —
+        // which is itself the rule: a timer that never ran did not do any work.
+        let stopped = call(&app, json!({ "kind": "stopTimer", "taskId": id })).await;
+        assert_eq!(stopped["value"]["isRunning"], false);
+        assert_eq!(stopped["value"]["loggedMinutes"], 0);
+
+        // And the detail screen carries the state, so the section knows whether to draw.
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": id })).await;
+        assert_eq!(detail["value"]["timer"]["isRunning"], false);
+    }
+
+    /// Two clicks on Start should not discard the first ten minutes.
+    #[tokio::test]
+    async fn starting_a_timer_that_is_already_running_keeps_the_original_start() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it up" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let first = call(&app, json!({ "kind": "startTimer", "taskId": id })).await;
+        let again = call(&app, json!({ "kind": "startTimer", "taskId": id })).await;
+        assert_eq!(first["value"]["startedAt"], again["value"]["startedAt"]);
+    }
+
+    /// Stopping one that is not running is an ordinary thing to do, not an error.
+    #[tokio::test]
+    async fn stopping_a_timer_that_never_started_says_so_quietly() {
+        let app = app_with(StubTransport::new());
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it up" }),
+        )
+        .await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let stopped = call(&app, json!({ "kind": "stopTimer", "taskId": id })).await;
+        assert_eq!(stopped["ok"], true);
+        assert_eq!(stopped["value"]["isRunning"], false);
     }
 
     /// A file reaches a task through a comment — there is no attach-to-task endpoint anywhere —

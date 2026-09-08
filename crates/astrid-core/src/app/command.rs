@@ -257,6 +257,17 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// Start timing a task.
+    ///
+    /// The start time goes in the cache rather than in memory, so a timer survives a restart — on
+    /// Apple it does not, and a timer left running an hour ago is simply lost.
+    StartTimer {
+        task_id: String,
+    },
+    /// Stop timing, and record what the session was worth.
+    StopTimer {
+        task_id: String,
+    },
     /// The files on a task: its own, and its comments'.
     ///
     /// There is no "attach to task" endpoint anywhere — a file reaches a task by being uploaded and
