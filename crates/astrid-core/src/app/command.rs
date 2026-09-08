@@ -388,11 +388,11 @@ pub enum Command {
         task_id: String,
         file_id: String,
     },
-    /// Upload a file from this machine and post a comment carrying it.
+    /// Attach a file from this machine, and post the comment that carries it.
     ///
-    /// Needs a connection: the Outbox journal holds JSON, and a queued photo would be megabytes in
-    /// the write journal that still nobody else could see. Offline this fails rather than looking
-    /// like it worked.
+    /// Works offline like everything else. The bytes are copied into a pending directory and the
+    /// journal row names the copy — a journal holding a photograph is a journal nobody can read.
+    /// See [`crate::services::attachment`].
     AttachFile {
         task_id: String,
         /// A path on this machine, from the file picker.

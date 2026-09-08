@@ -58,6 +58,11 @@ pub mod kind {
     pub const UPDATE_TASK: &str = "updateTask";
     pub const DELETE_TASK: &str = "deleteTask";
     pub const COMPLETE_TASK: &str = "completeTask";
+    /// A file on its way to the server.
+    ///
+    /// The payload names a copy on disk rather than carrying the bytes: a journal row
+    /// holding a photograph is a journal nobody can read and a database nobody should have.
+    pub const UPLOAD_ATTACHMENT: &str = "uploadAttachment";
     pub const CREATE_COMMENT: &str = "createComment";
     pub const UPDATE_COMMENT: &str = "updateComment";
     pub const DELETE_COMMENT: &str = "deleteComment";

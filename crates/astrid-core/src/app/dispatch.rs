@@ -357,7 +357,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             path,
             content,
-        } => attach_file(app, &task_id, &path, content.as_deref()).await,
+        } => attach_file(app, &task_id, &path, content.as_deref()),
         Command::FilterOptions { list_id } => filter_options(app, &list_id),
         Command::SetFilter {
             list_id,
@@ -816,7 +816,7 @@ async fn download_attachment(app: &App, task_id: &str, file_id: &str) -> Respons
 ///
 /// One command rather than two, because a file uploaded with no comment naming it is a file nobody
 /// can reach: it exists on the server and appears on no task.
-async fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>) -> Response {
+fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
@@ -824,21 +824,40 @@ async fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>
     };
     // The list decides who may read the file afterwards, so the server is told which one.
     let list_id = task.effective_list_ids().into_iter().next();
-    let context = serde_json::json!({ "listId": list_id });
 
+    // A copy on disk and a temporary id, not a request. The file is on the task the moment
+    // somebody chooses it, and it goes when there is a connection — see the module note on
+    // `astrid_core::services::attachment`.
     let service = app.context.attachments(app.attachment_cache());
-    let uploaded = match service.upload(std::path::Path::new(path), context).await {
-        Ok(file) => file,
+    let (file, held) = match service.queue(std::path::Path::new(path)) {
+        Ok(queued) => queued,
         Err(error) => return Response::failed(error.into()),
     };
 
+    let entry = crate::outbox::build(
+        crate::outbox::kind::UPLOAD_ATTACHMENT,
+        serde_json::json!({
+            "localPath": held.to_string_lossy(),
+            "name": file.name,
+            "mimeType": file.mime_type,
+            "context": { "listId": list_id },
+        }),
+        &file.id,
+        app.clock.now(),
+    )
+    .for_temp_id(&file.id);
+    if let Err(error) = crate::outbox::journal::enqueue(&app.store, &entry) {
+        return Response::failed(error.into());
+    }
+
+    // Queued after the upload, so it goes second and finds the real file id waiting for it.
     let author = app.context.account().current_user_id().ok().flatten();
     answer(app.context.comments().post(
         task_id,
         content.unwrap_or_default(),
         author.as_deref(),
         crate::model::CommentType::Attachment,
-        Some(&uploaded),
+        Some(&file),
     ))
 }
 
@@ -2418,6 +2437,117 @@ mod tests {
             .as_array()
             .expect("containers")
             .is_empty());
+    }
+
+    // ── Attaching a file ─────────────────────────────────────────────────────────────────────
+
+    /// The whole offline story for attachments in one test: on the task immediately, in the
+    /// journal, and with a copy of the bytes that survives the original being deleted.
+    #[tokio::test]
+    async fn attaching_a_file_works_with_no_connection_at_all() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let scratch = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+        std::fs::write(&scratch, b"a receipt").expect("writes");
+
+        let attached = call(
+            &app,
+            json!({
+                "kind": "attachFile",
+                "taskId": task_id,
+                "path": scratch.to_string_lossy(),
+            }),
+        )
+        .await;
+        // The original goes, the way a downloads folder gets tidied.
+        std::fs::remove_file(&scratch).expect("removes");
+
+        assert_eq!(attached["ok"], true, "{attached}");
+        let queued = crate::outbox::journal::all(&app.store).expect("reads");
+        let upload = queued
+            .iter()
+            .find(|entry| entry.kind == crate::outbox::kind::UPLOAD_ATTACHMENT)
+            .expect("the upload is queued");
+        let held = upload.payload["localPath"].as_str().expect("a path");
+        assert_eq!(
+            std::fs::read(held).expect("the copy is still there"),
+            b"a receipt",
+            "the bytes were copied, not merely pointed at"
+        );
+
+        // And the comment that carries it names the file by the id the upload will resolve.
+        let comment = queued
+            .iter()
+            .find(|entry| entry.kind == crate::outbox::kind::CREATE_COMMENT)
+            .expect("the comment is queued");
+        assert_eq!(
+            comment.payload["body"]["fileId"].as_str(),
+            upload.temp_id.as_deref(),
+        );
+    }
+
+    /// The upload has to be sent before the comment that names its file, which is what the order
+    /// in the journal decides.
+    #[tokio::test]
+    async fn the_upload_is_queued_before_the_comment_that_carries_it() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+        let scratch = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+        std::fs::write(&scratch, b"a receipt").expect("writes");
+
+        call(
+            &app,
+            json!({
+                "kind": "attachFile",
+                "taskId": task_id,
+                "path": scratch.to_string_lossy(),
+            }),
+        )
+        .await;
+        let _ = std::fs::remove_file(&scratch);
+
+        let kinds: Vec<String> = crate::outbox::journal::all(&app.store)
+            .expect("reads")
+            .into_iter()
+            .map(|entry| entry.kind)
+            .collect();
+        let upload = kinds
+            .iter()
+            .position(|kind| kind == crate::outbox::kind::UPLOAD_ATTACHMENT)
+            .expect("an upload");
+        let comment = kinds
+            .iter()
+            .position(|kind| kind == crate::outbox::kind::CREATE_COMMENT)
+            .expect("a comment");
+        assert!(upload < comment);
+    }
+
+    /// A file that is not there cannot be attached, and saying so beats a comment pointing at
+    /// nothing.
+    #[tokio::test]
+    async fn attaching_a_file_that_is_not_there_fails_rather_than_queueing_nothing() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let attached = call(
+            &app,
+            json!({
+                "kind": "attachFile",
+                "taskId": task_id,
+                "path": "C:\\nowhere\\nothing.png",
+            }),
+        )
+        .await;
+
+        assert_eq!(attached["ok"], false);
+        assert!(!crate::outbox::journal::all(&app.store)
+            .expect("reads")
+            .iter()
+            .any(|entry| entry.kind == crate::outbox::kind::UPLOAD_ATTACHMENT));
     }
 
     // ── My Tasks ─────────────────────────────────────────────────────────────────────────────

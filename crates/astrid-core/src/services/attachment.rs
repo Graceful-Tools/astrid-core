@@ -11,13 +11,20 @@
 //! gathers, and why the Mac's Attachments section was empty on nearly every task until it started
 //! doing the same.
 //!
-//! ## Uploading needs a connection, and says so
+//! ## An upload waits on disk, not in the journal
 //!
-//! Everything else in this app writes through the Outbox and works on a train. An upload cannot:
-//! the journal holds JSON, and a queue entry carrying a photo would put megabytes into the write
-//! journal and still not be an attachment anybody else could see. Apple keeps a parallel disk
-//! queue for this; that is a bigger machine than it looks, and until it exists here an upload
-//! offline fails honestly rather than appearing to have worked.
+//! Everything in this app writes through the Outbox, and an upload is no exception — but the
+//! journal holds JSON, and a queue row carrying a photograph is a row nobody can read in a
+//! database nobody should have. So the bytes are copied into a pending directory beside the
+//! downloads and the journal row names the copy.
+//!
+//! The copy is what makes it honest. Somebody who attaches a file and shuts the lid expects the
+//! file to arrive; the original may have been renamed, moved or deleted by then, and a queue that
+//! remembered only a path would send whatever is at that path tomorrow, or nothing at all.
+//!
+//! The file's id is temporary until the server answers, which is what lets the comment carrying it
+//! be queued in the same breath: the Outbox rewrites every temporary id in a payload once the
+//! write that produces it succeeds, so the comment finds the real file id without knowing it.
 //!
 //! ## A download is a file on disk
 //!
@@ -94,49 +101,49 @@ impl AttachmentService {
         Ok(path)
     }
 
-    /// Upload a file from disk and answer with the id the server gave it.
+    /// Take a copy of a file and answer with what it will be, once it is sent.
     ///
-    /// `context` is the JSON the server wants beside the file — `{"listId": "…"}` — which is how it
-    /// decides who may read it afterwards.
-    pub async fn upload(
-        &self,
-        path: &Path,
-        context: serde_json::Value,
-    ) -> Result<crate::model::SecureFile> {
+    /// The copy is the point. Somebody who attaches a file and closes their laptop expects the
+    /// file to arrive, and the original may have been renamed, moved or deleted by then — a queue
+    /// that remembered only a path would upload whatever is at that path a day later, or nothing.
+    ///
+    /// The id is a temporary one, so the comment that carries this file can be queued in the same
+    /// breath: the Outbox rewrites it to the real id the moment the upload answers.
+    pub fn queue(&self, path: &Path) -> Result<(SecureFile, PathBuf)> {
         let bytes =
             std::fs::read(path).map_err(|error| ServiceError::LocalFile(error.to_string()))?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("attachment")
-            .to_string();
-        let mime = mime_for(path);
+        let name = file_name(path);
+        let id = crate::outbox::new_temp_id();
+        let pending = self.pending_dir();
+        std::fs::create_dir_all(&pending)
+            .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
+        let held = pending.join(&id);
+        std::fs::write(&held, &bytes)
+            .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
 
-        let boundary = format!("astrid-{}", crate::outbox::new_temp_id());
-        let body = multipart(&boundary, &name, &mime, &bytes, &context.to_string());
-
-        let request = self
-            .context
-            .client
-            .post(endpoints::REQUEST_UPLOAD)
-            .bytes(format!("multipart/form-data; boundary={boundary}"), body);
-        let answer = self.context.client.send(request).await?;
-
-        let id = answer
-            .get("fileId")
-            .and_then(|value| value.as_str())
-            .ok_or_else(|| {
-                ServiceError::Api(crate::api::ApiError::Decode(
-                    "the upload answered without a file id".into(),
-                ))
-            })?;
-        Ok(SecureFile {
-            id: id.to_string(),
-            name,
-            size: bytes.len() as i64,
-            mime_type: mime,
-        })
+        Ok((
+            SecureFile {
+                id,
+                name,
+                size: bytes.len() as i64,
+                mime_type: mime_for(path),
+            },
+            held,
+        ))
     }
+
+    /// Where files wait for a connection. Beside the downloads, under the same cache directory.
+    pub fn pending_dir(&self) -> PathBuf {
+        self.cache_dir.join("pending")
+    }
+}
+
+/// The name to send, or a plain one when the path has none worth sending.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("attachment")
+        .to_string()
 }
 
 /// Where a downloaded file is kept.
@@ -157,7 +164,13 @@ fn cached_path(cache_dir: &Path, file: &SecureFile) -> PathBuf {
 ///
 /// Written out rather than pulled from a crate because it is twenty lines and the alternative is a
 /// dependency in the core that exists to build a string.
-fn multipart(boundary: &str, file_name: &str, mime: &str, bytes: &[u8], context: &str) -> Vec<u8> {
+pub(crate) fn multipart(
+    boundary: &str,
+    file_name: &str,
+    mime: &str,
+    bytes: &[u8],
+    context: &str,
+) -> Vec<u8> {
     let mut body = Vec::with_capacity(bytes.len() + 512);
     let mut push = |text: &str| body.extend_from_slice(text.as_bytes());
 

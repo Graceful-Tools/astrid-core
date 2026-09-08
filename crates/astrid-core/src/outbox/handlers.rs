@@ -66,6 +66,7 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::CREATE_TASK => create_task(client, store, entry).await,
         kind::UPDATE_TASK | kind::COMPLETE_TASK => update_task(client, store, entry).await,
         kind::DELETE_TASK => delete_task(client, store, entry).await,
+        kind::UPLOAD_ATTACHMENT => upload_attachment(client, store, entry).await,
         kind::CREATE_COMMENT => create_comment(client, store, entry).await,
         kind::UPDATE_COMMENT => update_comment(client, store, entry).await,
         kind::DELETE_COMMENT => delete_comment(client, store, entry).await,
@@ -293,6 +294,59 @@ async fn send_chat_message(client: &ApiClient, store: &Store, entry: &Entry) -> 
     }
 }
 
+/// Send a queued file, and hand its real id to whatever is waiting for it.
+///
+/// The comment carrying this attachment is already in the journal, naming the file by its
+/// temporary id; recording the mapping is what turns that into the real one. The copy on disk is
+/// removed only on success or on a permanent failure — a retry needs the bytes.
+async fn upload_attachment(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let payload = &entry.payload;
+    let text = |key: &str| payload.get(key).and_then(|value| value.as_str());
+    let (Some(path), Some(name)) = (text("localPath"), text("name")) else {
+        return Outcome::Dead("an upload with no file to send".into());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        // The copy is gone: a cache somebody cleared, or a half-finished sign-out. There is
+        // nothing left to send and no amount of retrying will bring it back.
+        Err(error) => return Outcome::Dead(format!("the queued file is gone: {error}")),
+    };
+    let mime = text("mimeType").unwrap_or("application/octet-stream");
+    let context = payload
+        .get("context")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let boundary = format!("astrid-{}", entry.client_request_id);
+    let body =
+        crate::services::attachment::multipart(&boundary, name, mime, &bytes, &context.to_string());
+    let request = client
+        .post(endpoints::REQUEST_UPLOAD)
+        .bytes(format!("multipart/form-data; boundary={boundary}"), body);
+
+    match client.send(request).await {
+        Ok(value) => {
+            let Some(file_id) = value.get("fileId").and_then(|value| value.as_str()) else {
+                return Outcome::Retry("the upload answered without a file id".into());
+            };
+            if let Some(temp_id) = &entry.temp_id {
+                let _ = store.record_id_mapping(temp_id, file_id, chrono::Utc::now());
+            }
+            let _ = std::fs::remove_file(path);
+            Outcome::producing("fileId", file_id)
+        }
+        Err(error) => {
+            let outcome = from_error(error);
+            // Permanently refused — too large, or a list this account cannot write to. Keeping the
+            // bytes would leave them in the cache directory for ever with nothing to send them.
+            if matches!(outcome, Outcome::Dead(_)) {
+                let _ = std::fs::remove_file(path);
+            }
+            outcome
+        }
+    }
+}
+
 async fn create_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
     let request = client.post(endpoints::LISTS).value(with_client_request_id(
         body(entry),
@@ -400,6 +454,91 @@ mod tests {
 
     fn entry(kind: &str, payload: serde_json::Value) -> Entry {
         Entry::new("e1", kind, payload, "temp_abc", t0())
+    }
+
+    fn a_queued_file(bytes: &[u8]) -> std::path::PathBuf {
+        let held = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+        std::fs::write(&held, bytes).expect("writes");
+        held
+    }
+
+    /// The temporary id is what the comment queued beside this names its file by, so the mapping
+    /// is the whole point: without it the comment reaches the server naming a file id that never
+    /// existed.
+    #[tokio::test]
+    async fn a_queued_upload_sends_the_file_and_hands_over_its_real_id() {
+        let (client, store, transport) = fixture(StubTransport::new().push_json(
+            "/api/v1/secure-upload/request-upload",
+            200,
+            serde_json::json!({ "fileId": "file_real" }),
+        ));
+        let held = a_queued_file(b"a receipt");
+
+        let entry = entry(
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": held.to_string_lossy(),
+                "name": "receipt.png",
+                "mimeType": "image/png",
+                "context": { "listId": "l1" },
+            }),
+        )
+        .for_temp_id("temp_abc");
+        let outcome = perform(&client, &store, &entry).await;
+
+        assert!(
+            matches!(outcome, Outcome::Done(Some(ref result)) if result["fileId"] == "file_real")
+        );
+        assert_eq!(store.resolve_id("temp_abc").expect("resolves"), "file_real");
+        assert!(!held.exists(), "the copy is not kept once it has been sent");
+
+        let sent = transport.requests();
+        let body = String::from_utf8_lossy(sent[0].body.as_deref().unwrap_or_default()).to_string();
+        assert!(body.contains("receipt.png"), "{body}");
+        assert!(body.contains("a receipt"), "{body}");
+        assert!(body.contains("l1"), "the list that decides who may read it");
+    }
+
+    /// A cache somebody cleared, or a half-finished sign-out. There is nothing left to send, and
+    /// no amount of retrying brings it back.
+    #[tokio::test]
+    async fn an_upload_whose_copy_is_gone_is_dead_rather_than_retried_for_ever() {
+        let (client, store, _) = fixture(StubTransport::new());
+
+        let entry = entry(
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": "C:\\nowhere\\nothing.png",
+                "name": "nothing.png",
+            }),
+        );
+        let outcome = perform(&client, &store, &entry).await;
+
+        assert!(matches!(outcome, Outcome::Dead(_)));
+    }
+
+    /// Being offline is the case this whole path exists for: the bytes stay, and the next drain
+    /// sends them.
+    #[tokio::test]
+    async fn an_upload_that_cannot_reach_the_server_keeps_the_file_for_next_time() {
+        let (client, store, _) = fixture(StubTransport::new().fallback(Err(
+            crate::api::TransportError::Unreachable("no network".into()),
+        )));
+        let held = a_queued_file(b"a receipt");
+
+        let entry = entry(
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": held.to_string_lossy(),
+                "name": "receipt.png",
+                "mimeType": "image/png",
+            }),
+        );
+        let outcome = perform(&client, &store, &entry).await;
+
+        assert!(matches!(outcome, Outcome::Retry(_)));
+        assert!(held.exists(), "a retry needs the bytes");
+        std::fs::remove_file(&held).expect("removes");
     }
 
     #[tokio::test]
