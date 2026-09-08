@@ -257,6 +257,14 @@ pub enum Command {
     SearchUsers {
         query: String,
     },
+    /// Whether the first-run tour has been seen on this machine.
+    ///
+    /// In the cache rather than in the account: it is about this installation — where its hotkey
+    /// is, what its palette does — and somebody who has used the app for a year on a laptop still
+    /// wants to be told those things the first time they open it on a desktop.
+    HasSeenTour,
+    /// Remember that the tour has been seen.
+    TourSeen,
     /// Everything one box can find: commands, lists, tasks, ranked.
     ///
     /// The matcher is the Mac's, character for character — see [`crate::palette`]. The ranking is

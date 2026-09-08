@@ -207,6 +207,18 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.comments().refresh(&task_id).await)
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::HasSeenTour => Response::ok(serde_json::json!({
+            "seen": app
+                .store
+                .metadata(TOUR_KEY)
+                .ok()
+                .flatten()
+                .is_some_and(|value| value == "yes"),
+        })),
+        Command::TourSeen => match app.store.set_metadata(TOUR_KEY, "yes") {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
         Command::Palette { query } => {
             let lists = app.store.lists().unwrap_or_default();
             let tasks = app.store.tasks().unwrap_or_default();
@@ -1019,6 +1031,12 @@ fn reminder_options(app: &App, task_id: &str) -> Response {
         "picks": rows::reminder_picks::options(&task, app.clock.now()),
     }))
 }
+
+/// Where "the tour has been seen" is remembered.
+///
+/// The cache, so it belongs to this installation: somebody who has used the app for a year on a
+/// laptop still wants to be shown where the hotkey is the first time they open it on a desktop.
+const TOUR_KEY: &str = "tour.seen";
 
 /// The key a shown reminder is remembered under.
 ///
@@ -2055,6 +2073,22 @@ mod tests {
 
         let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
         assert_eq!(found["value"]["total"], 0);
+    }
+
+    /// Once. A tour that came back every launch would be the first thing anybody turned off.
+    #[tokio::test]
+    async fn the_tour_is_shown_once() {
+        let app = app_with(StubTransport::new());
+        assert_eq!(
+            call(&app, json!({ "kind": "hasSeenTour" })).await["value"]["seen"],
+            false
+        );
+
+        call(&app, json!({ "kind": "tourSeen" })).await;
+        assert_eq!(
+            call(&app, json!({ "kind": "hasSeenTour" })).await["value"]["seen"],
+            true
+        );
     }
 
     /// The palette answers from the cache, ranked, with commands first — so the keyboard action
