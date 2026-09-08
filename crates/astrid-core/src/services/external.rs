@@ -42,10 +42,15 @@ pub enum Provider {
 
 impl Provider {
     /// The name the API knows it by.
+    ///
+    /// GitHub is `GITHUB_ISSUES` over the wire, which reads oddly beside the enum but is the
+    /// server's own name for it — the one `/api/v1/integrations` validates against and the one the
+    /// Apple clients send. Anything else is a 400 on disconnect and a provider that never shows as
+    /// connected.
     pub fn wire(self) -> &'static str {
         match self {
             Provider::GoogleTasks => "GOOGLE_TASKS",
-            Provider::GitHub => "GITHUB",
+            Provider::GitHub => "GITHUB_ISSUES",
         }
     }
 
@@ -634,11 +639,15 @@ mod tests {
         assert!(ledger::tombstoned(&fixture.store, PROVIDER_KEY).is_empty());
     }
 
+    /// The names are the server's, not ours. `GITHUB_ISSUES` is what `PROVIDER_CAPABILITY` in
+    /// astrid-web's `/api/v1/integrations` route accepts and what the Apple clients send; anything
+    /// else is a 400 on disconnect and a provider that never reads as connected.
     #[test]
     fn a_provider_travels_under_the_name_the_api_knows() {
         assert_eq!(Provider::GoogleTasks.wire(), "GOOGLE_TASKS");
-        assert_eq!(Provider::GitHub.wire(), "GITHUB");
+        assert_eq!(Provider::GitHub.wire(), "GITHUB_ISSUES");
         assert_eq!(Provider::GoogleTasks.slug(), "google");
+        assert_eq!(Provider::GitHub.slug(), "github");
     }
 
     /// The whole point of the ledger: a task deleted here takes its twin with it, on a later pass,

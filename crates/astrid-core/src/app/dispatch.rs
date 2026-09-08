@@ -2264,8 +2264,37 @@ mod tests {
             .is_empty());
     }
 
+    /// The panel reads "connected" by matching the server's own provider name, so a name we
+    /// invented shows a connected account as disconnected and offers a Connect button instead.
+    #[tokio::test]
+    async fn a_connected_provider_reads_as_connected_under_the_servers_name_for_it() {
+        let app = app_with(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/integrations",
+                    200,
+                    json!({ "integrations": [{ "provider": "GITHUB_ISSUES" }] }),
+                )
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        let made = call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let panel = call(&app, json!({ "kind": "externalSync", "listId": id })).await;
+        let providers = panel["value"]["providers"].as_array().expect("providers");
+        let github = providers
+            .iter()
+            .find(|provider| provider["provider"] == "git_hub")
+            .expect("GitHub is one of the two");
+        assert_eq!(github["connected"], true);
+    }
+
     /// A pull applies what came back and commits the cursor only after it has — a client killed
-    /// mid-pass re-pulls rather than skipping what it never wrote down.
+    /// mid-pass re-pulls rather than skipping what it never wrote down.""
     #[tokio::test]
     async fn a_google_pass_applies_what_it_pulled_and_then_commits() {
         let transport = StubTransport::new()
