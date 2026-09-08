@@ -376,6 +376,28 @@ mod tests {
         assert_eq!(fixture.secure.get(SESSION_COOKIE_KEY).await, None);
     }
 
+    /// Sync state is per-account. A tombstone or a queued remote deletion left behind would have
+    /// the next person on this machine deleting a stranger's Google task.
+    #[tokio::test]
+    async fn signing_out_takes_the_sync_ledger_with_it() {
+        let fixture = fixture(StubTransport::new());
+        crate::external::ledger::record_deletion(&fixture.store, "google", "r1", "c1")
+            .expect("records");
+        crate::external::ledger::remember_links(
+            &fixture.store,
+            "google",
+            "c1",
+            [("t1".to_string(), "r1".to_string())],
+        )
+        .expect("remembers");
+
+        fixture.service.sign_out().await.expect("signs out");
+
+        assert!(crate::external::ledger::pending(&fixture.store, "google").is_empty());
+        assert!(crate::external::ledger::tombstoned(&fixture.store, "google").is_empty());
+        assert!(crate::external::ledger::twin(&fixture.store, "google", "t1").is_none());
+    }
+
     #[tokio::test]
     async fn searching_for_people_caches_what_it_finds() {
         let fixture = fixture(StubTransport::new().push_json(

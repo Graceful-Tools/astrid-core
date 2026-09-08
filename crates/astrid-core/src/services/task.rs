@@ -427,8 +427,12 @@ impl TaskService {
     }
 
     /// Delete a task. Gone from the cache immediately; the server hears about it when it can.
+    ///
+    /// If the task was mirrored to Google, its twin is written down first — see
+    /// [`crate::external::ledger`] for why that has to happen here and not in the sync pass.
     pub fn delete(&self, id: &str) -> Result<()> {
         let now = self.context.clock.now();
+        self.record_external_deletion(id);
         self.context.store.delete_task(id)?;
 
         let entry = outbox::build(
@@ -443,6 +447,29 @@ impl TaskService {
         };
         journal::enqueue(&self.context.store, &entry)?;
         Ok(())
+    }
+
+    /// Note a mirrored task's remote twin before the task goes.
+    ///
+    /// The server's link row cascades away with the task, so after this there is nothing left to
+    /// say which remote item it was — the capture has to happen at delete time or not at all. What
+    /// it reads is the link cache the last sync pass wrote down, because deleting is local and
+    /// offline and there is no server to ask.
+    ///
+    /// Best effort on purpose: a task nobody mirrored has nothing to record, and a ledger that
+    /// could not be written must not stop somebody deleting a task.
+    fn record_external_deletion(&self, id: &str) {
+        use crate::external::ledger;
+        let store = &self.context.store;
+        let Some((remote_id, container_id)) = ledger::twin(store, "google", id) else {
+            return;
+        };
+        // Already tombstoned means the deletion came from over there and arrived here as a pull.
+        // Recording it again would queue this device to delete an item that is already gone.
+        if !ledger::tombstoned(store, "google").contains(&remote_id) {
+            let _ = ledger::record_deletion(store, "google", &remote_id, &container_id);
+        }
+        let _ = ledger::forget_link(store, "google", id);
     }
 
     /// Move a task between lists.
@@ -632,6 +659,77 @@ mod tests {
 
     fn entries(store: &Store) -> Vec<crate::outbox::Entry> {
         journal::all(store).expect("reads")
+    }
+
+    // ── Deleting something that is mirrored ──────────────────────────────────────────────────
+
+    /// The capture has to happen here. The server's link row cascades away with the task, so a
+    /// sync pass asked afterwards has nothing left to tell it which remote item this was.
+    #[test]
+    fn deleting_a_mirrored_task_writes_down_the_twin_before_the_task_goes() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        crate::external::ledger::remember_links(
+            &fixture.store,
+            "google",
+            "tasklist-1",
+            [("t1".to_string(), "r1".to_string())],
+        )
+        .expect("remembers");
+        fixture
+            .store
+            .upsert_task(&Task::new("t1", "Buy milk"))
+            .expect("writes");
+
+        fixture.service.delete("t1").expect("deletes");
+
+        assert_eq!(
+            crate::external::ledger::pending(&fixture.store, "google"),
+            vec![("r1".to_string(), "tasklist-1".to_string())],
+            "the next pass has what it needs to remove the twin"
+        );
+        assert!(
+            crate::external::ledger::twin(&fixture.store, "google", "t1").is_none(),
+            "and the link is spent"
+        );
+    }
+
+    /// A task nobody mirrored has no twin to remove, and queueing one would have the next pass
+    /// deleting an id it made up.
+    #[test]
+    fn deleting_an_unmirrored_task_queues_nothing() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        fixture
+            .store
+            .upsert_task(&Task::new("t1", "Buy milk"))
+            .expect("writes");
+
+        fixture.service.delete("t1").expect("deletes");
+
+        assert!(crate::external::ledger::pending(&fixture.store, "google").is_empty());
+    }
+
+    /// The deletion came from over there and arrived as a pull. Echoing it back would have this
+    /// device deleting an item that is already gone.
+    #[test]
+    fn a_deletion_that_came_from_the_other_side_is_not_echoed_back() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        crate::external::ledger::remember_links(
+            &fixture.store,
+            "google",
+            "tasklist-1",
+            [("t1".to_string(), "r1".to_string())],
+        )
+        .expect("remembers");
+        crate::external::ledger::record_tombstone(&fixture.store, "google", "r1")
+            .expect("tombstones");
+        fixture
+            .store
+            .upsert_task(&Task::new("t1", "Buy milk"))
+            .expect("writes");
+
+        fixture.service.delete("t1").expect("deletes");
+
+        assert!(crate::external::ledger::pending(&fixture.store, "google").is_empty());
     }
 
     // ── Creating ─────────────────────────────────────────────────────────────────────────────

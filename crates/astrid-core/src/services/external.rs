@@ -12,15 +12,14 @@
 //! **Google Tasks is the client's job.** The server holds the tokens and proxies the API, but the
 //! pulling and pushing are the client's — "clients poll on foreground/nudge", as the route says.
 //!
-//! ## What this pass deliberately does not do yet
+//! ## Deletions go through a ledger, and the pass is what feeds it
 //!
-//! It does not delete a remote twin when a task is deleted here. Apple captures the link at delete
-//! time in a local ledger, because the server's link row cascades away with the task and the
-//! evidence is gone by the next pass. Until that ledger exists here, a deleted task simply stops
-//! being pushed and its Google twin stays — which is the conservative failure: nothing is lost,
-//! and somebody can delete it there. Written up in `docs/PARITY.md` rather than left as a surprise.
+//! The server's link row cascades away with the task, so a deletion has to be captured *at delete
+//! time* — and deleting is local, offline and synchronous, with no server to ask. So every pass
+//! writes down the links it fetched ([`ledger::remember_links`]), a deletion reads them, and the
+//! next pass removes the twin and refuses to import the id again. See [`crate::external::ledger`].
 //!
-//! It also acts on a remote deletion only when Google says so explicitly (`deleted`), never on
+//! It acts on a remote deletion only when Google says so explicitly (`deleted`), never on
 //! absence from a page. A cursor pull is not a full listing, and deleting local tasks because a
 //! page did not mention them is how a dropped request wipes somebody's list.
 
@@ -30,6 +29,7 @@ use serde_json::json;
 use super::{Context, Result};
 use crate::api::endpoints;
 use crate::external::decisions::{self, PullOutcome};
+use crate::external::ledger;
 use crate::model::{date, Task};
 
 /// Which system.
@@ -100,6 +100,9 @@ struct RemoteItem {
     parent: Option<String>,
 }
 
+/// The name the ledger files Google's deletions under.
+const PROVIDER_KEY: &str = "google";
+
 /// What one pass did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +110,8 @@ pub struct PassReport {
     pub pulled: usize,
     pub applied: usize,
     pub deleted_locally: usize,
+    /// Twins removed over there, for tasks deleted here.
+    pub removed_remotely: usize,
     pub pushed: usize,
     /// True when the page was cut short, so nothing may be inferred from absence.
     pub truncated: bool,
@@ -122,9 +127,46 @@ impl ExternalSyncService {
     }
 
     /// Which providers this account has connected.
+    ///
+    /// Also the moment the server's tombstones arrive — the deletions made on the web and on other
+    /// devices — so this device stops re-importing what somebody deleted elsewhere.
     pub async fn status(&self) -> Result<serde_json::Value> {
         let request = self.context.client.get(endpoints::INTEGRATIONS);
-        Ok(self.context.client.send(request).await?)
+        let answer = self.context.client.send(request).await?;
+        self.merge_server_tombstones(&answer)?;
+        Ok(answer)
+    }
+
+    /// Take the tombstones out of Google's integration metadata.
+    ///
+    /// They arrive as one comma-separated string, which is how the server stores its metadata, and
+    /// they go into their own store — never this device's — so a large merge cannot evict a local
+    /// deletion. See [`crate::external::ledger`].
+    fn merge_server_tombstones(&self, answer: &serde_json::Value) -> Result<()> {
+        let Some(integrations) = answer
+            .get("integrations")
+            .and_then(|value| value.as_array())
+        else {
+            return Ok(());
+        };
+        let Some(google) = integrations.iter().find(|integration| {
+            integration.get("provider").and_then(|value| value.as_str())
+                == Some(Provider::GoogleTasks.wire())
+        }) else {
+            return Ok(());
+        };
+        let ids: Vec<String> = google
+            .get("metadata")
+            .and_then(|metadata| metadata.get("tombstonedRemoteIds"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect();
+        ledger::merge_server_tombstones(&self.context.store, PROVIDER_KEY, &ids)?;
+        Ok(())
     }
 
     /// The URL to open in a browser to connect a provider.
@@ -230,11 +272,51 @@ impl ExternalSyncService {
         Ok(())
     }
 
-    /// One Google pass over one link: pull what changed there, then push what changed here.
+    /// One Google pass over one link: remove what was deleted here, pull, then push.
+    ///
+    /// Deletions first. A pull that ran before them can re-import the very task somebody just
+    /// deleted — the tombstone stops that, but only if the pull is not racing the removal.
     pub async fn sync_google_link(&self, link: &ExternalLink) -> Result<PassReport> {
+        let removed = self.remove_deleted_twins(link).await?;
         let mut report = self.pull(link).await?;
+        report.removed_remotely = removed;
         report.pushed = self.push(link).await?;
         Ok(report)
+    }
+
+    /// Remove the remote twins of tasks deleted on this machine.
+    ///
+    /// A twin that is already gone counts as done: 404 and 410 both mean the work is finished, and
+    /// retrying for ever because somebody deleted it over there too is not a failure worth keeping.
+    /// Anything else is left pending, so a server having a bad minute does not lose the deletion.
+    async fn remove_deleted_twins(&self, link: &ExternalLink) -> Result<usize> {
+        let store = &self.context.store;
+        let mut removed = 0;
+        for (remote_id, container_id) in ledger::pending(store, PROVIDER_KEY) {
+            // This container's only: a pass for one list must not delete out of another.
+            if container_id != link.remote_container_id {
+                continue;
+            }
+            let request = self
+                .context
+                .client
+                .delete(endpoints::GOOGLE_TASKS)
+                .query("linkId", Some(link.id.clone()))
+                .query("remoteId", Some(remote_id.clone()));
+            match self.context.client.send(request).await {
+                Ok(_) => {
+                    ledger::clear_pending(store, PROVIDER_KEY, &remote_id)?;
+                    removed += 1;
+                }
+                Err(crate::api::ApiError::Http { status, .. })
+                    if decisions::remote_already_gone(status) =>
+                {
+                    ledger::clear_pending(store, PROVIDER_KEY, &remote_id)?;
+                }
+                Err(_) => {}
+            }
+        }
+        Ok(removed)
     }
 
     /// Bring in what changed on the other side.
@@ -268,6 +350,7 @@ impl ExternalSyncService {
         };
 
         let task_links = self.task_links(&link.remote_container_id).await?;
+        let tombstoned = ledger::tombstoned(&self.context.store, PROVIDER_KEY);
         for item in &items {
             let linked_task_id = task_links.get(&item.remote_id).cloned();
             let local = linked_task_id
@@ -278,7 +361,7 @@ impl ExternalSyncService {
                 item.deleted.unwrap_or(false),
                 linked_task_id.is_some(),
                 local.is_some(),
-                false,
+                tombstoned.contains(&item.remote_id),
             );
             match outcome {
                 PullOutcome::DeleteLocalTwin => {
@@ -286,6 +369,9 @@ impl ExternalSyncService {
                         self.context.store.delete_task(&task.id)?;
                         report.deleted_locally += 1;
                     }
+                    // Tombstoned, not pushed back: the deletion came from over there, and echoing
+                    // it would be this device deleting an item that is already gone.
+                    ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &item.remote_id)?;
                 }
                 PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                 PullOutcome::Apply => {
@@ -339,6 +425,15 @@ impl ExternalSyncService {
                 map.insert(remote.to_string(), task.to_string());
             }
         }
+        // Written down for the delete-time capture: a deletion cannot ask the server which remote
+        // item a task was, so a pass has to have said so first.
+        ledger::remember_links(
+            &self.context.store,
+            PROVIDER_KEY,
+            container_id,
+            map.iter()
+                .map(|(remote, task)| (task.clone(), remote.clone())),
+        )?;
         Ok(map)
     }
 
@@ -450,10 +545,195 @@ impl ExternalSyncService {
 mod tests {
     use super::*;
 
+    use crate::api::{ApiClient, StubTransport};
+    use crate::model::date;
+    use crate::platform::{FixedClock, MemorySecureStore};
+    use crate::store::Store;
+    use std::sync::Arc;
+
+    struct Fixture {
+        service: ExternalSyncService,
+        store: Arc<Store>,
+        transport: Arc<StubTransport>,
+    }
+
+    /// A pass over one link, with the four requests it makes scripted in the order it makes them:
+    /// the deletion, the pull, and the task-link fetch each of pull and push does.
+    fn fixture(delete_status: u16, pulled: serde_json::Value) -> Fixture {
+        let transport = Arc::new(
+            StubTransport::new()
+                // The deletion goes first, so its answer is queued first.
+                .push_json("google/tasks", delete_status, json!({}))
+                .push_json("google/tasks", 200, json!({ "items": pulled }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "taskLinks": [] })),
+        );
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let context = Context::new(
+            Arc::new(ApiClient::new(
+                "https://astrid.cc",
+                transport.clone(),
+                Arc::new(MemorySecureStore::new()),
+            )),
+            store.clone(),
+            Arc::new(FixedClock::at(
+                date::parse("2026-09-07T12:00:00Z").expect("an instant"),
+            )),
+        );
+        Fixture {
+            service: context.external(),
+            store,
+            transport,
+        }
+    }
+
+    fn link() -> ExternalLink {
+        ExternalLink {
+            id: "link-1".into(),
+            astrid_list_id: "l1".into(),
+            remote_container_id: "tasklist-1".into(),
+            cursor: None,
+        }
+    }
+
+    /// A deletion made on the web reaches this device as metadata on the integration. Without
+    /// this, the next pull imports it again and somebody's deleted task is back.
+    #[tokio::test]
+    async fn the_servers_tombstones_arrive_with_the_status() {
+        let fixture = fixture(200, json!([]));
+        let answer = json!({
+            "integrations": [{
+                "provider": "GOOGLE_TASKS",
+                "metadata": { "tombstonedRemoteIds": "r1, r2" },
+            }],
+        });
+        fixture
+            .service
+            .merge_server_tombstones(&answer)
+            .expect("merges");
+
+        let held = ledger::tombstoned(&fixture.store, PROVIDER_KEY);
+        assert!(held.contains(&"r1".to_string()));
+        assert!(held.contains(&"r2".to_string()));
+    }
+
+    /// An account with no Google integration, and an account whose metadata has no tombstones,
+    /// both have to be ordinary rather than an error.
+    #[tokio::test]
+    async fn a_status_without_tombstones_is_not_a_problem() {
+        let fixture = fixture(200, json!([]));
+        fixture
+            .service
+            .merge_server_tombstones(&json!({ "integrations": [] }))
+            .expect("merges");
+        fixture
+            .service
+            .merge_server_tombstones(&json!({}))
+            .expect("merges");
+
+        assert!(ledger::tombstoned(&fixture.store, PROVIDER_KEY).is_empty());
+    }
+
     #[test]
     fn a_provider_travels_under_the_name_the_api_knows() {
         assert_eq!(Provider::GoogleTasks.wire(), "GOOGLE_TASKS");
         assert_eq!(Provider::GitHub.wire(), "GITHUB");
         assert_eq!(Provider::GoogleTasks.slug(), "google");
+    }
+
+    /// The whole point of the ledger: a task deleted here takes its twin with it, on a later pass,
+    /// with nothing but what was written down at delete time.
+    #[tokio::test]
+    async fn a_task_deleted_here_has_its_twin_removed_over_there() {
+        let fixture = fixture(200, json!([]));
+        ledger::record_deletion(&fixture.store, PROVIDER_KEY, "r1", "tasklist-1").expect("records");
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.removed_remotely, 1);
+        assert!(
+            ledger::pending(&fixture.store, PROVIDER_KEY).is_empty(),
+            "the work is done, so it stops being pending"
+        );
+        assert!(
+            ledger::tombstoned(&fixture.store, PROVIDER_KEY).contains(&"r1".to_string()),
+            "but the deletion stays a fact, or the next pull brings it back"
+        );
+        let sent = fixture.transport.requests();
+        assert_eq!(sent[0].method.as_str(), "DELETE");
+        assert!(sent[0].url.contains("remoteId=r1"), "{}", sent[0].url);
+    }
+
+    /// A pass covers one container. Deleting out of another would remove somebody's task from a
+    /// list this pass has nothing to do with.
+    #[tokio::test]
+    async fn a_pending_deletion_from_another_container_is_left_alone() {
+        let fixture = fixture(200, json!([]));
+        ledger::record_deletion(&fixture.store, PROVIDER_KEY, "r1", "other-list").expect("records");
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.removed_remotely, 0);
+        assert_eq!(ledger::pending(&fixture.store, PROVIDER_KEY).len(), 1);
+    }
+
+    /// Somebody deleted it over there too. That is the work finished, not a failure to retry for
+    /// ever.
+    #[tokio::test]
+    async fn a_twin_that_is_already_gone_stops_being_retried() {
+        let fixture = fixture(404, json!([]));
+        ledger::record_deletion(&fixture.store, PROVIDER_KEY, "r1", "tasklist-1").expect("records");
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.removed_remotely, 0, "nothing was removed by us");
+        assert!(ledger::pending(&fixture.store, PROVIDER_KEY).is_empty());
+    }
+
+    /// A server having a bad minute must not lose a deletion — the twin would stay for ever.
+    #[tokio::test]
+    async fn a_deletion_the_server_refused_is_kept_for_the_next_pass() {
+        let fixture = fixture(500, json!([]));
+        ledger::record_deletion(&fixture.store, PROVIDER_KEY, "r1", "tasklist-1").expect("records");
+
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(ledger::pending(&fixture.store, PROVIDER_KEY).len(), 1);
+    }
+
+    /// Without this, the deletion undoes itself: the twin is removed, the pull still lists it, and
+    /// the task comes back on every pass for ever.
+    #[tokio::test]
+    async fn a_pull_refuses_to_bring_back_what_was_deleted_here() {
+        let fixture = fixture(200, json!([{ "remoteId": "r1", "title": "Buy milk" }]));
+        ledger::record_deletion(&fixture.store, PROVIDER_KEY, "r1", "tasklist-1").expect("records");
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+
+        assert_eq!(report.applied, 0);
+        assert!(
+            fixture.store.task("ext_r1").expect("reads").is_none(),
+            "the task somebody deleted did not come back"
+        );
     }
 }
