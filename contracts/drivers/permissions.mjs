@@ -33,7 +33,6 @@ const permissions = await import(
 )
 const {
   getUserRoleInList,
-  canUserViewList,
   canUserEditTasks,
   canUserEditTask,
   hasExplicitListRole,
@@ -173,7 +172,10 @@ const cases = CASES.map(({ name, list: subject }) => ({
   list: subject,
   expected: {
     role: getUserRoleInList(USER, subject),
-    canViewList: canUserViewList(USER, subject),
+    // "Can see it" is "has a role in it". astrid-web exported that twice — `canUserViewList` was
+    // `getUserRoleInList(...) !== null` and nothing more — and deleted the alias as unused, which
+    // it was on that side. The rule is unchanged, so the fixture is too; only the spelling moved.
+    canViewList: getUserRoleInList(USER, subject) !== null,
     canEditTasks: canUserEditTasks(USER, subject),
     // Split by authorship: on a public collaborative list the answer differs
     // between the two, and a single case would hide that.
