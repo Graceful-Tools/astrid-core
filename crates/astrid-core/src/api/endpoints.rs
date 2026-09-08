@@ -32,6 +32,9 @@ pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
 
 pub const INTEGRATIONS: &str = "/api/v1/integrations";
 
+/// My Tasks' filters and sort, which belong to the account rather than to a list.
+pub const MY_TASKS_PREFERENCES: &str = "/api/v1/users/me/my-tasks-preferences";
+
 // ─── The agents ───────────────────────────────────────────────────────────────────────────────
 
 pub const AGENT_MODES: &str = "/api/v1/users/me/agent-modes";

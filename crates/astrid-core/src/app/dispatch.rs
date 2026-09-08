@@ -254,6 +254,30 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::UnlinkList { provider, link_id } => {
             answer_done(app.context.external().unlink(provider, &link_id).await)
         }
+        Command::MyTasksList => Response::ok(app.context.lists().my_tasks()),
+        Command::MyTasksFilters => match app.context.account().my_tasks_preferences() {
+            Ok(filters) => Response::ok(filters),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RefreshMyTasks => {
+            match app.context.account().refresh_my_tasks_preferences().await {
+                Ok(filters) => Response::ok(filters),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::SetMyTasksFilters { filters } => {
+            match app
+                .context
+                .account()
+                .set_my_tasks_preferences(&filters)
+                .await
+            {
+                Ok(filters) => Response::ok(filters),
+                // The choice is already on screen and already remembered here. Saying so beats
+                // pretending it worked, and beats losing it because the account could not hear.
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::GoogleSyncMode => match app.context.external().auto_link_settings().await {
             Ok(settings) => Response::ok(serde_json::json!({
                 "mode": settings.mode,
@@ -335,6 +359,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             content,
         } => attach_file(app, &task_id, &path, content.as_deref()).await,
         Command::FilterOptions { list_id } => filter_options(app, &list_id),
+        Command::SetFilter {
+            list_id,
+            field,
+            value,
+        } => set_filter(app, &list_id, &field, &value).await,
         Command::Chat { list_id } => chat(app, &list_id),
         Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
         Command::SendChatMessage {
@@ -819,16 +848,88 @@ async fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>
 /// — they are saved on the list and read by every client, so a value spelled differently would be
 /// a filter the others keep and this one silently ignores.
 fn filter_options(app: &App, list_id: &str) -> Response {
-    let list = match app.context.lists().list(list_id) {
-        Ok(Some(list)) => list,
-        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
-        Err(error) => return Response::failed(error.into()),
+    let list = if list_id == crate::filters::my_tasks::VIRTUAL_ID {
+        // The same groups, filled in from the account's preferences: one filter sheet, whichever
+        // of the two it is looking at.
+        match app.context.account().my_tasks_preferences() {
+            Ok(preferences) => my_tasks_shape(&preferences),
+            Err(error) => return Response::failed(error.into()),
+        }
+    } else {
+        match app.context.lists().list(list_id) {
+            Ok(Some(list)) => list,
+            Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+            Err(error) => return Response::failed(error.into()),
+        }
     };
     Response::ok(serde_json::json!({
-        "listId": list.id,
+        "listId": list_id,
         "isFiltered": rows::filter_picks::is_filtered(&list),
         "groups": rows::filter_picks::groups(&list),
     }))
+}
+
+/// My Tasks' preferences in the shape a list's filters have.
+///
+/// The sheet, the "is anything narrowing this" test and the sort all read a `TaskList`, and having
+/// two of each — one for lists, one for My Tasks — is two places for them to disagree about what
+/// "this week" means. The priority *set* collapses to the one the sheet can show: the sheet offers
+/// one at a time, and a set chosen elsewhere is left alone unless somebody changes it here.
+fn my_tasks_shape(preferences: &crate::filters::my_tasks::Preferences) -> crate::model::TaskList {
+    let mut shape = crate::model::TaskList::new(crate::filters::my_tasks::VIRTUAL_ID, "My Tasks");
+    shape.is_virtual = Some(true);
+    shape.filter_completion = Some(preferences.filter_completion.clone());
+    shape.filter_due_date = Some(preferences.filter_due_date.clone());
+    shape.filter_priority = Some(
+        preferences
+            .filter_priority
+            .first()
+            .map(i64::to_string)
+            .unwrap_or_else(|| "all".into()),
+    );
+    shape.sort_by = Some(preferences.sort_by.clone());
+    shape.manual_sort_order = Some(preferences.manual_sort_order.clone());
+    shape
+}
+
+/// Set one filter, wherever that filter lives.
+async fn set_filter(app: &App, list_id: &str, field: &str, value: &str) -> Response {
+    if list_id != crate::filters::my_tasks::VIRTUAL_ID {
+        // A list's filters are fields on the list, so this is an ordinary update — through the
+        // same decoder the `updateList` command uses, so one field cannot mean two things.
+        return match list_changes_from_json(&serde_json::json!({ field: value })) {
+            Ok(changes) => answer(app.context.lists().update(list_id, &changes)),
+            Err(failure) => Response::failed(failure),
+        };
+    }
+
+    let account = app.context.account();
+    let mut preferences = match account.my_tasks_preferences() {
+        Ok(preferences) => preferences,
+        Err(error) => return Response::failed(error.into()),
+    };
+    match field {
+        "filterCompletion" => preferences.filter_completion = value.to_string(),
+        "filterDueDate" => preferences.filter_due_date = value.to_string(),
+        // Back into the set the account stores. "all" is no priority chosen, which is what an
+        // empty set means — see `astrid_core::filters::my_tasks`.
+        "filterPriority" => {
+            preferences.filter_priority = value
+                .parse::<i64>()
+                .map(|one| vec![one])
+                .unwrap_or_default()
+        }
+        "sortBy" => preferences.sort_by = value.to_string(),
+        // Every other group is a list's own — "in lists", "assigned by" — and My Tasks has no
+        // equivalent. Quietly ignoring it would look like a control that does nothing.
+        other => {
+            return Response::failed(Failure::not_found("myTasksFilter", other));
+        }
+    }
+    match account.set_my_tasks_preferences(&preferences).await {
+        Ok(saved) => Response::ok(saved),
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 /// A list's chat, from the cache.
@@ -1391,10 +1492,30 @@ fn rows_for_list(
     let now = app.clock.now();
     let offset_from_utc = app.clock.utc_offset();
 
-    let list = match app.store.list(list_id) {
-        Ok(Some(list)) => list,
-        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
-        Err(error) => return Response::failed(error.into()),
+    // My Tasks is not in the list collection — it is the view the app opens on, and its filters
+    // belong to the account rather than to a list row. Everything after this is the same pipeline.
+    let my_tasks = list_id == crate::filters::my_tasks::VIRTUAL_ID;
+    let preferences = match my_tasks {
+        true => match app.context.account().my_tasks_preferences() {
+            Ok(preferences) => Some(preferences),
+            Err(error) => return Response::failed(error.into()),
+        },
+        false => None,
+    };
+    let list = match &preferences {
+        // A shape rather than a row: the sort setting is read off it below, the same as any list's.
+        Some(preferences) => {
+            let mut shape = crate::model::TaskList::new(crate::filters::my_tasks::VIRTUAL_ID, "");
+            shape.is_virtual = Some(true);
+            shape.sort_by = Some(preferences.sort_by.clone());
+            shape.manual_sort_order = Some(preferences.manual_sort_order.clone());
+            shape
+        }
+        None => match app.store.list(list_id) {
+            Ok(Some(list)) => list,
+            Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+            Err(error) => return Response::failed(error.into()),
+        },
     };
 
     // A VIRTUAL list has no membership: it is a saved set of filters over everything the account
@@ -1428,13 +1549,22 @@ fn rows_for_list(
     // Borrowed the whole way down. A list of ten thousand is read once and then referred to: the
     // owned versions of these would copy every task twice per refresh, and a refresh happens every
     // time anybody touches anything in the list.
-    let filtered = filters::filter_refs(
-        &tasks,
-        &list,
-        current_user_id.as_deref(),
-        now,
-        offset_from_utc,
-    );
+    let filtered = match &preferences {
+        Some(preferences) => crate::filters::my_tasks::filter(
+            &tasks,
+            current_user_id.as_deref(),
+            preferences,
+            now,
+            offset_from_utc,
+        ),
+        None => filters::filter_refs(
+            &tasks,
+            &list,
+            current_user_id.as_deref(),
+            now,
+            offset_from_utc,
+        ),
+    };
 
     // Subtasks are spliced under their parents, so the top-level set is what gets sorted.
     let mut top_level: Vec<&crate::model::Task> = filtered
@@ -2288,6 +2418,178 @@ mod tests {
             .as_array()
             .expect("containers")
             .is_empty());
+    }
+
+    // ── My Tasks ─────────────────────────────────────────────────────────────────────────────
+
+    /// My Tasks is not in the list collection, so asking for its rows by a list id would be a
+    /// not-found. It is the view the app opens on.
+    #[tokio::test]
+    async fn my_tasks_rows_answer_without_a_list_row_behind_them() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+        assert_eq!(made["ok"], true);
+
+        let rows = call(
+            &app,
+            json!({ "kind": "rowsForList", "listId": "virtual:my-tasks" }),
+        )
+        .await;
+
+        assert_eq!(rows["ok"], true, "{rows}");
+        assert_eq!(rows["value"]["total"], 1);
+    }
+
+    /// The filters are the account's. Set here, they are what the next screen on the next machine
+    /// draws — and they are remembered locally either way, so being offline does not lose them.
+    #[tokio::test]
+    async fn my_tasks_filters_are_remembered_here_even_when_the_account_cannot_be_told() {
+        let app = app_with(StubTransport::new());
+
+        let set = call(
+            &app,
+            json!({
+                "kind": "setMyTasksFilters",
+                "filterPriority": [1],
+                "sortBy": "when",
+            }),
+        )
+        .await;
+        assert_eq!(set["ok"], false, "the account was not reachable");
+
+        let held = call(&app, json!({ "kind": "myTasksFilters" })).await;
+        assert_eq!(held["value"]["sortBy"], "when");
+        assert_eq!(held["value"]["filterPriority"][0], 1);
+    }
+
+    /// Filters chosen on another machine arrive with the account, not with this one.
+    #[tokio::test]
+    async fn my_tasks_filters_come_back_from_the_account() {
+        let app = app_with(StubTransport::new().push_json(
+            "my-tasks-preferences",
+            200,
+            json!({ "filterCompletion": "all", "sortBy": "priority" }),
+        ));
+
+        let fetched = call(&app, json!({ "kind": "refreshMyTasks" })).await;
+        assert_eq!(fetched["ok"], true);
+        assert_eq!(fetched["value"]["filterCompletion"], "all");
+
+        let held = call(&app, json!({ "kind": "myTasksFilters" })).await;
+        assert_eq!(held["value"]["filterCompletion"], "all", "and cached");
+    }
+
+    /// A filter that hides something has to actually hide it, which is the point of the whole
+    /// round trip.
+    #[tokio::test]
+    async fn a_priority_filter_narrows_what_my_tasks_shows() {
+        let app = app_with(StubTransport::new());
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Buy milk", "priority": 1 }),
+        )
+        .await;
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Ring the dentist" }),
+        )
+        .await;
+
+        call(
+            &app,
+            json!({ "kind": "setMyTasksFilters", "filterPriority": [1] }),
+        )
+        .await;
+        let rows = call(
+            &app,
+            json!({ "kind": "rowsForList", "listId": "virtual:my-tasks" }),
+        )
+        .await;
+
+        assert_eq!(rows["value"]["total"], 1);
+    }
+
+    /// One filter sheet, whichever of the two it is looking at — so it has to answer for My Tasks
+    /// as well, which has no list row to read.
+    #[tokio::test]
+    async fn the_filter_sheet_answers_for_my_tasks_too() {
+        let app = app_with(StubTransport::new());
+
+        let options = call(
+            &app,
+            json!({ "kind": "filterOptions", "listId": "virtual:my-tasks" }),
+        )
+        .await;
+
+        assert_eq!(options["ok"], true, "{options}");
+        assert_eq!(options["value"]["isFiltered"], false);
+        assert!(!options["value"]["groups"]
+            .as_array()
+            .expect("groups")
+            .is_empty());
+    }
+
+    /// Where a filter is written depends on what is being filtered — a list's on the list, My
+    /// Tasks' on the account — and that is a decision the shell must not be making.
+    #[tokio::test]
+    async fn setting_a_my_tasks_filter_writes_it_to_the_account() {
+        let app = app_with(StubTransport::new());
+
+        call(
+            &app,
+            json!({
+                "kind": "setFilter",
+                "listId": "virtual:my-tasks",
+                "field": "filterCompletion",
+                "value": "all",
+            }),
+        )
+        .await;
+
+        let held = call(&app, json!({ "kind": "myTasksFilters" })).await;
+        assert_eq!(held["value"]["filterCompletion"], "all");
+    }
+
+    /// The same command on a real list is the ordinary list update it always was.
+    #[tokio::test]
+    async fn setting_a_list_filter_writes_it_to_the_list() {
+        let app = app_with(StubTransport::new());
+        let made = call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+        let set = call(
+            &app,
+            json!({
+                "kind": "setFilter",
+                "listId": id,
+                "field": "filterCompletion",
+                "value": "all",
+            }),
+        )
+        .await;
+
+        assert_eq!(set["ok"], true, "{set}");
+        assert_eq!(set["value"]["filterCompletion"], "all");
+    }
+
+    /// A group a list has and My Tasks does not — "in lists" — has to say so rather than look
+    /// like a control that quietly does nothing.
+    #[tokio::test]
+    async fn a_filter_my_tasks_does_not_have_says_so() {
+        let app = app_with(StubTransport::new());
+
+        let set = call(
+            &app,
+            json!({
+                "kind": "setFilter",
+                "listId": "virtual:my-tasks",
+                "field": "filterInLists",
+                "value": "not_in_list",
+            }),
+        )
+        .await;
+
+        assert_eq!(set["ok"], false);
     }
 
     /// The mode is the account's, so the screen has to read it back rather than remember what it

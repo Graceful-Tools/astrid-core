@@ -209,6 +209,19 @@ impl ListService {
         Ok(self.context.store.lists()?)
     }
 
+    /// The My Tasks entry: the view the app opens on, above the lists.
+    ///
+    /// Not in the list collection and never will be — it has no row on the server, its filters
+    /// belong to the account rather than to a list, and its scope ("mine or nobody's") is not
+    /// something a list filter can express. It is answered here so the id and the name are the
+    /// core's, the same way the two virtual board columns are named in `astrid_core::board`.
+    pub fn my_tasks(&self) -> TaskList {
+        let mut entry = TaskList::new(crate::filters::my_tasks::VIRTUAL_ID, "My Tasks");
+        entry.is_virtual = Some(true);
+        entry.virtual_list_type = Some("my-tasks".into());
+        entry
+    }
+
     /// The lists a task can be filed in.
     ///
     /// Not the same as the lists a person can navigate into: a virtual list ("Today", "Not in a

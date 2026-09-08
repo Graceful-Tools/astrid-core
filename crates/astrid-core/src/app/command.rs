@@ -400,12 +400,36 @@ pub enum Command {
         #[serde(default)]
         content: Option<String>,
     },
+    /// The My Tasks entry for the sidebar: the view the app opens on.
+    MyTasksList,
+    /// What My Tasks is filtered and sorted by.
+    ///
+    /// From the cache, so a screen draws before the network answers; [`Command::RefreshMyTasks`]
+    /// is the catch-up.
+    MyTasksFilters,
+    /// Fetch My Tasks' filters from the account.
+    RefreshMyTasks,
+    /// Change what My Tasks is filtered and sorted by, for this account on every device.
+    SetMyTasksFilters {
+        #[serde(flatten)]
+        filters: crate::filters::my_tasks::Preferences,
+    },
     /// What a list is filtered and sorted by, and what else it could be.
     ///
-    /// Setting one is an ordinary `updateList` carrying the field the group names, so there is no
-    /// separate write.
+    /// Answers for My Tasks too, from the account's preferences rather than a list row.
     FilterOptions {
         list_id: String,
+    },
+    /// Set one filter on one list.
+    ///
+    /// A separate command rather than an `updateList` from the shell, because where a filter is
+    /// written depends on what is being filtered: a list's go on the list, My Tasks' go on the
+    /// account. That is a decision, and decisions are not the shell's.
+    SetFilter {
+        list_id: String,
+        /// The field the group names — `filterCompletion`, `sortBy`, and so on.
+        field: String,
+        value: String,
     },
     /// A list's chat, from the cache.
     ///

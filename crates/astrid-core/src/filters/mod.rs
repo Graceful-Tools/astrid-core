@@ -20,6 +20,7 @@
 //! keeping dated ones. It is reproduced here rather than fixed, because fixing it on one client
 //! makes three clients disagree about what a list contains. See `docs/CONTRACTS.md` D7.
 
+pub mod my_tasks;
 pub mod recently_completed;
 pub mod subtasks;
 

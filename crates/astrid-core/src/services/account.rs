@@ -15,11 +15,15 @@ use serde_json::json;
 
 use super::{Context, Result};
 use crate::api::endpoints;
+use crate::filters::my_tasks::Preferences as MyTasksPreferences;
 use crate::model::User;
 use crate::platform::CURRENT_USER_ID_KEY;
 
 /// Cache keys for the things that are one value under one name.
 const CURRENT_USER_KEY: &str = "account.current-user";
+
+/// Where My Tasks' filters are cached, so the view draws before the network answers.
+const MY_TASKS_PREFERENCES_KEY: &str = "account.myTasksPreferences";
 const CAPABILITIES_KEY: &str = "account.capabilities";
 const SETTINGS_KEY: &str = "account.settings";
 
@@ -214,6 +218,61 @@ impl AccountService {
 
     pub fn user(&self, id: &str) -> Result<Option<User>> {
         Ok(self.context.store.user(id)?)
+    }
+
+    /// What My Tasks is filtered and sorted by, for this account.
+    ///
+    /// From the cache first and the server second, in that order and always: this decides what a
+    /// screen draws, and a screen that waits for the network to say "no filters" is a screen that
+    /// is empty on a train. The server's answer replaces the cached one when it arrives.
+    pub fn my_tasks_preferences(&self) -> Result<MyTasksPreferences> {
+        Ok(self
+            .context
+            .store
+            .metadata(MY_TASKS_PREFERENCES_KEY)?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
+    }
+
+    /// Fetch them, and remember what came back.
+    pub async fn refresh_my_tasks_preferences(&self) -> Result<MyTasksPreferences> {
+        let request = self.context.client.get(endpoints::MY_TASKS_PREFERENCES);
+        let answer = self.context.client.send(request).await?;
+        // A blob the server has been storing for years, so anything it cannot read falls back to
+        // the defaults rather than failing the screen.
+        let preferences: MyTasksPreferences = serde_json::from_value(answer).unwrap_or_default();
+        self.remember_my_tasks_preferences(&preferences)?;
+        Ok(preferences)
+    }
+
+    /// Change them. On screen immediately; the server hears about it now, not later.
+    ///
+    /// Not through the Outbox, unlike a task: a filter is a preference rather than somebody's
+    /// work, and a queued filter change replayed after a week would move a screen under whoever is
+    /// looking at it. It is written locally either way, so the choice survives being offline on
+    /// this machine even when the account never hears it.
+    pub async fn set_my_tasks_preferences(
+        &self,
+        preferences: &MyTasksPreferences,
+    ) -> Result<MyTasksPreferences> {
+        self.remember_my_tasks_preferences(preferences)?;
+        let request = self
+            .context
+            .client
+            .patch(endpoints::MY_TASKS_PREFERENCES)
+            .value(serde_json::to_value(preferences).unwrap_or_default());
+        let answer = self.context.client.send(request).await?;
+        let confirmed: MyTasksPreferences = serde_json::from_value(answer).unwrap_or_default();
+        self.remember_my_tasks_preferences(&confirmed)?;
+        Ok(confirmed)
+    }
+
+    fn remember_my_tasks_preferences(&self, preferences: &MyTasksPreferences) -> Result<()> {
+        self.context.store.set_metadata(
+            MY_TASKS_PREFERENCES_KEY,
+            &serde_json::to_string(preferences).unwrap_or_default(),
+        )?;
+        Ok(())
     }
 
     /// Forget everything. Sign-out: the cache, the journal, the credential.
