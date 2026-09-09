@@ -22,6 +22,7 @@ pub mod board;
 pub mod external;
 pub mod filters;
 pub mod keyboard;
+pub mod markdown;
 pub mod model;
 pub mod outbox;
 pub mod palette;
