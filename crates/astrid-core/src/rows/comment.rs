@@ -55,6 +55,12 @@ pub struct FileRow {
     pub mime_type: String,
     /// Whether it is drawn in the comment or offered as a chip to open.
     pub renders_inline: bool,
+    /// Where its bytes are on this machine, when they are already here.
+    ///
+    /// `None` is not an error — it means "not fetched yet", and the chip is what a screen draws
+    /// until they are. Filled in by [`with_local_paths`] rather than by [`rows`], which stays a
+    /// pure function of the comments.
+    pub local_path: Option<String>,
 }
 
 /// The files a comment carries.
@@ -113,10 +119,29 @@ pub fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
                     size: file.size,
                     mime_type: file.mime_type.clone(),
                     renders_inline: renders_inline(&file.mime_type),
+                    // Filled in afterwards: where the bytes are is a question about this machine,
+                    // and this function is a question about the comments.
+                    local_path: None,
                 })
                 .collect(),
         })
         .collect()
+}
+
+/// Say where each file's bytes already are, for the ones that are here.
+///
+/// Split from [`rows`] so the projection stays pure: which comments draw, and how, is a rule with
+/// tests; where a file landed on this disk is not. `resolve` is given a file id and answers with a
+/// path when the bytes are in hand — see `AttachmentService::local_path`.
+///
+/// Only the files that would be drawn are asked about. A resolver call for a PDF that renders as a
+/// chip either way is work done to change nothing.
+pub fn with_local_paths(rows: &mut [CommentRow], resolve: impl Fn(&str) -> Option<String>) {
+    for row in rows.iter_mut() {
+        for file in row.files.iter_mut().filter(|file| file.renders_inline) {
+            file.local_path = resolve(&file.id);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -228,6 +253,66 @@ mod tests {
     fn signed_out_nothing_is_mine() {
         let rows = rows(&[comment(json!({ "id": "c1", "content": "x" }))], None);
         assert!(!rows[0].is_mine);
+    }
+
+    /// The bug AITD-308 names on the Mac: a screenshot posted from this machine, drawn from bytes
+    /// this process wrote itself rather than fetched back.
+    #[test]
+    fn a_file_whose_bytes_are_in_hand_says_where_they_are() {
+        let mut rows = rows(
+            &[comment(
+                json!({ "id": "c1", "content": "", "secureFiles": [a_file("image/png")] }),
+            )],
+            None,
+        );
+
+        with_local_paths(&mut rows, |id| {
+            (id == "f1").then(|| "C:/cache/pending/f1".to_string())
+        });
+
+        assert_eq!(
+            rows[0].files[0].local_path.as_deref(),
+            Some("C:/cache/pending/f1")
+        );
+    }
+
+    /// Not fetched yet is not an error. The chip is what a screen draws until the bytes arrive.
+    #[test]
+    fn a_file_that_is_not_here_yet_simply_has_no_path() {
+        let mut rows = rows(
+            &[comment(
+                json!({ "id": "c1", "content": "", "secureFiles": [a_file("image/png")] }),
+            )],
+            None,
+        );
+
+        with_local_paths(&mut rows, |_| None);
+
+        assert!(rows[0].files[0].local_path.is_none());
+    }
+
+    /// A chip looks the same whether or not its bytes are here, so asking is work done to change
+    /// nothing.
+    #[test]
+    fn only_the_files_that_would_be_drawn_are_asked_about() {
+        let mut rows = rows(
+            &[comment(json!({
+                "id": "c1",
+                "content": "",
+                "secureFiles": [a_file("image/png"), a_file("application/pdf")],
+            }))],
+            None,
+        );
+
+        let asked = std::cell::RefCell::new(Vec::new());
+        with_local_paths(&mut rows, |id| {
+            asked.borrow_mut().push(id.to_string());
+            Some("somewhere".to_string())
+        });
+
+        assert_eq!(asked.borrow().len(), 1, "the picture, not the document");
+        assert!(rows[0].files[0].local_path.is_some());
+        assert!(rows[0].files[1].local_path.is_none());
     }
 
     /// The same meaning it has in a chat transcript: queued, not failed.

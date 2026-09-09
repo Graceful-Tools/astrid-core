@@ -79,6 +79,25 @@ impl AttachmentService {
         self.cached_path(file).exists()
     }
 
+    /// Where this file's bytes already are on this machine, or `None`.
+    ///
+    /// Never touches the network. Two places count as in hand, and a thumbnail needs both: a file
+    /// somebody has opened before is in the download cache under its real id, and a file this
+    /// device attached moments ago is in the pending directory under its temporary one, waiting
+    /// for a connection.
+    ///
+    /// The second is the one worth stating. Posting a screenshot and then watching it load —
+    /// from the machine it was taken on, out of bytes this process wrote itself — is the bug the
+    /// Mac fixed in AITD-308.
+    pub fn local_path(&self, file: &SecureFile) -> Option<PathBuf> {
+        let cached = self.cached_path(file);
+        if cached.exists() {
+            return Some(cached);
+        }
+        let pending = self.pending_dir().join(&file.id);
+        pending.exists().then_some(pending)
+    }
+
     /// Fetch a file's bytes and keep them. Answers with the path.
     pub async fn download(&self, file: &SecureFile) -> Result<PathBuf> {
         let path = self.cached_path(file);

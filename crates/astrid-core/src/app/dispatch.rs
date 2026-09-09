@@ -208,7 +208,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             // differently from the screen it lands in.
             let me = app.context.account().current_user_id().ok().flatten();
             match app.context.comments().refresh(&task_id).await {
-                Ok(comments) => Response::ok(rows::comment::rows(&comments, me.as_deref())),
+                Ok(comments) => {
+                    let mut rows = rows::comment::rows(&comments, me.as_deref());
+                    fill_local_paths(app, &task_id, &mut rows);
+                    Response::ok(rows)
+                }
                 Err(error) => Response::failed(error.into()),
             }
         }
@@ -550,7 +554,7 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
 
     // Projected rather than sent raw: a comment's own files are what a screen has to draw, and
     // whether there is a bubble at all is a rule — see `rows::comment`.
-    let comments = rows::comment::rows(
+    let mut comments = rows::comment::rows(
         &app.context.comments().for_task(task_id).unwrap_or_default(),
         app.context
             .account()
@@ -559,6 +563,7 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
             .flatten()
             .as_deref(),
     );
+    fill_local_paths(app, task_id, &mut comments);
 
     // Subtasks are the children of this task, in the order they were added — the order somebody
     // breaking a task down expects to read them back in.
@@ -1600,6 +1605,30 @@ fn assignee_options(app: &App, task_id: &str) -> Response {
         "assigneeId": task.assignee_id,
         "options": options,
     }))
+}
+
+/// Say where each drawable file's bytes already are, so a comment can show the picture rather than
+/// an icon standing in for it.
+///
+/// No network and no download: this only reports what is already on disk. A file this device
+/// attached is in the pending directory before it has been anywhere, which is the case worth
+/// having — posting a screenshot and then watching it load, from the machine it was taken on, is
+/// the bug the Mac fixed in AITD-308.
+///
+/// Failing to resolve is not an error. The bytes are simply not here yet, and the chip is what a
+/// screen draws until they are.
+fn fill_local_paths(app: &App, task_id: &str, rows: &mut [rows::comment::CommentRow]) {
+    let attachments = app.context.attachments(app.attachment_cache());
+    let Ok(files) = attachments.for_task(task_id) else {
+        return;
+    };
+    rows::comment::with_local_paths(rows, |id| {
+        files
+            .iter()
+            .find(|file| file.id == id)
+            .and_then(|file| attachments.local_path(file))
+            .map(|path| path.to_string_lossy().into_owned())
+    });
 }
 
 /// For a write whose answer is that it happened. `Response::done()` rather than `ok(())`, so the
