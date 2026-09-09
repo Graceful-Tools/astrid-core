@@ -304,6 +304,14 @@ pub enum Command {
     PostComment {
         task_id: String,
         content: String,
+        /// The comment this one answers (task 97c817dd); absent for a top-level comment.
+        #[serde(default)]
+        parent_comment_id: Option<String>,
+    },
+    /// Change what a comment says. Offline through the Outbox, like posting one.
+    EditComment {
+        comment_id: String,
+        content: String,
     },
     DeleteComment {
         comment_id: String,

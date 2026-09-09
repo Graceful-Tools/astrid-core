@@ -54,6 +54,23 @@ impl CommentService {
         comment_type: CommentType,
         file: Option<&crate::model::SecureFile>,
     ) -> Result<Comment> {
+        self.post_under(task_id, content, author_id, comment_type, file, None)
+    }
+
+    /// Say something on a task — possibly in answer to another comment (task 97c817dd).
+    ///
+    /// A reply is a comment with a parent, on the wire and in the cache, so it nests under the
+    /// comment it answers the moment it is posted and reaches the server through the Outbox like
+    /// any other.
+    pub fn post_under(
+        &self,
+        task_id: &str,
+        content: &str,
+        author_id: Option<&str>,
+        comment_type: CommentType,
+        file: Option<&crate::model::SecureFile>,
+        parent_comment_id: Option<&str>,
+    ) -> Result<Comment> {
         let now = self.context.clock.now();
         let temp_id = outbox::new_temp_id();
 
@@ -63,6 +80,7 @@ impl CommentService {
             "content": content,
             "type": comment_type,
             "authorId": author_id,
+            "parentCommentId": parent_comment_id,
             "createdAt": crate::model::date::format(now),
             "clientRequestId": temp_id,
             // Carried on the optimistic comment so the attachment is on screen the moment it is
@@ -82,6 +100,7 @@ impl CommentService {
                     "content": content,
                     "type": comment_type,
                     "fileId": file.map(|file| file.id.clone()),
+                    "parentCommentId": parent_comment_id,
                 }
             }),
             &temp_id,

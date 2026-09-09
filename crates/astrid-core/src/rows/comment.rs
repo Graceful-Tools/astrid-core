@@ -43,6 +43,14 @@ pub struct CommentRow {
     pub is_mine: bool,
     /// Nobody wrote it — the server did. Drawn as a centred note rather than as either voice.
     pub is_system: bool,
+    /// The comment this one answers, when it answers one (task 97c817dd).
+    pub parent_id: Option<String>,
+    /// Drawn nested under its parent. False for a reply whose parent is not in the thread, which
+    /// is then an ordinary comment rather than an indent under nothing.
+    pub is_reply: bool,
+    /// Which side a reply is set in from: the parent author's, as the web does it — replies to
+    /// my comment step in from the right, replies to yours from the left.
+    pub indent_right: bool,
 }
 
 /// One file on a comment.
@@ -93,39 +101,75 @@ pub fn renders_inline(mime_type: &str) -> bool {
 ///
 /// A comment with neither text nor files is dropped rather than drawn as an empty row — see
 /// [`is_empty`]. That is the one this module exists for.
+///
+/// Replies are nested (task 97c817dd). The server answers a flat list in which a reply is a
+/// comment with `parentCommentId`, and the web nests them itself; so does this, putting each
+/// reply right after its parent, in the order the replies were written. A reply whose parent is
+/// not in the thread — deleted, or beyond the page — is drawn as an ordinary comment rather than
+/// as an indent under nothing.
 pub fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
-    comments
+    let drawable: Vec<&Comment> = comments
         .iter()
         .filter(|comment| !is_empty(comment))
-        .map(|comment| CommentRow {
-            id: comment.id.clone(),
-            content: comment.content.clone(),
-            created_at: comment.created_at.map(crate::model::date::format),
-            author_name: comment
-                .author
-                .as_ref()
-                .map(|author| author.display_name().to_string()),
-            is_pending: crate::model::is_temp_id(&comment.id),
-            shows_text: shows_text(&comment.content),
-            // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
-            // system comment on the reader's own side.
-            is_mine: me.is_some() && comment.author_id.as_deref() == me,
-            is_system: comment.author_id.is_none(),
-            files: files_of(comment)
-                .into_iter()
-                .map(|file| FileRow {
-                    id: file.id.clone(),
-                    name: file.name.clone(),
-                    size: file.size,
-                    mime_type: file.mime_type.clone(),
-                    renders_inline: renders_inline(&file.mime_type),
-                    // Filled in afterwards: where the bytes are is a question about this machine,
-                    // and this function is a question about the comments.
-                    local_path: None,
-                })
-                .collect(),
-        })
-        .collect()
+        .collect();
+    let has = |id: &str| drawable.iter().any(|comment| comment.id == id);
+    let is_top_level = |comment: &Comment| {
+        comment
+            .parent_comment_id
+            .as_deref()
+            .map(|parent| !has(parent))
+            .unwrap_or(true)
+    };
+
+    let mut rows = Vec::with_capacity(drawable.len());
+    for parent in drawable.iter().filter(|comment| is_top_level(comment)) {
+        rows.push(row(parent, me, None));
+        let parent_is_mine = me.is_some() && parent.author_id.as_deref() == me;
+        for reply in drawable
+            .iter()
+            .filter(|comment| comment.parent_comment_id.as_deref() == Some(parent.id.as_str()))
+        {
+            rows.push(row(reply, me, Some((&parent.id, parent_is_mine))));
+        }
+    }
+    rows
+}
+
+/// One row. `under` is the parent it nests beneath, and whether that parent is mine.
+fn row(comment: &Comment, me: Option<&str>, under: Option<(&String, bool)>) -> CommentRow {
+    CommentRow {
+        id: comment.id.clone(),
+        content: comment.content.clone(),
+        created_at: comment.created_at.map(crate::model::date::format),
+        author_name: comment
+            .author
+            .as_ref()
+            .map(|author| author.display_name().to_string()),
+        is_pending: crate::model::is_temp_id(&comment.id),
+        shows_text: shows_text(&comment.content),
+        // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
+        // system comment on the reader's own side.
+        is_mine: me.is_some() && comment.author_id.as_deref() == me,
+        is_system: comment.author_id.is_none(),
+        parent_id: under.map(|(parent, _)| parent.clone()),
+        is_reply: under.is_some(),
+        indent_right: under
+            .map(|(_, parent_is_mine)| parent_is_mine)
+            .unwrap_or(false),
+        files: files_of(comment)
+            .into_iter()
+            .map(|file| FileRow {
+                id: file.id.clone(),
+                name: file.name.clone(),
+                size: file.size,
+                mime_type: file.mime_type.clone(),
+                renders_inline: renders_inline(&file.mime_type),
+                // Filled in afterwards: where the bytes are is a question about this machine,
+                // and this function is a question about the comments.
+                local_path: None,
+            })
+            .collect(),
+    }
 }
 
 /// Say where each file's bytes already are, for the ones that are here.
@@ -155,6 +199,79 @@ mod tests {
 
     fn a_file(mime: &str) -> serde_json::Value {
         json!({ "id": "f1", "originalName": "shot.png", "fileSize": 1024, "mimeType": mime })
+    }
+
+    /// A reply draws under the comment it answers, set in from the parent author's side, in the
+    /// order it was written — and never as a top-level comment with no sign of what it answers
+    /// (task 97c817dd).
+    #[test]
+    fn replies_nest_under_their_parent_on_the_parent_author_s_side_task_97c817dd() {
+        let rows = rows(
+            &[
+                comment(json!({ "id": "c1", "content": "first", "authorId": "me" })),
+                comment(
+                    json!({ "id": "r2", "content": "later reply to c1", "authorId": "dana", "parentCommentId": "c1", "createdAt": "2026-09-07T12:05:00Z" }),
+                ),
+                comment(json!({ "id": "c3", "content": "second", "authorId": "dana" })),
+                comment(
+                    json!({ "id": "r1", "content": "first reply to c1", "authorId": "me", "parentCommentId": "c1", "createdAt": "2026-09-07T12:01:00Z" }),
+                ),
+                comment(
+                    json!({ "id": "r3", "content": "reply to c3", "authorId": "me", "parentCommentId": "c3" }),
+                ),
+            ],
+            Some("me"),
+        );
+
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["c1", "r2", "r1", "c3", "r3"],
+            "each reply follows its parent, in the order given"
+        );
+        assert!(!rows[0].is_reply);
+        assert!(rows[1].is_reply);
+        assert_eq!(rows[1].parent_id.as_deref(), Some("c1"));
+        assert!(
+            rows[1].indent_right,
+            "c1 is mine, so its replies step in from the right"
+        );
+        assert!(
+            !rows[4].indent_right,
+            "c3 is Dana's, so its replies step in from the left"
+        );
+        assert!(
+            !rows[1].is_mine && rows[2].is_mine,
+            "a reply keeps its own author's side"
+        );
+    }
+
+    /// A reply whose parent is not in the thread is an ordinary comment, not an indent under
+    /// nothing.
+    #[test]
+    fn a_reply_without_its_parent_is_drawn_as_a_comment() {
+        let rows = rows(
+            &[comment(
+                json!({ "id": "r1", "content": "orphan", "parentCommentId": "gone" }),
+            )],
+            None,
+        );
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].is_reply);
+        assert!(rows[0].parent_id.is_none());
+    }
+
+    /// An empty reply is dropped like an empty comment, and takes no place under its parent.
+    #[test]
+    fn an_empty_reply_is_not_drawn() {
+        let rows = rows(
+            &[
+                comment(json!({ "id": "c1", "content": "first" })),
+                comment(json!({ "id": "r1", "content": "  ", "parentCommentId": "c1" })),
+            ],
+            None,
+        );
+        assert_eq!(rows.len(), 1);
     }
 
     /// The bug in one test: a file posted with no caption was an empty row, and an empty row is

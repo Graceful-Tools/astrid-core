@@ -243,16 +243,28 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SetListFavorite { list_id, favorite } => {
             answer(app.context.lists().set_favorite(&list_id, favorite))
         }
-        Command::PostComment { task_id, content } => {
+        Command::PostComment {
+            task_id,
+            content,
+            parent_comment_id,
+        } => {
             let author = app.context.account().current_user_id().ok().flatten();
-            answer(app.context.comments().post(
+            answer(app.context.comments().post_under(
                 &task_id,
                 &content,
                 author.as_deref(),
                 crate::model::CommentType::Text,
                 None,
+                parent_comment_id.as_deref(),
             ))
         }
+        Command::EditComment {
+            comment_id,
+            content,
+        } => match app.context.comments().edit(&comment_id, &content) {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
         Command::DeleteComment { comment_id } => match app.context.comments().delete(&comment_id) {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
@@ -2322,6 +2334,99 @@ mod tests {
             .and_then(|list| list["id"].as_str())
             .unwrap_or_else(|| panic!("no list named {name}"))
             .to_string()
+    }
+
+    /// A reply nests under the comment it answers, an edit changes what it says, and a delete
+    /// takes it out — each offline, through the Outbox, and each drawn at once (task 97c817dd).
+    #[tokio::test]
+    async fn a_comment_can_be_replied_to_edited_and_deleted_through_the_door_task_97c817dd() {
+        let app = app_with(StubTransport::new());
+        app.store
+            .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+            .expect("stores");
+        let created = call(&app, json!({ "kind": "createTask", "title": "Plan" })).await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let first = call(
+            &app,
+            json!({ "kind": "postComment", "taskId": task_id, "content": "Thoughts?" }),
+        )
+        .await;
+        let first_id = first["value"]["id"].as_str().expect("an id").to_string();
+        let reply = call(
+            &app,
+            json!({
+                "kind": "postComment", "taskId": task_id, "content": "Yes",
+                "parentCommentId": first_id
+            }),
+        )
+        .await;
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["value"]["parentCommentId"], first_id);
+        let reply_id = reply["value"]["id"].as_str().expect("an id").to_string();
+        let later = call(
+            &app,
+            json!({ "kind": "postComment", "taskId": task_id, "content": "Another thread" }),
+        )
+        .await;
+        assert_eq!(later["ok"], true);
+
+        // The test clock stands still, so the two top-level comments share a timestamp and the
+        // cache orders them by id; the rule under test is that the reply comes right after ITS
+        // parent, wherever the parent sits.
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        let comments = detail["value"]["comments"].as_array().expect("rows");
+        assert_eq!(comments.len(), 3);
+        let parent_at = comments
+            .iter()
+            .position(|row| row["id"] == first_id)
+            .expect("the parent is drawn");
+        let reply_row = &comments[parent_at + 1];
+        assert_eq!(reply_row["id"], reply_id, "the reply follows its parent");
+        assert_eq!(reply_row["isReply"], true);
+        assert_eq!(reply_row["parentId"], first_id);
+        assert_eq!(reply_row["indentRight"], true, "the parent is mine");
+        let other = comments
+            .iter()
+            .find(|row| row["content"] == "Another thread")
+            .expect("the other thread is drawn");
+        assert_eq!(other["isReply"], false);
+
+        let edited = call(
+            &app,
+            json!({ "kind": "editComment", "commentId": reply_id, "content": "Yes, tomorrow" }),
+        )
+        .await;
+        assert_eq!(edited["ok"], true, "{edited}");
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        assert!(
+            detail["value"]["comments"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .any(|row| row["id"] == reply_id && row["content"] == "Yes, tomorrow"),
+            "{detail}"
+        );
+
+        let deleted = call(
+            &app,
+            json!({ "kind": "deleteComment", "commentId": reply_id }),
+        )
+        .await;
+        assert_eq!(deleted["ok"], true);
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        assert_eq!(
+            detail["value"]["comments"].as_array().expect("rows").len(),
+            2
+        );
+
+        // All of it is journalled for the server: a create, a create with a parent, a create, an
+        // update and a delete.
+        let outbox = call(&app, json!({ "kind": "outboxStats" })).await;
+        assert!(
+            outbox["value"]["pending"].as_i64().unwrap_or(0) >= 5,
+            "{outbox}"
+        );
     }
 
     /// A list's agent and repository are offered from what the account can use, and written
