@@ -176,6 +176,27 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
         },
+        Command::SetClosedReason {
+            task_id,
+            closed_reason,
+        } => {
+            if let Some(reason) = closed_reason.as_deref() {
+                if !crate::model::task::is_closed_reason(reason) {
+                    return Response::failed(Failure::bad_request(format!(
+                        "closedReason must be one of: {}",
+                        crate::model::task::CLOSED_REASONS.join(", ")
+                    )));
+                }
+            }
+            answer(
+                app.context
+                    .tasks()
+                    .close(&task_id, closed_reason.as_deref()),
+            )
+        }
+        Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
+        Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
+        Command::ShareTask { task_id } => share_task(app, &task_id).await,
         Command::SetTaskLists { task_id, list_ids } => {
             answer(app.context.tasks().set_lists(&task_id, list_ids))
         }
@@ -710,6 +731,12 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
         ),
         "listChips": chips,
         "assignee": assignee,
+        // Closed as anything but done, and the address the menu's "Copy link" copies — the same
+        // one the web's own task links carry, built here so one place knows its shape. A task
+        // that has not reached the server yet has no address (task 016ce981).
+        "isCanceled": task.is_canceled(),
+        "link": (!crate::model::is_temp_id(&task.id))
+            .then(|| format!("{}/tasks/{}", app.context.client.base_url(), task.id)),
         "comments": comments,
         "subtasks": subtasks.iter().map(|subtask| serde_json::json!({
             "id": subtask.id,
@@ -1469,6 +1496,12 @@ fn move_task_to_column(app: &App, task_id: &str, column_id: &str, list_id: &str)
         .iter()
         .find(|list| list.id == list_id)
         .and_then(|list| list.project_id.clone());
+    let columns = board_columns(app, project_id.as_deref());
+    move_to_column(app, &task, &lists, &columns, column_id)
+}
+
+/// A project's columns, or the ones every board shares when there is no project.
+fn board_columns(app: &App, project_id: Option<&str>) -> Vec<crate::board::BoardColumn> {
     let project = project_id.and_then(|id| {
         app.store
             .projects()
@@ -1476,16 +1509,92 @@ fn move_task_to_column(app: &App, task_id: &str, column_id: &str, list_id: &str)
             .into_iter()
             .find(|project| project.id == id)
     });
-    let columns = crate::board::columns(
+    crate::board::columns(
         project
             .as_ref()
             .and_then(|project| project.custom_states.as_ref()),
-    );
+    )
+}
+
+/// The columns a task's own menu can put it in (task 016ce981).
+///
+/// The detail has no board open, so the project comes from the task's own lists; a task in no
+/// project gets the columns every board shares, which is what web's `boardColumnsFor(null)` gives
+/// its menu. Resolved here rather than in the shell so the menu and the board read one list.
+fn task_columns(app: &App, task: &crate::model::Task) -> Vec<crate::board::BoardColumn> {
+    let lists = app.store.lists().unwrap_or_default();
+    let project_id = task.effective_list_ids().into_iter().find_map(|id| {
+        lists
+            .iter()
+            .find(|list| list.id == id)
+            .and_then(|list| list.project_id.clone())
+    });
+    board_columns(app, project_id.as_deref())
+}
+
+/// Which columns the menu offers, and which one is lit. `board::column_for` decides the latter, so
+/// the lit row and the card's column on the board are one answer (task 016ce981).
+fn task_status_options(app: &App, task_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let columns = task_columns(app, &task);
+    let current = crate::board::column_for(&task, &columns);
+    Response::ok(serde_json::json!({
+        "current": current,
+        "columns": columns.iter().map(|column| serde_json::json!({
+            "id": column.id,
+            "name": column.name,
+            "kind": column.kind,
+            "isCurrent": column.id == current,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// The menu's "Set status": the very move a dragged card makes, against the same columns the menu
+/// was shown (task 016ce981).
+fn set_task_status(app: &App, task_id: &str, column_id: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let columns = task_columns(app, &task);
+    move_to_column(app, &task, &lists, &columns, column_id)
+}
+
+/// A link other people can open, minted on the server like the web's (task 016ce981). A task that
+/// has not reached the server yet has no id the server knows, so there is nothing to mint.
+async fn share_task(app: &App, task_id: &str) -> Response {
+    if crate::model::is_temp_id(task_id) {
+        return Response::failed(Failure::bad_request(
+            "this task has not reached the server yet, so it cannot be shared",
+        ));
+    }
+    match app.context.share().link_for_task(task_id).await {
+        Ok(url) => Response::ok(serde_json::json!({ "url": url })),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// Put `task` in the column called `column_id`, out of `columns`. The shared tail of a drag and a
+/// menu choice; see [`move_task_to_column`] for why Done goes through the completion service.
+fn move_to_column(
+    app: &App,
+    task: &crate::model::Task,
+    lists: &[crate::model::TaskList],
+    columns: &[crate::board::BoardColumn],
+    column_id: &str,
+) -> Response {
+    let task_id = &task.id;
     let Some(target) = columns.iter().find(|column| column.id == column_id) else {
         return Response::failed(Failure::bad_request("that column is not on this board"));
     };
 
-    let moved = crate::board::resolve_move(&task, target, &lists);
+    let moved = crate::board::resolve_move(task, target, lists);
 
     // The memberships first: a completion that also has to shed a stale status membership should
     // shed it whichever way the write is ordered, and doing it here keeps one path for it.
@@ -4807,6 +4916,125 @@ mod tests {
             .expect("a doing column");
         assert_eq!(doing["total"], 1);
         assert_eq!(columns[0]["total"], 0);
+    }
+
+    /// The detail's menu: Won't do closes with a reason and no rollover, Reopen clears it, the
+    /// status choices are the board's own columns, and choosing one is the same move a dragged card
+    /// makes — including that Done means completed (task 016ce981).
+    #[tokio::test]
+    async fn the_action_menu_closes_as_wont_do_and_sets_status_like_the_board_task_016ce981() {
+        let (app, transport) = app_and_transport(StubTransport::new().push_json(
+            "/api/v1/shortcodes",
+            200,
+            json!({ "url": "https://astrid.cc/s/abc123" }),
+        ));
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        let mut task = crate::model::Task::new("t1", "Water plants");
+        task.list_ids = Some(vec!["l1".into()]);
+        task.repeating = Some(crate::model::Repeating::Daily);
+        task.due_date_time = crate::model::date::parse("2026-09-07T09:00:00Z");
+        app.store.upsert_task(&task).expect("stores");
+
+        // Won't do: closed, with the reason, where it stands — no rollover.
+        let closed = call(
+            &app,
+            json!({ "kind": "setClosedReason", "taskId": "t1", "closedReason": "canceled" }),
+        )
+        .await;
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["value"]["completed"], true);
+        assert_eq!(closed["value"]["closedReason"], "canceled");
+        assert!(closed["value"]["dueDateTime"]
+            .as_str()
+            .expect("a due date")
+            .starts_with("2026-09-07"));
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": "t1" })).await;
+        assert_eq!(detail["value"]["isCanceled"], true);
+        assert_eq!(detail["value"]["link"], "https://astrid.cc/tasks/t1");
+
+        let refused = call(
+            &app,
+            json!({ "kind": "setClosedReason", "taskId": "t1", "closedReason": "meh" }),
+        )
+        .await;
+        assert_eq!(
+            refused["ok"], false,
+            "a typo must not become 'completed normally'"
+        );
+
+        // Reopen clears both.
+        let reopened = call(
+            &app,
+            json!({ "kind": "setClosedReason", "taskId": "t1", "closedReason": null }),
+        )
+        .await;
+        assert_eq!(reopened["value"]["completed"], false);
+        assert!(reopened["value"]["closedReason"].is_null());
+
+        // The menu's columns are the board's, resolved from the task's own list.
+        let options = call(&app, json!({ "kind": "taskStatusOptions", "taskId": "t1" })).await;
+        let names: Vec<&str> = options["value"]["columns"]
+            .as_array()
+            .expect("columns")
+            .iter()
+            .map(|column| column["name"].as_str().expect("a name"))
+            .collect();
+        assert_eq!(names, ["Inbox", "Ready", "Doing", "Waiting", "Done"]);
+        assert_eq!(options["value"]["current"], "__virtual_inbox__");
+        assert_eq!(options["value"]["columns"][0]["isCurrent"], true);
+
+        // Choosing Doing is the move a dragged card makes.
+        let doing = call(
+            &app,
+            json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "doing" }),
+        )
+        .await;
+        assert_eq!(doing["ok"], true, "{doing}");
+        assert_eq!(doing["value"]["statusRole"], "doing");
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        let columns = board["value"]["columns"].as_array().expect("columns");
+        let in_doing = columns
+            .iter()
+            .find(|column| column["id"] == "doing")
+            .expect("a doing column");
+        assert_eq!(in_doing["total"], 1);
+
+        // Done means completed, through the completion service — so the daily task rolls forward
+        // exactly as it would when its card is dragged there.
+        let done = call(
+            &app,
+            json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "__virtual_done__" }),
+        )
+        .await;
+        assert_eq!(done["ok"], true, "{done}");
+        assert_eq!(
+            done["value"]["completed"], false,
+            "a repeating task rolls to its next occurrence"
+        );
+        assert!(done["value"]["dueDateTime"]
+            .as_str()
+            .expect("a due date")
+            .starts_with("2026-09-08"));
+        assert!(done["value"]["statusRole"].is_null());
+
+        // Share mints a link on the server and hands back its address.
+        let shared = call(&app, json!({ "kind": "shareTask", "taskId": "t1" })).await;
+        assert_eq!(shared["ok"], true, "{shared}");
+        assert_eq!(shared["value"]["url"], "https://astrid.cc/s/abc123");
+        let minted = transport
+            .requests()
+            .into_iter()
+            .find(|request| request.url.ends_with("/api/v1/shortcodes"))
+            .expect("a shortcode request");
+        let body: serde_json::Value =
+            serde_json::from_slice(minted.body.as_deref().expect("a body")).expect("json");
+        assert_eq!(body["targetType"], "task");
+        assert_eq!(body["targetId"], "t1");
     }
 
     /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does

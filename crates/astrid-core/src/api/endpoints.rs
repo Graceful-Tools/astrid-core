@@ -186,6 +186,9 @@ pub fn channel_messages(channel_id: &str) -> String {
     )
 }
 
+/// Where a share link is minted (task 016ce981).
+pub const SHORTCODES: &str = "/api/v1/shortcodes";
+
 pub fn shortcode(code: &str) -> String {
     format!("/api/v1/shortcodes/{}", escaped_path_component(code))
 }

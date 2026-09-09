@@ -104,6 +104,9 @@ pub struct TaskChanges {
     pub is_private: Option<bool>,
     pub timer_duration: Option<Option<i64>>,
     pub last_timer_value: Option<Option<String>>,
+    /// Why the task is closed, when not because it is done. `Some(None)` clears it, which a reopen
+    /// does together with the flag (task 016ce981).
+    pub closed_reason: Option<Option<String>>,
 }
 
 impl TaskChanges {
@@ -173,6 +176,9 @@ impl TaskChanges {
         if let Some(value) = &self.status_role {
             task.status_role = value.clone();
         }
+        if let Some(value) = &self.closed_reason {
+            task.closed_reason = value.clone();
+        }
         if let Some(value) = self.is_private {
             task.is_private = value;
         }
@@ -237,6 +243,9 @@ impl TaskChanges {
         }
         if let Some(value) = &self.status_role {
             set("statusRole", json!(value));
+        }
+        if let Some(value) = &self.closed_reason {
+            set("closedReason", json!(value));
         }
         if let Some(value) = self.is_private {
             set("isPrivate", json!(value));
@@ -400,6 +409,11 @@ impl TaskService {
         if !completed || current.completed || !current.is_repeating() {
             changes.completed = Some(completed);
             changes.completed_at = Some(completed.then_some(now));
+            if !completed && current.closed_reason.is_some() {
+                // Reopening clears the reason with the flag: a task that is open again is not
+                // "won't do" either, and the web's reopen clears both (task 016ce981).
+                changes.closed_reason = Some(None);
+            }
             return self.update(id, &changes);
         }
 
@@ -493,6 +507,36 @@ impl TaskService {
                 ..Default::default()
             },
         )
+    }
+
+    /// Close a task as something other than done, or reopen it (task 016ce981).
+    ///
+    /// `Some(reason)` writes `completed: true` beside the reason, the way the web does it, so every
+    /// view that reads the flag keeps working and the task lands in Done wearing a "Won't do" chip.
+    /// It deliberately does **not** roll a repeating task forward: the server skips the rollover
+    /// for a canceled close (`lib/task-update-handler.ts`), and a series somebody has abandoned
+    /// must not come back next week. `None` reopens — the flag and the reason go together, as they
+    /// do on the web.
+    ///
+    /// The reason is the caller's to validate against [`crate::model::task::CLOSED_REASONS`];
+    /// this writes what it is given.
+    pub fn close(&self, id: &str, reason: Option<&str>) -> Result<Task> {
+        let now = self.context.clock.now();
+        let changes = match reason {
+            Some(reason) => TaskChanges {
+                completed: Some(true),
+                completed_at: Some(Some(now)),
+                closed_reason: Some(Some(reason.to_string())),
+                ..Default::default()
+            },
+            None => TaskChanges {
+                completed: Some(false),
+                completed_at: Some(None),
+                closed_reason: Some(None),
+                ..Default::default()
+            },
+        };
+        self.update(id, &changes)
     }
 
     /// The subset of `list_ids` a task can actually be filed in.
@@ -659,6 +703,71 @@ mod tests {
 
     fn entries(store: &Store) -> Vec<crate::outbox::Entry> {
         journal::all(store).expect("reads")
+    }
+
+    // ── Closing as "won't do" ────────────────────────────────────────────────────────────────
+
+    /// Closing a repeating task as "won't do" ends it where it stands. The server skips the
+    /// rollover for a canceled close, and a series somebody has abandoned must not come back next
+    /// week; reopening clears the reason with the flag (task 016ce981).
+    #[test]
+    fn closing_as_wont_do_does_not_roll_a_repeating_task_forward_task_016ce981() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        let mut task = Task::new("t1", "Water plants");
+        task.repeating = Some(Repeating::Daily);
+        task.due_date_time = Some(at("2026-09-07T09:00:00Z"));
+        fixture.store.upsert_task(&task).expect("writes");
+
+        let closed = fixture
+            .service
+            .close("t1", Some("canceled"))
+            .expect("closes");
+        assert!(closed.completed);
+        assert!(closed.is_canceled());
+        assert_eq!(
+            closed.due_date_time,
+            Some(at("2026-09-07T09:00:00Z")),
+            "not rolled forward"
+        );
+        assert_eq!(
+            closed.repeating,
+            Some(Repeating::Daily),
+            "and not rewritten"
+        );
+        let queued = entries(&fixture.store);
+        let body = &queued.last().expect("queued").payload["body"];
+        assert_eq!(body["closedReason"], "canceled");
+        assert_eq!(body["completed"], true);
+
+        let reopened = fixture.service.close("t1", None).expect("reopens");
+        assert!(!reopened.completed);
+        assert!(reopened.closed_reason.is_none());
+        assert!(!reopened.is_canceled());
+    }
+
+    /// Un-completing from the checkbox reopens a canceled task properly: the reason goes with the
+    /// flag, or the task would read as open and "won't do" at once (task 016ce981).
+    #[test]
+    fn unchecking_a_canceled_task_clears_its_reason_task_016ce981() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        let mut task = Task::new("t1", "Buy milk");
+        task.completed = true;
+        task.closed_reason = Some("duplicate".into());
+        fixture.store.upsert_task(&task).expect("writes");
+
+        let reopened = fixture
+            .service
+            .complete("t1", false, None, None)
+            .expect("reopens");
+        assert!(!reopened.completed);
+        assert!(reopened.closed_reason.is_none());
+        let queued = entries(&fixture.store);
+        let body = &queued.last().expect("queued").payload["body"];
+        assert!(body["closedReason"].is_null());
+        assert!(
+            body.get("closedReason").is_some(),
+            "cleared, not left alone"
+        );
     }
 
     // ── Deleting something that is mirrored ──────────────────────────────────────────────────

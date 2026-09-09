@@ -320,6 +320,13 @@ pub struct Task {
     /// this build working against an unmigrated server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_role: Option<String>,
+    /// Why the task was closed, when it was closed as anything but done: `canceled` |
+    /// `duplicate` | `not_planned` (web task 11042ae3). The web keeps `completed` true beside it,
+    /// so every view that reads the flag keeps working; only the rendering and the repeat rollover
+    /// differ. Kept as text rather than an enum so a reason this build has never heard of cannot
+    /// make the whole task unreadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<Attachment>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -355,6 +362,16 @@ fn default_true() -> bool {
     true
 }
 
+/// The reasons a task can be closed without being done, exactly as the server accepts them
+/// (web's `CLOSED_REASONS`). Anything else is refused rather than written: a typo'd reason must
+/// not quietly become "completed normally".
+pub const CLOSED_REASONS: [&str; 3] = ["canceled", "duplicate", "not_planned"];
+
+/// Whether `value` is a reason the server will accept.
+pub fn is_closed_reason(value: &str) -> bool {
+    CLOSED_REASONS.contains(&value)
+}
+
 impl Task {
     /// A task with nothing but an id and a title, for the paths that build one from scratch.
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
@@ -385,6 +402,7 @@ impl Task {
             completed_at: None,
             completed_source: None,
             status_role: None,
+            closed_reason: None,
             attachments: None,
             secure_files: None,
             comments: None,
@@ -422,6 +440,12 @@ impl Task {
     /// True when the task rolls over on completion.
     pub fn is_repeating(&self) -> bool {
         self.repeating.map(Repeating::repeats).unwrap_or(false)
+    }
+
+    /// Closed as anything other than done — web's `isCanceled` (`lib/closed-reason.ts`). A reason
+    /// on an open task means nothing, exactly as it means nothing there.
+    pub fn is_canceled(&self) -> bool {
+        self.completed && self.closed_reason.as_deref().is_some_and(is_closed_reason)
     }
 
     /// Every distinct secure file reachable from this task: its own, its legacy attachments

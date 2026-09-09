@@ -228,6 +228,29 @@ pub enum Command {
     DeleteTask {
         task_id: String,
     },
+    /// Close a task as something other than done — `canceled` | `duplicate` | `not_planned` — or
+    /// reopen it with `null` (task 016ce981). Not a way to complete one: a canceled close does not
+    /// roll a repeating task forward, on purpose.
+    SetClosedReason {
+        task_id: String,
+        #[serde(default)]
+        closed_reason: Option<String>,
+    },
+    /// The board columns a task's menu can put it in, and which one it is in now. The project's
+    /// own columns when the task is in a project, the defaults every board shares when not.
+    TaskStatusOptions {
+        task_id: String,
+    },
+    /// Put a task in a column by id from its menu: the same move a dragged card makes, so the two
+    /// cannot disagree — including that Done means completed.
+    SetTaskStatus {
+        task_id: String,
+        column_id: String,
+    },
+    /// Mint a link to the task that other people can open, as the web's Share does. Online-only.
+    ShareTask {
+        task_id: String,
+    },
     SetTaskLists {
         task_id: String,
         list_ids: Vec<String>,

@@ -26,6 +26,7 @@ pub mod external;
 pub mod list;
 pub mod list_defaults;
 pub mod search;
+pub mod share;
 pub mod task;
 pub mod timer;
 
@@ -38,6 +39,7 @@ pub use chat::ChatService;
 pub use comment::CommentService;
 pub use external::{ExternalSyncService, Provider};
 pub use list::{ListChanges, ListService};
+pub use share::ShareService;
 pub use task::{TaskChanges, TaskDraft, TaskService};
 
 use std::sync::Arc;
@@ -81,6 +83,11 @@ impl Context {
 
     pub fn comments(&self) -> CommentService {
         CommentService::new(self.clone())
+    }
+
+    /// Links other people can open. Online-only, like the web's.
+    pub fn share(&self) -> ShareService {
+        ShareService::new(self.clone())
     }
 
     /// Files on tasks. Needs the cache directory, which is the only service that does — it is
