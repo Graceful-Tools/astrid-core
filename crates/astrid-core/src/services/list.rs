@@ -298,22 +298,36 @@ impl ListService {
     // ─── Writes ───────────────────────────────────────────────────────────────────────────────
 
     pub fn create(&self, name: &str, color: Option<String>) -> Result<TaskList> {
+        self.create_with(name, color, None)
+    }
+
+    /// Create a list, saying what privacy it has.
+    ///
+    /// `None` leaves that to the server, as [`Self::create`] always has. A list made from a
+    /// task's own editor names one — the privacy its sibling lists have (task d3f3b111) — so a
+    /// task in a shared list does not quietly gain a private one nobody else can see.
+    pub fn create_with(
+        &self,
+        name: &str,
+        color: Option<String>,
+        privacy: Option<crate::model::Privacy>,
+    ) -> Result<TaskList> {
         let now = self.context.clock.now();
         let temp_id = outbox::new_temp_id();
 
         let mut list = TaskList::new(temp_id.clone(), name);
         list.color = color.clone();
+        list.privacy = privacy;
         list.created_at = Some(now);
         list.updated_at = Some(now);
         self.context.store.upsert_list(&list)?;
 
-        let entry = outbox::build(
-            kind::CREATE_LIST,
-            json!({ "body": { "name": name, "color": color } }),
-            &temp_id,
-            now,
-        )
-        .for_temp_id(&temp_id);
+        let mut body = json!({ "name": name, "color": color });
+        if let Some(privacy) = privacy {
+            body["privacy"] = json!(privacy);
+        }
+        let entry = outbox::build(kind::CREATE_LIST, json!({ "body": body }), &temp_id, now)
+            .for_temp_id(&temp_id);
         journal::enqueue(&self.context.store, &entry)?;
 
         Ok(list)

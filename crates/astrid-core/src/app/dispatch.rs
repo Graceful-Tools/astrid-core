@@ -153,6 +153,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SetTaskLists { task_id, list_ids } => {
             answer(app.context.tasks().set_lists(&task_id, list_ids))
         }
+        Command::ListPicks { task_id, query } => list_picks(app, &task_id, &query),
+        Command::AddTaskToList { task_id, list_id } => change_task_lists(app, &task_id, |ids| {
+            if !ids.contains(&list_id) {
+                ids.push(list_id.clone());
+            }
+        }),
+        Command::RemoveTaskFromList { task_id, list_id } => {
+            change_task_lists(app, &task_id, |ids| ids.retain(|id| id != &list_id))
+        }
+        Command::CreateListForTask { task_id, name } => create_list_for_task(app, &task_id, &name),
         Command::SetTaskStatusRole {
             task_id,
             status_role,
@@ -1608,6 +1618,70 @@ fn repeat_options(app: &App, task_id: &str) -> Response {
 /// users say they are agents. Until the core fetches the agent roster (M3) that is only the ones
 /// seen embedded in a response; an agent nobody has met yet is simply not offered, which is
 /// better than offering a bare id.
+/// What the detail's list editor shows for a task (task d3f3b111). The rules are
+/// `rows::list_picks`; this only finds the task and hands over every list.
+fn list_picks(app: &App, task_id: &str, query: &str) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    Response::ok(rows::list_picks::picks(
+        &task.effective_list_ids(),
+        &lists,
+        query,
+    ))
+}
+
+/// Change which lists a task is in, by editing the set it has. One write through the task
+/// service, which journals it for the Outbox like any other edit.
+fn change_task_lists(app: &App, task_id: &str, edit: impl FnOnce(&mut Vec<String>)) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let mut list_ids = task.effective_list_ids();
+    edit(&mut list_ids);
+    answer(app.context.tasks().set_lists(task_id, list_ids))
+}
+
+/// The editor's **Create "…"**: a list in one of the web's colours, with the privacy the task's
+/// other lists have, and the task filed in it — two Outbox entries, the second depending on the
+/// first's id.
+fn create_list_for_task(app: &App, task_id: &str, name: &str) -> Response {
+    let name = name.trim();
+    if name.is_empty() {
+        return Response::failed(Failure::bad_request("a list needs a name"));
+    }
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let mut list_ids = task.effective_list_ids();
+    let siblings = list_ids
+        .iter()
+        .filter_map(|id| lists.iter().find(|list| &list.id == id));
+    let privacy = rows::list_picks::privacy_for_new_list(siblings);
+
+    let list = match app.context.lists().create_with(
+        name,
+        Some(rows::list_picks::random_list_color().to_string()),
+        Some(privacy),
+    ) {
+        Ok(list) => list,
+        Err(error) => return Response::failed(error.into()),
+    };
+    list_ids.push(list.id.clone());
+    match app.context.tasks().set_lists(task_id, list_ids) {
+        Ok(task) => Response::ok(serde_json::json!({ "list": list, "task": task })),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
 fn assignee_options(app: &App, task_id: &str) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
@@ -2022,6 +2096,106 @@ mod tests {
 
     async fn call(app: &super::App, command: serde_json::Value) -> serde_json::Value {
         serde_json::from_str(&app.run_json(&command.to_string()).await).expect("valid JSON")
+    }
+
+    /// The id of the list with this name, from the `lists` answer.
+    async fn list_id_named(app: &super::App, name: &str) -> String {
+        let lists = call(app, json!({ "kind": "lists" })).await;
+        lists["value"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .find(|list| list["name"] == name)
+            .and_then(|list| list["id"].as_str())
+            .unwrap_or_else(|| panic!("no list named {name}"))
+            .to_string()
+    }
+
+    /// The detail's list editor: add, remove, and what it offers in between (task d3f3b111).
+    #[tokio::test]
+    async fn a_task_can_be_added_to_and_removed_from_a_list_from_its_editor_task_d3f3b111() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let home = list_id_named(&app, "Home").await;
+        let work = list_id_named(&app, "Work").await;
+        let created = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Buy milk", "listIds": [home] }),
+        )
+        .await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let picks = call(&app, json!({ "kind": "listPicks", "taskId": task_id })).await;
+        assert_eq!(picks["value"]["selected"][0]["name"], "Home");
+        assert_eq!(picks["value"]["options"][0]["name"], "Work");
+        assert_eq!(picks["value"]["options"].as_array().unwrap().len(), 1);
+        assert!(picks["value"]["createName"].is_null());
+
+        let added = call(
+            &app,
+            json!({ "kind": "addTaskToList", "taskId": task_id, "listId": work }),
+        )
+        .await;
+        assert_eq!(added["ok"], true);
+        let picks = call(&app, json!({ "kind": "listPicks", "taskId": task_id })).await;
+        assert_eq!(picks["value"]["selected"].as_array().unwrap().len(), 2);
+        assert!(picks["value"]["options"].as_array().unwrap().is_empty());
+
+        let removed = call(
+            &app,
+            json!({ "kind": "removeTaskFromList", "taskId": task_id, "listId": home }),
+        )
+        .await;
+        assert_eq!(removed["ok"], true);
+        let picks = call(&app, json!({ "kind": "listPicks", "taskId": task_id })).await;
+        assert_eq!(picks["value"]["selected"][0]["name"], "Work");
+        assert_eq!(picks["value"]["selected"].as_array().unwrap().len(), 1);
+        // The detail agrees: its chips are the same lists.
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        assert_eq!(detail["value"]["listChips"][0]["name"], "Work");
+    }
+
+    /// Typing a name no list has offers to create it, and creating files the task there with
+    /// one of the web's colours.
+    #[tokio::test]
+    async fn a_list_created_from_the_editor_holds_the_task_and_wears_a_web_colour() {
+        let app = app_with(StubTransport::new());
+        call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+        let created = call(&app, json!({ "kind": "createTask", "title": "Weed" })).await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let picks = call(
+            &app,
+            json!({ "kind": "listPicks", "taskId": task_id, "query": "Gar" }),
+        )
+        .await;
+        assert_eq!(picks["value"]["createName"], "Gar");
+        assert!(picks["value"]["options"].as_array().unwrap().is_empty());
+
+        let made = call(
+            &app,
+            json!({ "kind": "createListForTask", "taskId": task_id, "name": " Garden " }),
+        )
+        .await;
+        assert_eq!(made["ok"], true, "{made}");
+        assert_eq!(made["value"]["list"]["name"], "Garden");
+        let colour = made["value"]["list"]["color"].as_str().expect("a colour");
+        assert!(
+            crate::rows::list_picks::LIST_COLOR_PALETTE.contains(&colour),
+            "{colour} is not one of the web's"
+        );
+        assert_eq!(made["value"]["list"]["privacy"], "PRIVATE");
+
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        assert_eq!(detail["value"]["listChips"][0]["name"], "Garden");
+
+        let refused = call(
+            &app,
+            json!({ "kind": "createListForTask", "taskId": task_id, "name": "  " }),
+        )
+        .await;
+        assert_eq!(refused["ok"], false);
     }
 
     #[tokio::test]

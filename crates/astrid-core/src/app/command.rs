@@ -232,6 +232,27 @@ pub enum Command {
         task_id: String,
         list_ids: Vec<String>,
     },
+    /// The lists a task can be put in, for the detail's list editor (task d3f3b111): the ones it
+    /// is in, the ones that match what was typed, and whether to offer creating what was typed.
+    ListPicks {
+        task_id: String,
+        #[serde(default)]
+        query: String,
+    },
+    AddTaskToList {
+        task_id: String,
+        list_id: String,
+    },
+    RemoveTaskFromList {
+        task_id: String,
+        list_id: String,
+    },
+    /// Make a list and put the task in it, in one step — the editor's **Create "…"**. The new
+    /// list's colour and privacy are the core's decision, see `rows::list_picks`.
+    CreateListForTask {
+        task_id: String,
+        name: String,
+    },
     SetTaskStatusRole {
         task_id: String,
         #[serde(default)]

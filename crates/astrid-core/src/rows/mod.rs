@@ -22,6 +22,7 @@ pub mod credential;
 pub mod detail;
 pub mod due_picks;
 pub mod filter_picks;
+pub mod list_picks;
 pub mod reminder_picks;
 pub mod repeat;
 
