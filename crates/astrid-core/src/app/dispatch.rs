@@ -40,6 +40,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             display_mode,
         } => task_detail(app, &task_id, display_mode),
         Command::DueDateOptions { task_id } => due_date_options(app, &task_id),
+        Command::DueDateOnDay { task_id, day } => due_date_on_day(app, &task_id, &day),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),
@@ -619,6 +620,42 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
 /// have to compute. `isSelected` uses the same day arithmetic the row labels use, which is why
 /// `rows::day_offset` is public: a quick-pick row deciding for itself is how the tick lands on the
 /// wrong row for anybody west of UTC.
+/// What a calendar day means for one task.
+///
+/// Answers in the same shape a quick pick does, so the shell takes it down the path it already
+/// has rather than growing a second one.
+fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
+    let Ok(day) = day.parse::<chrono::NaiveDate>() else {
+        // 400: the caller sent something this command cannot mean, which is not a failure of the
+        // account, the network or the cache.
+        return Response::failed(Failure::refused(400, "day must be YYYY-MM-DD"));
+    };
+    let task = match app.store.task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => {
+            return Response::failed(
+                crate::services::ServiceError::NotFound {
+                    kind: "task",
+                    id: task_id.to_string(),
+                }
+                .into(),
+            )
+        }
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let picked = rows::due_picks::on_day(
+        day,
+        task.due_date_time,
+        task.is_all_day,
+        app.clock.utc_offset(),
+    );
+    Response::ok(serde_json::json!({
+        "dueDateTime": date::format(picked),
+        "isAllDay": task.is_all_day,
+    }))
+}
+
 fn due_date_options(app: &App, task_id: &str) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,

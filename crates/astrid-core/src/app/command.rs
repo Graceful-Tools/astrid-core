@@ -85,6 +85,17 @@ pub enum Command {
     /// a day is 23 or 25 hours across a daylight-saving boundary, an all-day date is stored
     /// differently from a timed one, and "morning" means 09:00 where the reader is rather than in
     /// UTC. Three clients read the same list in the same order — see `astrid_core::rows::due_picks`.
+    /// What a chosen calendar day means for this task, as an instant.
+    ///
+    /// A calendar hands back a DAY; whether that is a date or a date-and-time depends on the task,
+    /// and an all-day date written as a local midnight reads back as the day before west of UTC.
+    /// So the shell asks rather than computes — the same reason the quick picks carry their
+    /// instants. See `rows::due_picks::on_day`.
+    DueDateOnDay {
+        task_id: String,
+        /// The calendar day the reader clicked, as `YYYY-MM-DD`.
+        day: String,
+    },
     DueDateOptions {
         task_id: String,
     },

@@ -15,7 +15,7 @@
 //! Titles are keys, never words. The shell resolves them, the same way it resolves
 //! [`super::DueLabel`].
 
-use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 
 /// A quick date choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +102,40 @@ pub fn timed_pick(days: i64, current: DateTime<Utc>, offset: FixedOffset) -> Dat
 ///
 /// In the reader's zone, because that is where "morning" means anything. A task set to the morning
 /// in Auckland is not due at 09:00 UTC.
+/// The instant a chosen calendar day means for this task.
+///
+/// A calendar hands back a DAY. What that day means depends on the task, and getting it wrong is
+/// the bug this exists to prevent twice over:
+///
+/// - An **all-day** task stores a calendar date, so the day is written as one. Reading it back
+///   anywhere west of UTC must give the same date, which is what [`crate::model::date`] is for.
+/// - A **timed** task keeps its time of day. Picking "the 14th" on a task due at 17:00 means
+///   the 14th at 17:00, not the 14th at midnight — silently discarding a time somebody set is
+///   the same mistake the quick picks already avoid.
+///
+/// A timed task with no date yet has no time to keep, so it falls back to the day itself.
+pub fn on_day(
+    day: NaiveDate,
+    current: Option<DateTime<Utc>>,
+    is_all_day: bool,
+    offset: FixedOffset,
+) -> DateTime<Utc> {
+    if is_all_day {
+        return crate::model::date::all_day_instant(day);
+    }
+    let Some(current) = current else {
+        return crate::model::date::all_day_instant(day);
+    };
+    let time = current.with_timezone(&offset).time();
+    day.and_time(time)
+        .and_local_timezone(offset)
+        .single()
+        // A local time that does not exist — the hour a daylight-saving jump skips — takes the
+        // day itself rather than refusing the choice.
+        .map(|at| at.with_timezone(&Utc))
+        .unwrap_or_else(|| crate::model::date::all_day_instant(day))
+}
+
 pub fn with_hour(hour: u32, current: DateTime<Utc>, offset: FixedOffset) -> DateTime<Utc> {
     let local = current.with_timezone(&offset);
     let time = chrono::NaiveTime::from_hms_opt(hour.min(23), 0, 0).expect("a valid hour");
@@ -123,6 +157,59 @@ fn to_utc(day: chrono::NaiveDate, time: chrono::NaiveTime, offset: FixedOffset) 
 mod tests {
     use super::*;
     use crate::model::date;
+
+    fn california() -> FixedOffset {
+        FixedOffset::east_opt(-7 * 3600).expect("an offset")
+    }
+
+    fn day(year: i32, month: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, d).expect("a real day")
+    }
+
+    /// An all-day task stores a calendar date, and it has to read back as the same date west of
+    /// UTC — which is the whole reason `date::all_day_instant` exists.
+    #[test]
+    fn an_all_day_task_takes_the_day_itself() {
+        let picked = on_day(day(2026, 12, 25), None, true, california());
+        assert_eq!(date::all_day_date(picked), day(2026, 12, 25));
+        assert_eq!(date::format(picked), "2026-12-25T00:00:00Z");
+    }
+
+    /// Picking "the 14th" on a task due at 17:00 means the 14th at 17:00. Discarding the time
+    /// silently is the mistake the quick picks already avoid.
+    #[test]
+    fn a_timed_task_keeps_its_time_of_day() {
+        // 17:00 in California on the 7th.
+        let current = date::parse("2026-09-08T00:00:00Z").expect("an instant");
+        let picked = on_day(day(2026, 9, 14), Some(current), false, california());
+
+        assert_eq!(
+            picked
+                .with_timezone(&california())
+                .format("%Y-%m-%d %H:%M")
+                .to_string(),
+            "2026-09-14 17:00",
+        );
+    }
+
+    /// A timed task with no date has no time to keep, so the day itself is the honest answer
+    /// rather than midnight-in-some-zone.
+    #[test]
+    fn a_timed_task_with_no_date_takes_the_day() {
+        let picked = on_day(day(2026, 9, 14), None, false, california());
+        assert_eq!(date::all_day_date(picked), day(2026, 9, 14));
+    }
+
+    /// The reader's zone decides, not the server's.
+    #[test]
+    fn the_time_is_kept_in_the_readers_zone() {
+        let current = date::parse("2026-09-08T09:30:00Z").expect("an instant");
+        let picked = on_day(day(2026, 9, 20), Some(current), false, utc());
+        assert_eq!(
+            picked.with_timezone(&utc()).format("%H:%M").to_string(),
+            "09:30",
+        );
+    }
 
     fn at(instant: &str) -> DateTime<Utc> {
         date::parse(instant).expect("an instant")
