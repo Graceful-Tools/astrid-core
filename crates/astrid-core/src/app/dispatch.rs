@@ -120,6 +120,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             is_all_day,
             assignee_id,
             parent_task_id,
+            quick_add,
         } => {
             // What the caller said, before the fields move into the draft: a list's defaults
             // fill in only what was left unsaid (task c4102c67).
@@ -143,9 +144,36 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             draft.assignee_id = assignee_id;
             draft.parent_task_id = parent_task_id;
 
+            let lists = app.store.lists().unwrap_or_default();
+            // The quick-add box's `#list` tags, when the account has smart parsing on — the web's
+            // rule, in the core, so a person who turned it off there gets the same plain title
+            // here (task 6ac2639a). The tagged lists come first and the open list after, as the
+            // web orders them. A title that was nothing but tags keeps its tags: a task named
+            // after its filing beats an untitled one.
+            if quick_add
+                && app
+                    .context
+                    .account()
+                    .smart_tasks()
+                    .smart_task_creation_enabled
+            {
+                let (title, tagged) = crate::parse::quick_add::extract_lists(&draft.title, &lists);
+                if !title.trim().is_empty() {
+                    draft.title = title;
+                }
+                if !tagged.is_empty() {
+                    let mut filed = tagged;
+                    for id in draft.list_ids.drain(..) {
+                        if !filed.contains(&id) {
+                            filed.push(id);
+                        }
+                    }
+                    draft.list_ids = filed;
+                }
+            }
+
             // The first of the task's lists the cache knows decides the defaults — a task filed
             // in two lists takes the first one's, as the web takes its target list's.
-            let lists = app.store.lists().unwrap_or_default();
             if let Some(list) = draft
                 .list_ids
                 .iter()
@@ -1012,6 +1040,7 @@ fn settings(app: &App) -> Response {
         "dueOffsetChoices": crate::smart_tasks::offset_choices(),
         "dueTimeChoices": crate::smart_tasks::time_choices(),
         "layoutChoices": crate::smart_tasks::layout_choices(),
+        "subtaskChoices": crate::smart_tasks::subtask_choices(),
     }))
 }
 
@@ -2324,7 +2353,12 @@ fn rows_for_list(
     let ordered = filters::subtasks::splice_refs(
         &top_level,
         &tasks,
-        filters::subtasks::should_splice(list.show_subtasks, None),
+        // The account's half of the rule — "inside parent task only" — beside the list's
+        // (task 6ac2639a). See `filters::subtasks` for which one wins.
+        filters::subtasks::should_splice(
+            list.show_subtasks,
+            Some(&app.context.account().smart_tasks().subtask_display),
+        ),
         |task| visible.contains(task.id.as_str()),
     );
 
@@ -5359,6 +5393,124 @@ mod tests {
         assert_eq!(body, json!({ "taskDisplayMode": "list" }));
         let rows = call(&app, json!({ "kind": "rowsForList", "listId": list_id })).await;
         assert_eq!(rows["value"]["rows"][0]["action"], "complete");
+    }
+
+    /// Appearance's two rules (task 6ac2639a): with smart parsing on, the quick-add box's `#list`
+    /// files the task and leaves the title, and off it stays in the title as typed; and "inside
+    /// parent task only" keeps subtasks out of the top-level list while the detail keeps them.
+    #[tokio::test]
+    async fn smart_parsing_and_subtask_display_follow_the_account_task_6ac2639a() {
+        let (app, _transport) = app_and_transport(
+            StubTransport::new()
+                .push_json("smart-tasks", 200, json!({}))
+                .push_json("smart-tasks", 200, json!({})),
+        );
+        call(&app, json!({ "kind": "createList", "name": "Health" })).await;
+        call(
+            &app,
+            json!({ "kind": "createList", "name": "Side Projects" }),
+        )
+        .await;
+        let health = list_id_named(&app, "Health").await;
+        let side = list_id_named(&app, "Side Projects").await;
+
+        // On by default, as on web: the tag files the task and leaves the title. The tagged list
+        // comes first, the open list after.
+        let filed = call(
+            &app,
+            json!({
+                "kind": "createTask", "title": "Pushups #health", "listIds": [side], "quickAdd": true
+            }),
+        )
+        .await;
+        assert_eq!(filed["ok"], true, "{filed}");
+        assert_eq!(filed["value"]["title"], "Pushups");
+        assert_eq!(filed["value"]["listIds"], json!([health, side]));
+
+        // A two-word list, typed the way people type it after a `#`.
+        let dashed = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Read #side-projects docs", "quickAdd": true }),
+        )
+        .await;
+        assert_eq!(dashed["value"]["title"], "Read docs");
+        assert_eq!(dashed["value"]["listIds"], json!([side]));
+
+        // Not from the quick-add box: a title is a title.
+        let typed = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Fix #health", "listIds": [side] }),
+        )
+        .await;
+        assert_eq!(typed["value"]["title"], "Fix #health");
+        assert_eq!(typed["value"]["listIds"], json!([side]));
+
+        // Off: the tag stays in the title and the task lands in the open list only.
+        let off = call(
+            &app,
+            json!({
+                "kind": "updateSmartTaskSettings",
+                "changes": { "smartTaskCreationEnabled": false }
+            }),
+        )
+        .await;
+        assert_eq!(off["ok"], true, "{off}");
+        let plain = call(
+            &app,
+            json!({
+                "kind": "createTask", "title": "Walk #health", "listIds": [side], "quickAdd": true
+            }),
+        )
+        .await;
+        assert_eq!(plain["value"]["title"], "Walk #health");
+        assert_eq!(plain["value"]["listIds"], json!([side]));
+
+        // Subtasks: indented in the list by default...
+        let parent = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan the trip", "listIds": [health] }),
+        )
+        .await;
+        let parent_id = parent["value"]["id"].as_str().expect("an id").to_string();
+        call(
+            &app,
+            json!({
+                "kind": "createTask", "title": "Book flights",
+                "listIds": [health], "parentTaskId": parent_id
+            }),
+        )
+        .await;
+        let titles = |rows: &serde_json::Value| -> Vec<String> {
+            rows["value"]["rows"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .map(|row| row["title"].as_str().expect("a title").to_string())
+                .collect()
+        };
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": health })).await;
+        assert!(
+            titles(&rows).contains(&"Book flights".to_string()),
+            "{:?}",
+            titles(&rows)
+        );
+
+        // ...and inside the parent only when the account says so; the detail still has it.
+        let under = call(
+            &app,
+            json!({ "kind": "updateSmartTaskSettings", "changes": { "subtaskDisplay": "under_parent" } }),
+        )
+        .await;
+        assert_eq!(under["ok"], true, "{under}");
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": health })).await;
+        assert!(
+            !titles(&rows).contains(&"Book flights".to_string()),
+            "{:?}",
+            titles(&rows)
+        );
+        assert!(titles(&rows).contains(&"Plan the trip".to_string()));
+        let detail = call(&app, json!({ "kind": "taskDetail", "taskId": parent_id })).await;
+        assert_eq!(detail["value"]["subtasks"][0]["title"], "Book flights");
     }
 
     /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does

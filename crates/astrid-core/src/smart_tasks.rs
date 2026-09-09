@@ -172,6 +172,14 @@ pub fn time_choices() -> Vec<Choice> {
         .collect()
 }
 
+/// The two subtask layouts, as the web's Appearance page offers them (task 6ac2639a).
+pub fn subtask_choices() -> Vec<Choice> {
+    SUBTASK_DISPLAYS
+        .iter()
+        .map(|layout| choice(layout, format!("smart.subtasks.{layout}")))
+        .collect()
+}
+
 /// The two task-detail layouts, each with the line the web shows under it.
 pub fn layout_choices() -> Vec<Choice> {
     [DisplayMode::List, DisplayMode::Project]
@@ -243,6 +251,10 @@ mod tests {
         assert_eq!(values, DUE_OFFSETS);
         assert_eq!(offset_choices()[0].title_key, "smart.offset.none");
         assert_eq!(time_choices()[2].title_key, "smart.time.17_00");
+        assert_eq!(
+            subtask_choices()[1].title_key,
+            "smart.subtasks.under_parent"
+        );
         let layouts = layout_choices();
         assert_eq!(layouts[0].value, "list");
         assert_eq!(

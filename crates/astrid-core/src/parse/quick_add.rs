@@ -165,12 +165,80 @@ pub fn title_without_tags(value: &str) -> String {
         .join(" ")
 }
 
+/// What the web's quick add does with `#tags` when smart parsing is on (`parseTaskInput` in
+/// `lib/task-manager-utils.ts`, task 6ac2639a): each `#word` that names a list — case-insensitively,
+/// with the list's spaces typed as `-`, `_` or nothing — files the task there, and every tag is then
+/// taken out of the title, whether or not it named anything. A `#` inside a word (`C#`) is not a
+/// tag, and neither is a bare `#`. The open list is for the caller to append afterwards, as the web
+/// appends its selected list after the tagged ones.
+pub fn extract_lists(title: &str, lists: &[TaskList]) -> (String, Vec<String>) {
+    let mut ids: Vec<String> = Vec::new();
+    let mut kept: Vec<&str> = Vec::new();
+    for word in title.split_whitespace() {
+        let Some(tag) = word.strip_prefix('#').filter(|tag| !tag.is_empty()) else {
+            kept.push(word);
+            continue;
+        };
+        let tag = tag.to_lowercase();
+        let named = lists
+            .iter()
+            .filter(|list| !list.is_virtual.unwrap_or(false) && list.is_domain_list())
+            .find(|list| {
+                let name = list.name.to_lowercase();
+                let words: Vec<&str> = name.split_whitespace().collect();
+                name == tag
+                    || words.join("-") == tag
+                    || words.join("_") == tag
+                    || words.concat() == tag
+            });
+        if let Some(list) = named {
+            if !ids.contains(&list.id) {
+                ids.push(list.id.clone());
+            }
+        }
+    }
+    (kept.join(" "), ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn list(id: &str, name: &str) -> TaskList {
         TaskList::new(id, name)
+    }
+
+    /// The web's rule, to the letter: a tag names a list however its spaces were typed, every tag
+    /// leaves the title, and what is not a tag stays (task 6ac2639a).
+    #[test]
+    fn hashtags_file_the_task_and_leave_the_title_task_6ac2639a() {
+        let lists = [list("h", "Health"), list("s", "Side Projects")];
+        assert_eq!(
+            extract_lists("Pushups #health", &lists),
+            ("Pushups".to_string(), vec!["h".to_string()])
+        );
+        assert_eq!(
+            extract_lists("Read #side-projects docs #Health", &lists),
+            (
+                "Read docs".to_string(),
+                vec!["s".to_string(), "h".to_string()]
+            )
+        );
+        assert_eq!(
+            extract_lists("#side_projects #sideprojects", &lists).1,
+            vec!["s".to_string()]
+        );
+        // A tag that names nothing is still taken out; a `#` in a word, or alone, is not a tag.
+        assert_eq!(
+            extract_lists("Learn C# #nothing # now", &lists),
+            ("Learn C# # now".to_string(), vec![])
+        );
+        let mut board = list("b", "Doing");
+        board.list_type = Some("status".into());
+        assert_eq!(
+            extract_lists("Fix #doing", &[board]).1,
+            Vec::<String>::new()
+        );
     }
 
     #[test]

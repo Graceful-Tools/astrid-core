@@ -368,3 +368,21 @@ Here that task is **all-day on the reader's calendar day**, stored the way all-d
 stored (`date::all_day_instant`), which is what the setting says and what the task that filed
 this asked for. The web should do the same; until it does, the two clients disagree only in
 this one corner, and only about the time of day of a task the person never gave a time.
+
+## D11 — Smart parsing reads `#list` tags here, and dates, priority and repeats as well on web
+
+**This crate parses hashtags only.** `astrid_core::parse::quick_add::extract_lists`, applied in the
+`createTask` command when the title came from the quick-add box and the account's
+`smartTaskCreationEnabled` is on (task 6ac2639a).
+
+Web's `parseTaskInput` (`lib/task-manager-utils.ts`) does four things when smart parsing is on:
+files the task by its `#list` tags, and reads a due date ("tomorrow", "next week", "monday"), a
+priority ("urgent", "high priority") and a repeat ("weekly Monday") out of locale-specific keyword
+tables. The hashtag half is mirrored here to the letter — the same name matching, the same
+ordering (tagged lists first, the open list after), every tag stripped. The natural-language
+half is not: it is a port of its own, with a fixture of its own, and a client that parsed
+"monday" by a rule that drifted from web's would be worse than one that leaves the word in the
+title. Until it is ported, "Buy milk tomorrow" is a task called "Buy milk tomorrow" on Windows
+and a task due tomorrow on web. With smart parsing **off**, the two clients agree exactly: the
+title is kept as typed, and the task lands in the open list.
+

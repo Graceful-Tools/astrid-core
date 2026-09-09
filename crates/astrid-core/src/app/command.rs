@@ -213,6 +213,11 @@ pub enum Command {
         assignee_id: Option<String>,
         #[serde(default)]
         parent_task_id: Option<String>,
+        /// True when the title was typed into the quick-add box, where the web's smart parsing
+        /// reads `#list` tags out of it when the account has it on (task 6ac2639a). A subtask
+        /// typed into a detail is not parsed, as it is not on the web.
+        #[serde(default)]
+        quick_add: bool,
     },
     /// Edit a task. The body is the same shape the API takes, so a field the shell learns about
     /// needs no change here — see [`crate::services::TaskChanges`] for how absent and null differ.

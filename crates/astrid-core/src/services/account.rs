@@ -271,14 +271,18 @@ impl AccountService {
         Ok(merged)
     }
 
-    /// The task-detail layout the account chose: what rows and the detail draw with when the shell
-    /// does not say otherwise. From the cache, so a choice made here applies at once and one made
-    /// on the web applies after the next settings refresh.
-    pub fn display_mode(&self) -> crate::rows::DisplayMode {
+    /// The same, shaped and defaulted — see [`crate::smart_tasks`]. From the cache, so a choice
+    /// made here applies at once and one made on the web applies after the next settings refresh.
+    pub fn smart_tasks(&self) -> crate::smart_tasks::SmartTaskSettings {
         crate::smart_tasks::SmartTaskSettings::from_stored(
             &self.smart_task_settings().unwrap_or_default(),
         )
-        .display_mode()
+    }
+
+    /// The task-detail layout the account chose: what rows and the detail draw with when the shell
+    /// does not say otherwise.
+    pub fn display_mode(&self) -> crate::rows::DisplayMode {
+        self.smart_tasks().display_mode()
     }
 
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────
