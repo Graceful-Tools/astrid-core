@@ -121,6 +121,15 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             assignee_id,
             parent_task_id,
         } => {
+            // What the caller said, before the fields move into the draft: a list's defaults
+            // fill in only what was left unsaid (task c4102c67).
+            let given = crate::services::list_defaults::Given {
+                priority: priority.is_some(),
+                due: due_date_time.is_some(),
+                assignee: assignee_id.is_some(),
+                repeating: false,
+                is_private: false,
+            };
             let mut draft = TaskDraft::new(title);
             draft.description = description.unwrap_or_default();
             draft.list_ids = list_ids;
@@ -133,6 +142,23 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             }
             draft.assignee_id = assignee_id;
             draft.parent_task_id = parent_task_id;
+
+            // The first of the task's lists the cache knows decides the defaults — a task filed
+            // in two lists takes the first one's, as the web takes its target list's.
+            let lists = app.store.lists().unwrap_or_default();
+            if let Some(list) = draft
+                .list_ids
+                .iter()
+                .find_map(|id| lists.iter().find(|list| &list.id == id))
+            {
+                crate::services::list_defaults::apply(
+                    &mut draft,
+                    given,
+                    list,
+                    app.clock.now(),
+                    app.clock.utc_offset(),
+                );
+            }
             answer(app.context.tasks().create(&draft))
         }
         Command::UpdateTask { task_id, changes } => match changes_from_json(&changes) {
@@ -1223,6 +1249,15 @@ async fn list_members(app: &App, list_id: &str) -> Response {
         "colorChoices": rows::list_picks::LIST_COLOR_PALETTE,
         "privacy": list.privacy,
         "isFavorite": list.is_favorite.unwrap_or(false),
+        // What a task added to this list starts as (task c4102c67), as the list stores it: an
+        // absent assignee is the creator, "unassigned" is nobody, an id is that member.
+        "defaults": {
+            "assigneeId": list.default_assignee_id,
+            "priority": list.default_priority.unwrap_or(0),
+            "repeating": list.default_repeating.clone().unwrap_or_else(|| "never".into()),
+            "dueDate": list.default_due_date.clone().unwrap_or_else(|| "none".into()),
+            "dueTime": list.default_due_time,
+        },
         "canManageMembers": can_manage_members,
         "canManageList": can_manage_list,
         "canDeleteList": can_delete,
@@ -2073,6 +2108,10 @@ fn list_changes_from_json(
             }
             "defaultPriority" => changes.default_priority = Some(value.as_i64()),
             "defaultDueTime" => changes.default_due_time = Some(value.as_str().map(str::to_string)),
+            "defaultRepeating" => {
+                changes.default_repeating = Some(value.as_str().map(str::to_string))
+            }
+            "defaultDueDate" => changes.default_due_date = Some(value.as_str().map(str::to_string)),
             "filterPriority" => changes.filter_priority = Some(value.as_str().map(str::to_string)),
             "filterDueDate" => changes.filter_due_date = Some(value.as_str().map(str::to_string)),
             "filterAssignee" => changes.filter_assignee = Some(value.as_str().map(str::to_string)),
@@ -2118,6 +2157,72 @@ mod tests {
             .and_then(|list| list["id"].as_str())
             .unwrap_or_else(|| panic!("no list named {name}"))
             .to_string()
+    }
+
+    /// A list's defaults reach a task made at the door, and what was said at the door wins
+    /// (task c4102c67).
+    #[tokio::test]
+    async fn quick_add_takes_the_list_s_defaults_for_what_it_did_not_say_task_c4102c67() {
+        // The settings read at the end fetches members over the wire; nothing else here does.
+        let app =
+            app_with(StubTransport::new().push_json("/members", 200, json!({ "members": [] })));
+        call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let work = list_id_named(&app, "Work").await;
+        let set = call(
+            &app,
+            json!({
+                "kind": "updateList", "listId": work,
+                "changes": {
+                    "defaultPriority": 2, "defaultRepeating": "weekly",
+                    "defaultDueDate": "tomorrow", "defaultDueTime": "17:00",
+                    "defaultAssigneeId": "unassigned"
+                }
+            }),
+        )
+        .await;
+        assert_eq!(set["ok"], true, "{set}");
+
+        let made = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Plan", "listIds": [work] }),
+        )
+        .await;
+        assert_eq!(made["ok"], true, "{made}");
+        assert_eq!(made["value"]["priority"], 2);
+        assert_eq!(made["value"]["repeating"], "weekly");
+        assert_eq!(made["value"]["isAllDay"], false);
+        assert!(made["value"]["assigneeId"].is_null());
+        let due = made["value"]["dueDateTime"].as_str().expect("a due date");
+        // The test clock is 2026-09-07T12:00Z; tomorrow at 17:00 in the clock's own zone.
+        let offset = app.clock.utc_offset();
+        let expected = "2026-09-08T17:00:00"
+            .parse::<chrono::NaiveDateTime>()
+            .expect("a time")
+            .and_local_timezone(offset)
+            .single()
+            .expect("a local time")
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            crate::model::date::parse(due).expect("parses"),
+            expected,
+            "{due}"
+        );
+
+        // Said at the door: the list's default does not override it.
+        let chosen = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Now", "listIds": [work], "priority": 0 }),
+        )
+        .await;
+        assert_eq!(chosen["value"]["priority"], 0);
+
+        // And the settings answer carries the five, so the flyout can show them.
+        let settings = call(&app, json!({ "kind": "listMembers", "listId": work })).await;
+        assert_eq!(settings["value"]["defaults"]["priority"], 2);
+        assert_eq!(settings["value"]["defaults"]["repeating"], "weekly");
+        assert_eq!(settings["value"]["defaults"]["dueDate"], "tomorrow");
+        assert_eq!(settings["value"]["defaults"]["dueTime"], "17:00");
+        assert_eq!(settings["value"]["defaults"]["assigneeId"], "unassigned");
     }
 
     /// The detail's list editor: add, remove, and what it offers in between (task d3f3b111).

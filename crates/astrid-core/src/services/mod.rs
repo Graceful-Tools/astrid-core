@@ -23,6 +23,7 @@ pub mod chat;
 pub mod comment;
 pub mod external;
 pub mod list;
+pub mod list_defaults;
 pub mod search;
 pub mod task;
 pub mod timer;

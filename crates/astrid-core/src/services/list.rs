@@ -33,6 +33,10 @@ pub struct ListChanges {
     pub default_assignee_id: Option<Option<String>>,
     pub default_priority: Option<Option<i64>>,
     pub default_due_time: Option<Option<String>>,
+    /// `never`, `daily`, `weekly`, `monthly`, `yearly` or `custom` (task c4102c67).
+    pub default_repeating: Option<Option<String>>,
+    /// `none`, `today`, `tomorrow` or `next_week`.
+    pub default_due_date: Option<Option<String>>,
     pub filter_completion: Option<Option<String>>,
     /// The other six saved filters. Every one of them was already applied by
     /// [`crate::filters`] and settable by nothing, so a filter set on web could be read here and
@@ -93,6 +97,12 @@ impl ListChanges {
         }
         if let Some(value) = &self.default_due_time {
             list.default_due_time = value.clone();
+        }
+        if let Some(value) = &self.default_repeating {
+            list.default_repeating = value.clone();
+        }
+        if let Some(value) = &self.default_due_date {
+            list.default_due_date = value.clone();
         }
         if let Some(value) = &self.filter_priority {
             list.filter_priority = value.clone();
@@ -160,6 +170,12 @@ impl ListChanges {
         }
         if let Some(value) = &self.default_due_time {
             set("defaultDueTime", json!(value));
+        }
+        if let Some(value) = &self.default_repeating {
+            set("defaultRepeating", json!(value));
+        }
+        if let Some(value) = &self.default_due_date {
+            set("defaultDueDate", json!(value));
         }
         if let Some(value) = &self.filter_priority {
             set("filterPriority", json!(value));

@@ -351,3 +351,20 @@ until the connection comes back.
 If the clients cannot be aligned in one change, write the divergence down here — with which
 behaviour this crate follows and what it would take to close it. An undocumented divergence becomes
 a bug report from a confused user.
+
+---
+
+## D10 — A list's *When* default without a *When Time* stamps the creation instant on web
+
+**This crate stores the calendar day.** `astrid_core::services::list_defaults`.
+
+A list can default its new tasks to *today*, *tomorrow* or *next week* (`defaultDueDate`) and to
+a time of day (`defaultDueTime`, or `null` for all day). When the date default is set and the
+time default is absent, web's `applyListDefaults` takes `parseRelativeDate("today")`, which is
+`new Date()` — the moment the task was created, 14:37 and all — and leaves `isAllDay` false. A
+"due today" default produces a task due at whatever time it was added.
+
+Here that task is **all-day on the reader's calendar day**, stored the way all-day dates are
+stored (`date::all_day_instant`), which is what the setting says and what the task that filed
+this asked for. The web should do the same; until it does, the two clients disagree only in
+this one corner, and only about the time of day of a task the person never gave a time.
