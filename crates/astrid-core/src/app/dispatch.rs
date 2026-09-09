@@ -1214,6 +1214,15 @@ async fn list_members(app: &App, list_id: &str) -> Response {
         "listId": list.id,
         "name": list.name,
         "ownerId": list.owner_id,
+        // How the list looks and who can see it (task 53780e75). The colour is the one every
+        // screen draws — sidebar mark, row chip, detail chip — and the choices are the web's
+        // palette, so a colour picked here is a colour the web offers too. Privacy comes back
+        // as stored, absent when the server's thinner responses left it out, so the flyout can
+        // say "unknown" rather than guessing "private".
+        "color": list.display_color(),
+        "colorChoices": rows::list_picks::LIST_COLOR_PALETTE,
+        "privacy": list.privacy,
+        "isFavorite": list.is_favorite.unwrap_or(false),
         "canManageMembers": can_manage_members,
         "canManageList": can_manage_list,
         "canDeleteList": can_delete,
@@ -3895,6 +3904,60 @@ mod tests {
         // The owner cannot leave their own list — that would strand it, which is what deleting is
         // for.
         assert_eq!(answered["value"]["canLeave"], false);
+    }
+
+    /// The settings screen needs the look and the visibility of the list beside its members
+    /// (task 53780e75): the colour every screen draws, the web's palette to choose from,
+    /// privacy as stored, and whether it is a favourite.
+    #[tokio::test]
+    async fn list_settings_carry_colour_privacy_and_favourite_task_53780e75() {
+        let transport = StubTransport::new().push_json("/members", 200, json!({ "members": [] }));
+        let app = app_with(transport);
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({
+                    "id": "l1", "name": "Work", "ownerId": "me",
+                    "color": "#ef4444", "privacy": "PUBLIC", "isFavorite": true
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+
+        let answered = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+
+        assert_eq!(answered["value"]["color"], "#ef4444");
+        assert_eq!(answered["value"]["privacy"], "PUBLIC");
+        assert_eq!(answered["value"]["isFavorite"], true);
+        assert_eq!(
+            answered["value"]["colorChoices"]
+                .as_array()
+                .expect("a palette")
+                .len(),
+            crate::rows::list_picks::LIST_COLOR_PALETTE.len()
+        );
+
+        // A list the server never said the privacy of: the answer says nothing rather than
+        // "private", which a screen would then offer to change back to.
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l2", "name": "Thin", "ownerId": "me" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        let app =
+            app_with(StubTransport::new().push_json("/members", 200, json!({ "members": [] })));
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l2", "name": "Thin", "ownerId": "me" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        let thin = call(&app, json!({ "kind": "listMembers", "listId": "l2" })).await;
+        assert!(thin["value"]["privacy"].is_null());
+        assert_eq!(
+            thin["value"]["color"], "#3b82f6",
+            "the default every client draws"
+        );
     }
 
     #[tokio::test]
