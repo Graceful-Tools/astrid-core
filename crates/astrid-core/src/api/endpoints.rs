@@ -106,6 +106,12 @@ pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
 /// Everything this account has, as one file. `?format=json` or `?format=csv`.
 pub const EXPORT: &str = "/api/v1/users/me/export";
+/// Close the account for good (task 19fd9289). The body carries the typed confirmation.
+pub const DELETE_ACCOUNT: &str = "/api/v1/users/me/delete";
+/// Send, resend or cancel an email verification. The v1 route reads the action from the query.
+pub const VERIFY_EMAIL: &str = "/api/v1/users/me/verify-email";
+/// One small file, uploaded directly — a profile photo. Answers with the file's address.
+pub const UPLOAD: &str = "/api/v1/upload";
 
 /// Somebody's profile: who they are, and the three numbers under it.
 pub fn user_profile(user_id: &str) -> String {

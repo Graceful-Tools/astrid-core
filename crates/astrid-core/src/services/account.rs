@@ -27,6 +27,10 @@ const MY_TASKS_PREFERENCES_KEY: &str = "account.myTasksPreferences";
 const CAPABILITIES_KEY: &str = "account.capabilities";
 const SETTINGS_KEY: &str = "account.settings";
 
+/// What the server makes somebody type before it deletes their account, character for character
+/// (web's `AccountDeletionSection`). Checked here too, so a near miss is refused without a request.
+pub const DELETE_CONFIRMATION: &str = "DELETE MY ACCOUNT";
+
 pub struct AccountService {
     context: Context,
 }
@@ -79,6 +83,84 @@ impl AccountService {
             .map_err(|error| crate::api::ApiError::Decode(error.to_string()))?;
         self.set_current_user(&user).await?;
         Ok(user)
+    }
+
+    /// Change the signed-in user's name, photo, or both (task 19fd9289). Either may be left alone:
+    /// the server keeps what it is not sent. The user is fetched back afterwards so the cache — and
+    /// every avatar drawn from it — says what the server now says.
+    pub async fn update_profile(&self, name: Option<&str>, image: Option<&str>) -> Result<User> {
+        let mut body = serde_json::Map::new();
+        if let Some(name) = name {
+            body.insert("name".into(), json!(name.trim()));
+        }
+        if let Some(image) = image {
+            body.insert("image".into(), json!(image));
+        }
+        let request = self
+            .context
+            .client
+            .put(endpoints::ME)
+            .value(serde_json::Value::Object(body));
+        self.context.client.send(request).await?;
+        self.refresh_current_user().await
+    }
+
+    /// Put a picture on the server and return its address, for [`Self::update_profile`].
+    ///
+    /// Straight to the upload route the web's own avatar goes through, and not the Outbox: a photo
+    /// is chosen while somebody watches, and one queued to appear later would change their face
+    /// unbidden, possibly on another day.
+    pub async fn upload_photo(&self, path: &std::path::Path) -> Result<String> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| super::ServiceError::LocalFile(error.to_string()))?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("photo");
+        let mime = super::attachment::mime_for(path);
+        let boundary = format!("astrid-photo-{}", crate::outbox::new_temp_id());
+        let body = super::attachment::multipart(&boundary, name, &mime, &bytes, "{}");
+        let request = self
+            .context
+            .client
+            .post(endpoints::UPLOAD)
+            .bytes(format!("multipart/form-data; boundary={boundary}"), body);
+        let answer = self.context.client.send(request).await?;
+        answer
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                super::ServiceError::Api(crate::api::ApiError::Decode(
+                    "the upload answered without an address".into(),
+                ))
+            })
+    }
+
+    /// Ask the server to send the verification email again (task 19fd9289).
+    ///
+    /// The action goes in the query string, which is where the v1 route reads it, and in the body
+    /// as well, which is where the web's own settings page puts it — whichever the server honours.
+    pub async fn resend_verification(&self) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::VERIFY_EMAIL)
+            .query("action", Some("resend".to_string()))
+            .value(json!({ "action": "resend" }));
+        Ok(self.context.client.send(request).await?)
+    }
+
+    /// Delete the account, for good (task 19fd9289). The server checks the phrase; so does the
+    /// command that calls this. What is left on this machine afterwards is [`Self::sign_out`]'s.
+    pub async fn delete_account(&self, confirmation: &str) -> Result<()> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::DELETE_ACCOUNT)
+            .value(json!({ "confirmationText": confirmation }));
+        self.context.client.send(request).await?;
+        Ok(())
     }
 
     // ─── Settings ─────────────────────────────────────────────────────────────────────────────

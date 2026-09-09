@@ -522,6 +522,45 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 None => Response::failed(Failure::unauthorized()),
             }
         }
+        Command::UpdateProfile { name, photo_path } => {
+            let account = app.context.account();
+            let image = match photo_path {
+                Some(path) => match account.upload_photo(std::path::Path::new(&path)).await {
+                    Ok(url) => Some(url),
+                    Err(error) => return Response::failed(error.into()),
+                },
+                None => None,
+            };
+            match account
+                .update_profile(name.as_deref(), image.as_deref())
+                .await
+            {
+                Ok(_) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::ResendVerification => match app.context.account().resend_verification().await {
+            Ok(answer) => Response::ok(serde_json::json!({
+                "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::DeleteAccount { confirmation } => {
+            // The server requires the phrase typed exactly, and so does this: a request that is
+            // going to be refused is not worth sending, and a button that sends one looks like it
+            // worked.
+            if confirmation != crate::services::account::DELETE_CONFIRMATION {
+                return Response::failed(Failure::bad_request(format!(
+                    "type {} exactly to delete the account",
+                    crate::services::account::DELETE_CONFIRMATION
+                )));
+            }
+            if let Err(error) = app.context.account().delete_account(&confirmation).await {
+                return Response::failed(error.into());
+            }
+            // The account is gone; so is everything this machine held for it.
+            sign_out(app).await
+        }
         Command::ExportAccount { format, path } => {
             match app
                 .context
@@ -616,23 +655,27 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             app.auth.cancel();
             Response::done()
         }
-        Command::SignOut => {
-            // The flow in progress goes with the session. Leaving it would let a callback from
-            // before the sign-out complete afterwards and sign the user back in.
-            app.auth.cancel();
-            // Files waiting to be uploaded go too. The journal that would have sent them is about
-            // to be wiped, so they are bytes belonging to the departing account with nothing left
-            // to send them — and the next person on this machine should not be holding them.
-            let _ = std::fs::remove_dir_all(
-                app.context
-                    .attachments(app.attachment_cache())
-                    .pending_dir(),
-            );
-            match app.context.account().sign_out().await {
-                Ok(()) => Response::done(),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
+        Command::SignOut => sign_out(app).await,
+    }
+}
+
+/// Forget the session and everything this machine held for it. Sign-out, and the tail of deleting
+/// the account (task 19fd9289).
+async fn sign_out(app: &App) -> Response {
+    // The flow in progress goes with the session. Leaving it would let a callback from before the
+    // sign-out complete afterwards and sign the user back in.
+    app.auth.cancel();
+    // Files waiting to be uploaded go too. The journal that would have sent them is about to be
+    // wiped, so they are bytes belonging to the departing account with nothing left to send them —
+    // and the next person on this machine should not be holding them.
+    let _ = std::fs::remove_dir_all(
+        app.context
+            .attachments(app.attachment_cache())
+            .pending_dir(),
+    );
+    match app.context.account().sign_out().await {
+        Ok(()) => Response::done(),
+        Err(error) => Response::failed(error.into()),
     }
 }
 
@@ -5035,6 +5078,133 @@ mod tests {
             serde_json::from_slice(minted.body.as_deref().expect("a body")).expect("json");
         assert_eq!(body["targetType"], "task");
         assert_eq!(body["targetId"], "t1");
+    }
+
+    /// The account page's sections work through the core (task 19fd9289): a name or a photo is
+    /// saved and the account fetched back, the verification email is re-sent where the v1 route
+    /// reads the action, and deleting the account needs the phrase typed exactly — then leaves
+    /// nothing of the account on this machine.
+    #[tokio::test]
+    async fn the_account_page_edits_the_profile_resends_verification_and_deletes_the_account_task_19fd9289(
+    ) {
+        let me = json!({ "user": {
+            "id": "me", "name": "Jon", "email": "jon@x.io", "image": null,
+            "verified": false, "hasPendingChange": true, "pendingEmail": "new@x.io",
+            "createdAt": "2026-01-02T03:04:05Z", "updatedAt": "2026-09-01T00:00:00Z"
+        }});
+        let (app, transport) = app_and_transport(
+            StubTransport::new()
+                .push_json(
+                    "v1/upload",
+                    200,
+                    json!({ "url": "https://blob.test/photo.png" }),
+                )
+                .push_json(
+                    "verify-email",
+                    200,
+                    json!({ "success": true, "message": "Verification email sent" }),
+                )
+                .push_json("me/delete", 200, json!({ "success": true }))
+                // Everything else — the GET and the PUT of /users/me — answers with the account.
+                .fallback(Ok(crate::api::transport::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: me.to_string().into_bytes(),
+                })),
+        );
+        app.store
+            .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+            .expect("stores");
+
+        // A new name: sent, then the account fetched back so the screen says what the server says.
+        let renamed = call(&app, json!({ "kind": "updateProfile", "name": " Jon P " })).await;
+        assert_eq!(renamed["ok"], true, "{renamed}");
+        assert_eq!(renamed["value"]["user"]["verified"], false);
+        assert_eq!(renamed["value"]["user"]["hasPendingChange"], true);
+        assert_eq!(renamed["value"]["user"]["pendingEmail"], "new@x.io");
+        let put = transport
+            .requests()
+            .into_iter()
+            .find(|request| request.method.as_str() == "PUT")
+            .expect("a PUT");
+        assert!(put.url.ends_with("/api/v1/users/me"), "{}", put.url);
+        let body: serde_json::Value =
+            serde_json::from_slice(put.body.as_deref().expect("a body")).expect("json");
+        assert_eq!(body["name"], "Jon P", "trimmed");
+        assert!(
+            body.get("image").is_none(),
+            "a photo that was not chosen is left alone"
+        );
+
+        // A photo: uploaded as a file, then its address put on the profile.
+        let photo =
+            std::env::temp_dir().join(format!("astrid-photo-{}.png", crate::outbox::new_temp_id()));
+        std::fs::write(&photo, b"\x89PNG").expect("writes");
+        let pictured = call(
+            &app,
+            json!({ "kind": "updateProfile", "photoPath": photo.to_string_lossy() }),
+        )
+        .await;
+        let _ = std::fs::remove_file(&photo);
+        assert_eq!(pictured["ok"], true, "{pictured}");
+        let requests = transport.requests();
+        let upload = requests
+            .iter()
+            .find(|request| request.url.ends_with("/api/v1/upload"))
+            .expect("an upload");
+        let upload_body = String::from_utf8_lossy(upload.body.as_deref().expect("bytes"));
+        assert!(upload_body.contains("name=\"file\""));
+        assert!(upload_body.contains("image/png"));
+        let put = requests
+            .iter()
+            .rfind(|request| request.method.as_str() == "PUT")
+            .expect("a PUT");
+        let body: serde_json::Value =
+            serde_json::from_slice(put.body.as_deref().expect("a body")).expect("json");
+        assert_eq!(body["image"], "https://blob.test/photo.png");
+        assert!(body.get("name").is_none(), "the name was not touched");
+
+        // Resend goes where the v1 route reads the action.
+        let resent = call(&app, json!({ "kind": "resendVerification" })).await;
+        assert_eq!(resent["ok"], true, "{resent}");
+        assert_eq!(resent["value"]["message"], "Verification email sent");
+        assert!(transport.requests().iter().any(|request| {
+            request.url.contains("verify-email") && request.url.contains("action=resend")
+        }));
+
+        // Deleting needs the phrase, typed exactly; a near miss sends nothing.
+        let refused = call(
+            &app,
+            json!({ "kind": "deleteAccount", "confirmation": "delete my account" }),
+        )
+        .await;
+        assert_eq!(refused["ok"], false);
+        assert!(!transport
+            .requests()
+            .iter()
+            .any(|request| request.url.contains("me/delete")));
+        let deleted = call(
+            &app,
+            json!({ "kind": "deleteAccount", "confirmation": "DELETE MY ACCOUNT" }),
+        )
+        .await;
+        assert_eq!(deleted["ok"], true, "{deleted}");
+        let sent = transport
+            .requests()
+            .into_iter()
+            .find(|request| request.url.contains("me/delete"))
+            .expect("the deletion");
+        let body: serde_json::Value =
+            serde_json::from_slice(sent.body.as_deref().expect("a body")).expect("json");
+        assert_eq!(body["confirmationText"], "DELETE MY ACCOUNT");
+        assert!(
+            app.context
+                .account()
+                .current_user()
+                .expect("reads")
+                .is_none(),
+            "nothing of the account is left here"
+        );
     }
 
     /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does

@@ -24,6 +24,30 @@ pub struct User {
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(
+        default,
+        with = "date::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<DateTime<Utc>>,
+    /// The account's own verification state, as `GET /users/me` merges it into the user (task
+    /// 19fd9289): verified outright or through a sign-in provider, whether a change of address is
+    /// waiting, and what it is. Only ever present on the signed-in user; absent on everyone else,
+    /// and absent from a server older than the fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<bool>,
+    #[serde(
+        default,
+        rename = "verifiedViaOAuth",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub verified_via_oauth: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_pending_change: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_pending_verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_email: Option<String>,
     /// `HH:MM`, the time of day a new all-day task defaults to when the user gives it a time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_due_time: Option<String>,
@@ -52,6 +76,12 @@ impl User {
             name: None,
             image: None,
             created_at: None,
+            updated_at: None,
+            verified: None,
+            verified_via_oauth: None,
+            has_pending_change: None,
+            has_pending_verification: None,
+            pending_email: None,
             default_due_time: None,
             is_pending: None,
             is_ai_agent: None,
@@ -134,15 +164,9 @@ mod tests {
 
     fn user(name: Option<&str>, email: Option<&str>) -> User {
         User {
-            id: "u1".into(),
             email: email.map(str::to_string),
             name: name.map(str::to_string),
-            image: None,
-            created_at: None,
-            default_due_time: None,
-            is_pending: None,
-            is_ai_agent: None,
-            ai_agent_type: None,
+            ..User::new("u1")
         }
     }
 

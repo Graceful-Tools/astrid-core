@@ -521,6 +521,21 @@ pub enum Command {
         format: String,
         path: String,
     },
+    /// Change the signed-in user's name, photo, or both (task 19fd9289). `photoPath` is a file on
+    /// this machine, uploaded first. The answer is the account screen, redrawn.
+    UpdateProfile {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        photo_path: Option<String>,
+    },
+    /// Send the verification email again. Answers with the server's message.
+    ResendVerification,
+    /// Delete the account for good. `confirmation` must be the phrase the web requires, typed
+    /// exactly; anything else is refused without a request. Signs out afterwards.
+    DeleteAccount {
+        confirmation: String,
+    },
     /// The account: who is signed in, and what their reminder settings are.
     ///
     /// From the cache, so the screen draws instantly. [`Command::RefreshSettings`] catches it up.

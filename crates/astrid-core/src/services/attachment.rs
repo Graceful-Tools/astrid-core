@@ -217,7 +217,7 @@ pub(crate) fn multipart(
 ///
 /// A short table rather than a crate: the server re-checks the type anyway, and what this affects
 /// is whether a browser shows an image inline. Anything unrecognised is bytes.
-fn mime_for(path: &Path) -> String {
+pub(crate) fn mime_for(path: &Path) -> String {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
