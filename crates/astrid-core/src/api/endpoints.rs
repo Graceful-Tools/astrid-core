@@ -49,6 +49,9 @@ pub const MY_TASKS_PREFERENCES: &str = "/api/v1/users/me/my-tasks-preferences";
 // ─── The agents ───────────────────────────────────────────────────────────────────────────────
 
 pub const AGENT_MODES: &str = "/api/v1/users/me/agent-modes";
+/// The agents this account can put on a list — built-ins the account may run, and its own
+/// (task f44b4a0c). Answers `{ "agents": [{ "id", "name", … }] }`.
+pub const AVAILABLE_AGENTS: &str = "/api/v1/users/me/available-agents";
 /// Which services have a key. The server answers with that, never with the key.
 pub const AI_CREDENTIALS: &str = "/api/v1/users/me/ai-credentials";
 pub const AI_CREDENTIALS_TEST: &str = "/api/v1/users/me/ai-credentials/test";

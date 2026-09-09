@@ -37,6 +37,12 @@ pub struct ListChanges {
     pub default_repeating: Option<Option<String>>,
     /// `none`, `today`, `tomorrow` or `next_week`.
     pub default_due_date: Option<Option<String>>,
+    /// Which agent picks up this list's tasks; `Some(None)` is the account's default
+    /// (task f44b4a0c). Travels as `aiAgentConfig.defaultAgentId`, beside the enabled types the
+    /// list already has, because that is the shape the server prefers.
+    pub default_agent_id: Option<Option<String>>,
+    /// `owner/name` of the repository a coding agent commits to; `Some(None)` is none.
+    pub github_repository_id: Option<Option<String>>,
     pub filter_completion: Option<Option<String>>,
     /// The other six saved filters. Every one of them was already applied by
     /// [`crate::filters`] and settable by nothing, so a filter set on web could be read here and
@@ -103,6 +109,14 @@ impl ListChanges {
         }
         if let Some(value) = &self.default_due_date {
             list.default_due_date = value.clone();
+        }
+        if let Some(value) = &self.default_agent_id {
+            let mut config = list.ai_agent_config.clone().unwrap_or_default();
+            config.default_agent_id = value.clone();
+            list.ai_agent_config = Some(config);
+        }
+        if let Some(value) = &self.github_repository_id {
+            list.github_repository_id = value.clone();
         }
         if let Some(value) = &self.filter_priority {
             list.filter_priority = value.clone();
@@ -176,6 +190,9 @@ impl ListChanges {
         }
         if let Some(value) = &self.default_due_date {
             set("defaultDueDate", json!(value));
+        }
+        if let Some(value) = &self.github_repository_id {
+            set("githubRepositoryId", json!(value));
         }
         if let Some(value) = &self.filter_priority {
             set("filterPriority", json!(value));
@@ -356,9 +373,19 @@ impl ListService {
         list.updated_at = Some(now);
         self.context.store.upsert_list(&list)?;
 
+        let mut body = changes.to_body();
+        // The agent travels inside `aiAgentConfig` with the enabled types the list already has,
+        // which is why it is assembled here where the list is known rather than in `to_body`.
+        if changes.default_agent_id.is_some() {
+            let config = list.ai_agent_config.clone().unwrap_or_default();
+            body["aiAgentConfig"] = json!({
+                "enabledTypes": config.enabled_types,
+                "defaultAgentId": config.default_agent_id,
+            });
+        }
         let entry = outbox::build(
             kind::UPDATE_LIST,
-            json!({ "listId": id, "body": changes.to_body() }),
+            json!({ "listId": id, "body": body }),
             &outbox::new_temp_id(),
             now,
         );

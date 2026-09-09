@@ -226,6 +226,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::RemoveBoardStatus { list_id, role } => {
             status_outcome(app.context.boards().remove_status(&list_id, &role).await)
         }
+        Command::ListAgentOptions { list_id } => list_agent_options(app, &list_id).await,
         Command::SetTaskStatusRole {
             task_id,
             status_role,
@@ -1305,6 +1306,10 @@ async fn list_members(app: &App, list_id: &str) -> Response {
         "ownerId": list.owner_id,
         "projectId": list.project_id,
         "statuses": statuses,
+        // The coding-agent binding (task f44b4a0c): which agent picks this list's tasks up, and
+        // which repository it commits to. The choices are a separate, networked answer.
+        "defaultAgentId": list.ai_agent_config.as_ref().and_then(|config| config.default_agent_id.clone()),
+        "githubRepositoryId": list.github_repository_id,
         // How the list looks and who can see it (task 53780e75). The colour is the one every
         // screen draws — sidebar mark, row chip, detail chip — and the choices are the web's
         // palette, so a colour picked here is a colour the web offers too. Privacy comes back
@@ -1727,6 +1732,83 @@ fn repeat_options(app: &App, task_id: &str) -> Response {
 /// users say they are agents. Until the core fetches the agent roster (M3) that is only the ones
 /// seen embedded in a response; an agent nobody has met yet is simply not offered, which is
 /// better than offering a bare id.
+/// The choices for a list's coding-agent settings (task f44b4a0c).
+///
+/// Both halves reach the network. The agents are what the account may run — the web's
+/// `available-agents` — and the repositories are what its GitHub connection can see. A GitHub
+/// that is not connected answers with an error, which is not a failure here: it is "no
+/// repositories, and say why".
+async fn list_agent_options(app: &App, list_id: &str) -> Response {
+    let list = match app.context.lists().list(list_id) {
+        Ok(Some(list)) => list,
+        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let client = &app.context.client;
+
+    let agents: Vec<serde_json::Value> = match client
+        .send(client.get(crate::api::endpoints::AVAILABLE_AGENTS))
+        .await
+    {
+        Ok(answer) => answer
+            .get("agents")
+            .and_then(|value| value.as_array())
+            .map(|agents| {
+                agents
+                    .iter()
+                    .filter_map(|agent| {
+                        let id = agent.get("id")?.as_str()?;
+                        let name = agent
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or(id);
+                        Some(serde_json::json!({ "id": id, "name": name }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        Err(error @ crate::api::ApiError::Unauthorized) => {
+            return Response::failed(crate::services::ServiceError::Api(error).into())
+        }
+        Err(_) => Vec::new(),
+    };
+
+    let (repositories, github_connected) = match client
+        .send(client.get(crate::api::endpoints::GITHUB_REPOSITORIES))
+        .await
+    {
+        Ok(answer) => (
+            answer
+                .get("repositories")
+                .and_then(|value| value.as_array())
+                .map(|repositories| {
+                    repositories
+                        .iter()
+                        .filter_map(|repository| {
+                            let full_name = repository.get("fullName")?.as_str()?;
+                            let name = repository
+                                .get("name")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or(full_name);
+                            Some(serde_json::json!({ "fullName": full_name, "name": name }))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            true,
+        ),
+        Err(_) => (Vec::new(), false),
+    };
+
+    Response::ok(serde_json::json!({
+        "defaultAgentId": list.ai_agent_config.as_ref().and_then(|config| config.default_agent_id.clone()),
+        "githubRepositoryId": list.github_repository_id,
+        "agents": agents,
+        "repositories": repositories,
+        "githubConnected": github_connected,
+    }))
+}
+
 /// A board-status write's answer: the state that changed, or the web's own refusal as a bad
 /// request (task e5214fba).
 fn status_outcome(outcome: crate::services::Result<crate::services::StatusOutcome>) -> Response {
@@ -2191,6 +2273,10 @@ fn list_changes_from_json(
                 changes.default_repeating = Some(value.as_str().map(str::to_string))
             }
             "defaultDueDate" => changes.default_due_date = Some(value.as_str().map(str::to_string)),
+            "defaultAgentId" => changes.default_agent_id = Some(value.as_str().map(str::to_string)),
+            "githubRepositoryId" => {
+                changes.github_repository_id = Some(value.as_str().map(str::to_string))
+            }
             "filterPriority" => changes.filter_priority = Some(value.as_str().map(str::to_string)),
             "filterDueDate" => changes.filter_due_date = Some(value.as_str().map(str::to_string)),
             "filterAssignee" => changes.filter_assignee = Some(value.as_str().map(str::to_string)),
@@ -2236,6 +2322,120 @@ mod tests {
             .and_then(|list| list["id"].as_str())
             .unwrap_or_else(|| panic!("no list named {name}"))
             .to_string()
+    }
+
+    /// A list's agent and repository are offered from what the account can use, and written
+    /// the way the server prefers them (task f44b4a0c).
+    #[tokio::test]
+    async fn a_list_s_agent_and_repository_are_offered_and_written_task_f44b4a0c() {
+        let transport = StubTransport::new()
+            .push_json(
+                "/available-agents",
+                200,
+                json!({ "agents": [
+                    { "id": "ai-agent-claude", "name": "Claude Agent", "isAIAgent": true },
+                    { "id": "ai-agent-codex", "name": "Codex" }
+                ] }),
+            )
+            .push_json(
+                "/github/repositories",
+                200,
+                json!({ "repositories": [
+                    { "id": 1, "name": "astrid-windows", "fullName": "Graceful-Tools/astrid-windows", "private": true }
+                ] }),
+            )
+            .push_json("/members", 200, json!({ "members": [] }));
+        let app = app_with(transport);
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({
+                    "id": "l1", "name": "Work",
+                    "aiAgentConfig": { "enabledTypes": ["claude_agent"], "defaultAgentId": null }
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+
+        let options = call(&app, json!({ "kind": "listAgentOptions", "listId": "l1" })).await;
+        assert_eq!(options["ok"], true, "{options}");
+        assert_eq!(options["value"]["agents"][0]["id"], "ai-agent-claude");
+        assert_eq!(options["value"]["agents"][0]["name"], "Claude Agent");
+        assert_eq!(options["value"]["agents"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            options["value"]["repositories"][0]["fullName"],
+            "Graceful-Tools/astrid-windows"
+        );
+        assert_eq!(options["value"]["githubConnected"], true);
+        assert!(options["value"]["defaultAgentId"].is_null());
+
+        let set = call(
+            &app,
+            json!({
+                "kind": "updateList", "listId": "l1",
+                "changes": { "defaultAgentId": "ai-agent-claude", "githubRepositoryId": "Graceful-Tools/astrid-windows" }
+            }),
+        )
+        .await;
+        assert_eq!(set["ok"], true, "{set}");
+        // The list carries both, and the enabled types it had are kept beside the agent.
+        assert_eq!(
+            set["value"]["aiAgentConfig"]["defaultAgentId"],
+            "ai-agent-claude"
+        );
+        assert_eq!(
+            set["value"]["aiAgentConfig"]["enabledTypes"][0],
+            "claude_agent"
+        );
+        assert_eq!(
+            set["value"]["githubRepositoryId"],
+            "Graceful-Tools/astrid-windows"
+        );
+        let settings = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(settings["value"]["defaultAgentId"], "ai-agent-claude");
+        assert_eq!(
+            settings["value"]["githubRepositoryId"],
+            "Graceful-Tools/astrid-windows"
+        );
+
+        // Cleared with an explicit null, which is how "account default" and "no repository"
+        // are told apart from "leave it".
+        let cleared = call(
+            &app,
+            json!({
+                "kind": "updateList", "listId": "l1",
+                "changes": { "defaultAgentId": null, "githubRepositoryId": null }
+            }),
+        )
+        .await;
+        assert!(cleared["value"]["aiAgentConfig"]["defaultAgentId"].is_null());
+        assert!(cleared["value"]["githubRepositoryId"].is_null());
+    }
+
+    /// GitHub not connected is not an error: no repositories, and the answer says so.
+    #[tokio::test]
+    async fn without_github_the_repositories_are_empty_and_the_answer_says_why() {
+        let transport = StubTransport::new()
+            .push_json("/available-agents", 200, json!({ "agents": [] }))
+            .push_json(
+                "/github/repositories",
+                400,
+                json!({ "error": "GitHub is not connected" }),
+            );
+        let app = app_with(transport);
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l1", "name": "Work" })).expect("a list"),
+            )
+            .expect("stores");
+
+        let options = call(&app, json!({ "kind": "listAgentOptions", "listId": "l1" })).await;
+
+        assert_eq!(options["ok"], true, "{options}");
+        assert_eq!(options["value"]["githubConnected"], false);
+        assert!(options["value"]["repositories"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     /// A board's columns can be added, renamed, reordered and removed from here, the board

@@ -275,6 +275,11 @@ pub enum Command {
         list_id: String,
         role: String,
     },
+    /// What a list's coding-agent settings can be set to (task f44b4a0c): the agents this
+    /// account may put on a list, and the repositories its GitHub connection can reach.
+    ListAgentOptions {
+        list_id: String,
+    },
     SetTaskStatusRole {
         task_id: String,
         #[serde(default)]

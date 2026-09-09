@@ -34,7 +34,7 @@ pub enum Privacy {
 /// `{ enabledTypes, defaultAgentId }` — the shape the server stores and, since 2026-08-29, emits
 /// as `aiAgentConfig` beside the plain `aiAgentsEnabled` array. It carries the default agent the
 /// array cannot express.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAgentConfig {
     #[serde(default)]
