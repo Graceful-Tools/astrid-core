@@ -102,6 +102,12 @@ impl SyncManager {
                 report.tasks_updated = fetched.tasks_updated;
                 report.tasks_unchanged = fetched.tasks_unchanged;
                 report.fetched = true;
+                // The boards too. This was written and never called, so a column added or a
+                // default renamed on the web never reached a board here (task e5214fba). A
+                // server without boards answers 404, which is not a failed pass.
+                if let Err(error) = self.sync_projects().await {
+                    tracing::debug!(%error, "projects did not sync; the boards are as they were");
+                }
                 let _ = self
                     .store
                     .set_metadata(LAST_SYNC_KEY, &date::format(self.clock.now()));

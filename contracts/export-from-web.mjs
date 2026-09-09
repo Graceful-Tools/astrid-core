@@ -125,11 +125,19 @@ function exportBoard() {
   return runDriver('board.mjs', 'board')
 }
 
+// Writing a board's columns — which role a new one mints, which names are refused, that a rename
+// keeps the role — is the same kind of rule as reading them, and drifts the same way. Run, not read
+// (task e5214fba).
+function exportStatuses() {
+  return runDriver('statuses.mjs', 'statuses')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
   'permissions.json': exportPermissions,
   'board.json': exportBoard,
+  'statuses.json': exportStatuses,
 }
 
 let failed = false

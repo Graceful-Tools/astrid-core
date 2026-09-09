@@ -21,6 +21,7 @@ rather than going unnoticed at runtime.
 | `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded | `astrid_core::repeating` |
 | `permissions.json` | `lib/list-permissions.ts` — **executed**: a case matrix run through web's own rules, recording all eight predicates per case | `astrid_core::permissions` |
 | `board.json` | `lib/project-status.ts` — **executed**: three board configurations by eight cards, recording which column each card is in, what every move writes, and what a new card carries | `astrid_core::board` |
+| `statuses.json` | `lib/project-custom-states.ts` — **executed**: add, rename, reorder and remove over four boards, recording the role each add mints, every refusal and its message, and the exact array stored afterwards | `astrid_core::board` (the writers) |
 
 ## Two kinds of export
 

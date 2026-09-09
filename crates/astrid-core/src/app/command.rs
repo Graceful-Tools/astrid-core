@@ -253,6 +253,28 @@ pub enum Command {
         task_id: String,
         name: String,
     },
+    /// A board's columns (task e5214fba), addressed by the list the board was opened from. The
+    /// rules are `crate::board`, locked against the web; a refused write is a bad request with
+    /// the web's own message.
+    AddBoardStatus {
+        list_id: String,
+        name: String,
+    },
+    RenameBoardStatus {
+        list_id: String,
+        role: String,
+        name: String,
+    },
+    ReorderBoardStatus {
+        list_id: String,
+        role: String,
+        /// `up` or `down`.
+        direction: String,
+    },
+    RemoveBoardStatus {
+        list_id: String,
+        role: String,
+    },
     SetTaskStatusRole {
         task_id: String,
         #[serde(default)]

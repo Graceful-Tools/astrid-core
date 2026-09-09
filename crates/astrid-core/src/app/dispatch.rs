@@ -189,6 +189,43 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             change_task_lists(app, &task_id, |ids| ids.retain(|id| id != &list_id))
         }
         Command::CreateListForTask { task_id, name } => create_list_for_task(app, &task_id, &name),
+        Command::AddBoardStatus { list_id, name } => {
+            status_outcome(app.context.boards().add_status(&list_id, &name).await)
+        }
+        Command::RenameBoardStatus {
+            list_id,
+            role,
+            name,
+        } => status_outcome(
+            app.context
+                .boards()
+                .rename_status(&list_id, &role, &name)
+                .await,
+        ),
+        Command::ReorderBoardStatus {
+            list_id,
+            role,
+            direction,
+        } => {
+            let direction = match direction.as_str() {
+                "up" => crate::board::ReorderDirection::Up,
+                "down" => crate::board::ReorderDirection::Down,
+                other => {
+                    return Response::failed(Failure::bad_request(format!(
+                        "direction must be 'up' or 'down', not '{other}'"
+                    )))
+                }
+            };
+            status_outcome(
+                app.context
+                    .boards()
+                    .reorder_status(&list_id, &role, direction)
+                    .await,
+            )
+        }
+        Command::RemoveBoardStatus { list_id, role } => {
+            status_outcome(app.context.boards().remove_status(&list_id, &role).await)
+        }
         Command::SetTaskStatusRole {
             task_id,
             status_role,
@@ -1225,6 +1262,32 @@ async fn list_members(app: &App, list_id: &str) -> Response {
         Err(error) => return Response::failed(error.into()),
     };
 
+    // The board's editable columns, for the Statuses section (task e5214fba): the defaults,
+    // renamed or not, and the board's own — never Inbox or Done, which are derived.
+    let statuses: Vec<serde_json::Value> = match &list.project_id {
+        Some(project_id) => {
+            let custom_states = app
+                .store
+                .projects()
+                .unwrap_or_default()
+                .into_iter()
+                .find(|project| &project.id == project_id)
+                .and_then(|project| project.custom_states);
+            crate::board::columns(custom_states.as_ref())
+                .into_iter()
+                .filter(|column| column.kind == crate::board::ColumnKind::Status)
+                .map(|column| {
+                    serde_json::json!({
+                        "id": column.id,
+                        "name": column.name,
+                        "isDefault": crate::board::is_default_role(&column.id),
+                    })
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
+
     let me = app.context.account().current_user_id().ok().flatten();
     let lists = app.context.lists();
     let (can_manage_members, can_manage_list, can_delete) = match me.as_deref() {
@@ -1240,6 +1303,8 @@ async fn list_members(app: &App, list_id: &str) -> Response {
         "listId": list.id,
         "name": list.name,
         "ownerId": list.owner_id,
+        "projectId": list.project_id,
+        "statuses": statuses,
         // How the list looks and who can see it (task 53780e75). The colour is the one every
         // screen draws — sidebar mark, row chip, detail chip — and the choices are the web's
         // palette, so a colour picked here is a colour the web offers too. Privacy comes back
@@ -1662,6 +1727,20 @@ fn repeat_options(app: &App, task_id: &str) -> Response {
 /// users say they are agents. Until the core fetches the agent roster (M3) that is only the ones
 /// seen embedded in a response; an agent nobody has met yet is simply not offered, which is
 /// better than offering a bare id.
+/// A board-status write's answer: the state that changed, or the web's own refusal as a bad
+/// request (task e5214fba).
+fn status_outcome(outcome: crate::services::Result<crate::services::StatusOutcome>) -> Response {
+    match outcome {
+        Ok(crate::services::StatusOutcome::Written(state)) => {
+            Response::ok(serde_json::json!({ "state": state }))
+        }
+        Ok(crate::services::StatusOutcome::Refused(refused)) => {
+            Response::failed(Failure::bad_request(&refused.message))
+        }
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
 /// What the detail's list editor shows for a task (task d3f3b111). The rules are
 /// `rows::list_picks`; this only finds the task and hands over every list.
 fn list_picks(app: &App, task_id: &str, query: &str) -> Response {
@@ -2157,6 +2236,148 @@ mod tests {
             .and_then(|list| list["id"].as_str())
             .unwrap_or_else(|| panic!("no list named {name}"))
             .to_string()
+    }
+
+    /// A board's columns can be added, renamed, reordered and removed from here, the board
+    /// redraws, and a name the web would refuse is refused with the web's words (task e5214fba).
+    #[tokio::test]
+    async fn board_columns_are_managed_through_the_door_task_e5214fba() {
+        let review = json!({ "role": "custom-review", "name": "Review", "order": 0 });
+        let renamed = json!({ "role": "custom-review", "name": "In review", "order": 0 });
+        // The three writes, in order. The projects re-fetch after each is deliberately NOT
+        // stubbed: the cache carries the rule's result before the refresh, so an unanswered
+        // refresh changes nothing — and a stub matched by URL fragment would match the writes'
+        // own URL too, which is a race, not a script.
+        let transport = StubTransport::new()
+            .push_json("/p1/statuses", 200, json!({ "state": review }))
+            .push_json("/p1/statuses", 200, json!({ "state": renamed }))
+            .push_json("/p1/statuses", 200, json!({ "state": renamed }))
+            .push_json("/members", 200, json!({ "members": [] }));
+        let (app, transport) = app_and_transport(transport);
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        app.store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Work" })).expect("a project"),
+            ])
+            .expect("stores");
+
+        let added = call(
+            &app,
+            json!({ "kind": "addBoardStatus", "listId": "l1", "name": " Review " }),
+        )
+        .await;
+        assert_eq!(added["ok"], true, "{added}");
+        assert_eq!(added["value"]["state"]["role"], "custom-review");
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        let names: Vec<&str> = board["value"]["columns"]
+            .as_array()
+            .expect("columns")
+            .iter()
+            .map(|column| column["name"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Inbox", "Ready", "Doing", "Waiting", "Review", "Done"]
+        );
+
+        // Refused before any round trip, in the web's words.
+        let refused = call(
+            &app,
+            json!({ "kind": "addBoardStatus", "listId": "l1", "name": "Ready" }),
+        )
+        .await;
+        assert_eq!(refused["ok"], false);
+        assert_eq!(
+            refused["error"]["message"],
+            "\"Ready\" is a built-in status"
+        );
+        let kept = call(
+            &app,
+            json!({ "kind": "removeBoardStatus", "listId": "l1", "role": "doing" }),
+        )
+        .await;
+        assert_eq!(
+            kept["error"]["message"],
+            "Built-in statuses cannot be removed"
+        );
+
+        let renamed_answer = call(
+            &app,
+            json!({ "kind": "renameBoardStatus", "listId": "l1", "role": "custom-review", "name": "In review" }),
+        )
+        .await;
+        assert_eq!(renamed_answer["ok"], true, "{renamed_answer}");
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        assert_eq!(board["value"]["columns"][4]["name"], "In review");
+        assert_eq!(
+            board["value"]["columns"][4]["id"], "custom-review",
+            "a rename keeps the role"
+        );
+
+        let removed = call(
+            &app,
+            json!({ "kind": "removeBoardStatus", "listId": "l1", "role": "custom-review" }),
+        )
+        .await;
+        assert_eq!(removed["ok"], true, "{removed}");
+        let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+        assert_eq!(
+            board["value"]["columns"].as_array().expect("columns").len(),
+            5
+        );
+
+        // The settings answer lists the editable columns, saying which are built in.
+        let settings = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(settings["value"]["projectId"], "p1");
+        let statuses = settings["value"]["statuses"].as_array().expect("statuses");
+        assert_eq!(statuses.len(), 3);
+        assert_eq!(statuses[0]["id"], "ready");
+        assert_eq!(statuses[0]["isDefault"], true);
+
+        // Every write went to the board's versioned statuses route.
+        let sent: Vec<String> = transport
+            .requests()
+            .into_iter()
+            .filter(|request| request.url.contains("/api/v1/projects/p1/statuses"))
+            .map(|request| request.method.as_str().to_string())
+            .collect();
+        assert_eq!(sent, vec!["POST", "PATCH", "DELETE"]);
+
+        // Until the web ships that route, a 404 reads as what it is.
+        let (app, _) = app_and_transport(StubTransport::new().push_json(
+            "/p1/statuses",
+            404,
+            json!({ "error": "Not found" }),
+        ));
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        app.store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Work" })).expect("a project"),
+            ])
+            .expect("stores");
+        let missing = call(
+            &app,
+            json!({ "kind": "addBoardStatus", "listId": "l1", "name": "Review" }),
+        )
+        .await;
+        assert_eq!(missing["ok"], false);
+        assert!(
+            missing["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("does not manage board columns yet"),
+            "{missing}"
+        );
     }
 
     /// A list's defaults reach a task made at the door, and what was said at the door wins

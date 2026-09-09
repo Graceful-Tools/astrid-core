@@ -19,6 +19,7 @@ pub mod agents;
 pub mod api_access;
 pub mod attachment;
 pub mod auth;
+pub mod board;
 pub mod chat;
 pub mod comment;
 pub mod external;
@@ -32,6 +33,7 @@ pub use account::AccountService;
 pub use agents::{AgentMode, AgentService};
 pub use attachment::AttachmentService;
 pub use auth::AuthService;
+pub use board::{BoardService, StatusOutcome};
 pub use chat::ChatService;
 pub use comment::CommentService;
 pub use external::{ExternalSyncService, Provider};
@@ -70,6 +72,11 @@ impl Context {
 
     pub fn lists(&self) -> ListService {
         ListService::new(self.clone())
+    }
+
+    /// A board's columns: changed on the server, mirrored into the cache.
+    pub fn boards(&self) -> BoardService {
+        BoardService::new(self.clone())
     }
 
     pub fn comments(&self) -> CommentService {

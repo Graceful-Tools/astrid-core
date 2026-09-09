@@ -18,6 +18,17 @@ use super::path::escaped_path_component;
 pub const TASKS: &str = "/api/v1/tasks";
 pub const LISTS: &str = "/api/v1/lists";
 pub const PROJECTS: &str = "/api/v1/projects";
+/// A board's columns: add (POST), rename (PATCH), reorder (PUT), remove (DELETE).
+///
+/// **The server does not have this route yet.** The web manages statuses at `/api/statuses`,
+/// which is not under `/api/v1` and which this client refuses to speak (docs/ASTRID.md §0 rule
+/// 6, enforced by the request guard). The versioned route — this path, the same four verbs, the
+/// same bodies minus the project id that is now in the path — is filed on the web board as task
+/// 58994c6c, and the Windows task that needs it (e5214fba) waits on it. Nothing here changes
+/// when it lands.
+pub fn project_statuses(project_id: &str) -> String {
+    format!("{}/statuses", project(project_id))
+}
 pub const CHAT_CHANNELS: &str = "/api/v1/chat/channels";
 pub const CAPABILITIES: &str = "/api/v1/capabilities";
 /// Where a new file is uploaded. Multipart: the bytes, and a JSON context saying which list it

@@ -69,7 +69,8 @@ const DEFAULT_STATES: [(&str, &str, &str); 3] = [
 ];
 
 /// A board's own column, as stored in `Project.customStates`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomState {
     pub role: String,
     pub name: String,
@@ -127,7 +128,8 @@ pub fn parse_custom_states(raw: Option<&serde_json::Value>) -> Vec<CustomState> 
     states
 }
 
-fn is_default_role(role: &str) -> bool {
+/// Whether a role is one of the three every board shares.
+pub fn is_default_role(role: &str) -> bool {
     DEFAULT_STATES
         .iter()
         .any(|(default, _, _)| *default == role)
@@ -281,6 +283,371 @@ pub fn domain_tasks<'a>(tasks: &'a [Task], lists: &[TaskList], project_id: &str)
                 .any(|id| domain.contains(&id.as_str()))
         })
         .collect()
+}
+
+// ─── Writing a board's columns (task e5214fba) ────────────────────────────────────────────────
+//
+// Ported from `astrid-web/lib/project-custom-states.ts` and locked by
+// `contracts/fixtures/statuses.json`, which records what web's own functions answer over a case
+// matrix — including the array they store afterwards, in the order they store it.
+//
+// RENAME KEEPS THE ROLE. A task points at its column by `statusRole`; minting a fresh role on
+// rename would orphan every task in that column. Removal has the same hazard, which is why the
+// server clears the tasks a removed column held, and this client only asks it to.
+
+/// Longest name that fits a column header without truncating — web's `MAX_STATUS_NAME_LENGTH`.
+pub const MAX_STATUS_NAME_LENGTH: usize = 40;
+
+/// Why a write was refused, as the web names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StateErrorKind {
+    Invalid,
+    Duplicate,
+    Reserved,
+    NotFound,
+}
+
+/// A refusal, with the web's own message so the two clients say the same thing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StateError {
+    pub kind: StateErrorKind,
+    pub message: String,
+}
+
+impl StateError {
+    fn new(kind: StateErrorKind, message: impl Into<String>) -> Self {
+        StateError {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+/// A write that took: the full array to store, and the one state that changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateWrite {
+    pub states: Vec<CustomState>,
+    pub state: CustomState,
+}
+
+/// Which way to move a column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReorderDirection {
+    Up,
+    Down,
+}
+
+impl CustomState {
+    /// As the server stores it. A description is written only when there is one, as web's
+    /// `StatusState` leaves the key off.
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "role": self.role,
+            "name": self.name,
+            "order": self.order,
+        });
+        if let Some(description) = &self.description {
+            value["description"] = serde_json::Value::String(description.clone());
+        }
+        value
+    }
+}
+
+/// The array the server stores, from the states a write produced.
+pub fn states_to_json(states: &[CustomState]) -> serde_json::Value {
+    serde_json::Value::Array(states.iter().map(CustomState::to_json).collect())
+}
+
+/// Web's `slugify`: lower-case, runs of anything but `a-z0-9` become one hyphen, hyphens are
+/// trimmed from the ends, and nothing at all is "status".
+fn slugify(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut pending_hyphen = false;
+    for ch in name.to_lowercase().chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            if pending_hyphen && !slug.is_empty() {
+                slug.push('-');
+            }
+            pending_hyphen = false;
+            slug.push(ch);
+        } else {
+            pending_hyphen = true;
+        }
+    }
+    if slug.is_empty() {
+        "status".to_string()
+    } else {
+        slug
+    }
+}
+
+/// Custom roles are namespaced `custom-…`, and suffixed `-2`, `-3`… when the slug is taken.
+fn mint_role(name: &str, taken: &[String]) -> String {
+    let base = format!("custom-{}", slugify(name));
+    if !taken.iter().any(|role| role == &base) {
+        return base;
+    }
+    let mut suffix = 2;
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if !taken.iter().any(|role| role == &candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+/// Web's `validateName`: the trimmed name, or why it will not do. `ignore_role` lets a state
+/// keep its own name on rename.
+fn validate_name(
+    name: &str,
+    states: &[CustomState],
+    ignore_role: Option<&str>,
+) -> Result<String, StateError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(StateError::new(
+            StateErrorKind::Invalid,
+            "Status name cannot be empty",
+        ));
+    }
+    if trimmed.encode_utf16().count() > MAX_STATUS_NAME_LENGTH {
+        return Err(StateError::new(
+            StateErrorKind::Invalid,
+            format!("Status name is too long ({MAX_STATUS_NAME_LENGTH} characters max)"),
+        ));
+    }
+    // Checked against the NAME rather than its slug: "Ready" slugs to `custom-ready`, which
+    // collides with nothing, yet would put a second column called Ready on the board.
+    if is_default_role(&trimmed.to_lowercase()) {
+        return Err(StateError::new(
+            StateErrorKind::Reserved,
+            format!("\"{trimmed}\" is a built-in status"),
+        ));
+    }
+    let lower = trimmed.to_lowercase();
+    if states
+        .iter()
+        .any(|state| Some(state.role.as_str()) != ignore_role && state.name.to_lowercase() == lower)
+    {
+        return Err(StateError::new(
+            StateErrorKind::Duplicate,
+            "A status with that name already exists",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Add a column. The role is minted from the name; the order goes after every existing one.
+pub fn add_custom_state(
+    raw: Option<&serde_json::Value>,
+    name: &str,
+) -> Result<StateWrite, StateError> {
+    let states = parse_custom_states(raw);
+    let trimmed = validate_name(name, &states, None)?;
+    let taken: Vec<String> = states.iter().map(|state| state.role.clone()).collect();
+    let max_order = states.iter().map(|state| state.order).max().unwrap_or(-1);
+    let state = CustomState {
+        role: mint_role(&trimmed, &taken),
+        name: trimmed,
+        description: None,
+        order: max_order + 1,
+    };
+    let mut all = states;
+    all.push(state.clone());
+    Ok(StateWrite { states: all, state })
+}
+
+/// Rename a column, whichever kind it is — the web's route dispatches the same way.
+pub fn rename_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+    name: &str,
+) -> Result<StateWrite, StateError> {
+    if is_default_role(role) {
+        rename_builtin_state(raw, role, name)
+    } else {
+        rename_custom_state(raw, role, name)
+    }
+}
+
+/// A per-board name for one of the three built-ins: an override entry in `customStates`, the
+/// role untouched so tasks keep routing by it.
+fn rename_builtin_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+    name: &str,
+) -> Result<StateWrite, StateError> {
+    let Some((_, default_name, _)) = DEFAULT_STATES
+        .iter()
+        .find(|(default, _, _)| *default == role)
+    else {
+        return Err(StateError::new(
+            StateErrorKind::Invalid,
+            "Use renameCustomState for custom columns",
+        ));
+    };
+    let default_order = DEFAULT_STATES
+        .iter()
+        .position(|(default, _, _)| *default == role)
+        .unwrap_or(0) as i64;
+
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(StateError::new(
+            StateErrorKind::Invalid,
+            "Status name cannot be empty",
+        ));
+    }
+    if trimmed.encode_utf16().count() > MAX_STATUS_NAME_LENGTH {
+        return Err(StateError::new(
+            StateErrorKind::Invalid,
+            format!("Status name is too long ({MAX_STATUS_NAME_LENGTH} characters max)"),
+        ));
+    }
+    // Not another built-in's name — but its own original name is fine ("Starting" → "Ready").
+    let lower = trimmed.to_lowercase();
+    if is_default_role(&lower) && lower != default_name.to_lowercase() {
+        return Err(StateError::new(
+            StateErrorKind::Reserved,
+            format!("\"{trimmed}\" is a built-in status"),
+        ));
+    }
+    let all = parse_custom_states(raw);
+    if all
+        .iter()
+        .any(|state| state.role != role && state.name.to_lowercase() == lower)
+    {
+        return Err(StateError::new(
+            StateErrorKind::Duplicate,
+            "A status with that name already exists",
+        ));
+    }
+    let existing = all.iter().find(|state| state.role == role);
+    let state = CustomState {
+        role: role.to_string(),
+        name: trimmed.to_string(),
+        description: None,
+        order: existing.map(|state| state.order).unwrap_or(default_order),
+    };
+    // Any existing override for this role is replaced, and the new one goes last.
+    let mut states: Vec<CustomState> = all.into_iter().filter(|state| state.role != role).collect();
+    states.push(state.clone());
+    Ok(StateWrite { states, state })
+}
+
+/// Rename a custom column in place. The role is deliberately preserved.
+fn rename_custom_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+    name: &str,
+) -> Result<StateWrite, StateError> {
+    let states = parse_custom_states(raw);
+    let Some(existing) = states.iter().find(|state| state.role == role) else {
+        return Err(StateError::new(
+            StateErrorKind::NotFound,
+            "That status does not exist on this board",
+        ));
+    };
+    let trimmed = validate_name(name, &states, Some(role))?;
+    let state = CustomState {
+        name: trimmed,
+        ..existing.clone()
+    };
+    let states = states
+        .into_iter()
+        .map(|candidate| {
+            if candidate.role == role {
+                state.clone()
+            } else {
+                candidate
+            }
+        })
+        .collect();
+    Ok(StateWrite { states, state })
+}
+
+/// Move a custom column one slot. The three defaults have a fixed order and sit above every
+/// custom column; at a boundary the move is a no-op that answers the unchanged board.
+pub fn reorder_custom_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+    direction: ReorderDirection,
+) -> Result<StateWrite, StateError> {
+    if is_default_role(role) {
+        return Err(StateError::new(
+            StateErrorKind::Reserved,
+            "Built-in status order cannot be changed",
+        ));
+    }
+    let all = parse_custom_states(raw);
+    let default_overrides: Vec<CustomState> = all
+        .iter()
+        .filter(|state| is_default_role(&state.role))
+        .cloned()
+        .collect();
+    let mut sorted: Vec<CustomState> = all
+        .iter()
+        .filter(|state| !is_default_role(&state.role))
+        .cloned()
+        .collect();
+    sorted.sort_by_key(|state| state.order);
+    let Some(index) = sorted.iter().position(|state| state.role == role) else {
+        return Err(StateError::new(
+            StateErrorKind::NotFound,
+            "That status does not exist on this board",
+        ));
+    };
+    let swap = match direction {
+        ReorderDirection::Up => index.checked_sub(1),
+        ReorderDirection::Down => Some(index + 1).filter(|next| *next < sorted.len()),
+    };
+    let Some(swap) = swap else {
+        let state = sorted[index].clone();
+        let mut states = default_overrides;
+        states.extend(sorted);
+        return Ok(StateWrite { states, state });
+    };
+    // The two swap ORDER values and keep their positions in the array, which is what the
+    // server stores and the fixture records.
+    let (mine, theirs) = (sorted[index].order, sorted[swap].order);
+    sorted[index].order = theirs;
+    sorted[swap].order = mine;
+    let state = sorted[index].clone();
+    let mut states = default_overrides;
+    states.extend(sorted);
+    Ok(StateWrite { states, state })
+}
+
+/// Remove a custom column. The removed state is handed back because the tasks still carrying its
+/// role have to be cleared — which the server does when asked.
+pub fn remove_custom_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+) -> Result<StateWrite, StateError> {
+    if is_default_role(role) {
+        return Err(StateError::new(
+            StateErrorKind::Reserved,
+            "Built-in statuses cannot be removed",
+        ));
+    }
+    let states = parse_custom_states(raw);
+    let Some(existing) = states.iter().find(|state| state.role == role).cloned() else {
+        return Err(StateError::new(
+            StateErrorKind::NotFound,
+            "That status does not exist on this board",
+        ));
+    };
+    let states = states
+        .into_iter()
+        .filter(|state| state.role != role)
+        .collect();
+    Ok(StateWrite {
+        states,
+        state: existing,
+    })
 }
 
 #[cfg(test)]
