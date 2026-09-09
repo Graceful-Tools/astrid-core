@@ -549,6 +549,13 @@ pub enum Command {
     UpdateReminderSettings {
         changes: serde_json::Value,
     },
+    /// Change the account's task defaults or its task-detail layout (task c0f3db19). The fields
+    /// are the server's — `emailToTaskEnabled`, `defaultTaskDueOffset`, `defaultDueTime`,
+    /// `taskDisplayMode`, `subtaskDisplay`, `smartTaskCreationEnabled` — merged into what is
+    /// stored, and refused here when the server would refuse them. Answers with the account screen.
+    UpdateSmartTaskSettings {
+        changes: serde_json::Value,
+    },
     /// Start timing a task.
     ///
     /// The start time goes in the cache rather than in memory, so a timer survives a restart — on

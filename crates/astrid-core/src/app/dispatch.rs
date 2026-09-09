@@ -577,6 +577,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             // The user first: a settings screen with no name on it looks broken in a way the
             // settings themselves do not.
             let _ = app.context.account().refresh_current_user().await;
+            // Best effort, like the user: a server without the route leaves the defaults standing.
+            let _ = app.context.account().refresh_smart_task_settings().await;
             match app.context.account().refresh_settings().await {
                 Ok(_) => settings(app),
                 Err(error) => Response::failed(error.into()),
@@ -585,6 +587,20 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::UpdateReminderSettings { changes } => {
             match update_reminder_settings(app, changes).await {
                 Ok(()) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::UpdateSmartTaskSettings { changes } => {
+            if let Err(reason) = crate::smart_tasks::validate(&changes) {
+                return Response::failed(Failure::bad_request(reason));
+            }
+            match app
+                .context
+                .account()
+                .update_smart_task_settings(changes)
+                .await
+            {
+                Ok(_) => settings(app),
                 Err(error) => Response::failed(error.into()),
             }
         }
@@ -698,7 +714,7 @@ fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Respon
 
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
-    let mode = Command::display_mode(display_mode.as_deref());
+    let mode = resolved_display_mode(app, display_mode.as_deref());
 
     let lists = app.store.lists().unwrap_or_default();
     let chips: Vec<serde_json::Value> = task
@@ -988,7 +1004,25 @@ fn settings(app: &App) -> Response {
         // What the server should schedule a digest against. The reader's zone, from the clock the
         // core was given, rather than a string the shell types.
         "timezone": app.clock.utc_offset().to_string(),
+        // The task defaults and the task-detail layout, shaped and defaulted in one place, with
+        // the choices each combo offers (task c0f3db19).
+        "smartTasks": crate::smart_tasks::SmartTaskSettings::from_stored(
+            &account.smart_task_settings().unwrap_or_default(),
+        ),
+        "dueOffsetChoices": crate::smart_tasks::offset_choices(),
+        "dueTimeChoices": crate::smart_tasks::time_choices(),
+        "layoutChoices": crate::smart_tasks::layout_choices(),
     }))
+}
+
+/// The layout to draw with: what the shell asked for, else what the account chose (task c0f3db19).
+/// The preference lives on the server and is read from the cache, so a choice made on the web
+/// applies here after the next settings refresh, and one made here applies at once.
+fn resolved_display_mode(app: &App, asked: Option<&str>) -> rows::DisplayMode {
+    match asked {
+        Some(value) => Command::display_mode(Some(value)),
+        None => app.context.account().display_mode(),
+    }
 }
 
 /// Merge changes into the stored reminder settings and write them back.
@@ -2316,7 +2350,7 @@ fn rows_for_list(
 
     let context = RowContext {
         current_user_id: current_user_id.as_deref(),
-        display_mode: Command::display_mode(display_mode.as_deref()),
+        display_mode: resolved_display_mode(app, display_mode.as_deref()),
         surface: Command::surface(surface.as_deref()),
         now,
         offset: offset_from_utc,
@@ -5205,6 +5239,126 @@ mod tests {
                 .is_none(),
             "nothing of the account is left here"
         );
+    }
+
+    /// The Task Settings page (task c0f3db19): the defaults come shaped from the cache, the server's
+    /// answer replaces them on refresh, one field is written with a PATCH — refused before any
+    /// request when the server would refuse it — and the layout the account chose is what the rows
+    /// draw with, at once.
+    #[tokio::test]
+    async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19() {
+        let account = json!({ "user": { "id": "me", "name": "Jon" }, "settings": {} });
+        let (app, transport) = app_and_transport(
+            StubTransport::new()
+                .push_json(
+                    "smart-tasks",
+                    200,
+                    json!({
+                        "emailToTaskEnabled": false, "defaultTaskDueOffset": "3_days",
+                        "defaultDueTime": "09:00", "taskDisplayMode": "project",
+                        "subtaskDisplay": "under_parent", "meta": { "apiVersion": "v1" }
+                    }),
+                )
+                .push_json("smart-tasks", 200, json!({ "taskDisplayMode": "list" }))
+                // The user and the settings: enough for a refresh to be a refresh.
+                .fallback(Ok(crate::api::transport::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: account.to_string().into_bytes(),
+                })),
+        );
+
+        // Nothing fetched yet: the web's defaults, shaped, with the choices beside them.
+        let cached = call(&app, json!({ "kind": "settings" })).await;
+        assert_eq!(cached["value"]["smartTasks"]["emailToTaskEnabled"], true);
+        assert_eq!(
+            cached["value"]["smartTasks"]["defaultTaskDueOffset"],
+            "1_week"
+        );
+        assert_eq!(cached["value"]["smartTasks"]["defaultDueTime"], "17:00");
+        assert_eq!(cached["value"]["smartTasks"]["taskDisplayMode"], "list");
+        assert_eq!(cached["value"]["dueOffsetChoices"][0]["value"], "none");
+        assert_eq!(
+            cached["value"]["dueTimeChoices"][2]["titleKey"],
+            "smart.time.17_00"
+        );
+        assert_eq!(
+            cached["value"]["layoutChoices"]
+                .as_array()
+                .expect("layouts")
+                .len(),
+            2
+        );
+
+        // The server's answer replaces them, without its envelope.
+        let fresh = call(&app, json!({ "kind": "refreshSettings" })).await;
+        assert_eq!(fresh["ok"], true, "{fresh}");
+        assert_eq!(fresh["value"]["smartTasks"]["emailToTaskEnabled"], false);
+        assert_eq!(
+            fresh["value"]["smartTasks"]["defaultTaskDueOffset"],
+            "3_days"
+        );
+        assert_eq!(fresh["value"]["smartTasks"]["defaultDueTime"], "09:00");
+        assert_eq!(fresh["value"]["smartTasks"]["taskDisplayMode"], "project");
+        assert_eq!(
+            fresh["value"]["smartTasks"]["subtaskDisplay"],
+            "under_parent"
+        );
+        assert!(fresh["value"]["smartTasks"].get("meta").is_none());
+
+        // Project layout, chosen on the server: a list row's checkbox opens the picker.
+        call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+        let list_id = list_id_named(&app, "Work").await;
+        call(
+            &app,
+            json!({ "kind": "createTask", "title": "Write it down", "listIds": [list_id] }),
+        )
+        .await;
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": list_id })).await;
+        assert_eq!(rows["value"]["rows"][0]["action"], "openPicker");
+
+        // A value the server would refuse sends nothing.
+        let refused = call(
+            &app,
+            json!({
+                "kind": "updateSmartTaskSettings",
+                "changes": { "defaultTaskDueOffset": "2_weeks" }
+            }),
+        )
+        .await;
+        assert_eq!(refused["ok"], false);
+        assert!(!transport
+            .requests()
+            .iter()
+            .any(|request| request.method.as_str() == "PATCH"));
+
+        // Back to the list layout: one PATCH carrying just that field, and the rows follow at once.
+        let written = call(
+            &app,
+            json!({ "kind": "updateSmartTaskSettings", "changes": { "taskDisplayMode": "list" } }),
+        )
+        .await;
+        assert_eq!(written["ok"], true, "{written}");
+        assert_eq!(written["value"]["smartTasks"]["taskDisplayMode"], "list");
+        assert_eq!(
+            written["value"]["smartTasks"]["defaultDueTime"], "09:00",
+            "the rest is kept"
+        );
+        let patch = transport
+            .requests()
+            .into_iter()
+            .find(|request| request.method.as_str() == "PATCH")
+            .expect("a PATCH");
+        assert!(
+            patch.url.ends_with("/api/v1/users/me/smart-tasks"),
+            "{}",
+            patch.url
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(patch.body.as_deref().expect("a body")).expect("json");
+        assert_eq!(body, json!({ "taskDisplayMode": "list" }));
+        let rows = call(&app, json!({ "kind": "rowsForList", "listId": list_id })).await;
+        assert_eq!(rows["value"]["rows"][0]["action"], "complete");
     }
 
     /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does

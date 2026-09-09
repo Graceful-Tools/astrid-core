@@ -26,6 +26,7 @@ const CURRENT_USER_KEY: &str = "account.current-user";
 const MY_TASKS_PREFERENCES_KEY: &str = "account.myTasksPreferences";
 const CAPABILITIES_KEY: &str = "account.capabilities";
 const SETTINGS_KEY: &str = "account.settings";
+const SMART_TASKS_KEY: &str = "account.smartTasks";
 
 /// What the server makes somebody type before it deletes their account, character for character
 /// (web's `AccountDeletionSection`). Checked here too, so a near miss is refused without a request.
@@ -213,6 +214,71 @@ impl AccountService {
             .value(changes);
         self.context.client.send(request).await?;
         Ok(merged)
+    }
+
+    // ─── Task defaults and layout ─────────────────────────────────────────────────────────────
+
+    /// The account's task defaults and task-detail layout as last fetched (task c0f3db19).
+    /// Free-form like the settings above; [`crate::smart_tasks`] gives them shape and defaults.
+    pub fn smart_task_settings(&self) -> Result<serde_json::Value> {
+        Ok(self
+            .context
+            .store
+            .metadata(SMART_TASKS_KEY)?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_else(|| json!({})))
+    }
+
+    /// Fetch them. The server answers with the user's columns and an envelope; the envelope is not
+    /// a setting and does not go into the cache.
+    pub async fn refresh_smart_task_settings(&self) -> Result<serde_json::Value> {
+        let mut value = self
+            .context
+            .client
+            .send(self.context.client.get(endpoints::SMART_TASKS))
+            .await?;
+        if let Some(object) = value.as_object_mut() {
+            object.remove("meta");
+        }
+        self.context
+            .store
+            .set_metadata(SMART_TASKS_KEY, &value.to_string())?;
+        Ok(value)
+    }
+
+    /// Change some of them. Merged into the cache first so the control stays where it was put
+    /// while the request is in flight — the same bargain [`Self::update_settings`] makes.
+    pub async fn update_smart_task_settings(
+        &self,
+        changes: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let mut merged = self.smart_task_settings()?;
+        if let (Some(target), Some(source)) = (merged.as_object_mut(), changes.as_object()) {
+            for (key, value) in source {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        self.context
+            .store
+            .set_metadata(SMART_TASKS_KEY, &merged.to_string())?;
+
+        let request = self
+            .context
+            .client
+            .patch(endpoints::SMART_TASKS)
+            .value(changes);
+        self.context.client.send(request).await?;
+        Ok(merged)
+    }
+
+    /// The task-detail layout the account chose: what rows and the detail draw with when the shell
+    /// does not say otherwise. From the cache, so a choice made here applies at once and one made
+    /// on the web applies after the next settings refresh.
+    pub fn display_mode(&self) -> crate::rows::DisplayMode {
+        crate::smart_tasks::SmartTaskSettings::from_stored(
+            &self.smart_task_settings().unwrap_or_default(),
+        )
+        .display_mode()
     }
 
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────

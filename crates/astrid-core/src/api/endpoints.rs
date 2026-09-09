@@ -103,6 +103,9 @@ pub fn sync_links(provider: &str) -> String {
 }
 pub const ME: &str = "/api/v1/users/me";
 pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
+/// Task defaults and the task-detail layout (task c0f3db19): `GET`, and `PATCH` with the fields
+/// that changed.
+pub const SMART_TASKS: &str = "/api/v1/users/me/smart-tasks";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
 /// Everything this account has, as one file. `?format=json` or `?format=csv`.
 pub const EXPORT: &str = "/api/v1/users/me/export";
