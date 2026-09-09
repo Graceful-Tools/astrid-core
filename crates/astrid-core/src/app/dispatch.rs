@@ -265,6 +265,22 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
         },
+        Command::CommentSuggestions {
+            task_id,
+            text,
+            caret,
+        } => comment_suggestions(app, &task_id, &text, caret),
+        Command::ApplyCommentSuggestion {
+            text,
+            caret,
+            trigger_kind,
+            id,
+            label,
+        } => {
+            let (text, caret) =
+                crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
+            Response::ok(serde_json::json!({ "text": text, "caret": caret }))
+        }
         Command::DeleteComment { comment_id } => match app.context.comments().delete(&comment_id) {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
@@ -1744,6 +1760,43 @@ fn repeat_options(app: &App, task_id: &str) -> Response {
 /// users say they are agents. Until the core fetches the agent roster (M3) that is only the ones
 /// seen embedded in a response; an agent nobody has met yet is simply not offered, which is
 /// better than offering a bare id.
+/// The comment box's popup (task 3271a0c5). The rules are `parse::mentions`; this gathers what
+/// they read from — the task, every list, every task, everyone the cache knows — and asks.
+fn comment_suggestions(app: &App, task_id: &str, text: &str, caret: usize) -> Response {
+    let Some(trigger) = crate::parse::mentions::find_trigger(text, caret) else {
+        return Response::ok(serde_json::json!({ "trigger": null, "items": [] }));
+    };
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let tasks = app.store.tasks().unwrap_or_default();
+    let users = app.store.users().unwrap_or_default();
+    let me = app.context.account().current_user_id().ok().flatten();
+    // The task's own first list stands in for "the open list": the comment box lives in the
+    // detail, which is opened from that list far more often than from anywhere else.
+    let selected = task.effective_list_ids().into_iter().find(|id| {
+        lists
+            .iter()
+            .any(|list| &list.id == id && list.is_domain_list())
+    });
+    let items = crate::parse::mentions::suggestions(
+        trigger.kind,
+        &trigger.query,
+        &crate::parse::mentions::Sources {
+            task: &task,
+            lists: &lists,
+            tasks: &tasks,
+            users: &users,
+            me: me.as_deref(),
+            selected_list_id: selected.as_deref(),
+        },
+    );
+    Response::ok(serde_json::json!({ "trigger": trigger, "items": items }))
+}
+
 /// The choices for a list's coding-agent settings (task f44b4a0c).
 ///
 /// Both halves reach the network. The agents are what the account may run — the web's
@@ -2334,6 +2387,84 @@ mod tests {
             .and_then(|list| list["id"].as_str())
             .unwrap_or_else(|| panic!("no list named {name}"))
             .to_string()
+    }
+
+    /// `@` in the comment box offers the task's people and the agent, and choosing one puts the
+    /// reference the server resolves into the text (task 3271a0c5).
+    #[tokio::test]
+    async fn the_comment_box_offers_people_lists_and_tasks_and_inserts_the_reference_task_3271a0c5()
+    {
+        let app = app_with(StubTransport::new());
+        app.store
+            .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+            .expect("stores");
+        app.store
+            .upsert_users(&[
+                serde_json::from_value(json!({ "id": "ai-agent-astrid", "name": "Astrid", "email": "astrid@astrid.cc", "isAIAgent": true })).expect("a user"),
+                serde_json::from_value(json!({ "id": "me", "name": "Jon", "email": "jon@x.io" })).expect("a user"),
+            ])
+            .expect("stores");
+        call(&app, json!({ "kind": "createList", "name": "Health" })).await;
+        let health = list_id_named(&app, "Health").await;
+        let created = call(
+            &app,
+            json!({ "kind": "createTask", "title": "Pushups", "listIds": [health] }),
+        )
+        .await;
+        let task_id = created["value"]["id"].as_str().expect("an id").to_string();
+
+        let people = call(
+            &app,
+            json!({ "kind": "commentSuggestions", "taskId": task_id, "text": "hey @as", "caret": 7 }),
+        )
+        .await;
+        assert_eq!(people["ok"], true, "{people}");
+        assert_eq!(people["value"]["trigger"]["kind"], "mention");
+        assert_eq!(people["value"]["trigger"]["query"], "as");
+        assert_eq!(people["value"]["items"][0]["id"], "ai-agent-astrid");
+        assert_eq!(people["value"]["items"][0]["isAgent"], true);
+        assert_eq!(
+            people["value"]["items"].as_array().unwrap().len(),
+            1,
+            "never the reader"
+        );
+
+        let lists = call(
+            &app,
+            json!({ "kind": "commentSuggestions", "taskId": task_id, "text": "see #", "caret": 5 }),
+        )
+        .await;
+        assert_eq!(lists["value"]["items"][0]["label"], "Health");
+
+        let tasks = call(
+            &app,
+            json!({ "kind": "commentSuggestions", "taskId": task_id, "text": "!push", "caret": 5 }),
+        )
+        .await;
+        assert_eq!(tasks["value"]["items"][0]["label"], "Pushups");
+        assert_eq!(tasks["value"]["items"][0]["secondary"], "Health");
+
+        let quiet = call(
+            &app,
+            json!({ "kind": "commentSuggestions", "taskId": task_id, "text": "nothing", "caret": 7 }),
+        )
+        .await;
+        assert!(quiet["value"]["trigger"].is_null());
+
+        let applied = call(
+            &app,
+            json!({
+                "kind": "applyCommentSuggestion", "text": "hey @as", "caret": 7,
+                "triggerKind": "mention", "id": "ai-agent-astrid", "label": "Astrid"
+            }),
+        )
+        .await;
+        assert_eq!(applied["ok"], true, "{applied}");
+        assert_eq!(applied["value"]["text"], "hey @[Astrid](ai-agent-astrid) ");
+        assert_eq!(
+            applied["value"]["caret"],
+            "hey @[Astrid](ai-agent-astrid) ".encode_utf16().count()
+        );
     }
 
     /// A reply nests under the comment it answers, an edit changes what it says, and a delete

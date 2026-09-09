@@ -51,6 +51,9 @@ pub struct CommentRow {
     /// Which side a reply is set in from: the parent author's, as the web does it — replies to
     /// my comment step in from the right, replies to yours from the left.
     pub indent_right: bool,
+    /// The text as the web draws it — through the same markdown a description gets, so a
+    /// mention is a pill and `**bold**` is bold (task 3271a0c5). Empty when there is no text.
+    pub blocks: Vec<crate::markdown::Block>,
 }
 
 /// One file on a comment.
@@ -156,6 +159,11 @@ fn row(comment: &Comment, me: Option<&str>, under: Option<(&String, bool)>) -> C
         indent_right: under
             .map(|(_, parent_is_mine)| parent_is_mine)
             .unwrap_or(false),
+        blocks: if shows_text(&comment.content) {
+            crate::markdown::render(&comment.content)
+        } else {
+            Vec::new()
+        },
         files: files_of(comment)
             .into_iter()
             .map(|file| FileRow {
@@ -244,6 +252,30 @@ mod tests {
             !rows[1].is_mine && rows[2].is_mine,
             "a reply keeps its own author's side"
         );
+    }
+
+    /// A mention typed on any client draws as a pill here, because a comment's text goes through
+    /// the same markdown a description does (task 3271a0c5).
+    #[test]
+    fn a_comment_s_text_is_rendered_as_blocks_with_its_pills() {
+        let rows = rows(
+            &[comment(
+                json!({ "id": "c1", "content": "ask @[Astrid](ai-agent-astrid) about #[Health](l1)" }),
+            )],
+            None,
+        );
+        assert_eq!(rows[0].blocks.len(), 1);
+        let crate::markdown::Block::Paragraph { inlines } = &rows[0].blocks[0] else {
+            panic!("a paragraph");
+        };
+        assert!(inlines.iter().any(|inline| matches!(
+            inline,
+            crate::markdown::Inline::Reference { reference: crate::markdown::ReferenceKind::User, id, .. } if id == "ai-agent-astrid"
+        )));
+        assert!(inlines.iter().any(|inline| matches!(
+            inline,
+            crate::markdown::Inline::Reference { reference: crate::markdown::ReferenceKind::List, id, .. } if id == "l1"
+        )));
     }
 
     /// A reply whose parent is not in the thread is an ordinary comment, not an indent under

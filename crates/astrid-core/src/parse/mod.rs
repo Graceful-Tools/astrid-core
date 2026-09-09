@@ -4,4 +4,5 @@
 //! `astrid-web/lib/quick-add.ts`. Everything in this module is pure and returns keys rather than
 //! sentences, so the shell resolves its own words and the rules stay testable without a window.
 
+pub mod mentions;
 pub mod quick_add;

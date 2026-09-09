@@ -313,6 +313,22 @@ pub enum Command {
         comment_id: String,
         content: String,
     },
+    /// What the comment box's popup should show for this text and caret (task 3271a0c5): the
+    /// trigger the caret is inside, if any, and the rows for it. Positions are UTF-16 units.
+    CommentSuggestions {
+        task_id: String,
+        text: String,
+        caret: usize,
+    },
+    /// Put a chosen row into the text, the way the server will read it back. The row's kind is
+    /// `triggerKind`, because `kind` on the wire is the command itself.
+    ApplyCommentSuggestion {
+        text: String,
+        caret: usize,
+        trigger_kind: crate::parse::mentions::TriggerKind,
+        id: String,
+        label: String,
+    },
     DeleteComment {
         comment_id: String,
     },
