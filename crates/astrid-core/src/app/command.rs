@@ -536,6 +536,18 @@ pub enum Command {
     },
     /// Send the verification email again. Answers with the server's message.
     ResendVerification,
+    /// The passkeys the account signs in with (task 19fd9289). Online-only; registering one is the
+    /// browser's.
+    Passkeys,
+    /// Rename a passkey. An empty name is refused before any request, as the server would refuse it.
+    RenamePasskey {
+        id: String,
+        name: String,
+    },
+    /// Revoke a passkey.
+    RevokePasskey {
+        id: String,
+    },
     /// The contacts this account imported for collaborator suggestions (task 438494c7). Online-only.
     Contacts,
     /// Remove every imported contact. Answers with how many went.

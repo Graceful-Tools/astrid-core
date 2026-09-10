@@ -573,6 +573,23 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             })),
             Err(error) => Response::failed(error.into()),
         },
+        Command::Passkeys => match app.context.account().passkeys().await {
+            Ok(passkeys) => Response::ok(serde_json::json!({ "passkeys": passkeys })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RenamePasskey { id, name } => {
+            if name.trim().is_empty() {
+                return Response::failed(Failure::bad_request("a passkey needs a name"));
+            }
+            match app.context.account().rename_passkey(&id, &name).await {
+                Ok(()) => Response::done(),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RevokePasskey { id } => match app.context.account().revoke_passkey(&id).await {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
         Command::Contacts => match app.context.account().contacts().await {
             Ok((contacts, total)) => {
                 Response::ok(serde_json::json!({ "contacts": contacts, "total": total }))
@@ -5521,6 +5538,80 @@ mod tests {
         assert!(titles(&rows).contains(&"Plan the trip".to_string()));
         let detail = call(&app, json!({ "kind": "taskDetail", "taskId": parent_id })).await;
         assert_eq!(detail["value"]["subtasks"][0]["title"], "Book flights");
+    }
+
+    /// Passkeys on the Account page (task 19fd9289): listed as the page draws them, renamed with a
+    /// PATCH to the one path, revoked with a DELETE to it, and a server without the route reads as
+    /// a sentence rather than a missing account.
+    #[tokio::test]
+    async fn passkeys_are_listed_renamed_and_revoked_through_the_core_task_19fd9289() {
+        let (app, transport) = app_and_transport(
+            StubTransport::new()
+                .push_json(
+                    "me/passkeys",
+                    200,
+                    json!({ "passkeys": [
+                        { "id": "k1", "name": "MacBook", "credentialDeviceType": "multiDevice", "credentialBackedUp": true, "createdAt": "2026-08-01T00:00:00Z" },
+                        { "id": "k2", "name": "YubiKey", "credentialDeviceType": "singleDevice", "credentialBackedUp": false, "createdAt": "2026-07-01T00:00:00Z" }
+                    ], "meta": { "apiVersion": "v1" } }),
+                )
+                .push_json("me/passkeys", 200, json!({ "success": true }))
+                .push_json("me/passkeys", 200, json!({ "success": true }))
+                .push_json("me/passkeys", 404, json!({ "error": "Not found" })),
+        );
+
+        let listed = call(&app, json!({ "kind": "passkeys" })).await;
+        assert_eq!(listed["ok"], true, "{listed}");
+        assert_eq!(listed["value"]["passkeys"][0]["name"], "MacBook");
+        assert_eq!(listed["value"]["passkeys"][0]["isSynced"], true);
+        assert_eq!(listed["value"]["passkeys"][1]["isSynced"], false);
+        assert!(listed["value"]["passkeys"][0]
+            .get("credentialDeviceType")
+            .is_none());
+
+        let blank = call(
+            &app,
+            json!({ "kind": "renamePasskey", "id": "k1", "name": "  " }),
+        )
+        .await;
+        assert_eq!(blank["ok"], false, "refused before any request");
+
+        let renamed = call(
+            &app,
+            json!({ "kind": "renamePasskey", "id": "k1", "name": " Laptop " }),
+        )
+        .await;
+        assert_eq!(renamed["ok"], true, "{renamed}");
+        let revoked = call(&app, json!({ "kind": "revokePasskey", "id": "k2" })).await;
+        assert_eq!(revoked["ok"], true, "{revoked}");
+
+        let sent: Vec<(String, String)> = transport
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("me/passkeys"))
+            .map(|request| (request.method.as_str().to_string(), request.url.clone()))
+            .collect();
+        assert_eq!(sent.len(), 3, "list, rename, revoke");
+        assert_eq!(sent[1].0, "PATCH");
+        assert!(sent[1].1.ends_with("/api/v1/users/me/passkeys/k1"));
+        let body: serde_json::Value = serde_json::from_slice(
+            transport.requests()[transport.requests().len() - 2]
+                .body
+                .as_deref()
+                .expect("a body"),
+        )
+        .expect("json");
+        assert_eq!(body["name"], "Laptop", "trimmed");
+        assert_eq!(sent[2].0, "DELETE");
+        assert!(sent[2].1.ends_with("/api/v1/users/me/passkeys/k2"));
+
+        // A deployment without the route: one sentence, not a missing account.
+        let missing = call(&app, json!({ "kind": "passkeys" })).await;
+        assert_eq!(missing["ok"], false);
+        assert!(missing["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("does not offer passkeys"));
     }
 
     /// The Contacts page (task 438494c7): the server's list, shaped to what the page draws, and

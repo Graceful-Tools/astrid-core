@@ -110,6 +110,13 @@ pub const USER_SEARCH: &str = "/api/v1/users/search";
 /// The people this account has imported to suggest as collaborators (task 438494c7): `GET` lists
 /// them, `DELETE` clears them all. Windows has no address book to `POST` from.
 pub const CONTACTS: &str = "/api/v1/contacts";
+/// The account's passkeys (task 19fd9289, web c4ad9e68): `GET` lists them; one is renamed with
+/// `PATCH` and revoked with `DELETE` at [`passkey`]. Registering one stays in the browser.
+pub const PASSKEYS: &str = "/api/v1/users/me/passkeys";
+
+pub fn passkey(id: &str) -> String {
+    format!("{PASSKEYS}/{}", escaped_path_component(id))
+}
 /// Everything this account has, as one file. `?format=json` or `?format=csv`.
 pub const EXPORT: &str = "/api/v1/users/me/export";
 /// Close the account for good (task 19fd9289). The body carries the typed confirmation.

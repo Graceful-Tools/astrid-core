@@ -36,6 +36,20 @@ pub struct AccountService {
     context: Context,
 }
 
+/// A 404 from the passkeys route is a deployment without passkeys for apps — not a missing
+/// account — and it should read that way on screen (task 19fd9289).
+fn no_passkeys_here(error: crate::api::ApiError) -> super::ServiceError {
+    match error {
+        crate::api::ApiError::Http { status: 404, .. } => {
+            super::ServiceError::Api(crate::api::ApiError::Refused(
+                "This server does not offer passkeys to apps yet; manage them on the web."
+                    .to_string(),
+            ))
+        }
+        other => super::ServiceError::Api(other),
+    }
+}
+
 impl AccountService {
     pub fn new(context: Context) -> Self {
         AccountService { context }
@@ -330,6 +344,63 @@ impl AccountService {
             .get("deleted")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0))
+    }
+
+    // ─── Passkeys ─────────────────────────────────────────────────────────────────────────────
+
+    /// The passkeys the account signs in with, newest first, as the page lists them (task
+    /// 19fd9289): id, name, when it was added, and whether it is a synced (multi-device) key.
+    /// A deployment with passkeys switched off answers 404, worded here as one sentence.
+    pub async fn passkeys(&self) -> Result<Vec<serde_json::Value>> {
+        let answer = self
+            .context
+            .client
+            .send(self.context.client.get(endpoints::PASSKEYS))
+            .await
+            .map_err(no_passkeys_here)?;
+        Ok(answer
+            .get("passkeys")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|key| {
+                json!({
+                    "id": key.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                    "name": key.get("name").cloned().unwrap_or(serde_json::Value::Null),
+                    "createdAt": key.get("createdAt").cloned().unwrap_or(serde_json::Value::Null),
+                    "isSynced": key.get("credentialDeviceType").and_then(serde_json::Value::as_str)
+                        == Some("multiDevice")
+                        || key.get("credentialBackedUp").and_then(serde_json::Value::as_bool)
+                            == Some(true),
+                })
+            })
+            .collect())
+    }
+
+    /// Rename a passkey. The server trims and refuses an empty name; so does this, before asking.
+    pub async fn rename_passkey(&self, id: &str, name: &str) -> Result<()> {
+        let request = self
+            .context
+            .client
+            .patch(endpoints::passkey(id))
+            .value(json!({ "name": name.trim() }));
+        self.context
+            .client
+            .send(request)
+            .await
+            .map_err(no_passkeys_here)?;
+        Ok(())
+    }
+
+    /// Revoke a passkey. One that is not yours is 404, the same answer as one that is not there.
+    pub async fn revoke_passkey(&self, id: &str) -> Result<()> {
+        self.context
+            .client
+            .send(self.context.client.delete(endpoints::passkey(id)))
+            .await
+            .map_err(no_passkeys_here)?;
+        Ok(())
     }
 
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────
