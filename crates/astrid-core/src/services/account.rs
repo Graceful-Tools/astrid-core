@@ -285,6 +285,53 @@ impl AccountService {
         self.smart_tasks().display_mode()
     }
 
+    // ─── Contacts ─────────────────────────────────────────────────────────────────────────────
+
+    /// The contacts this account has imported, as the server lists them (task 438494c7): id,
+    /// email, name. Online-only, like the web's page — there is no offline meaning to a list of
+    /// people the server keeps for suggestions.
+    pub async fn contacts(&self) -> Result<(Vec<serde_json::Value>, u64)> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::CONTACTS)
+            .query("limit", Some("500".to_string()));
+        let answer = self.context.client.send(request).await?;
+        let rows = answer
+            .get("contacts")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|contact| {
+                json!({
+                    "id": contact.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                    "email": contact.get("email").cloned().unwrap_or(serde_json::Value::Null),
+                    "name": contact.get("name").cloned().unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .collect::<Vec<_>>();
+        let total = answer
+            .get("pagination")
+            .and_then(|page| page.get("total"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(rows.len() as u64);
+        Ok((rows, total))
+    }
+
+    /// Remove every imported contact. The server answers with how many went.
+    pub async fn clear_contacts(&self) -> Result<u64> {
+        let answer = self
+            .context
+            .client
+            .send(self.context.client.delete(endpoints::CONTACTS))
+            .await?;
+        Ok(answer
+            .get("deleted")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0))
+    }
+
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────
 
     /// Whether the deployment this client is talking to supports `name`.

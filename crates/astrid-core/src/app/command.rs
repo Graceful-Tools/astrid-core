@@ -536,6 +536,10 @@ pub enum Command {
     },
     /// Send the verification email again. Answers with the server's message.
     ResendVerification,
+    /// The contacts this account imported for collaborator suggestions (task 438494c7). Online-only.
+    Contacts,
+    /// Remove every imported contact. Answers with how many went.
+    ClearContacts,
     /// Delete the account for good. `confirmation` must be the phrase the web requires, typed
     /// exactly; anything else is refused without a request. Signs out afterwards.
     DeleteAccount {

@@ -573,6 +573,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             })),
             Err(error) => Response::failed(error.into()),
         },
+        Command::Contacts => match app.context.account().contacts().await {
+            Ok((contacts, total)) => {
+                Response::ok(serde_json::json!({ "contacts": contacts, "total": total }))
+            }
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ClearContacts => match app.context.account().clear_contacts().await {
+            Ok(deleted) => Response::ok(serde_json::json!({ "deleted": deleted })),
+            Err(error) => Response::failed(error.into()),
+        },
         Command::DeleteAccount { confirmation } => {
             // The server requires the phrase typed exactly, and so does this: a request that is
             // going to be refused is not worth sending, and a button that sends one looks like it
@@ -5511,6 +5521,53 @@ mod tests {
         assert!(titles(&rows).contains(&"Plan the trip".to_string()));
         let detail = call(&app, json!({ "kind": "taskDetail", "taskId": parent_id })).await;
         assert_eq!(detail["value"]["subtasks"][0]["title"], "Book flights");
+    }
+
+    /// The Contacts page (task 438494c7): the server's list, shaped to what the page draws, and
+    /// clearing it answers with the count.
+    #[tokio::test]
+    async fn contacts_are_listed_and_cleared_through_the_core_task_438494c7() {
+        let (app, transport) = app_and_transport(
+            StubTransport::new()
+                .push_json(
+                    "v1/contacts",
+                    200,
+                    json!({
+                        "contacts": [
+                            { "id": "c1", "email": "ann@x.io", "name": "Ann", "phoneNumber": null, "uploadedAt": "2026-09-01T00:00:00Z" },
+                            { "id": "c2", "email": "bo@x.io", "name": null, "phoneNumber": null, "uploadedAt": "2026-09-01T00:00:00Z" }
+                        ],
+                        "pagination": { "total": 2, "limit": 500, "offset": 0, "hasMore": false },
+                        "meta": { "apiVersion": "v1" }
+                    }),
+                )
+                .push_json("v1/contacts", 200, json!({ "message": "All contacts deleted", "deleted": 2 })),
+        );
+
+        let listed = call(&app, json!({ "kind": "contacts" })).await;
+        assert_eq!(listed["ok"], true, "{listed}");
+        assert_eq!(listed["value"]["total"], 2);
+        assert_eq!(listed["value"]["contacts"][0]["email"], "ann@x.io");
+        assert_eq!(listed["value"]["contacts"][0]["name"], "Ann");
+        assert!(listed["value"]["contacts"][1]["name"].is_null());
+        assert!(
+            listed["value"]["contacts"][0].get("phoneNumber").is_none(),
+            "only what the page draws"
+        );
+
+        let cleared = call(&app, json!({ "kind": "clearContacts" })).await;
+        assert_eq!(cleared["ok"], true, "{cleared}");
+        assert_eq!(cleared["value"]["deleted"], 2);
+        let methods: Vec<&str> = transport
+            .requests()
+            .iter()
+            .filter(|request| {
+                request.url.ends_with("/api/v1/contacts")
+                    || request.url.contains("/api/v1/contacts?")
+            })
+            .map(|request| request.method.as_str())
+            .collect();
+        assert_eq!(methods, ["GET", "DELETE"]);
     }
 
     /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does

@@ -107,6 +107,9 @@ pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 /// that changed.
 pub const SMART_TASKS: &str = "/api/v1/users/me/smart-tasks";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
+/// The people this account has imported to suggest as collaborators (task 438494c7): `GET` lists
+/// them, `DELETE` clears them all. Windows has no address book to `POST` from.
+pub const CONTACTS: &str = "/api/v1/contacts";
 /// Everything this account has, as one file. `?format=json` or `?format=csv`.
 pub const EXPORT: &str = "/api/v1/users/me/export";
 /// Close the account for good (task 19fd9289). The body carries the typed confirmation.
