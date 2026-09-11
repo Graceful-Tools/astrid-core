@@ -218,6 +218,19 @@ impl Stats {
     }
 }
 
+/// Whether anything is waiting to go. One indexed lookup, for the caller that asks after every
+/// command and must not pay for reading the journal each time.
+pub fn has_pending(store: &Store) -> Result<bool> {
+    store.transaction(|connection| {
+        let pending: i64 = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outbox WHERE status = 'pending')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(pending != 0)
+    })
+}
+
 pub fn stats(store: &Store) -> Result<Stats> {
     let entries = all(store)?;
     let mut stats = Stats::default();

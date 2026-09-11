@@ -74,6 +74,12 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::CREATE_LIST => create_list(client, store, entry).await,
         kind::UPDATE_LIST => update_list(client, store, entry).await,
         kind::DELETE_LIST => delete_list(client, store, entry).await,
+        kind::UPDATE_SETTINGS => {
+            send_body(client, client.put(endpoints::USER_SETTINGS), entry).await
+        }
+        kind::UPDATE_SMART_TASKS => {
+            send_body(client, client.patch(endpoints::SMART_TASKS), entry).await
+        }
         unknown => Outcome::Dead(format!(
             "no handler for {unknown} — the journal was written by a newer build"
         )),
@@ -412,6 +418,18 @@ async fn delete_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
     }
 }
 
+/// Send the entry's body on a request that carries nothing else, and fold nothing back.
+///
+/// For the settings writes: the service merged the change into the cache when it was made, and
+/// the next settings refresh reads the server's copy back. A settings write is a merge on the
+/// server too, which is what makes replaying it a week later safe.
+async fn send_body(client: &ApiClient, request: crate::api::Request, entry: &Entry) -> Outcome {
+    match client.send(request.value(body(entry))).await {
+        Ok(_) => Outcome::done(),
+        Err(error) => from_error(error),
+    }
+}
+
 /// Attach the idempotency key to a create body.
 ///
 /// Set here rather than by the caller so no create can be enqueued without one. A create that
@@ -584,6 +602,58 @@ mod tests {
 
     /// A delete of something already gone is a delete that worked. Dead-lettering it leaves the
     /// row in the cache and shows the user a task they have deleted twice.
+    /// A settings change made on a train goes out when the train does: the body the person
+    /// set, on the settings route, and nothing else.
+    #[tokio::test]
+    async fn a_queued_settings_change_is_sent_as_it_was_made() {
+        let (client, store, transport) = fixture(StubTransport::new().push_json(
+            "/api/v1/users/me/settings",
+            200,
+            serde_json::json!({ "ok": true }),
+        ));
+        let outcome = perform(
+            &client,
+            &store,
+            &entry(
+                kind::UPDATE_SETTINGS,
+                serde_json::json!({ "body": { "reminderSettings": { "enablePushReminders": false } } }),
+            ),
+        )
+        .await;
+
+        assert!(matches!(outcome, Outcome::Done(None)));
+        let sent = transport.requests();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].url.ends_with("/api/v1/users/me/settings"));
+        assert_eq!(sent[0].method.as_str(), "PUT");
+        let body: serde_json::Value =
+            serde_json::from_slice(sent[0].body.as_deref().unwrap_or(b"{}")).expect("json");
+        assert_eq!(body["reminderSettings"]["enablePushReminders"], false);
+    }
+
+    #[tokio::test]
+    async fn a_queued_smart_task_change_patches_its_route() {
+        let (client, store, transport) = fixture(StubTransport::new().push_json(
+            "/api/v1/users/me/smart-tasks",
+            200,
+            serde_json::json!({}),
+        ));
+        let outcome = perform(
+            &client,
+            &store,
+            &entry(
+                kind::UPDATE_SMART_TASKS,
+                serde_json::json!({ "body": { "taskDisplayMode": "project" } }),
+            ),
+        )
+        .await;
+
+        assert!(matches!(outcome, Outcome::Done(None)));
+        let sent = transport.requests();
+        assert_eq!(sent[0].method.as_str(), "PATCH");
+        assert!(sent[0].url.ends_with("/api/v1/users/me/smart-tasks"));
+    }
+
     #[tokio::test]
     async fn deleting_something_that_is_already_gone_counts_as_done() {
         let (client, store, _) = fixture(StubTransport::new().push_json(

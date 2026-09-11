@@ -644,7 +644,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             }
         }
         Command::UpdateReminderSettings { changes } => {
-            match update_reminder_settings(app, changes).await {
+            match update_reminder_settings(app, changes) {
                 Ok(()) => settings(app),
                 Err(error) => Response::failed(error.into()),
             }
@@ -653,12 +653,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             if let Err(reason) = crate::smart_tasks::validate(&changes) {
                 return Response::failed(Failure::bad_request(reason));
             }
-            match app
-                .context
-                .account()
-                .update_smart_task_settings(changes)
-                .await
-            {
+            match app.context.account().update_smart_task_settings(changes) {
                 Ok(_) => settings(app),
                 Err(error) => Response::failed(error.into()),
             }
@@ -700,7 +695,13 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 reply_to_id.as_deref(),
             ))
         }
-        Command::ListMembers { list_id } => list_members(app, &list_id).await,
+        Command::ListMembers { list_id } => list_members(app, &list_id),
+        Command::RefreshListMembers { list_id } => {
+            match app.context.lists().members(&list_id).await {
+                Ok(_) => list_members(app, &list_id),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::InviteToList {
             list_id,
             email,
@@ -1086,10 +1087,7 @@ fn resolved_display_mode(app: &App, asked: Option<&str>) -> rows::DisplayMode {
 }
 
 /// Merge changes into the stored reminder settings and write them back.
-async fn update_reminder_settings(
-    app: &App,
-    changes: serde_json::Value,
-) -> crate::services::Result<()> {
+fn update_reminder_settings(app: &App, changes: serde_json::Value) -> crate::services::Result<()> {
     let account = app.context.account();
     let mut reminders = account
         .settings()?
@@ -1101,9 +1099,7 @@ async fn update_reminder_settings(
             target.insert(key.clone(), value.clone());
         }
     }
-    account
-        .update_settings(serde_json::json!({ "reminderSettings": reminders }))
-        .await?;
+    account.update_settings(serde_json::json!({ "reminderSettings": reminders }))?;
     Ok(())
 }
 
@@ -1444,13 +1440,18 @@ async fn refresh_chat(app: &App, list_id: &str) -> Response {
 /// somebody may change a role is [`crate::permissions`], and a screen that decided it itself would
 /// be the fourth implementation of a rule whose failure mode is a control that 403s — or one that
 /// quietly is not offered to somebody who should have it.
-async fn list_members(app: &App, list_id: &str) -> Response {
+///
+/// From the cache, and nothing else: one network call in here used to take the list's name,
+/// colour, privacy, columns and permissions — all cache-derived — down with it whenever the
+/// server could not be reached. The roster is refreshed by `RefreshListMembers`, which answers
+/// with this same shape once the server has spoken.
+fn list_members(app: &App, list_id: &str) -> Response {
     let list = match app.context.lists().list(list_id) {
         Ok(Some(list)) => list,
         Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
         Err(error) => return Response::failed(error.into()),
     };
-    let members = match app.context.lists().members(list_id).await {
+    let members = match app.context.lists().cached_members(list_id) {
         Ok(members) => members,
         Err(error) => return Response::failed(error.into()),
     };
@@ -4905,7 +4906,26 @@ mod tests {
             .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
             .expect("stores");
 
-        let answered = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        // The cache has no roster yet, and the answer says so at once rather than waiting.
+        let cached = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(cached["ok"], true, "{cached}");
+        assert_eq!(
+            cached["value"]["members"]
+                .as_array()
+                .expect("members")
+                .len(),
+            0
+        );
+        assert_eq!(
+            cached["value"]["name"], "Work",
+            "the list's own facts need no network"
+        );
+
+        let answered = call(
+            &app,
+            json!({ "kind": "refreshListMembers", "listId": "l1" }),
+        )
+        .await;
         assert_eq!(
             answered["value"]["members"]
                 .as_array()
@@ -4917,6 +4937,56 @@ mod tests {
         // The owner cannot leave their own list — that would strand it, which is what deleting is
         // for.
         assert_eq!(answered["value"]["canLeave"], false);
+
+        // And the roster is kept: the next open draws it without asking again.
+        let again = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(
+            again["value"]["members"].as_array().expect("members").len(),
+            2
+        );
+    }
+
+    /// The flyout opens offline. One network call in here used to take the list's name, colour,
+    /// privacy and permissions — none of which need a connection — down with it.
+    #[tokio::test]
+    async fn list_settings_open_from_the_cache_when_the_server_is_away() {
+        let app = app_with(StubTransport::new().fallback(Err(
+            crate::api::TransportError::Unreachable("tunnel".into()),
+        )));
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({
+                    "id": "l1", "name": "Work", "ownerId": "me", "color": "#ef4444",
+                    "listMembers": [
+                        { "userId": "me", "role": "owner", "user": { "id": "me", "name": "Jon" } }
+                    ]
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+
+        let answered = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+        assert_eq!(answered["ok"], true, "{answered}");
+        assert_eq!(answered["value"]["name"], "Work");
+        assert_eq!(answered["value"]["color"], "#ef4444");
+        assert_eq!(
+            answered["value"]["members"]
+                .as_array()
+                .expect("members")
+                .len(),
+            1
+        );
+
+        let refreshed = call(
+            &app,
+            json!({ "kind": "refreshListMembers", "listId": "l1" }),
+        )
+        .await;
+        assert_eq!(
+            refreshed["ok"], false,
+            "the refresh is the part that needs the server"
+        );
+        assert_eq!(refreshed["error"]["kind"], "offline");
     }
 
     /// The settings screen needs the look and the visibility of the list beside its members
@@ -5409,6 +5479,8 @@ mod tests {
             written["value"]["smartTasks"]["defaultDueTime"], "09:00",
             "the rest is kept"
         );
+        // Journalled rather than sent: it goes out with the Outbox, carrying just that field.
+        call(&app, json!({ "kind": "drain" })).await;
         let patch = transport
             .requests()
             .into_iter()

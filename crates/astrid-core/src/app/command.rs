@@ -688,9 +688,17 @@ pub enum Command {
     },
     /// Who a list is shared with, and what this account may do about it.
     ///
-    /// Reaches the network: membership is not a local fact, and a cached member list that is a day
-    /// old is how somebody removed last week is still offered a role.
+    /// From the cache — the roster the lists payload carried, or the last refresh — so the
+    /// flyout opens at once and opens offline with the list's own name, colour and privacy,
+    /// none of which need a connection. Follow it with [`Command::RefreshListMembers`]:
+    /// membership is not a local fact, and a roster a day old is how somebody removed last week
+    /// is still offered a role.
     ListMembers {
+        list_id: String,
+    },
+    /// The same answer, after asking the server for the roster. Fails offline, and the caller
+    /// keeps what [`Command::ListMembers`] gave it.
+    RefreshListMembers {
         list_id: String,
     },
     /// Invite somebody by email.

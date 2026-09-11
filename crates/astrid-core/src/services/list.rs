@@ -454,14 +454,37 @@ impl ListService {
     // not exist, and the "optimistic" row would be indistinguishable from a real one to every
     // permission check that reads it afterwards.
 
+    /// The roster, from the server, and kept on the cached list afterwards — the same place the
+    /// lists payload puts it — so the next open draws it at once and the permission helpers read
+    /// the roster the screen shows.
     pub async fn members(&self, list_id: &str) -> Result<Vec<ListMember>> {
         let request = self.context.client.get(endpoints::list_members(list_id));
         let members = self
             .context
             .client
             .send_collection::<ListMember>(request, Some(endpoints::envelope::MEMBERS))
-            .await?;
-        Ok(members.into_items())
+            .await?
+            .into_items();
+        if let Some(mut list) = self.context.store.list(list_id)? {
+            list.list_members = Some(members.clone());
+            self.context.store.upsert_list(&list)?;
+        }
+        Ok(members)
+    }
+
+    /// The roster as last seen — from the lists payload, or from the last [`Self::members`].
+    ///
+    /// What the flyout opens with. It may be a sync old, which is why the flyout asks
+    /// [`Self::members`] straight after; but a roster a minute stale beats an empty panel with a
+    /// spinner, and beats a panel that refuses to open on a train with the list's own name,
+    /// colour and privacy — none of which need a connection to draw.
+    pub fn cached_members(&self, list_id: &str) -> Result<Vec<ListMember>> {
+        Ok(self
+            .context
+            .store
+            .list(list_id)?
+            .and_then(|list| list.list_members)
+            .unwrap_or_default())
     }
 
     pub async fn invite(&self, list_id: &str, email: &str, role: &str) -> Result<()> {

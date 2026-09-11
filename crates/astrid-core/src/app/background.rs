@@ -68,6 +68,72 @@ pub async fn sync_loop(
     }
 }
 
+/// Deliver what the Outbox holds: as soon as something is journalled, and again when a retry
+/// comes due.
+///
+/// The sync pass drains the journal too, at the top of every pass — and until this loop existed
+/// that was the *only* time it drained, so a task added here took up to sixty seconds to exist
+/// anywhere else. Now [`super::App::run`] rings `nudge` after any command that leaves something
+/// pending, and this wakes, sends it, and tells the shell what moved: a temporary id becoming a
+/// real one is a change the rows have to see.
+///
+/// A drain that could not deliver — no network — leaves the entries scheduled with a backoff,
+/// and the next wait is until the earliest of them; nothing here spins.
+pub async fn outbox_loop(
+    app: Arc<App>,
+    should_continue: impl Fn() -> bool + Send,
+    nudge: Arc<tokio::sync::Notify>,
+) {
+    while should_continue() {
+        let wait = next_delivery_wait(&app);
+        tokio::select! {
+            _ = nudge.notified() => {}
+            _ = tokio::time::sleep(wait) => {}
+        }
+        if !should_continue() {
+            return;
+        }
+        if !app.auth.is_signed_in().await {
+            continue;
+        }
+        match app.runner.drain().await {
+            Ok(report) => {
+                tracing::debug!(
+                    completed = report.completed,
+                    retried = report.retried,
+                    dead_lettered = report.dead_lettered,
+                    "outbox delivery"
+                );
+                // Only when a row's fate is settled. A retry that failed again changed nothing on
+                // screen, and announcing it would redraw the window on every backoff tick.
+                if report.completed > 0 || report.dead_lettered > 0 {
+                    app.realtime().publish(crate::realtime::Change::Synced {
+                        task_ids: Vec::new(),
+                        list_ids: Vec::new(),
+                    });
+                }
+            }
+            Err(error) => tracing::debug!(%error, "outbox delivery failed"),
+        }
+    }
+}
+
+/// How long the delivery loop may sleep before it must look at the journal again.
+///
+/// Until the earliest scheduled retry; at once if something is runnable now (a nudge may have
+/// arrived while a drain was running, which `Notify` folds into one); and otherwise the sync
+/// interval, as a floor that costs one lookup a minute.
+fn next_delivery_wait(app: &App) -> Duration {
+    match app.runner.next_wakeup() {
+        Ok(Some(at)) => (at - app.clock.now()).to_std().unwrap_or(Duration::ZERO),
+        Ok(None) => match crate::outbox::journal::has_pending(&app.store) {
+            Ok(true) => Duration::ZERO,
+            _ => default_sync_interval(),
+        },
+        Err(_) => default_sync_interval(),
+    }
+}
+
 /// How often to look for a reminder that has come due.
 ///
 /// Half a minute. A reminder is a promise about a time, and a minute's slack on "9:00" is the
@@ -335,6 +401,92 @@ mod tests {
         .await;
 
         assert_eq!(heard.load(Ordering::SeqCst), 0);
+    }
+
+    /// A write goes out when it is made, not on the next timer tick. The command rings the
+    /// bell, the loop wakes without any time passing, and the shell hears that the rows moved.
+    #[tokio::test(start_paused = true)]
+    async fn a_journalled_write_goes_out_at_once_rather_than_on_the_next_tick() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = Arc::new(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    serde_json::json!({ "task": { "id": "t-real", "title": "Buy milk" } }),
+                )
+                .fallback(Err(TransportError::Unreachable("done".into()))),
+        );
+        let app = Arc::new(
+            App::with_parts(
+                &Config {
+                    cache_path: ":memory:".into(),
+                    base_url: "https://astrid.cc".into(),
+                },
+                secure,
+                transport.clone(),
+                Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
+            )
+            .expect("starts"),
+        );
+        let heard = Arc::new(AtomicUsize::new(0));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |change| {
+                if matches!(change, crate::realtime::Change::Synced { .. }) {
+                    heard.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+        }
+
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let looping = {
+            let (app, running) = (app.clone(), running.clone());
+            tokio::spawn(outbox_loop(
+                app.clone(),
+                move || running.load(Ordering::SeqCst),
+                app.outbox_nudge().clone(),
+            ))
+        };
+
+        let started = tokio::time::Instant::now();
+        app.run(crate::app::Command::CreateTask {
+            title: "Buy milk".into(),
+            description: None,
+            list_ids: Vec::new(),
+            priority: None,
+            due_date_time: None,
+            is_all_day: None,
+            assignee_id: None,
+            parent_task_id: None,
+            quick_add: false,
+        })
+        .await;
+        // Let the loop take its turn. No time passes: the wake-up is the bell, not a timer.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(
+            transport
+                .requests()
+                .iter()
+                .any(|r| r.method.as_str() == "POST" && r.url.ends_with("/api/v1/tasks")),
+            "the create went out on the nudge"
+        );
+        assert_eq!(started.elapsed(), Duration::ZERO, "and not on a timer");
+        assert_eq!(
+            heard.load(Ordering::SeqCst),
+            1,
+            "the shell hears the rows moved"
+        );
+
+        running.store(false, Ordering::SeqCst);
+        app.outbox_nudge().notify_one();
+        let _ = looping.await;
     }
 
     /// The timer is the floor for the screen, not only for the cache. A pass that brought

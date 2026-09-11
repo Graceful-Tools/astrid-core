@@ -36,6 +36,16 @@ pub struct AccountService {
     context: Context,
 }
 
+/// Lay `changes` over `target`, key by key. A setting this build has never heard of survives a
+/// change to one it has.
+fn merge_into(target: &mut serde_json::Value, changes: &serde_json::Value) {
+    if let (Some(target), Some(source)) = (target.as_object_mut(), changes.as_object()) {
+        for (key, value) in source {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 /// A 404 from the passkeys route is a deployment without passkeys for apps — not a missing
 /// account — and it should read that way on screen (task 19fd9289).
 fn no_passkeys_here(error: crate::api::ApiError) -> super::ServiceError {
@@ -208,26 +218,38 @@ impl AccountService {
         Ok(settings)
     }
 
-    /// Change a setting. Written through, and cached optimistically so the toggle stays where the
-    /// user put it while the request is in flight.
-    pub async fn update_settings(&self, changes: serde_json::Value) -> Result<serde_json::Value> {
+    /// Change a setting.
+    ///
+    /// Cached at once, so the toggle stays where the user put it, and journalled through the
+    /// Outbox, so a toggle flipped on a train reaches the account when the train does. It used
+    /// to be written straight to the server: the cache kept the change and the server never
+    /// heard of it, which is a setting that reads one way on this machine and another on every
+    /// other — and, being a setting, one nobody notices for weeks.
+    ///
+    /// Safe to replay: the server merges, and the journal replays entries in the order they
+    /// were made. (My Tasks' filters are deliberately *not* queued — see
+    /// [`Self::set_my_tasks_preferences`] — because a filter replayed a week later moves a
+    /// screen under whoever is looking at it, and a setting does not.)
+    pub fn update_settings(&self, changes: serde_json::Value) -> Result<serde_json::Value> {
         let mut merged = self.settings()?;
-        if let (Some(target), Some(source)) = (merged.as_object_mut(), changes.as_object()) {
-            for (key, value) in source {
-                target.insert(key.clone(), value.clone());
-            }
-        }
+        merge_into(&mut merged, &changes);
         self.context
             .store
             .set_metadata(SETTINGS_KEY, &merged.to_string())?;
-
-        let request = self
-            .context
-            .client
-            .put(endpoints::USER_SETTINGS)
-            .value(changes);
-        self.context.client.send(request).await?;
+        self.journal(crate::outbox::kind::UPDATE_SETTINGS, changes)?;
         Ok(merged)
+    }
+
+    /// Put a body in the Outbox for one of the account routes.
+    fn journal(&self, kind: &str, body: serde_json::Value) -> Result<()> {
+        let entry = crate::outbox::build(
+            kind,
+            json!({ "body": body }),
+            &crate::outbox::new_temp_id(),
+            self.context.clock.now(),
+        );
+        crate::outbox::journal::enqueue(&self.context.store, &entry)?;
+        Ok(())
     }
 
     // ─── Task defaults and layout ─────────────────────────────────────────────────────────────
@@ -260,28 +282,18 @@ impl AccountService {
         Ok(value)
     }
 
-    /// Change some of them. Merged into the cache first so the control stays where it was put
-    /// while the request is in flight — the same bargain [`Self::update_settings`] makes.
-    pub async fn update_smart_task_settings(
+    /// Change some of them. Merged into the cache first so the control stays where it was put,
+    /// and journalled — the same bargain [`Self::update_settings`] makes, for the same reason.
+    pub fn update_smart_task_settings(
         &self,
         changes: serde_json::Value,
     ) -> Result<serde_json::Value> {
         let mut merged = self.smart_task_settings()?;
-        if let (Some(target), Some(source)) = (merged.as_object_mut(), changes.as_object()) {
-            for (key, value) in source {
-                target.insert(key.clone(), value.clone());
-            }
-        }
+        merge_into(&mut merged, &changes);
         self.context
             .store
             .set_metadata(SMART_TASKS_KEY, &merged.to_string())?;
-
-        let request = self
-            .context
-            .client
-            .patch(endpoints::SMART_TASKS)
-            .value(changes);
-        self.context.client.send(request).await?;
+        self.journal(crate::outbox::kind::UPDATE_SMART_TASKS, changes)?;
         Ok(merged)
     }
 
@@ -645,21 +657,16 @@ mod tests {
     /// whatever this build had not heard of, and write the loss back on the next save.
     #[tokio::test]
     async fn settings_this_build_does_not_know_survive_a_change_to_one_it_does() {
-        let fixture = fixture(
-            StubTransport::new()
-                .push_json(
-                    "/api/v1/users/me/settings",
-                    200,
-                    json!({ "settings": { "theme": "dark", "somethingLater": 42 } }),
-                )
-                .push_json("/api/v1/users/me/settings", 200, json!({ "ok": true })),
-        );
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/users/me/settings",
+            200,
+            json!({ "settings": { "theme": "dark", "somethingLater": 42 } }),
+        ));
         fixture.service.refresh_settings().await.expect("refreshes");
 
         let merged = fixture
             .service
             .update_settings(json!({ "theme": "light" }))
-            .await
             .expect("updates");
         assert_eq!(merged["theme"], "light");
         assert_eq!(merged["somethingLater"], 42);
@@ -667,22 +674,65 @@ mod tests {
 
     /// A toggle that springs back while the request is in flight reads as a failure that has not
     /// happened yet.
-    #[tokio::test]
-    async fn a_changed_setting_stays_where_the_user_put_it() {
-        let fixture = fixture(StubTransport::new().push_json(
-            "/api/v1/users/me/settings",
-            200,
-            json!({ "ok": true }),
-        ));
+    #[test]
+    fn a_changed_setting_stays_where_the_user_put_it() {
+        let fixture = fixture(StubTransport::new());
         fixture
             .service
             .update_settings(json!({ "theme": "dark" }))
-            .await
             .expect("updates");
         assert_eq!(
             fixture.service.setting("theme").expect("reads"),
             Some(json!("dark"))
         );
+    }
+
+    /// A setting changed with no network is not lost: it sits in the Outbox and goes out with
+    /// everything else when the Outbox drains. It used to be written straight to the server,
+    /// so the cache kept it and the account never heard.
+    #[tokio::test]
+    async fn a_setting_changed_offline_reaches_the_account_when_the_outbox_drains() {
+        let transport = Arc::new(
+            StubTransport::new()
+                .push_json("/api/v1/users/me/settings", 200, json!({ "ok": true }))
+                .push_json("/api/v1/users/me/smart-tasks", 200, json!({})),
+        );
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let clock = Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z"));
+        let client = Arc::new(ApiClient::new(
+            "https://astrid.cc",
+            transport.clone(),
+            Arc::new(MemorySecureStore::with(
+                SESSION_COOKIE_KEY,
+                "next-auth.session-token=abc",
+            )),
+        ));
+        let context = Context::new(client.clone(), store.clone(), clock.clone());
+        let service = context.account();
+
+        service
+            .update_settings(json!({ "reminderSettings": { "enablePushReminders": false } }))
+            .expect("caches and journals");
+        service
+            .update_smart_task_settings(json!({ "taskDisplayMode": "project" }))
+            .expect("caches and journals");
+        assert!(
+            transport.requests().is_empty(),
+            "nothing goes to the server until the Outbox drains"
+        );
+        let stats = crate::outbox::journal::stats(&store).expect("reads");
+        assert_eq!(stats.pending, 2);
+
+        let runner = crate::outbox::Runner::new(client, store.clone(), clock);
+        let report = runner.drain().await.expect("drains");
+        assert_eq!(report.completed, 2);
+        let sent = transport.requests();
+        assert!(sent
+            .iter()
+            .any(|r| r.method.as_str() == "PUT" && r.url.ends_with("/users/me/settings")));
+        assert!(sent
+            .iter()
+            .any(|r| r.method.as_str() == "PATCH" && r.url.ends_with("/users/me/smart-tasks")));
     }
 
     /// A cache that outlives its session shows one person's tasks to the next.

@@ -70,6 +70,11 @@ pub mod kind {
     pub const CREATE_LIST: &str = "createList";
     pub const UPDATE_LIST: &str = "updateList";
     pub const DELETE_LIST: &str = "deleteList";
+    /// A change to the account's settings — a reminder toggle, quiet hours. Replays safely: the
+    /// server merges, and entries replay in the order the person made them.
+    pub const UPDATE_SETTINGS: &str = "updateSettings";
+    /// A change to the task defaults and layout (`/users/me/smart-tasks`). Same shape.
+    pub const UPDATE_SMART_TASKS: &str = "updateSmartTaskSettings";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

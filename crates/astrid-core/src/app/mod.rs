@@ -71,6 +71,13 @@ pub struct App {
     /// Where downloaded attachments are kept: `attachments/` beside the database, so one directory
     /// holds everything this installation stores and deleting it is a complete reset.
     pub(crate) attachment_cache: std::path::PathBuf,
+    /// Rung after a command leaves something in the Outbox, so the delivery loop
+    /// ([`background::outbox_loop`]) sends it now rather than on the next timer tick.
+    ///
+    /// Before this the journal drained only at the top of the sixty-second sync pass, so a task
+    /// added here took up to a minute to exist anywhere else — an offline-first design behaving,
+    /// while online, like an offline one.
+    pub(crate) outbox_nudge: Arc<tokio::sync::Notify>,
 }
 
 impl App {
@@ -137,7 +144,13 @@ impl App {
             client,
             clock,
             attachment_cache,
+            outbox_nudge: Arc::new(tokio::sync::Notify::new()),
         })
+    }
+
+    /// The bell the delivery loop listens for.
+    pub fn outbox_nudge(&self) -> &Arc<tokio::sync::Notify> {
+        &self.outbox_nudge
     }
 
     /// The cache, for tests that need to seed one.
@@ -161,7 +174,14 @@ impl App {
     /// shape rather than two. A cache read completes without yielding, so the cost is a future that
     /// is already ready.
     pub async fn run(&self, command: Command) -> Response {
-        dispatch::run(self, command).await
+        let response = dispatch::run(self, command).await;
+        // Whatever the command was, if the journal has something waiting the delivery loop
+        // should hear about it now. One indexed lookup on a table that is pruned hourly; cheaper
+        // than teaching every write arm to ring the bell, and impossible to forget.
+        if crate::outbox::journal::has_pending(&self.store).unwrap_or(false) {
+            self.outbox_nudge.notify_one();
+        }
+        response
     }
 
     /// Run a command given as JSON, and answer as JSON. What the FFI calls.
