@@ -65,6 +65,19 @@ pub async fn sync_loop(
                 list_ids: report.changed_list_ids,
             });
         }
+        // The inbox rides on the same tick: the web sends no live event for it. Best effort —
+        // a deployment without the route, or a pass that could not reach the server, leaves the
+        // cached inbox standing — and announced only when it differs from what was cached.
+        if report.fetched {
+            let notifications = app.context.notifications();
+            let before = notifications.inbox().unwrap_or_default();
+            if let Ok(after) = notifications.refresh().await {
+                if after != before {
+                    app.realtime()
+                        .publish(crate::realtime::Change::Notifications);
+                }
+            }
+        }
     }
 }
 

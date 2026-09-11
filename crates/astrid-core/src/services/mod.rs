@@ -25,6 +25,7 @@ pub mod comment;
 pub mod external;
 pub mod list;
 pub mod list_defaults;
+pub mod notifications;
 pub mod search;
 pub mod share;
 pub mod task;
@@ -39,6 +40,7 @@ pub use chat::ChatService;
 pub use comment::CommentService;
 pub use external::{ExternalSyncService, Provider};
 pub use list::{ListChanges, ListService};
+pub use notifications::NotificationService;
 pub use share::ShareService;
 pub use task::{TaskChanges, TaskDraft, TaskService};
 
@@ -86,6 +88,10 @@ impl Context {
     }
 
     /// Links other people can open. Online-only, like the web's.
+    pub fn notifications(&self) -> NotificationService {
+        NotificationService::new(self.clone())
+    }
+
     pub fn share(&self) -> ShareService {
         ShareService::new(self.clone())
     }

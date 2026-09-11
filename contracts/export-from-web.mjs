@@ -132,12 +132,26 @@ function exportStatuses() {
   return runDriver('statuses.mjs', 'statuses')
 }
 
+// "What happens to my edit when I click elsewhere" is a product contract (PRODUCT_CONTRACT.md §6):
+// four transitions and their interactions, run through scripted sequences.
+function exportEditing() {
+  return runDriver('editing.mjs', 'editing')
+}
+
+// The search box's grammar — aliases, quoting, the identifier shape, the unknown-key fallback —
+// run over a set of queries (task 5df85b9f).
+function exportSearch() {
+  return runDriver('search.mjs', 'search')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
   'permissions.json': exportPermissions,
   'board.json': exportBoard,
   'statuses.json': exportStatuses,
+  'editing.json': exportEditing,
+  'search.json': exportSearch,
 }
 
 let failed = false

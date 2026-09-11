@@ -25,6 +25,7 @@
 pub mod chat;
 pub mod date;
 pub mod list;
+pub mod notification;
 pub mod project;
 pub mod task;
 pub mod user;
@@ -34,6 +35,7 @@ pub use list::{
     DurationUnit, ListAgentConfig, ListInvite, ListMember, Privacy, RecentlyCompletedWindow,
     TaskList,
 };
+pub use notification::{Inbox, Notification, NotificationTask};
 pub use project::{Project, ProjectMember};
 pub use task::{
     Attachment, Comment, CommentType, CustomRepeatingPattern, MonthWeekday, Priority, ReminderType,

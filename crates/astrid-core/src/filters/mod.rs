@@ -103,7 +103,7 @@ fn matches_priority(task: &Task, filter: Option<&str>) -> bool {
 ///
 /// Overdue incomplete tasks surface in every forward-looking bucket. A "today" list that hid what
 /// was due yesterday and never done is a list that helps you forget.
-fn matches_due_date(
+pub(crate) fn matches_due_date(
     task: &Task,
     filter: Option<&str>,
     now: DateTime<Utc>,

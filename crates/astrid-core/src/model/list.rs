@@ -331,9 +331,23 @@ impl TaskList {
         self.list_type.as_deref() == Some("status")
     }
 
+    /// True for a label: a list that renders as a chip and never as a destination.
+    ///
+    /// The web's third flavour (`lib/list-flavors.ts`, task 60f5849d): multi-list membership
+    /// already *is* labels — a task in "iOS To-do" and "Bugs" is a task with a label — so a label
+    /// is a `TaskList` with `listType: "label"` rather than a new entity. What it is not: a place.
+    /// It has no defaults, no chat, no agent, and the sidebar and the pickers must not offer it as
+    /// somewhere to go.
+    pub fn is_label_list(&self) -> bool {
+        self.list_type.as_deref() == Some("label")
+    }
+
     /// True for list-shaped destinations a person can navigate into and file tasks in.
+    ///
+    /// A missing `listType` is regular: every row predating flavours is a domain list, and
+    /// defaulting the other way would hide them all.
     pub fn is_domain_list(&self) -> bool {
-        !self.is_status_list()
+        !self.is_status_list() && !self.is_label_list()
     }
 
     /// Whether this list splices subtasks inline. **Absent means yes** (task ba1deb9d): a list

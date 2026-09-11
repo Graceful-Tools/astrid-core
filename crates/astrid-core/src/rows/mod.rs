@@ -256,6 +256,8 @@ pub fn day_offset(
 pub struct TaskRow {
     pub id: String,
     pub title: String,
+    /// `AST-142`, when the task has one. Drawn small beside the title, as the web draws it.
+    pub identifier: Option<String>,
     pub completed: bool,
     pub priority: Priority,
     pub due: DueLabel,
@@ -285,6 +287,8 @@ pub struct ListChip {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// A label rather than a place (`listType: "label"`). Drawn as a tag, and never opened.
+    pub is_label: bool,
 }
 
 /// What the row builder needs to resolve a task against.
@@ -320,18 +324,21 @@ impl TaskRow {
             .iter()
             .filter_map(|id| context.lists.iter().find(|list| &list.id == id))
             // A board column is a state, not a place. Drawing it as a chip beside "Home" and
-            // "Work" tells the reader a task is filed somewhere it is not.
-            .filter(|list| list.is_domain_list())
+            // "Work" tells the reader a task is filed somewhere it is not. A label IS drawn —
+            // that is the whole point of a label — marked so the shell draws it as a tag.
+            .filter(|list| !list.is_status_list())
             .map(|list| ListChip {
                 id: list.id.clone(),
                 name: list.name.clone(),
                 color: list.display_color().to_string(),
+                is_label: list.is_label_list(),
             })
             .collect();
 
         TaskRow {
             id: task.id.clone(),
             title: task.title.clone(),
+            identifier: task.identifier.clone(),
             completed: task.completed,
             priority: task.priority,
             due: DueLabel::for_due(

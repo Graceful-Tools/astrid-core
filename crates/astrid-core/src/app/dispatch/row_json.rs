@@ -171,6 +171,7 @@ pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
             serde_json::json!({
                 "id": row.id,
                 "title": row.title,
+                "identifier": row.identifier,
                 "completed": row.completed,
                 "priority": row.priority.as_i64(),
                 "due": due_json(&row.due),
@@ -189,7 +190,7 @@ pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "attachmentCount": row.attachment_count,
                 "subtaskCount": row.subtask_count,
                 "listChips": row.list_chips.iter().map(|chip| serde_json::json!({
-                    "id": chip.id, "name": chip.name, "color": chip.color
+                    "id": chip.id, "name": chip.name, "color": chip.color, "isLabel": chip.is_label
                 })).collect::<Vec<_>>(),
                 "assignee": row.assignee,
                 "statusRole": row.status_role,

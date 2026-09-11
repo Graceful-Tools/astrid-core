@@ -4,6 +4,39 @@
 
 use super::*;
 
+/// The inbox as the bell draws it: each row with the key for its kind, so the shell owns the
+/// words, and the task's title and identifier so a row reads without a lookup.
+pub(super) fn inbox_response(inbox: crate::services::Result<crate::model::Inbox>) -> Response {
+    let inbox = match inbox {
+        Ok(inbox) => inbox,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let notifications: Vec<serde_json::Value> = inbox
+        .notifications
+        .iter()
+        .map(|notification| {
+            serde_json::json!({
+                "id": notification.id,
+                "kind": notification.kind,
+                // `notification.assigned`, `notification.mentioned`, … — a kind this build has
+                // not heard of gets a key nobody has a string for, and the shell falls back to
+                // the key, which is ugly and visible rather than blank.
+                "labelKey": format!("notification.{}", notification.kind),
+                "taskId": notification.task_id,
+                "taskTitle": notification.task.as_ref().map(|task| task.title.clone()),
+                "taskIdentifier": notification.task.as_ref().and_then(|task| task.identifier.clone()),
+                "taskCompleted": notification.task.as_ref().map(|task| task.completed).unwrap_or(false),
+                "isRead": notification.is_read(),
+                "createdAt": notification.created_at.map(crate::model::date::format),
+            })
+        })
+        .collect();
+    Response::ok(serde_json::json!({
+        "unreadCount": inbox.unread_count,
+        "notifications": notifications,
+    }))
+}
+
 /// Forget the session and everything this machine held for it. Sign-out, and the tail of deleting
 /// the account (task 19fd9289).
 pub(super) async fn sign_out(app: &App) -> Response {

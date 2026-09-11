@@ -113,6 +113,9 @@ pub enum Change {
         task_ids: Vec<String>,
         list_ids: Vec<String>,
     },
+    /// The inbox moved — a sync pass fetched it and it differs from what was cached. The web
+    /// sends no live event for the inbox, so this is how the bell learns.
+    Notifications,
 }
 
 /// Something told when the cache moves. The shell registers one and refreshes what it names.

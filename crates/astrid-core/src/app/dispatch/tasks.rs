@@ -246,19 +246,27 @@ pub(super) fn search_tasks(
         list_id,
         include_completed: include_completed.unwrap_or(true),
     };
-    let found = crate::services::search::matches(&tasks, query, &scope);
+    let lists = app.store.lists().unwrap_or_default();
+    // Everyone the query might name by handle, and everyone the rows might draw.
+    let users = app.store.users().unwrap_or_default();
+    let current_user_id = app.context.account().current_user_id().ok().flatten();
+    let found = crate::services::search::search(
+        &tasks,
+        query,
+        &scope,
+        &crate::services::search::SearchContext {
+            lists: &lists,
+            users: &users,
+            current_user_id: current_user_id.as_deref(),
+            now: app.clock.now(),
+            offset: app.clock.utc_offset(),
+        },
+    );
     let total = found.len();
     let window = &found[..limit.unwrap_or(total).min(total)];
 
-    let lists = app.store.lists().unwrap_or_default();
-    let users: Vec<crate::model::User> = window
-        .iter()
-        .filter_map(|task| task.assignee_id.as_deref())
-        .filter_map(|id| app.store.user(id).ok().flatten())
-        .collect();
     let depths = std::collections::HashMap::new();
     let counts = rows::subtask_counts(&tasks);
-    let current_user_id = app.context.account().current_user_id().ok().flatten();
 
     let context = RowContext {
         current_user_id: current_user_id.as_deref(),

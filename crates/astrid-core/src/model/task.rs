@@ -248,6 +248,11 @@ pub struct Task {
     pub title: String,
     #[serde(default)]
     pub description: String,
+    /// The human-readable id — `AST-142` (web task 12f54df4). Minted by the server for tasks on
+    /// a project; absent for a task on a project-less list, so a solo user never sees one.
+    /// Searchable as a direct hit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -379,6 +384,7 @@ impl Task {
             id: id.into(),
             title: title.into(),
             description: String::new(),
+            identifier: None,
             assignee_id: None,
             assignee: None,
             creator_id: None,

@@ -271,6 +271,43 @@ impl TaskService {
 
     // ─── Reads ────────────────────────────────────────────────────────────────────────────────
 
+    /// Copy a task, the web's Copy (`POST /tasks/{id}/copy`): into `target_list_id` or, absent,
+    /// beside the original; its comments too when asked. Online-only and outside the Outbox, like
+    /// Share — the server does the copying, and a copy that does not exist yet is not something
+    /// a journal entry could stand in for. The copy comes back and goes into the cache at once.
+    pub async fn copy(
+        &self,
+        task_id: &str,
+        target_list_id: Option<&str>,
+        include_comments: bool,
+    ) -> Result<Task> {
+        let request = self
+            .context
+            .client
+            .post(crate::api::endpoints::copy_task(task_id))
+            .value(json!({
+                "targetListId": target_list_id,
+                "includeComments": include_comments,
+                // What the web's copy dialog sends: the date travels, the assignee does not.
+                "preserveDueDate": true,
+                "preserveAssignee": false,
+            }));
+        let answer = self.context.client.send(request).await?;
+        let copied: Task = serde_json::from_value(
+            answer
+                .get(crate::api::endpoints::envelope::TASK)
+                .cloned()
+                .unwrap_or(answer),
+        )
+        .map_err(|error| {
+            ServiceError::Api(crate::api::ApiError::Decode(format!(
+                "the copied task could not be read: {error}"
+            )))
+        })?;
+        self.context.store.upsert_task(&copied)?;
+        Ok(copied)
+    }
+
     pub fn task(&self, id: &str) -> Result<Option<Task>> {
         Ok(self.context.store.task(id)?)
     }

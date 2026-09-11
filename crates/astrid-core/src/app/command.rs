@@ -256,6 +256,15 @@ pub enum Command {
     ShareTask {
         task_id: String,
     },
+    /// Copy a task into a list, with or without its comments, as the web's Copy does. The server
+    /// makes the copy, so this is online-only; the copy comes back and is cached at once.
+    CopyTask {
+        task_id: String,
+        #[serde(default)]
+        target_list_id: Option<String>,
+        #[serde(default)]
+        include_comments: bool,
+    },
     SetTaskLists {
         task_id: String,
         list_ids: Vec<String>,
@@ -722,6 +731,18 @@ pub enum Command {
     },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
+    /// The inbox, from the cache: assigned, mentioned, replied, commented, status changed,
+    /// completed (web task ab0572cb).
+    Notifications,
+    /// The inbox, after asking the server.
+    RefreshNotifications,
+    /// Mark some of it read. In the cache now, on the server now — not journalled; see
+    /// `services::notifications`.
+    MarkNotificationsRead {
+        ids: Vec<String>,
+    },
+    /// Mark all of it read.
+    MarkAllNotificationsRead,
     /// Start signing in. Answers with the URL for the shell to open in the browser.
     BeginSignIn,
     /// Finish signing in, from the URL Windows activated the app with.

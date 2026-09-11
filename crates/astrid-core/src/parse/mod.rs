@@ -6,3 +6,4 @@
 
 pub mod mentions;
 pub mod quick_add;
+pub mod search;

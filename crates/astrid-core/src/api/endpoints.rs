@@ -213,6 +213,16 @@ pub fn channel_messages(channel_id: &str) -> String {
 /// Where a share link is minted (task 016ce981).
 pub const SHORTCODES: &str = "/api/v1/shortcodes";
 
+/// Copy a task, on the server: `POST`, with `targetListId`, `includeComments`, `preserveDueDate`
+/// and `preserveAssignee` in the body. Answers `{ "task": … }`.
+pub fn copy_task(task_id: &str) -> String {
+    format!("{}/copy", task(task_id))
+}
+
+/// The caller's inbox: `GET` for the rows and the unread count, `PUT` with `{ ids }` or
+/// `{ all: true }` to mark them read (web task ab0572cb).
+pub const NOTIFICATIONS: &str = "/api/v1/notifications";
+
 pub fn shortcode(code: &str) -> String {
     format!("/api/v1/shortcodes/{}", escaped_path_component(code))
 }

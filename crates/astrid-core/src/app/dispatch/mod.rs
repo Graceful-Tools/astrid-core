@@ -225,6 +225,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
         Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
         Command::ShareTask { task_id } => share_task(app, &task_id).await,
+        Command::CopyTask {
+            task_id,
+            target_list_id,
+            include_comments,
+        } => answer(
+            app.context
+                .tasks()
+                .copy(&task_id, target_list_id.as_deref(), include_comments)
+                .await,
+        ),
         Command::SetTaskLists { task_id, list_ids } => {
             answer(app.context.tasks().set_lists(&task_id, list_ids))
         }
@@ -722,6 +732,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
+        Command::Notifications => inbox_response(app.context.notifications().inbox()),
+        Command::RefreshNotifications => {
+            inbox_response(app.context.notifications().refresh().await)
+        }
+        Command::MarkNotificationsRead { ids } => {
+            inbox_response(app.context.notifications().mark_read(&ids).await)
+        }
+        Command::MarkAllNotificationsRead => {
+            inbox_response(app.context.notifications().mark_all_read().await)
+        }
         Command::BeginSignIn => match app.auth.begin() {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),
