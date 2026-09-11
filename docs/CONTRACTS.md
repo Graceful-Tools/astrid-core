@@ -369,20 +369,34 @@ stored (`date::all_day_instant`), which is what the setting says and what the ta
 this asked for. The web should do the same; until it does, the two clients disagree only in
 this one corner, and only about the time of day of a task the person never gave a time.
 
-## D11 — Smart parsing reads `#list` tags here, and dates, priority and repeats as well on web
+## D11 — Smart parsing: closed 2026-09-11
 
-**This crate parses hashtags only.** `astrid_core::parse::quick_add::extract_lists`, applied in the
-`createTask` command when the title came from the quick-add box and the account's
-`smartTaskCreationEnabled` is on (task 6ac2639a).
+**This crate now reads what web reads.** `astrid_core::parse::smart`, applied in the `createTask`
+command when the title came from the quick-add box and the account's `smartTaskCreationEnabled`
+is on, ports `parseTaskInput` (`lib/task-manager-utils.ts`) in the web's order: `#list` tags,
+"weekly mon and wed", "daily" / "every month", "tomorrow" / "next week" / a weekday, and
+"urgent" / "high priority" — in all twelve languages, whose keyword tables are carried in
+`contracts/fixtures/smart.json` rather than retyped. The same fixture records the web's answers
+for 220 inputs under a pinned clock, and `tests/smart_contract.rs` replays them.
 
-Web's `parseTaskInput` (`lib/task-manager-utils.ts`) does four things when smart parsing is on:
-files the task by its `#list` tags, and reads a due date ("tomorrow", "next week", "monday"), a
-priority ("urgent", "high priority") and a repeat ("weekly Monday") out of locale-specific keyword
-tables. The hashtag half is mirrored here to the letter — the same name matching, the same
-ordering (tagged lists first, the open list after), every tag stripped. The natural-language
-half is not: it is a port of its own, with a fixture of its own, and a client that parsed
-"monday" by a rule that drifted from web's would be worse than one that leaves the word in the
-title. Until it is ported, "Buy milk tomorrow" is a task called "Buy milk tomorrow" on Windows
-and a task due tomorrow on web. With smart parsing **off**, the two clients agree exactly: the
-title is kept as typed, and the task lands in the open list.
+Two things were found on the way and are reproduced faithfully rather than fixed here: "low
+priority" strips the words and sets **no** priority, because the web reads `priority || undefined`
+and zero is falsy; and "Daily Mail subscription" becomes "Mail subscription", repeating daily,
+because a keyword is matched wherever it sits on a word boundary. Both change on web first.
+
+### D12 — a date word is a calendar day here and an instant on web
+
+The web's `parseRelativeDate("tomorrow")` is `new Date()` plus a day — 14:37 tomorrow, if that is
+when the task was typed — and the task is not all-day. Here the same word gives **tomorrow as an
+all-day task**, stored the way every all-day date is (`date::all_day_instant`), for the reason
+D10 gives about list defaults: the person said a day, not a time. The fixture compares the
+calendar day, which the two agree on.
+
+### D13 — "assign to" and "for" are not read here
+
+The web's last step strips `(assign to|assigned to|for) <word>` from the title and assigns the
+task to the signed-in user if the word contains "jon" — a stub, as its comment says. It also
+turns "Buy flowers for mum" into "Buy flowers". This crate leaves the phrase in the title and
+assigns nobody. Porting a stub that eats "for mum" would be worse than the gap; the driver leaves
+such inputs out of the fixture so the divergence is this paragraph and not a failing test.
 

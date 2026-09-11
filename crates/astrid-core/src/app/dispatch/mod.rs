@@ -121,6 +121,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             assignee_id,
             parent_task_id,
             quick_add,
+            locale,
         } => {
             // What the caller said, before the fields move into the draft: a list's defaults
             // fill in only what was left unsaid (task c4102c67).
@@ -145,11 +146,14 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             draft.parent_task_id = parent_task_id;
 
             let lists = app.store.lists().unwrap_or_default();
-            // The quick-add box's `#list` tags, when the account has smart parsing on — the web's
-            // rule, in the core, so a person who turned it off there gets the same plain title
-            // here (task 6ac2639a). The tagged lists come first and the open list after, as the
-            // web orders them. A title that was nothing but tags keeps its tags: a task named
-            // after its filing beats an untitled one.
+            let mut given = given;
+            // What the quick-add box reads out of a sentence when the account has smart parsing
+            // on — `#list` tags, "tomorrow", "weekly mon and wed", "urgent" — by the web's rule,
+            // in the reader's language, in the core (tasks 6ac2639a and CONTRACTS.md D11). A
+            // person who turned it off on the web gets the same plain title here. The tagged
+            // lists come first and the open list after, as the web orders them. A title that was
+            // nothing but keywords keeps its words: a task named after its filing beats an
+            // untitled one.
             if quick_add
                 && app
                     .context
@@ -157,18 +161,53 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                     .smart_tasks()
                     .smart_task_creation_enabled
             {
-                let (title, tagged) = crate::parse::quick_add::extract_lists(&draft.title, &lists);
-                if !title.trim().is_empty() {
-                    draft.title = title;
-                }
-                if !tagged.is_empty() {
-                    let mut filed = tagged;
+                let keywords =
+                    crate::parse::smart::Keywords::for_locale(locale.as_deref().unwrap_or("en"));
+                let today = crate::filters::local_day(app.clock.now(), app.clock.utc_offset());
+                let read = crate::parse::smart::parse(&draft.title, &lists, keywords, today);
+                draft.title = read.title;
+                if !read.list_ids.is_empty() {
+                    let mut filed = read.list_ids;
                     for id in draft.list_ids.drain(..) {
                         if !filed.contains(&id) {
                             filed.push(id);
                         }
                     }
                     draft.list_ids = filed;
+                }
+                // A date word is a calendar day here, stored the way every all-day date is
+                // (CONTRACTS.md D12). It counts as given, so a list's own default does not
+                // overrule what the person typed.
+                if let Some(day) = read.due_day {
+                    if draft.due_date_time.is_none() {
+                        draft.due_date_time = Some(date::all_day_instant(day));
+                        draft.is_all_day = true;
+                    }
+                    given.due = true;
+                }
+                if let Some(priority) = read.priority {
+                    draft.priority = crate::model::Priority::from_i64(priority);
+                    given.priority = true;
+                }
+                if let Some(repeating) = read.repeating.as_deref() {
+                    draft.repeating = Some(match repeating {
+                        "daily" => crate::model::Repeating::Daily,
+                        "weekly" => crate::model::Repeating::Weekly,
+                        "monthly" => crate::model::Repeating::Monthly,
+                        "yearly" => crate::model::Repeating::Yearly,
+                        _ => crate::model::Repeating::Custom,
+                    });
+                    if repeating == "custom" {
+                        draft.repeating_data = Some(crate::model::CustomRepeatingPattern {
+                            r#type: Some("custom".into()),
+                            unit: Some("weeks".into()),
+                            interval: Some(1),
+                            end_condition: Some("never".into()),
+                            weekdays: Some(read.weekdays),
+                            ..Default::default()
+                        });
+                    }
+                    given.repeating = true;
                 }
             }
 

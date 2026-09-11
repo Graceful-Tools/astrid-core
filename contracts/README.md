@@ -24,6 +24,7 @@ rather than going unnoticed at runtime.
 | `statuses.json` | `lib/project-custom-states.ts` — **executed**: add, rename, reorder and remove over four boards, recording the role each add mints, every refusal and its message, and the exact array stored afterwards | `astrid_core::board` (the writers) |
 | `editing.json` | `lib/editing-session.ts` — **executed**: eleven scripted sequences of begin/end/cancel/commitAll, recording after each step which editor is open, what to commit and what to revert (PRODUCT_CONTRACT.md §6) | `astrid_core::editing` |
 | `search.json` | `lib/search-query-parser.ts` — **executed**: thirty-six queries covering every alias, the quoting rule, the identifier shape and the unknown-key fallback, recording the parse and whether it asks for anything | `astrid_core::parse::search` |
+| `smart.json` | `lib/task-manager-utils.ts` (`parseTaskInput`) and `lib/i18n/nlp-keywords.ts` — **executed** under a pinned clock: 220 inputs across twelve languages, recording title, lists, due day, priority, repeat and weekdays; the keyword tables themselves ride in the same file so the client reads the same words | `astrid_core::parse::smart` |
 
 ## Two kinds of export
 

@@ -7,3 +7,4 @@
 pub mod mentions;
 pub mod quick_add;
 pub mod search;
+pub mod smart;

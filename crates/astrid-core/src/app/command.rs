@@ -214,10 +214,15 @@ pub enum Command {
         #[serde(default)]
         parent_task_id: Option<String>,
         /// True when the title was typed into the quick-add box, where the web's smart parsing
-        /// reads `#list` tags out of it when the account has it on (task 6ac2639a). A subtask
-        /// typed into a detail is not parsed, as it is not on the web.
+        /// reads `#list` tags, dates, repeats and priorities out of it when the account has it
+        /// on (task 6ac2639a, CONTRACTS.md D11). A subtask typed into a detail is not parsed, as
+        /// it is not on the web.
         #[serde(default)]
         quick_add: bool,
+        /// The reader's language tag (`en-US`, `de`, `zh-CN`), for the words the quick-add box
+        /// reads out of a sentence. Absent means English.
+        #[serde(default)]
+        locale: Option<String>,
     },
     /// Edit a task. The body is the same shape the API takes, so a field the shell learns about
     /// needs no change here — see [`crate::services::TaskChanges`] for how absent and null differ.

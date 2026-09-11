@@ -144,6 +144,13 @@ function exportSearch() {
   return runDriver('search.mjs', 'search')
 }
 
+// The quick-add box's natural language — "tomorrow", "weekly mon and wed", "urgent", in twelve
+// languages — run over a set of inputs under a pinned clock, with the keyword tables beside the
+// answers so the client reads the same words (CONTRACTS.md D11).
+function exportSmart() {
+  return runDriver('smart.mjs', 'smart')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
@@ -152,6 +159,7 @@ const EXPORTS = {
   'statuses.json': exportStatuses,
   'editing.json': exportEditing,
   'search.json': exportSearch,
+  'smart.json': exportSmart,
 }
 
 let failed = false
