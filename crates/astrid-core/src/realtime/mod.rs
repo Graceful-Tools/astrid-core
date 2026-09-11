@@ -102,6 +102,17 @@ pub enum Change {
     RemindersDue,
     /// Something the stream cannot describe changed — ask for a sync pass.
     NeedsSync,
+    /// A pass nobody asked for — the sixty-second timer, or the external mirroring — brought
+    /// something into the cache.
+    ///
+    /// This is what makes the timer a floor for the *screen* and not only for the cache: without
+    /// it, a change that arrived while the stream was down sat in SQLite until the next click.
+    /// Carries what moved so the open task is reloaded only when it is one of them; empty lists
+    /// mean the pass could not say, and the shell refreshes what is on screen regardless.
+    Synced {
+        task_ids: Vec<String>,
+        list_ids: Vec<String>,
+    },
 }
 
 /// Something told when the cache moves. The shell registers one and refreshes what it names.

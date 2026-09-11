@@ -147,6 +147,11 @@ pub mod envelope {
     pub const CHANNELS: &str = "channels";
     pub const MEMBERS: &str = "members";
     pub const USERS: &str = "users";
+    /// Beside `tasks` on a delta fetch (`updatedSince`): the ids the server has deleted since,
+    /// which no row can carry because the row is gone. Absent on a full fetch.
+    pub const DELETED_TASKS: &str = "deletedIds";
+    /// The same beside `lists`. A different name, because the lists route grew it separately.
+    pub const DELETED_LISTS: &str = "deletedListIds";
 }
 
 pub fn task(id: &str) -> String {

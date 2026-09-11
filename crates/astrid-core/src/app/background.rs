@@ -47,13 +47,24 @@ pub async fn sync_loop(
         if !app.auth.is_signed_in().await {
             continue;
         }
-        let report = app.sync.sync().await;
+        let report = app.sync.sync_in_background().await;
         tracing::debug!(
             fetched = report.fetched,
+            skipped = report.skipped,
             tasks_added = report.tasks_added,
             tasks_updated = report.tasks_updated,
+            tasks_deleted = report.tasks_deleted,
             "background sync"
         );
+        // The cache moved, so the screen has to. Without this the timer was a floor for the
+        // cache and not for the person looking at it: a change that arrived while the stream was
+        // down sat in SQLite until they happened to click something.
+        if report.changed_anything() {
+            app.realtime().publish(crate::realtime::Change::Synced {
+                task_ids: report.changed_task_ids,
+                list_ids: report.changed_list_ids,
+            });
+        }
     }
 }
 
@@ -129,11 +140,16 @@ pub async fn external_loop(
             continue;
         }
         let external = app.context.external();
+        // Whether anything on this machine is different afterwards. The passes report counts,
+        // not ids, so what is announced is "something moved" and the shell refreshes what it
+        // has on screen.
+        let mut cache_moved = false;
         // Before the passes: a list made on either side since the last round gets its counterpart
         // and is then synced in the same round. A no-op in manual mode, which is the default.
         let auto_linked = external.auto_link_google().await;
         match &auto_linked {
-            Ok(report) if report.linked > 0 => {
+            Ok(report) if report.linked > 0 || report.lists_created > 0 => {
+                cache_moved = true;
                 tracing::debug!(linked = report.linked, "auto-linked")
             }
             Ok(_) => {}
@@ -141,8 +157,9 @@ pub async fn external_loop(
         }
         // My Tasks against Google's default list, when the mode asks for it.
         if let Ok(Some(container)) = auto_linked.map(|report| report.my_tasks_container) {
-            if let Err(error) = external.sync_my_tasks(&container).await {
-                tracing::debug!(%error, "My Tasks pass failed");
+            match external.sync_my_tasks(&container).await {
+                Ok(report) => cache_moved |= report.applied > 0 || report.deleted_locally > 0,
+                Err(error) => tracing::debug!(%error, "My Tasks pass failed"),
             }
         }
         let Ok(links) = external.links(crate::services::Provider::GoogleTasks).await else {
@@ -150,15 +167,24 @@ pub async fn external_loop(
         };
         for link in &links {
             match external.sync_google_link(link).await {
-                Ok(report) => tracing::debug!(
-                    link = %link.id,
-                    applied = report.applied,
-                    pushed = report.pushed,
-                    "external pass"
-                ),
+                Ok(report) => {
+                    cache_moved |= report.applied > 0 || report.deleted_locally > 0;
+                    tracing::debug!(
+                        link = %link.id,
+                        applied = report.applied,
+                        pushed = report.pushed,
+                        "external pass"
+                    )
+                }
                 // One list failing is not the others failing.
                 Err(error) => tracing::debug!(link = %link.id, %error, "external pass failed"),
             }
+        }
+        if cache_moved {
+            app.realtime().publish(crate::realtime::Change::Synced {
+                task_ids: Vec::new(),
+                list_ids: Vec::new(),
+            });
         }
     }
 }
@@ -305,6 +331,88 @@ mod tests {
             app,
             || ticks.fetch_add(1, Ordering::SeqCst) < 3,
             Duration::from_secs(30),
+        )
+        .await;
+
+        assert_eq!(heard.load(Ordering::SeqCst), 0);
+    }
+
+    /// The timer is the floor for the screen, not only for the cache. A pass that brought
+    /// something in says so on the same subscription a colleague's edit arrives on, naming what
+    /// moved.
+    #[tokio::test(start_paused = true)]
+    async fn a_background_pass_that_brought_something_in_is_announced() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = StubTransport::new()
+            .push_json(
+                "/api/v1/lists",
+                200,
+                serde_json::json!({ "lists": [{ "id": "l1", "name": "Home" }] }),
+            )
+            .push_json(
+                "/api/v1/tasks",
+                200,
+                serde_json::json!({ "tasks": [{ "id": "t1", "title": "From the web" }] }),
+            )
+            .fallback(Err(TransportError::Unreachable("done".into())));
+        let app = app_with(transport, secure);
+
+        let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |change| {
+                heard.lock().expect("lock").push(change.clone());
+            });
+        }
+
+        let ticks = AtomicUsize::new(0);
+        sync_loop(
+            app,
+            || ticks.fetch_add(1, Ordering::SeqCst) < 2,
+            Duration::from_secs(60),
+        )
+        .await;
+
+        let heard = heard.lock().expect("lock");
+        assert_eq!(
+            heard.as_slice(),
+            &[crate::realtime::Change::Synced {
+                task_ids: vec!["t1".into()],
+                list_ids: vec!["l1".into()],
+            }]
+        );
+    }
+
+    /// And a pass that found nothing says nothing. Announcing every tick would redraw the
+    /// window once a minute for the rest of the day.
+    #[tokio::test(start_paused = true)]
+    async fn a_background_pass_that_found_nothing_says_nothing() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = StubTransport::new()
+            .push_json("/api/v1/lists", 200, serde_json::json!({ "lists": [] }))
+            .push_json("/api/v1/tasks", 200, serde_json::json!({ "tasks": [] }))
+            .fallback(Err(TransportError::Unreachable("done".into())));
+        let app = app_with(transport, secure);
+
+        let heard = Arc::new(AtomicUsize::new(0));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |_| {
+                heard.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let ticks = AtomicUsize::new(0);
+        sync_loop(
+            app,
+            || ticks.fetch_add(1, Ordering::SeqCst) < 2,
+            Duration::from_secs(60),
         )
         .await;
 

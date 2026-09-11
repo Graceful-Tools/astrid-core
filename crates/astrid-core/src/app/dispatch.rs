@@ -340,10 +340,14 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             let report = app.sync.sync().await;
             Response::ok(serde_json::json!({
                 "fetched": report.fetched,
+                "skipped": report.skipped,
+                "delta": report.delta,
                 "listsAdded": report.lists_added,
                 "listsUpdated": report.lists_updated,
+                "listsDeleted": report.lists_deleted,
                 "tasksAdded": report.tasks_added,
                 "tasksUpdated": report.tasks_updated,
+                "tasksDeleted": report.tasks_deleted,
                 "pushesFailed": report.pushes_failed,
             }))
         }
