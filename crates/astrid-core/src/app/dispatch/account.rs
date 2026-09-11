@@ -95,6 +95,42 @@ pub(super) fn settings(app: &App) -> Response {
     }))
 }
 
+/// This user's flags, for the shell to gate its surfaces on. Null is "not asked yet", which the
+/// shell treats as "show" — the web only hides what it has been told to hide.
+pub(super) fn features(app: &App) -> Response {
+    let account = app.context.account();
+    let flag = |name: &str| account.has_feature(name).ok().flatten();
+    Response::ok(serde_json::json!({
+        "projectMode": flag("project_mode"),
+        "googleTasks": flag("google_tasks"),
+        "taskCost": flag("task_cost"),
+    }))
+}
+
+/// The global quick-add chord, as chosen or as shipped, with its parts for `RegisterHotKey`.
+pub(super) fn hotkey(app: &App) -> Response {
+    let stored = app
+        .store
+        .metadata(crate::keyboard::chord::KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::keyboard::chord::DEFAULT.to_string());
+    // A stored chord this build cannot read falls back to the default rather than to nothing:
+    // an app with no way to summon it is worse than one with the shipped way.
+    let chord = crate::keyboard::chord::parse(&stored).unwrap_or_else(|_| {
+        crate::keyboard::chord::parse(crate::keyboard::chord::DEFAULT)
+            .expect("the default is a chord")
+    });
+    Response::ok(serde_json::json!({
+        "chord": chord.to_string(),
+        "ctrl": chord.ctrl,
+        "alt": chord.alt,
+        "shift": chord.shift,
+        "win": chord.win,
+        "key": chord.key.to_string(),
+    }))
+}
+
 /// The layout to draw with: what the shell asked for, else what the account chose (task c0f3db19).
 /// The preference lives on the server and is read from the cache, so a choice made on the web
 /// applies here after the next settings refresh, and one made here applies at once.

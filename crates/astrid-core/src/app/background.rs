@@ -69,6 +69,8 @@ pub async fn sync_loop(
         // a deployment without the route, or a pass that could not reach the server, leaves the
         // cached inbox standing — and announced only when it differs from what was cached.
         if report.fetched {
+            // The flags too, quietly: what this person may see can change while the app is open.
+            let _ = app.context.account().refresh_features().await;
             let notifications = app.context.notifications();
             let before = notifications.inbox().unwrap_or_default();
             if let Ok(after) = notifications.refresh().await {

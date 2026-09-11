@@ -14,6 +14,8 @@
 //! divergence.
 
 /// One logical action a key can trigger. The name is stable and is what the shell dispatches on.
+pub mod chord;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutAction {
     NewTask,

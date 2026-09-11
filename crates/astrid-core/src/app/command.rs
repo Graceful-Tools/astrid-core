@@ -630,6 +630,15 @@ pub enum Command {
     ///
     /// Per installation rather than per account — a laptop in the evening and a desktop under an
     /// office light are different questions. See [`crate::theme`].
+    /// This user's feature flags, from the cache: `projectMode`, `googleTasks`, `taskCost`,
+    /// each `true`, `false`, or null when the server has never been asked (web task AWTD-566).
+    Features,
+    /// The global quick-add chord: what it is, and its parts for the shell to register.
+    Hotkey,
+    /// Choose another chord. Refused, with a reason, when it is not one the shell could register.
+    SetHotkey {
+        chord: String,
+    },
     Theme,
     SetTheme {
         theme: crate::theme::Theme,

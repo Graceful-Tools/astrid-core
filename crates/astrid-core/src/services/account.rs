@@ -25,6 +25,7 @@ const CURRENT_USER_KEY: &str = "account.current-user";
 /// Where My Tasks' filters are cached, so the view draws before the network answers.
 const MY_TASKS_PREFERENCES_KEY: &str = "account.myTasksPreferences";
 const CAPABILITIES_KEY: &str = "account.capabilities";
+const FEATURES_KEY: &str = "account.features";
 const SETTINGS_KEY: &str = "account.settings";
 const SMART_TASKS_KEY: &str = "account.smartTasks";
 
@@ -415,6 +416,44 @@ impl AccountService {
         Ok(())
     }
 
+    // ─── Feature flags ────────────────────────────────────────────────────────────────────────
+
+    /// This user's flags, as last fetched: `project_mode`, `google_tasks`, `task_cost`.
+    ///
+    /// `None` until the first fetch. That is a different thing from "off": a board shown to
+    /// somebody the server has not been asked about yet is right more often than one hidden,
+    /// and the web only hides a surface once it has been told to.
+    pub fn features(&self) -> Result<Option<serde_json::Value>> {
+        Ok(self
+            .context
+            .store
+            .metadata(FEATURES_KEY)?
+            .and_then(|json| serde_json::from_str(&json).ok()))
+    }
+
+    /// Whether this user has `name`. `None` when the flags have never been fetched.
+    pub fn has_feature(&self, name: &str) -> Result<Option<bool>> {
+        Ok(self.features()?.map(|features| {
+            features
+                .get(name)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        }))
+    }
+
+    pub async fn refresh_features(&self) -> Result<serde_json::Value> {
+        let value = self
+            .context
+            .client
+            .send(self.context.client.get(endpoints::FEATURES))
+            .await?;
+        let features = value.get("features").cloned().unwrap_or(value);
+        self.context
+            .store
+            .set_metadata(FEATURES_KEY, &features.to_string())?;
+        Ok(features)
+    }
+
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────
 
     /// Whether the deployment this client is talking to supports `name`.
@@ -627,6 +666,39 @@ mod tests {
             fixture.secure.get(CURRENT_USER_ID_KEY).await.as_deref(),
             Some("u1"),
             "the id sits beside the credential so the shell can name the user before the cache opens"
+        );
+    }
+
+    /// Unknown is not off: a board is shown until the server says otherwise, and hidden once it
+    /// has. The web only hides a surface it has been told to hide.
+    #[tokio::test]
+    async fn features_are_unknown_until_fetched_and_then_exact() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/features",
+            200,
+            json!({ "version": 3, "features": { "project_mode": true, "google_tasks": false } }),
+        ));
+        assert_eq!(
+            fixture.service.has_feature("project_mode").expect("reads"),
+            None
+        );
+
+        fixture.service.refresh_features().await.expect("refreshes");
+        assert_eq!(
+            fixture.service.has_feature("project_mode").expect("reads"),
+            Some(true)
+        );
+        assert_eq!(
+            fixture.service.has_feature("google_tasks").expect("reads"),
+            Some(false)
+        );
+        assert_eq!(
+            fixture
+                .service
+                .has_feature("something_later")
+                .expect("reads"),
+            Some(false),
+            "a flag nobody has heard of is off"
         );
     }
 

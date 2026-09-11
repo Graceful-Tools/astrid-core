@@ -315,8 +315,13 @@ impl TaskRow {
             .assignee_id
             .as_deref()
             .or(task.assignee.as_ref().map(|user| user.id.as_str()));
-        let leading =
+        let mut leading =
             LeadingControl::for_task(assignee_id, context.current_user_id, context.display_mode);
+        // The mark has to be able to read as checked, and the unassigned mark cannot
+        // (PRODUCT_CONTRACT.md §4). Only this pair: someone else's photo still reads as theirs.
+        if task.completed && leading == LeadingControl::Unassigned {
+            leading = LeadingControl::Checkbox;
+        }
         let action = leading.action(context.surface, context.display_mode);
 
         let list_ids = task.effective_list_ids();

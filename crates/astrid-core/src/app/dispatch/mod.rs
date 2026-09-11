@@ -387,6 +387,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         // ── The network ──────────────────────────────────────────────────────────────────────
         Command::Sync => {
             let report = app.sync.sync().await;
+            // The flags ride on a pass that reached the server: what this person may see can
+            // change while the app is open, and a board that appears on the next pass beats one
+            // that appears on the next launch. Best effort, like the projects.
+            if report.fetched {
+                let _ = app.context.account().refresh_features().await;
+            }
             Response::ok(serde_json::json!({
                 "fetched": report.fetched,
                 "skipped": report.skipped,
@@ -511,6 +517,20 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::UnlinkList { provider, link_id } => {
             answer_done(app.context.external().unlink(provider, &link_id).await)
         }
+        Command::Features => features(app),
+        Command::Hotkey => hotkey(app),
+        Command::SetHotkey { chord } => match crate::keyboard::chord::parse(&chord) {
+            Ok(parsed) => {
+                match app
+                    .store
+                    .set_metadata(crate::keyboard::chord::KEY, &parsed.to_string())
+                {
+                    Ok(()) => hotkey(app),
+                    Err(error) => Response::failed(error.into()),
+                }
+            }
+            Err(reason) => Response::failed(Failure::bad_request(reason.to_string())),
+        },
         Command::Theme => {
             let chosen = app
                 .store
@@ -687,6 +707,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             let _ = app.context.account().refresh_current_user().await;
             // Best effort, like the user: a server without the route leaves the defaults standing.
             let _ = app.context.account().refresh_smart_task_settings().await;
+            let _ = app.context.account().refresh_features().await;
             match app.context.account().refresh_settings().await {
                 Ok(_) => settings(app),
                 Err(error) => Response::failed(error.into()),

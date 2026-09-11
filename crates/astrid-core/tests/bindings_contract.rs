@@ -20,10 +20,12 @@ const COMMANDS_CS: &str = include_str!("../../../app/Astrid.Core.Bindings/Comman
 /// Every variant of `Command`, as the wire spells it: `rename_all = "camelCase"` lowercases the
 /// first letter and nothing else, so `CreateOAuthClient` is `createOAuthClient`.
 fn rust_kinds() -> BTreeSet<String> {
-    let start = COMMAND_RS
+    // A checkout on Windows may carry CRLF; the scan reads lines, not bytes.
+    let source = COMMAND_RS.replace("\r\n", "\n");
+    let start = source
         .find("pub enum Command {")
         .expect("command.rs declares `pub enum Command {`");
-    let body = &COMMAND_RS[start..];
+    let body = &source[start..];
     let end = body
         .find("\n}\n")
         .expect("the Command enum closes with a bare `}`");

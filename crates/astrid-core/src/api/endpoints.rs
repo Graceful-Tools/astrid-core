@@ -31,6 +31,9 @@ pub fn project_statuses(project_id: &str) -> String {
 }
 pub const CHAT_CHANNELS: &str = "/api/v1/chat/channels";
 pub const CAPABILITIES: &str = "/api/v1/capabilities";
+/// This USER's feature flags — `project_mode`, `google_tasks`, `task_cost` — beside
+/// `CAPABILITIES`, which is what the DEPLOYMENT ships. A client needs both (web task AWTD-566).
+pub const FEATURES: &str = "/api/v1/features";
 /// Where a new file is uploaded. Multipart: the bytes, and a JSON context saying which list it
 /// belongs to, which is how the server decides who may read it afterwards.
 pub const REQUEST_UPLOAD: &str = "/api/v1/secure-upload/request-upload";
