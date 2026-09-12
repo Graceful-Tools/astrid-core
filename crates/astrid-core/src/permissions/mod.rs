@@ -78,6 +78,42 @@ pub struct ListAccess {
     pub list_members: Vec<ListMembership>,
 }
 
+/// The part of a list that decides access.
+///
+/// Built here rather than by the caller so no code path can construct one that leaves out
+/// `list_members` and quietly resolves every collaborator to no access.
+pub fn access_of(list: &crate::model::TaskList) -> ListAccess {
+    use crate::model::Privacy;
+    ListAccess {
+        owner_id: list.owner_id.clone().unwrap_or_default(),
+        owner: list.owner.as_ref().map(|owner| UserRef {
+            id: owner.id.clone(),
+        }),
+        privacy: list
+            .privacy
+            .map(|privacy| match privacy {
+                Privacy::Private => "PRIVATE",
+                Privacy::Shared => "SHARED",
+                Privacy::Public => "PUBLIC",
+            })
+            .unwrap_or("PRIVATE")
+            .to_string(),
+        public_list_type: list.public_list_type.clone(),
+        list_members: list
+            .list_members
+            .iter()
+            .flatten()
+            .map(|member| ListMembership {
+                user_id: member.user_id.clone(),
+                role: Some(member.role.clone()),
+                user: member.user.as_ref().map(|user| UserRef {
+                    id: user.id.clone(),
+                }),
+            })
+            .collect(),
+    }
+}
+
 impl ListAccess {
     fn is_public(&self) -> bool {
         self.privacy == PRIVACY_PUBLIC

@@ -103,6 +103,10 @@ pub enum LeadingControl {
     Avatar(String),
     /// Nobody's yet.
     Unassigned,
+    /// A task in a public list the reader cannot edit (task f6bc59e8): the web draws its copy
+    /// control where the checkbox would be, because copying it is the one thing that can be
+    /// done with it.
+    Copy,
 }
 
 /// What clicking the leading control does.
@@ -110,6 +114,30 @@ pub enum LeadingControl {
 pub enum LeadingAction {
     Complete,
     OpenPicker,
+    /// Copy the task to the reader's own tasks.
+    Copy,
+}
+
+/// Whether a task is one the reader can only copy (task f6bc59e8).
+///
+/// The web shows its copy control on any task in a PUBLIC list (`lib/public-list-utils.ts`);
+/// here it is a task in a public list the signed-in user may not edit by the ported rule
+/// ([`crate::permissions::can_edit_task`]) — a passer-by on a public list, or, on a
+/// collaborative one, a task somebody else wrote. The owner, the admins and the members keep
+/// their checkboxes (CONTRACTS.md D15).
+pub fn copy_only(task: &Task, lists: &[TaskList], current_user_id: Option<&str>) -> bool {
+    let me = current_user_id.unwrap_or("");
+    task.effective_list_ids()
+        .iter()
+        .filter_map(|id| lists.iter().find(|list| &list.id == id))
+        .any(|list| {
+            list.privacy == Some(crate::model::Privacy::Public)
+                && !crate::permissions::can_edit_task(
+                    me,
+                    task.effective_creator_id(),
+                    &crate::permissions::access_of(list),
+                )
+        })
 }
 
 impl LeadingControl {
@@ -151,6 +179,11 @@ impl LeadingControl {
     /// else's photo is not a checkbox, and finishing their task by clicking their face is not what
     /// that click means (task 729a190e).
     pub fn action(&self, surface: Surface, display_mode: DisplayMode) -> LeadingAction {
+        // Copy is copy on every surface: a row, a card and the detail all say the same thing
+        // about a task that can only be copied.
+        if *self == LeadingControl::Copy {
+            return LeadingAction::Copy;
+        }
         match surface {
             Surface::BoardCard => LeadingAction::OpenPicker,
             Surface::ListRow => {
@@ -322,6 +355,11 @@ impl TaskRow {
         if task.completed && leading == LeadingControl::Unassigned {
             leading = LeadingControl::Checkbox;
         }
+        // A task in a public list the reader cannot edit is copied, not completed (task
+        // f6bc59e8): the web swaps the checkbox for its copy control on such rows.
+        if copy_only(task, context.lists, context.current_user_id) {
+            leading = LeadingControl::Copy;
+        }
         let action = leading.action(context.surface, context.display_mode);
 
         let list_ids = task.effective_list_ids();
@@ -487,6 +525,55 @@ mod tests {
         assert_eq!(
             LeadingControl::for_task(Some("me"), Some("me"), DisplayMode::Project),
             LeadingControl::Avatar("me".into())
+        );
+    }
+
+    /// A task in a public list the reader may not edit is copied, not completed (task f6bc59e8);
+    /// the list's owner and its members, and anybody in a private list, keep the checkbox.
+    #[test]
+    fn a_task_in_a_public_list_the_reader_cannot_edit_is_copied_not_completed_task_f6bc59e8() {
+        let public: TaskList = serde_json::from_value(serde_json::json!({
+            "id": "pub", "name": "Recipes", "ownerId": "them", "privacy": "PUBLIC",
+            "listMembers": [{ "userId": "friend", "role": "member" }],
+        }))
+        .expect("a list");
+        let private: TaskList = serde_json::from_value(serde_json::json!({
+            "id": "home", "name": "Home", "ownerId": "me", "privacy": "PRIVATE",
+        }))
+        .expect("a list");
+        let lists = vec![public, private];
+        let in_public: Task = serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": "Bake", "listIds": ["pub"],
+        }))
+        .expect("a task");
+        let in_private: Task = serde_json::from_value(serde_json::json!({
+            "id": "t2", "title": "Sweep", "listIds": ["home"],
+        }))
+        .expect("a task");
+
+        assert!(
+            copy_only(&in_public, &lists, Some("me")),
+            "a passer-by on a public list copies"
+        );
+        assert!(
+            !copy_only(&in_public, &lists, Some("them")),
+            "its owner completes"
+        );
+        assert!(
+            !copy_only(&in_public, &lists, Some("friend")),
+            "so does a member"
+        );
+        assert!(
+            !copy_only(&in_private, &lists, Some("me")),
+            "a private list is not copied"
+        );
+        assert_eq!(
+            LeadingControl::Copy.action(Surface::ListRow, DisplayMode::List),
+            LeadingAction::Copy
+        );
+        assert_eq!(
+            LeadingControl::Copy.action(Surface::Detail, DisplayMode::Project),
+            LeadingAction::Copy
         );
     }
 

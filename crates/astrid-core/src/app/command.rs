@@ -352,6 +352,14 @@ pub enum Command {
     ListImage {
         list_id: String,
     },
+    /// The public lists anybody may browse and copy (task f6bc59e8), most copied first.
+    /// Online-only: the server keeps the catalogue.
+    PublicLists,
+    /// Copy a public list, with its tasks, into this account (task f6bc59e8). Online-only: the
+    /// server makes the copy, and answers with the new list.
+    CopyList {
+        list_id: String,
+    },
     SetListFavorite {
         list_id: String,
         favorite: bool,

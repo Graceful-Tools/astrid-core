@@ -180,6 +180,7 @@ pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "action": match row.action {
                     rows::LeadingAction::Complete => "complete",
                     rows::LeadingAction::OpenPicker => "openPicker",
+                    rows::LeadingAction::Copy => "copy",
                 },
                 "depth": row.depth,
                 "isPending": row.is_pending,
@@ -218,6 +219,7 @@ pub(super) fn leading_json(leading: &rows::LeadingControl) -> serde_json::Value 
     match leading {
         rows::LeadingControl::Checkbox => serde_json::json!({ "kind": "checkbox" }),
         rows::LeadingControl::Unassigned => serde_json::json!({ "kind": "unassigned" }),
+        rows::LeadingControl::Copy => serde_json::json!({ "kind": "copy" }),
         rows::LeadingControl::Avatar(id) => {
             serde_json::json!({ "kind": "avatar", "userId": id })
         }

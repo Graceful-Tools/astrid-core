@@ -103,6 +103,18 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         // one the web's own task links carry, built here so one place knows its shape. A task
         // that has not reached the server yet has no address (task 016ce981).
         "isCanceled": task.is_canceled(),
+        // A task in a public list the reader cannot edit (task f6bc59e8): the header offers a
+        // copy where the checkbox would be, and the text is not for editing.
+        "isCopyOnly": rows::copy_only(
+            &task,
+            &lists,
+            app.context
+                .account()
+                .current_user_id()
+                .ok()
+                .flatten()
+                .as_deref(),
+        ),
         "link": (!crate::model::is_temp_id(&task.id))
             .then(|| format!("{}/tasks/{}", app.context.client.base_url(), task.id)),
         "comments": comments,

@@ -353,6 +353,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .image(&list_id, app.attachment_cache())
                 .await,
         ),
+        Command::PublicLists => answer(app.context.lists().public_lists().await),
+        Command::CopyList { list_id } => answer(app.context.lists().copy(&list_id).await),
         Command::PostComment {
             task_id,
             content,

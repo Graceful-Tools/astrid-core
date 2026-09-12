@@ -408,3 +408,13 @@ mark. This client draws the picture beside the list's name only when the list ha
 sidebar keeps the colour discs. The stored value is the same on both — a chosen picture set here
 shows on the web and the other way round (task 3a913e52) — so the divergence is what an absent
 picture looks like, not what a present one is.
+
+### D15 — the copy control is for a public list the reader cannot edit, not every public list
+
+The web draws its copy control in place of the checkbox on any task in a PUBLIC list
+(`lib/public-list-utils.ts` `shouldShowCopyButton`), owners included, and copies with no target,
+so the copy lands with the person. This client draws it only when the ported permission rule
+(`permissions::can_edit_task`) says the reader may not edit that task: a passer-by on a public
+list, or, on a collaborative one, a task somebody else wrote. The owner, the admins and the
+members keep their checkboxes, since they can complete. The copy itself is the same request
+with no target (task f6bc59e8).

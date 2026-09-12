@@ -15,7 +15,7 @@ use super::{Context, Result, ServiceError};
 use crate::api::endpoints;
 use crate::model::{ListMember, Privacy, TaskList};
 use crate::outbox::{self, journal, kind};
-use crate::permissions::{self, ListAccess, ListRole};
+use crate::permissions::{self, access_of, ListRole};
 
 /// An edit to a list. Doubly optional where clearing is possible, for the reason given on
 /// [`super::TaskChanges`].
@@ -236,6 +236,38 @@ pub struct ListService {
     context: Context,
 }
 
+/// One of the public lists anybody may browse and copy (task f6bc59e8), as the v1 projection
+/// answers it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicListSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<PublicListOwner>,
+    #[serde(default)]
+    pub task_count: i64,
+    #[serde(default)]
+    pub member_count: i64,
+}
+
+/// Who a public list belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicListOwner {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
 /// Where a list's picture can be drawn from (task 3a913e52): a cached local path for a secure
 /// file, or an absolute address.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -413,6 +445,59 @@ impl ListService {
             false => entry,
         };
         journal::enqueue(&self.context.store, &entry)?;
+        Ok(list)
+    }
+
+    // ─── Public lists (task f6bc59e8) ──────────────────────────────────────────────────────
+    //
+    // Both online-only, like Share: the server keeps the catalogue and does the copying, and a
+    // browser drawn from a cache would show lists that were made private a week ago.
+
+    /// The public lists anybody may browse, most copied first — the v1 projection, which is
+    /// what this client can speak.
+    pub async fn public_lists(&self) -> Result<Vec<PublicListSummary>> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::PUBLIC_LISTS)
+            .query("sortBy", Some("popular".to_string()))
+            .query("limit", Some("50".to_string()));
+        let answer = self.context.client.send(request).await?;
+        let lists = answer
+            .get("lists")
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+        serde_json::from_value(lists).map_err(|error| {
+            ServiceError::Api(crate::api::ApiError::Decode(format!(
+                "the public lists could not be read: {error}"
+            )))
+        })
+    }
+
+    /// Copy a public list, with its tasks, into this account. The server makes the copy and
+    /// answers with the new list; it is cached at once, and its tasks with it when the answer
+    /// carries them, so the sidebar and the list can draw before the next sync pass.
+    pub async fn copy(&self, id: &str) -> Result<TaskList> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::copy_list(id))
+            .value(json!({ "includeTasks": true }));
+        let answer = self.context.client.send(request).await?;
+        let copied = answer.get("list").cloned().unwrap_or(answer);
+        let list: TaskList = serde_json::from_value(copied.clone()).map_err(|error| {
+            ServiceError::Api(crate::api::ApiError::Decode(format!(
+                "the copied list could not be read: {error}"
+            )))
+        })?;
+        self.context.store.upsert_list(&list)?;
+        if let Some(tasks) = copied.get("tasks").and_then(|tasks| tasks.as_array()) {
+            for task in tasks {
+                if let Ok(task) = serde_json::from_value::<crate::model::Task>(task.clone()) {
+                    self.context.store.upsert_task(&task)?;
+                }
+            }
+        }
         Ok(list)
     }
 
@@ -680,41 +765,6 @@ impl ListService {
                 kind: "list",
                 id: id.to_string(),
             })
-    }
-}
-
-/// The part of a list that decides access.
-///
-/// Built here rather than by the caller so no code path can construct one that leaves out
-/// `list_members` and quietly resolves every collaborator to no access.
-fn access_of(list: &TaskList) -> ListAccess {
-    ListAccess {
-        owner_id: list.owner_id.clone().unwrap_or_default(),
-        owner: list.owner.as_ref().map(|owner| permissions::UserRef {
-            id: owner.id.clone(),
-        }),
-        privacy: list
-            .privacy
-            .map(|privacy| match privacy {
-                Privacy::Private => "PRIVATE",
-                Privacy::Shared => "SHARED",
-                Privacy::Public => "PUBLIC",
-            })
-            .unwrap_or("PRIVATE")
-            .to_string(),
-        public_list_type: list.public_list_type.clone(),
-        list_members: list
-            .list_members
-            .iter()
-            .flatten()
-            .map(|member| permissions::ListMembership {
-                user_id: member.user_id.clone(),
-                role: Some(member.role.clone()),
-                user: member.user.as_ref().map(|user| permissions::UserRef {
-                    id: user.id.clone(),
-                }),
-            })
-            .collect(),
     }
 }
 

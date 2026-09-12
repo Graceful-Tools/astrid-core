@@ -3550,3 +3550,113 @@ async fn a_list_image_is_uploaded_stored_and_fetched_task_3a913e52() {
     assert_eq!(none["ok"], true, "{none}");
     assert_eq!(none["value"], serde_json::Value::Null);
 }
+
+/// Public lists are browsed from the server and one is copied into the account (task f6bc59e8):
+/// the copy comes back cached with its tasks, so the sidebar and the list draw at once.
+#[tokio::test]
+async fn public_lists_are_browsed_and_one_is_copied_task_f6bc59e8() {
+    let transport = StubTransport::new()
+        .push_json(
+            "/api/v1/public/lists",
+            200,
+            json!({ "lists": [{
+                "id": "pub1", "name": "Recipes", "description": "Weeknight dinners",
+                "privacy": "PUBLIC", "owner": { "id": "them", "name": "Dana", "email": "dana@x.io" },
+                "taskCount": 3, "memberCount": 2,
+            }] }),
+        )
+        .push_json(
+            "/api/v1/lists/pub1/copy",
+            200,
+            json!({ "list": {
+                "id": "mine1", "name": "Recipes", "privacy": "PRIVATE", "ownerId": "me",
+                "tasks": [{ "id": "t9", "title": "Bake bread", "listIds": ["mine1"] }],
+            } }),
+        );
+    let (app, transport) = app_and_transport(transport);
+
+    let browsed = call(&app, json!({ "kind": "publicLists" })).await;
+    assert_eq!(browsed["ok"], true, "{browsed}");
+    assert_eq!(browsed["value"][0]["name"], "Recipes");
+    assert_eq!(browsed["value"][0]["owner"]["name"], "Dana");
+    assert_eq!(browsed["value"][0]["taskCount"], 3);
+    assert_eq!(browsed["value"][0]["memberCount"], 2);
+    let listing = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.url.contains("/api/v1/public/lists"))
+        .expect("a listing");
+    assert!(listing.url.contains("sortBy=popular"), "{}", listing.url);
+
+    let copied = call(&app, json!({ "kind": "copyList", "listId": "pub1" })).await;
+    assert_eq!(copied["ok"], true, "{copied}");
+    assert_eq!(copied["value"]["id"], "mine1");
+    let post = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.url.ends_with("/api/v1/lists/pub1/copy"))
+        .expect("a copy");
+    let body: serde_json::Value =
+        serde_json::from_slice(post.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["includeTasks"], true);
+
+    // Cached at once, tasks and all.
+    let lists = call(&app, json!({ "kind": "lists" })).await;
+    assert!(lists["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|list| list["id"] == "mine1"));
+    let rows = call(&app, json!({ "kind": "rowsForList", "listId": "mine1" })).await;
+    assert_eq!(rows["value"]["rows"][0]["title"], "Bake bread");
+}
+
+/// A task in a public list the reader may not edit — a passer-by's view of it — answers a copy
+/// control on its row and in its detail (task f6bc59e8); the reader's own list answers the
+/// checkbox.
+#[tokio::test]
+async fn a_public_task_the_reader_cannot_edit_is_a_copy_control_task_f6bc59e8() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({
+                "id": "pub", "name": "Recipes", "ownerId": "them", "privacy": "PUBLIC",
+            }))
+            .expect("a list"),
+        )
+        .expect("stores");
+    app.store
+        .upsert_task(
+            &serde_json::from_value(
+                json!({ "id": "t1", "title": "Bake", "listIds": ["pub"], "creatorId": "them" }),
+            )
+            .expect("a task"),
+        )
+        .expect("stores");
+    call(&app, json!({ "kind": "createList", "name": "Home" })).await;
+    let home = list_id_named(&app, "Home").await;
+    call(
+        &app,
+        json!({ "kind": "createTask", "title": "Sweep", "listIds": [home] }),
+    )
+    .await;
+
+    let theirs = call(&app, json!({ "kind": "rowsForList", "listId": "pub" })).await;
+    assert_eq!(
+        theirs["value"]["rows"][0]["leading"]["kind"], "copy",
+        "{theirs}"
+    );
+    assert_eq!(theirs["value"]["rows"][0]["action"], "copy");
+    let detail = call(&app, json!({ "kind": "taskDetail", "taskId": "t1" })).await;
+    assert_eq!(detail["value"]["isCopyOnly"], true);
+
+    let mine = call(&app, json!({ "kind": "rowsForList", "listId": home })).await;
+    assert_eq!(
+        mine["value"]["rows"][0]["leading"]["kind"], "unassigned",
+        "{mine}"
+    );
+    assert_eq!(mine["value"]["rows"][0]["action"], "complete");
+}
