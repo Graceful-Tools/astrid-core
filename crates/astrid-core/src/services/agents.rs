@@ -243,6 +243,35 @@ impl AgentService {
         Ok(())
     }
 
+    // ─── The model behind @astrid (task 810e1876) ──────────────────────────────────────────
+
+    /// The agents that could power `@astrid`, and which one does — as the web's selector reads
+    /// them (`components/Settings/AgentsSettings.tsx`): the agents the server can run, minus
+    /// Astrid itself, and the account's default agent from its AI preferences. Null for no
+    /// choice, which leaves the server to pick.
+    pub async fn astrid_model(&self) -> Result<serde_json::Value> {
+        let agents = self
+            .context
+            .client
+            .get(endpoints::AVAILABLE_AGENTS)
+            .query("serverRun", Some("true".to_string()));
+        let agents = self.context.client.send(agents).await?;
+        let preferences = self.context.client.get(endpoints::AI_PREFERENCES);
+        let preferences = self.context.client.send(preferences).await?;
+        Ok(astrid_model_json(&agents, &preferences))
+    }
+
+    /// Choose the agent that powers `@astrid`, or none. Answers the selector as it now stands.
+    pub async fn set_astrid_model(&self, agent_id: Option<&str>) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .patch(endpoints::AI_PREFERENCES)
+            .value(serde_json::json!({ "defaultAgentId": agent_id }));
+        self.context.client.send(request).await?;
+        self.astrid_model().await
+    }
+
     /// Whether the account's Copilot integration is connected.
     pub async fn copilot_status(&self) -> Result<serde_json::Value> {
         let request = self.context.client.get(endpoints::COPILOT_STATUS);
@@ -266,6 +295,50 @@ impl AgentService {
         self.context.client.send(request).await?;
         Ok(())
     }
+}
+
+/// The selector's rows, from the two answers it is built of (task 810e1876). Astrid itself is
+/// left out — the choice is what powers Astrid — and a service is labelled as the web labels it
+/// (`agentServiceLabel`: a custom agent's runtime reads "Custom Agent", the rest by name).
+pub fn astrid_model_json(
+    agents: &serde_json::Value,
+    preferences: &serde_json::Value,
+) -> serde_json::Value {
+    let selected = preferences
+        .get("defaultAgentId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    let options: Vec<serde_json::Value> = agents
+        .get("agents")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|agent| {
+                    let id = agent.get("id")?.as_str()?;
+                    let email = agent
+                        .get("email")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if email.starts_with("astrid@") {
+                        return None;
+                    }
+                    let service = agent
+                        .get("service")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    Some(serde_json::json!({
+                        "id": id,
+                        "name": agent.get("name").and_then(serde_json::Value::as_str).unwrap_or(id),
+                        "service": service,
+                        "serviceLabel": if service == "openclaw" { "Custom Agent" } else { service },
+                        "isSelected": selected.as_deref() == Some(id),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!({ "options": options, "selected": selected })
 }
 
 #[cfg(test)]

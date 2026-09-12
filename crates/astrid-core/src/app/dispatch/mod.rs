@@ -443,6 +443,13 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
         Command::Agents => agents(app).await,
+        Command::AstridModel => answer(app.context.agents().astrid_model().await),
+        Command::SetAstridModel { agent_id } => answer(
+            app.context
+                .agents()
+                .set_astrid_model(agent_id.as_deref())
+                .await,
+        ),
         Command::WebhookSettings => answer(app.context.agents().webhook_settings().await),
         Command::SaveWebhook {
             url,

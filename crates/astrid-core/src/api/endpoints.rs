@@ -58,6 +58,9 @@ pub const AVAILABLE_AGENTS: &str = "/api/v1/users/me/available-agents";
 /// Which services have a key. The server answers with that, never with the key.
 pub const AI_CREDENTIALS: &str = "/api/v1/users/me/ai-credentials";
 pub const AI_CREDENTIALS_TEST: &str = "/api/v1/users/me/ai-credentials/test";
+/// Which service and which agent the account prefers — the agent is the one that powers
+/// `@astrid` for My Tasks and private lists (task 810e1876). `PATCH` with `defaultAgentId`.
+pub const AI_PREFERENCES: &str = "/api/v1/users/me/ai-preferences";
 /// Where an account's own agent is told about work, and the secret that signs it.
 pub const WEBHOOK_SETTINGS: &str = "/api/v1/users/me/webhook-settings";
 /// The agents an account has registered of its own.

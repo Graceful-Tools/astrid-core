@@ -3660,3 +3660,74 @@ async fn a_public_task_the_reader_cannot_edit_is_a_copy_control_task_f6bc59e8() 
     );
     assert_eq!(mine["value"]["rows"][0]["action"], "complete");
 }
+
+/// The model behind @astrid (task 810e1876): the options are the agents the server can run,
+/// without Astrid itself, the choice is the account's default agent, and choosing patches it —
+/// or clears it, which leaves the server to pick.
+#[tokio::test]
+async fn the_model_behind_astrid_is_listed_chosen_and_cleared_task_810e1876() {
+    let agents = json!({ "agents": [
+        { "id": "astrid-user", "name": "Astrid", "email": "astrid@astrid.cc", "service": "claude" },
+        { "id": "claude-agent", "name": "Claude", "email": "claude@astrid.cc", "service": "claude" },
+        { "id": "own", "name": "Mine", "email": "mine@custom.test", "service": "openclaw" },
+    ] });
+    let transport = StubTransport::new()
+        .push_json("/available-agents", 200, agents.clone())
+        .push_json(
+            "/ai-preferences",
+            200,
+            json!({ "defaultAgentId": "claude-agent" }),
+        )
+        // Choosing: the PATCH's own answer, then the selector read back.
+        .push_json("/ai-preferences", 200, json!({ "defaultAgentId": "own" }))
+        .push_json("/available-agents", 200, agents.clone())
+        .push_json("/ai-preferences", 200, json!({ "defaultAgentId": "own" }))
+        // Clearing.
+        .push_json("/ai-preferences", 200, json!({ "defaultAgentId": null }))
+        .push_json("/available-agents", 200, agents)
+        .push_json("/ai-preferences", 200, json!({ "defaultAgentId": null }));
+    let (app, transport) = app_and_transport(transport);
+
+    let read = call(&app, json!({ "kind": "astridModel" })).await;
+    assert_eq!(read["ok"], true, "{read}");
+    let options = read["value"]["options"].as_array().expect("options");
+    assert_eq!(options.len(), 2, "Astrid itself is not an option: {read}");
+    assert_eq!(options[0]["id"], "claude-agent");
+    assert_eq!(options[0]["isSelected"], true);
+    assert_eq!(options[1]["serviceLabel"], "Custom Agent");
+    assert_eq!(read["value"]["selected"], "claude-agent");
+    assert!(transport
+        .requests()
+        .iter()
+        .any(|request| request.url.contains("available-agents")
+            && request.url.contains("serverRun=true")));
+
+    let chosen = call(&app, json!({ "kind": "setAstridModel", "agentId": "own" })).await;
+    assert_eq!(chosen["ok"], true, "{chosen}");
+    assert_eq!(chosen["value"]["selected"], "own");
+    let patch = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.method.as_str() == "PATCH")
+        .expect("a PATCH");
+    assert!(
+        patch.url.ends_with("/api/v1/users/me/ai-preferences"),
+        "{}",
+        patch.url
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(patch.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["defaultAgentId"], "own");
+
+    let cleared = call(&app, json!({ "kind": "setAstridModel" })).await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert_eq!(cleared["value"]["selected"], serde_json::Value::Null);
+    let last = transport
+        .requests()
+        .into_iter()
+        .rfind(|request| request.method.as_str() == "PATCH")
+        .expect("a second PATCH");
+    let body: serde_json::Value =
+        serde_json::from_slice(last.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["defaultAgentId"], serde_json::Value::Null);
+}

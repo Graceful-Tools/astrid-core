@@ -352,6 +352,15 @@ pub enum Command {
     ListImage {
         list_id: String,
     },
+    /// The agents that could power `@astrid`, and which one does (task 810e1876): the web's
+    /// selector, read from the account's AI preferences. Online-only, like the Agent Hub.
+    AstridModel,
+    /// Choose the agent that powers `@astrid`; null leaves the server to pick. Answers the
+    /// selector as it now stands.
+    SetAstridModel {
+        #[serde(default)]
+        agent_id: Option<String>,
+    },
     /// The public lists anybody may browse and copy (task f6bc59e8), most copied first.
     /// Online-only: the server keeps the catalogue.
     PublicLists,
