@@ -25,6 +25,10 @@ pub struct ListChanges {
     pub color: Option<Option<String>>,
     pub description: Option<Option<String>>,
     pub privacy: Option<Privacy>,
+    /// The list's picture, as the web stores it: a site path such as
+    /// `/api/v1/secure-files/{id}` or a placeholder, or an absolute address. `Some(None)` clears
+    /// it (task 3a913e52).
+    pub image_url: Option<Option<String>>,
     pub is_favorite: Option<bool>,
     pub favorite_order: Option<Option<i64>>,
     pub sort_by: Option<Option<String>>,
@@ -76,6 +80,9 @@ impl ListChanges {
         }
         if let Some(value) = self.privacy {
             list.privacy = Some(value);
+        }
+        if let Some(value) = &self.image_url {
+            list.image_url = value.clone();
         }
         if let Some(value) = self.is_favorite {
             list.is_favorite = Some(value);
@@ -161,6 +168,9 @@ impl ListChanges {
         if let Some(value) = self.privacy {
             set("privacy", json!(value));
         }
+        if let Some(value) = &self.image_url {
+            set("imageUrl", json!(value));
+        }
         if let Some(value) = self.is_favorite {
             set("isFavorite", json!(value));
         }
@@ -224,6 +234,15 @@ impl ListChanges {
 
 pub struct ListService {
     context: Context,
+}
+
+/// Where a list's picture can be drawn from (task 3a913e52): a cached local path for a secure
+/// file, or an absolute address.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListImage {
+    pub source: String,
+    pub is_local: bool,
 }
 
 impl ListService {
@@ -395,6 +414,136 @@ impl ListService {
         };
         journal::enqueue(&self.context.store, &entry)?;
         Ok(list)
+    }
+
+    // ─── The list's picture (task 3a913e52) ────────────────────────────────────────────────
+
+    /// Put a picture from this machine on the list: send the file, then write its address as an
+    /// ordinary edit.
+    ///
+    /// The file goes straight to the secure-upload route the web's own picker posts to, with the
+    /// list as its context — the route the Outbox's attachment handler uses, and the multipart it
+    /// builds — and not through the Outbox, for the reason the profile photo does not: a picture
+    /// is chosen while somebody watches, and one queued to appear later would change the list
+    /// unbidden. The address the upload answers is what the web stores
+    /// (`/api/v1/secure-files/{id}`); writing it on the list is the usual update, which does go
+    /// through the Outbox.
+    pub async fn set_image(&self, id: &str, path: &std::path::Path) -> Result<TaskList> {
+        let bytes =
+            std::fs::read(path).map_err(|error| ServiceError::LocalFile(error.to_string()))?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("image");
+        let mime = super::attachment::mime_for(path);
+        let boundary = format!("astrid-list-image-{}", crate::outbox::new_temp_id());
+        let context = json!({ "listId": id }).to_string();
+        let body = super::attachment::multipart(&boundary, name, &mime, &bytes, &context);
+        let request = self
+            .context
+            .client
+            .post(endpoints::REQUEST_UPLOAD)
+            .bytes(format!("multipart/form-data; boundary={boundary}"), body);
+        let answer = self.context.client.send(request).await?;
+        let file_id = answer
+            .get("fileId")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                ServiceError::Api(crate::api::ApiError::Decode(
+                    "the upload answered without a file id".into(),
+                ))
+            })?;
+        self.update(
+            id,
+            &ListChanges {
+                image_url: Some(Some(endpoints::secure_file(file_id))),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Where the list's picture can be drawn from, if it has one.
+    ///
+    /// The web resolves it as `imageUrl || coverImageUrl` (`lib/default-images.ts`). A secure
+    /// file sits behind the session, so an image control could not fetch it: it is fetched here
+    /// with the signed-in client, once, into the attachment cache, and answered as a local path.
+    /// Any other site path — the web's placeholders — is made absolute against the API's base,
+    /// and an absolute address is passed through. A list without a picture answers none; the
+    /// web draws a hashed default icon then, which this client does not (CONTRACTS.md D14).
+    pub async fn image(&self, id: &str, cache_dir: &std::path::Path) -> Result<Option<ListImage>> {
+        let list = self.require(id)?;
+        let Some(address) = list
+            .image_url
+            .clone()
+            .or(list.cover_image_url.clone())
+            .filter(|address| !address.trim().is_empty())
+        else {
+            return Ok(None);
+        };
+        if address.starts_with("http://") || address.starts_with("https://") {
+            return Ok(Some(ListImage {
+                source: address,
+                is_local: false,
+            }));
+        }
+        if let Some(rest) = address.strip_prefix("/api/v1/secure-files/") {
+            let file_id: String = rest
+                .split(['?', '#'])
+                .next()
+                .unwrap_or(rest)
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                .collect();
+            if file_id.is_empty() {
+                return Ok(None);
+            }
+            let dir = cache_dir.join("list-images");
+            // Keyed by the file rather than the list, so a changed picture is fetched and an
+            // unchanged one is not.
+            let cached = std::fs::read_dir(&dir).ok().and_then(|entries| {
+                entries.flatten().map(|entry| entry.path()).find(|path| {
+                    path.file_stem().and_then(|stem| stem.to_str()) == Some(file_id.as_str())
+                })
+            });
+            let path = match cached {
+                Some(path) => path,
+                None => {
+                    let request = self.context.client.get(endpoints::secure_file(&file_id));
+                    let response = self.context.client.send_raw(request).await?;
+                    let extension = match response.header("content-type") {
+                        Some(kind) if kind.contains("png") => "png",
+                        Some(kind) if kind.contains("jpeg") || kind.contains("jpg") => "jpg",
+                        Some(kind) if kind.contains("gif") => "gif",
+                        Some(kind) if kind.contains("webp") => "webp",
+                        Some(kind) if kind.contains("svg") => "svg",
+                        _ => "img",
+                    };
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
+                    let path = dir.join(format!("{file_id}.{extension}"));
+                    // Beside and rename, as the attachment cache does, so an interrupted fetch
+                    // does not leave a truncated file that looks cached.
+                    let temporary = path.with_extension("part");
+                    std::fs::write(&temporary, &response.body)
+                        .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
+                    std::fs::rename(&temporary, &path)
+                        .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
+                    path
+                }
+            };
+            return Ok(Some(ListImage {
+                source: path.to_string_lossy().into_owned(),
+                is_local: true,
+            }));
+        }
+        Ok(Some(ListImage {
+            source: format!(
+                "{}/{}",
+                self.context.client.base_url(),
+                address.trim_start_matches('/')
+            ),
+            is_local: false,
+        }))
     }
 
     /// Delete a list. The tasks in it are the server's business — it decides what happens to a task

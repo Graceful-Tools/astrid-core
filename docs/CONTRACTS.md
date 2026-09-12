@@ -400,3 +400,11 @@ turns "Buy flowers for mum" into "Buy flowers". This crate leaves the phrase in 
 assigns nobody. Porting a stub that eats "for mum" would be worse than the gap; the driver leaves
 such inputs out of the fixture so the divergence is this paragraph and not a failing test.
 
+### D14 — a list without a picture draws nothing here, a default icon on web
+
+The web resolves a list's picture as `imageUrl || coverImageUrl || a default icon hashed from
+the list id` (`lib/default-images.ts`), and draws the result over the list and as the sidebar's
+mark. This client draws the picture beside the list's name only when the list has one, and its
+sidebar keeps the colour discs. The stored value is the same on both — a chosen picture set here
+shows on the web and the other way round (task 3a913e52) — so the divergence is what an absent
+picture looks like, not what a present one is.

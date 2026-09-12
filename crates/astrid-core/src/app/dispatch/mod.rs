@@ -341,6 +341,18 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SetListFavorite { list_id, favorite } => {
             answer(app.context.lists().set_favorite(&list_id, favorite))
         }
+        Command::SetListImage { list_id, path } => answer(
+            app.context
+                .lists()
+                .set_image(&list_id, std::path::Path::new(&path))
+                .await,
+        ),
+        Command::ListImage { list_id } => answer(
+            app.context
+                .lists()
+                .image(&list_id, app.attachment_cache())
+                .await,
+        ),
         Command::PostComment {
             task_id,
             content,

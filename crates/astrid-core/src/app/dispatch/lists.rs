@@ -81,6 +81,8 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
         "color": list.display_color(),
         "colorChoices": rows::list_picks::LIST_COLOR_PALETTE,
         "privacy": list.privacy,
+        // The list's picture as stored (task 3a913e52); where to draw it from is `listImage`.
+        "imageUrl": list.image_url,
         "isFavorite": list.is_favorite.unwrap_or(false),
         // What a task added to this list starts as (task c4102c67), as the list stores it: an
         // absent assignee is the creator, "unassigned" is nobody, an id is that member.
@@ -209,6 +211,7 @@ pub(super) fn list_changes_from_json(
             "color" => changes.color = Some(value.as_str().map(str::to_string)),
             "description" => changes.description = Some(value.as_str().map(str::to_string)),
             "privacy" => changes.privacy = serde_json::from_value(value.clone()).ok(),
+            "imageUrl" => changes.image_url = Some(value.as_str().map(str::to_string)),
             "isFavorite" => changes.is_favorite = value.as_bool(),
             "favoriteOrder" => changes.favorite_order = Some(value.as_i64()),
             "sortBy" => changes.sort_by = Some(value.as_str().map(str::to_string)),

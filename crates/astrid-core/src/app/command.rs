@@ -339,6 +339,19 @@ pub enum Command {
     DeleteList {
         list_id: String,
     },
+    /// Put a picture from this machine on a list (task 3a913e52): sent through the secure-upload
+    /// route with the list as context, then written as the list's `imageUrl`. Online-only, as
+    /// the profile photo is; the write that follows goes through the Outbox.
+    SetListImage {
+        list_id: String,
+        path: String,
+    },
+    /// Where a list's picture can be drawn from — a cached local path for a secure file, an
+    /// absolute address otherwise — or null when it has none. `updateList` with `imageUrl: null`
+    /// removes one.
+    ListImage {
+        list_id: String,
+    },
     SetListFavorite {
         list_id: String,
         favorite: bool,

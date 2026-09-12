@@ -3444,3 +3444,109 @@ async fn the_editing_session_is_stepped_by_command_task_e71ed760() {
         "nothing open, nothing to commit"
     );
 }
+
+/// A list's picture (task 3a913e52): chosen from disk it goes through the secure-upload route
+/// with the list as context and its address is written on the list; asked for, a secure file is
+/// fetched once into the cache and answered as a local path, a site path is made absolute, and
+/// a list without one answers nothing.
+#[tokio::test]
+async fn a_list_image_is_uploaded_stored_and_fetched_task_3a913e52() {
+    use crate::api::transport::HttpResponse;
+    let transport = StubTransport::new()
+        .push_json(
+            "/api/v1/secure-upload/request-upload",
+            200,
+            json!({ "fileId": "file_pic" }),
+        )
+        .push(
+            "/api/v1/secure-files/file_pic",
+            Ok(HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "image/png".into())],
+                body: b"\x89PNG".to_vec(),
+            }),
+        );
+    let (app, transport) = app_and_transport(transport);
+    call(&app, json!({ "kind": "createList", "name": "Garden" })).await;
+    let garden = list_id_named(&app, "Garden").await;
+
+    let picture = std::env::temp_dir().join(format!(
+        "astrid-list-image-{}.png",
+        crate::outbox::new_temp_id()
+    ));
+    std::fs::write(&picture, b"\x89PNG").expect("writes");
+    let set = call(
+        &app,
+        json!({ "kind": "setListImage", "listId": garden, "path": picture.to_string_lossy() }),
+    )
+    .await;
+    let _ = std::fs::remove_file(&picture);
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["value"]["imageUrl"], "/api/v1/secure-files/file_pic");
+
+    let upload = transport
+        .requests()
+        .into_iter()
+        .find(|request| {
+            request
+                .url
+                .ends_with("/api/v1/secure-upload/request-upload")
+        })
+        .expect("an upload");
+    let body = String::from_utf8_lossy(upload.body.as_deref().expect("bytes")).into_owned();
+    assert!(body.contains("name=\"file\""), "{body}");
+    assert!(body.contains("image/png"), "{body}");
+    assert!(
+        body.contains(&garden),
+        "the list travels as the upload's context: {body}"
+    );
+
+    let settings = call(&app, json!({ "kind": "listMembers", "listId": garden })).await;
+    assert_eq!(
+        settings["value"]["imageUrl"],
+        "/api/v1/secure-files/file_pic"
+    );
+
+    // The picture, fetched once with the signed-in client and kept.
+    let first = call(&app, json!({ "kind": "listImage", "listId": garden })).await;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["value"]["isLocal"], true);
+    let local = first["value"]["source"]
+        .as_str()
+        .expect("a path")
+        .to_string();
+    assert!(local.ends_with("file_pic.png"), "{local}");
+    assert_eq!(std::fs::read(&local).expect("cached"), b"\x89PNG");
+    let again = call(&app, json!({ "kind": "listImage", "listId": garden })).await;
+    assert_eq!(again["value"]["source"], local);
+    let fetches = transport
+        .requests()
+        .iter()
+        .filter(|request| request.url.contains("/secure-files/file_pic"))
+        .count();
+    assert_eq!(fetches, 1, "the second answer came from the cache");
+    let _ = std::fs::remove_file(&local);
+
+    // A site path — the web's placeholders — is made absolute; an address is passed through.
+    call(
+        &app,
+        json!({ "kind": "updateList", "listId": garden, "changes": { "imageUrl": "/placeholders/blue.svg" } }),
+    )
+    .await;
+    let placeholder = call(&app, json!({ "kind": "listImage", "listId": garden })).await;
+    assert_eq!(
+        placeholder["value"]["source"],
+        "https://astrid.cc/placeholders/blue.svg"
+    );
+    assert_eq!(placeholder["value"]["isLocal"], false);
+
+    // Removed: nothing to draw.
+    call(
+        &app,
+        json!({ "kind": "updateList", "listId": garden, "changes": { "imageUrl": null } }),
+    )
+    .await;
+    let none = call(&app, json!({ "kind": "listImage", "listId": garden })).await;
+    assert_eq!(none["ok"], true, "{none}");
+    assert_eq!(none["value"], serde_json::Value::Null);
+}
