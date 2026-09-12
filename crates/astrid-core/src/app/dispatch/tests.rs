@@ -3402,15 +3402,33 @@ async fn the_editing_session_is_stepped_by_command_task_e71ed760() {
     assert_eq!(opened["value"]["active"], "title");
     assert_eq!(opened["value"]["commit"], serde_json::Value::Null);
 
-    let switched = call(&app, json!({ "kind": "beginEditing", "editor": "description" })).await;
+    let switched = call(
+        &app,
+        json!({ "kind": "beginEditing", "editor": "description" }),
+    )
+    .await;
     assert_eq!(switched["value"]["active"], "description");
-    assert_eq!(switched["value"]["commit"], "title", "the first editor is committed");
+    assert_eq!(
+        switched["value"]["commit"], "title",
+        "the first editor is committed"
+    );
 
     let stale = call(&app, json!({ "kind": "endEditing", "editor": "title" })).await;
-    assert_eq!(stale["value"]["commit"], serde_json::Value::Null, "a blur after the hand-off");
-    assert_eq!(stale["value"]["active"], "description", "the hand-off stands");
+    assert_eq!(
+        stale["value"]["commit"],
+        serde_json::Value::Null,
+        "a blur after the hand-off"
+    );
+    assert_eq!(
+        stale["value"]["active"], "description",
+        "the hand-off stands"
+    );
 
-    let cancelled = call(&app, json!({ "kind": "cancelEditing", "editor": "description" })).await;
+    let cancelled = call(
+        &app,
+        json!({ "kind": "cancelEditing", "editor": "description" }),
+    )
+    .await;
     assert_eq!(cancelled["value"]["cancel"], "description");
     assert_eq!(cancelled["value"]["commit"], serde_json::Value::Null);
     assert_eq!(cancelled["value"]["active"], serde_json::Value::Null);
@@ -3420,5 +3438,9 @@ async fn the_editing_session_is_stepped_by_command_task_e71ed760() {
     assert_eq!(closed["value"]["commit"], "lists");
     assert_eq!(closed["value"]["active"], serde_json::Value::Null);
     let idle = call(&app, json!({ "kind": "commitAllEditing" })).await;
-    assert_eq!(idle["value"]["commit"], serde_json::Value::Null, "nothing open, nothing to commit");
+    assert_eq!(
+        idle["value"]["commit"],
+        serde_json::Value::Null,
+        "nothing open, nothing to commit"
+    );
 }
