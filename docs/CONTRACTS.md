@@ -418,3 +418,13 @@ so the copy lands with the person. This client draws it only when the ported per
 list, or, on a collaborative one, a task somebody else wrote. The owner, the admins and the
 members keep their checkboxes, since they can complete. The copy itself is the same request
 with no target (task f6bc59e8).
+
+### D16 — full screen is never offered on a board card here; the web now offers it
+
+`PRODUCT_CONTRACT.md` §3 says full-screen task detail is **never offered on the inline/board
+panel**, which is deliberately a peek. The web's own code has since opted board cards in (its
+task 52bf1efb: "a board card's details are the only way to read a task on the board, so they
+need the escape hatch most"), leaving the contract and the web apart. This client follows the
+contract, as task 1927c2e7 asked: the expand control is drawn on the side pane only, and a card
+that takes the detail ends full screen. If the contract is amended to match the web, the change
+here is `ShellViewModel.CanEnterFullScreen` and the pane's place inside the card's slot.
