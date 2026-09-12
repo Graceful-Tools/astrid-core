@@ -639,6 +639,23 @@ pub enum Command {
     SetHotkey {
         chord: String,
     },
+    /// Open an editor in the one editing session (`astrid-web/docs/PRODUCT_CONTRACT.md` §6),
+    /// committing and closing whatever was open. Answers with the transition: which editor is
+    /// now active, and which one the shell must commit or revert. See [`crate::editing`].
+    BeginEditing {
+        editor: String,
+    },
+    /// Close an editor, committing it. A stale end — an editor `beginEditing` has already handed
+    /// off — is ignored, because honouring it would write the old value over the new one's.
+    EndEditing {
+        editor: String,
+    },
+    /// Close an editor, reverting it: the only transition that discards.
+    CancelEditing {
+        editor: String,
+    },
+    /// Close the session, committing whatever was open: navigating away and backgrounding save.
+    CommitAllEditing,
     Theme,
     SetTheme {
         theme: crate::theme::Theme,

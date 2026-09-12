@@ -531,6 +531,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             }
             Err(reason) => Response::failed(Failure::bad_request(reason.to_string())),
         },
+        Command::BeginEditing { editor } => {
+            editing(app, |session| crate::editing::begin(session, &editor))
+        }
+        Command::EndEditing { editor } => {
+            editing(app, |session| crate::editing::end(session, &editor))
+        }
+        Command::CancelEditing { editor } => {
+            editing(app, |session| crate::editing::cancel(session, &editor))
+        }
+        Command::CommitAllEditing => editing(app, crate::editing::commit_all),
         Command::Theme => {
             let chosen = app
                 .store
@@ -849,6 +859,28 @@ mod lists;
 mod reminders;
 mod row_json;
 mod tasks;
+/// Step the one editing session and answer with what the shell must do (task e71ed760).
+///
+/// The machine is pure ([`crate::editing`]); this is where its session lives between calls. A
+/// poisoned lock is recovered rather than propagated: the session is one small value, and a
+/// panic elsewhere must not leave every editor in the window unable to open.
+fn editing(
+    app: &App,
+    step: impl FnOnce(&crate::editing::Session) -> crate::editing::Transition,
+) -> Response {
+    let mut session = app
+        .editing
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let transition = step(&session);
+    *session = transition.session.clone();
+    Response::ok(serde_json::json!({
+        "active": transition.session.active,
+        "commit": transition.commit,
+        "cancel": transition.cancel,
+    }))
+}
+
 use account::*;
 use attachments::*;
 use board::*;

@@ -3389,3 +3389,36 @@ async fn signing_out_empties_everything() {
     let stats = call(&app, json!({ "kind": "outboxStats" })).await;
     assert_eq!(stats["value"]["hasUnsentWork"], false);
 }
+
+/// The editing session lives in the core and is stepped by command (task e71ed760): opening a
+/// second editor names the first as the one to commit, a stale end across the boundary commits
+/// nothing, cancel is the only transition that reverts, and commit-all empties the session.
+#[tokio::test]
+async fn the_editing_session_is_stepped_by_command_task_e71ed760() {
+    let app = app_with(StubTransport::new());
+
+    let opened = call(&app, json!({ "kind": "beginEditing", "editor": "title" })).await;
+    assert_eq!(opened["ok"], true, "{opened}");
+    assert_eq!(opened["value"]["active"], "title");
+    assert_eq!(opened["value"]["commit"], serde_json::Value::Null);
+
+    let switched = call(&app, json!({ "kind": "beginEditing", "editor": "description" })).await;
+    assert_eq!(switched["value"]["active"], "description");
+    assert_eq!(switched["value"]["commit"], "title", "the first editor is committed");
+
+    let stale = call(&app, json!({ "kind": "endEditing", "editor": "title" })).await;
+    assert_eq!(stale["value"]["commit"], serde_json::Value::Null, "a blur after the hand-off");
+    assert_eq!(stale["value"]["active"], "description", "the hand-off stands");
+
+    let cancelled = call(&app, json!({ "kind": "cancelEditing", "editor": "description" })).await;
+    assert_eq!(cancelled["value"]["cancel"], "description");
+    assert_eq!(cancelled["value"]["commit"], serde_json::Value::Null);
+    assert_eq!(cancelled["value"]["active"], serde_json::Value::Null);
+
+    call(&app, json!({ "kind": "beginEditing", "editor": "lists" })).await;
+    let closed = call(&app, json!({ "kind": "commitAllEditing" })).await;
+    assert_eq!(closed["value"]["commit"], "lists");
+    assert_eq!(closed["value"]["active"], serde_json::Value::Null);
+    let idle = call(&app, json!({ "kind": "commitAllEditing" })).await;
+    assert_eq!(idle["value"]["commit"], serde_json::Value::Null, "nothing open, nothing to commit");
+}

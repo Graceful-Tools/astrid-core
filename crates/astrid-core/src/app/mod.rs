@@ -78,6 +78,11 @@ pub struct App {
     /// added here took up to a minute to exist anywhere else — an offline-first design behaving,
     /// while online, like an offline one.
     pub(crate) outbox_nudge: Arc<tokio::sync::Notify>,
+    /// The one editing session (`PRODUCT_CONTRACT.md` §6): at most one editor open across the
+    /// whole window, stepped by the `beginEditing` / `endEditing` / `cancelEditing` /
+    /// `commitAllEditing` commands. Held here rather than in the shell so the rule is the core's
+    /// — the shell only does what each answer names.
+    pub(crate) editing: std::sync::Mutex<crate::editing::Session>,
 }
 
 impl App {
@@ -145,6 +150,7 @@ impl App {
             clock,
             attachment_cache,
             outbox_nudge: Arc::new(tokio::sync::Notify::new()),
+            editing: std::sync::Mutex::new(crate::editing::Session::IDLE),
         })
     }
 
