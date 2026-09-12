@@ -3731,3 +3731,49 @@ async fn the_model_behind_astrid_is_listed_chosen_and_cleared_task_810e1876() {
         serde_json::from_slice(last.body.as_deref().expect("a body")).expect("json");
     assert_eq!(body["defaultAgentId"], serde_json::Value::Null);
 }
+
+/// The calendar feed (task 28c5c6a9): the account answers the address a calendar app subscribes
+/// to, and the two calendar fields ride the reminder-settings blob like every other field.
+#[tokio::test]
+async fn the_calendar_feed_is_addressed_and_its_settings_ride_the_reminder_blob_task_28c5c6a9() {
+    let app = app_with(StubTransport::new());
+
+    let before = call(&app, json!({ "kind": "settings" })).await;
+    assert_eq!(before["ok"], true, "{before}");
+    assert_eq!(
+        before["value"]["calendarFeedUrl"],
+        "https://astrid.cc/api/calendar/tasks.ics"
+    );
+
+    let changed = call(
+        &app,
+        json!({
+            "kind": "updateReminderSettings",
+            "changes": { "enableCalendarSync": true, "calendarSyncType": "with_due_times" }
+        }),
+    )
+    .await;
+    assert_eq!(changed["ok"], true, "{changed}");
+    assert_eq!(
+        changed["value"]["reminderSettings"]["enableCalendarSync"],
+        true
+    );
+    assert_eq!(
+        changed["value"]["reminderSettings"]["calendarSyncType"],
+        "with_due_times"
+    );
+
+    let narrowed = call(
+        &app,
+        json!({ "kind": "updateReminderSettings", "changes": { "calendarSyncType": "none" } }),
+    )
+    .await;
+    assert_eq!(
+        narrowed["value"]["reminderSettings"]["calendarSyncType"],
+        "none"
+    );
+    assert_eq!(
+        narrowed["value"]["reminderSettings"]["enableCalendarSync"], true,
+        "one field at a time: the other stays"
+    );
+}

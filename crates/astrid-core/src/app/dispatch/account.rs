@@ -61,6 +61,14 @@ pub(super) async fn sign_out(app: &App) -> Response {
 ///
 /// The offsets come from the same list the per-task reminder picker uses, so "15 minutes before"
 /// means one thing in this app rather than two.
+/// The calendar feed a person subscribes to (task 28c5c6a9).
+///
+/// The one address this client names outside `/api/v1`, and it is never requested from here: it
+/// is handed to a calendar application, which fetches it with the person's session. There is no
+/// v1 feed, and this is the address the web hands out. What the feed holds is decided on the
+/// server from the stored `calendarSyncType`, so the address carries no filter.
+const CALENDAR_FEED: &str = "/api/calendar/tasks.ics";
+
 pub(super) fn settings(app: &App) -> Response {
     let account = app.context.account();
     let settings = account.settings().unwrap_or_else(|_| serde_json::json!({}));
@@ -83,6 +91,7 @@ pub(super) fn settings(app: &App) -> Response {
         // What the server should schedule a digest against. The reader's zone, from the clock the
         // core was given, rather than a string the shell types.
         "timezone": app.clock.utc_offset().to_string(),
+        "calendarFeedUrl": format!("{}{CALENDAR_FEED}", app.context.client.base_url()),
         // The task defaults and the task-detail layout, shaped and defaulted in one place, with
         // the choices each combo offers (task c0f3db19).
         "smartTasks": crate::smart_tasks::SmartTaskSettings::from_stored(
