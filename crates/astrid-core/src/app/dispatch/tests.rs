@@ -3845,7 +3845,11 @@ async fn a_manual_reorder_redraws_at_once_and_reaches_the_route_task_7883f710() 
         .into_iter()
         .find(|request| request.method.as_str() == "POST")
         .expect("a POST");
-    assert!(post.url.ends_with("/api/v1/lists/l1/manual-order"), "{}", post.url);
+    assert!(
+        post.url.ends_with("/api/v1/lists/l1/manual-order"),
+        "{}",
+        post.url
+    );
     let body: serde_json::Value =
         serde_json::from_slice(post.body.as_deref().expect("a body")).expect("json");
     assert_eq!(body, json!({ "order": ["t3", "t1", "t2"] }));

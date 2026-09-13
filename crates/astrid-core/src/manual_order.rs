@@ -102,7 +102,11 @@ mod tests {
         let existing = ids(&["a", "b", "c", "d"]);
         let displayed = ids(&["c", "a"]);
         assert_eq!(
-            arranged(&displayed, Some(&existing), &ids(&["a", "b", "c", "d", "e"])),
+            arranged(
+                &displayed,
+                Some(&existing),
+                &ids(&["a", "b", "c", "d", "e"])
+            ),
             ids(&["c", "a", "b", "d", "e"])
         );
     }

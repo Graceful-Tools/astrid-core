@@ -681,7 +681,11 @@ impl ListService {
         let now = self.context.clock.now();
         let mut list = self.require(id)?;
         let mut in_list = self.context.store.tasks_in_list(id)?;
-        in_list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        in_list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         let by_creation: Vec<String> = in_list.into_iter().map(|task| task.id).collect();
         let order = crate::manual_order::arranged(
             displayed,

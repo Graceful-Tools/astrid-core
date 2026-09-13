@@ -187,10 +187,9 @@ impl Entry {
                 field("commentId").map(|id| format!("comment:{id}"))
             }
             kind::SEND_CHAT_MESSAGE => field("channelId").map(|id| format!("channel:{id}")),
-            kind::CREATE_LIST
-            | kind::UPDATE_LIST
-            | kind::DELETE_LIST
-            | kind::SET_MANUAL_ORDER => field("listId").map(|id| format!("list:{id}")),
+            kind::CREATE_LIST | kind::UPDATE_LIST | kind::DELETE_LIST | kind::SET_MANUAL_ORDER => {
+                field("listId").map(|id| format!("list:{id}"))
+            }
             _ => None,
         };
         // An entry whose payload does not name its subject gets a lane of its own rather than
