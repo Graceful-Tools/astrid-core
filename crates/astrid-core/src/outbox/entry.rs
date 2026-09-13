@@ -70,6 +70,9 @@ pub mod kind {
     pub const CREATE_LIST: &str = "createList";
     pub const UPDATE_LIST: &str = "updateList";
     pub const DELETE_LIST: &str = "deleteList";
+    /// A hand-arranged order for a list (task 7883f710). The payload carries the WHOLE order,
+    /// reconciled here; the server reconciles again and answers with what it kept.
+    pub const SET_MANUAL_ORDER: &str = "setManualOrder";
     /// A change to the account's settings — a reminder toggle, quiet hours. Replays safely: the
     /// server merges, and entries replay in the order the person made them.
     pub const UPDATE_SETTINGS: &str = "updateSettings";
@@ -184,9 +187,10 @@ impl Entry {
                 field("commentId").map(|id| format!("comment:{id}"))
             }
             kind::SEND_CHAT_MESSAGE => field("channelId").map(|id| format!("channel:{id}")),
-            kind::CREATE_LIST | kind::UPDATE_LIST | kind::DELETE_LIST => {
-                field("listId").map(|id| format!("list:{id}"))
-            }
+            kind::CREATE_LIST
+            | kind::UPDATE_LIST
+            | kind::DELETE_LIST
+            | kind::SET_MANUAL_ORDER => field("listId").map(|id| format!("list:{id}")),
             _ => None,
         };
         // An entry whose payload does not name its subject gets a lane of its own rather than
@@ -236,6 +240,18 @@ mod tests {
             .for_temp_id("temp_1");
         assert_eq!(create.serialization_key(), "pending:temp_1");
         assert_eq!(update.serialization_key(), "pending:temp_1");
+    }
+
+    /// A reorder is a write to the list, and it queues behind the list's other edits: one racing
+    /// a rename is how the rename comes back (task 7883f710).
+    #[test]
+    fn a_reorder_shares_the_lane_of_the_lists_other_writes_task_7883f710() {
+        let rename = entry(kind::UPDATE_LIST, serde_json::json!({ "listId": "l1" }));
+        let reorder = entry(
+            kind::SET_MANUAL_ORDER,
+            serde_json::json!({ "listId": "l1", "order": ["t2", "t1"] }),
+        );
+        assert_eq!(rename.serialization_key(), reorder.serialization_key());
     }
 
     /// Every unnameable entry sharing one lane would serialise writes that have nothing to do with

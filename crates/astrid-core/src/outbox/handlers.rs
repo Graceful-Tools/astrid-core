@@ -74,6 +74,7 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::CREATE_LIST => create_list(client, store, entry).await,
         kind::UPDATE_LIST => update_list(client, store, entry).await,
         kind::DELETE_LIST => delete_list(client, store, entry).await,
+        kind::SET_MANUAL_ORDER => set_manual_order(client, store, entry).await,
         kind::UPDATE_SETTINGS => {
             send_body(client, client.put(endpoints::USER_SETTINGS), entry).await
         }
@@ -375,6 +376,45 @@ async fn create_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
             }
             let _ = store.upsert_list(&created);
             Outcome::producing("listId", &created.id)
+        }
+        Err(error) => from_error(error),
+    }
+}
+
+/// A hand-arranged order, sent whole (task 7883f710).
+///
+/// The route answers `{ list, order, meta }`, and `order` is read rather than assumed: the server
+/// drops ids of tasks that left the list, collapses repeats and appends what was not named, so
+/// what it kept can differ from what was sent. Its answer is what the cache keeps, on the list.
+async fn set_manual_order(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let list_id = match id(entry, "listId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let order = entry
+        .payload
+        .get("order")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let request = client
+        .post(endpoints::manual_order(list_id))
+        .value(serde_json::json!({ "order": order }));
+    match client.send(request).await {
+        Ok(value) => {
+            let kept: Option<Vec<String>> = value
+                .get("order")
+                .cloned()
+                .and_then(|order| serde_json::from_value(order).ok());
+            if let Ok(mut list) = serde_json::from_value::<TaskList>(unwrap_envelope(
+                value,
+                endpoints::envelope::LIST,
+            )) {
+                if kept.is_some() {
+                    list.manual_sort_order = kept;
+                }
+                let _ = store.upsert_list(&list);
+            }
+            Outcome::done()
         }
         Err(error) => from_error(error),
     }

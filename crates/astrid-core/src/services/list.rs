@@ -671,6 +671,41 @@ impl ListService {
         }
     }
 
+    /// Arrange the list by hand (task 7883f710).
+    ///
+    /// `displayed` is the order of the rows the shell showed — a filtered window, not the list.
+    /// The whole order is completed here ([`crate::manual_order::arranged`]) so the list redraws
+    /// in it at once, offline, and journalled whole; the server reconciles it again and its
+    /// answer is what the cache keeps.
+    pub fn set_manual_order(&self, id: &str, displayed: &[String]) -> Result<TaskList> {
+        let now = self.context.clock.now();
+        let mut list = self.require(id)?;
+        let mut in_list = self.context.store.tasks_in_list(id)?;
+        in_list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        let by_creation: Vec<String> = in_list.into_iter().map(|task| task.id).collect();
+        let order = crate::manual_order::arranged(
+            displayed,
+            list.manual_sort_order.as_deref(),
+            &by_creation,
+        );
+        list.manual_sort_order = Some(order.clone());
+        list.updated_at = Some(now);
+        self.context.store.upsert_list(&list)?;
+
+        let entry = outbox::build(
+            kind::SET_MANUAL_ORDER,
+            json!({ "listId": id, "order": order }),
+            &outbox::new_temp_id(),
+            now,
+        );
+        let entry = match crate::model::is_temp_id(id) {
+            true => entry.for_temp_id(id),
+            false => entry,
+        };
+        journal::enqueue(&self.context.store, &entry)?;
+        Ok(list)
+    }
+
     pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<TaskList> {
         self.update(
             id,

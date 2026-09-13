@@ -428,3 +428,15 @@ need the escape hatch most"), leaving the contract and the web apart. This clien
 contract, as task 1927c2e7 asked: the expand control is drawn on the side pane only, and a card
 that takes the detail ends full screen. If the contract is amended to match the web, the change
 here is `ShellViewModel.CanEnterFullScreen` and the pane's place inside the card's slot.
+
+### D17 — after a drag, tasks not on screen keep their place here; iOS puts them newest first
+
+Every client sends the server a whole order and the server reconciles it (`lib/list-manual-order.ts`,
+`sanitizeManualOrder`): unknown ids dropped, repeats collapsed, anything unnamed appended in
+creation order. What differs is how each client fills in the tasks a drag did not touch — the
+ones hidden by a filter or outside the page. iOS (`TaskListView.moveTask`) appends them newest
+first. The web moves one task relative to another inside the existing arrangement. This client
+(`astrid_core::manual_order::arranged`) leads with the rows as they came to rest, then the rest
+of the existing arrangement in its old order, then anything never arranged by creation — the
+same answer the server would produce from the same request, so the screen does not jump when
+its answer lands. The stored result is the server's either way; only the offline redraw differs.

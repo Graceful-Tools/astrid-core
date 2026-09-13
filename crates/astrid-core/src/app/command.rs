@@ -373,6 +373,12 @@ pub enum Command {
         list_id: String,
         favorite: bool,
     },
+    /// The rows were dragged into this order (task 7883f710). Only the rows that were on screen;
+    /// the core completes the list's order and journals it whole.
+    SetManualOrder {
+        list_id: String,
+        order: Vec<String>,
+    },
     PostComment {
         task_id: String,
         content: String,

@@ -158,6 +158,9 @@ pub(super) fn rows_for_list(
         "total": ordered.len(),
         "offset": start,
         "rows": serialize_rows(&TaskRow::build_all(window, &context)),
+        // How the rows were sorted, so the shell knows whether a drag may rearrange them
+        // (task 7883f710): only an order made by hand survives a refresh.
+        "sortBy": list.sort_by.as_deref().unwrap_or("auto"),
     }))
 }
 

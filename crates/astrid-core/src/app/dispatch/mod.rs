@@ -341,6 +341,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SetListFavorite { list_id, favorite } => {
             answer(app.context.lists().set_favorite(&list_id, favorite))
         }
+        Command::SetManualOrder { list_id, order } => {
+            answer(app.context.lists().set_manual_order(&list_id, &order))
+        }
         Command::SetListImage { list_id, path } => answer(
             app.context
                 .lists()

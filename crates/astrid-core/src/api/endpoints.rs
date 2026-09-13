@@ -205,6 +205,13 @@ pub fn copy_list(list_id: &str) -> String {
     format!("{}/copy", list(list_id))
 }
 
+/// Where a hand-arranged order is saved (task 7883f710). `POST { order: [taskId] }`; the answer
+/// carries the list and, beside it, the `order` the server kept — which is not necessarily the
+/// one sent, and is the one to store.
+pub fn manual_order(list_id: &str) -> String {
+    format!("{}/manual-order", list(list_id))
+}
+
 pub fn project(id: &str) -> String {
     format!("{PROJECTS}/{}", escaped_path_component(id))
 }

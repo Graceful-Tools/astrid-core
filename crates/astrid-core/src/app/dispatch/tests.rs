@@ -3777,3 +3777,86 @@ async fn the_calendar_feed_is_addressed_and_its_settings_ride_the_reminder_blob_
         "one field at a time: the other stays"
     );
 }
+
+/// Dragging rows into a new order writes the whole list's arrangement, locally first and then
+/// to the server's route for it, whose reconciled answer wins (task 7883f710).
+///
+/// The shell hands over only the rows it showed. The core completes the order — the rest of the
+/// arrangement keeps its place, anything never arranged comes last by creation — so the list
+/// redraws in the new order offline and does not jump when the server answers.
+#[tokio::test]
+async fn a_manual_reorder_redraws_at_once_and_reaches_the_route_task_7883f710() {
+    let transport = StubTransport::new().push_json(
+        "/manual-order",
+        200,
+        json!({
+            "list": { "id": "l1", "name": "Work", "sortBy": "manual",
+                      "manualSortOrder": ["t2", "t3", "t1"] },
+            "order": ["t2", "t3", "t1"],
+            "meta": { "apiVersion": "v1" }
+        }),
+    );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "sortBy": "manual" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    for (id, created) in [
+        ("t1", "2026-01-01T00:00:00Z"),
+        ("t2", "2026-01-02T00:00:00Z"),
+        ("t3", "2026-01-03T00:00:00Z"),
+    ] {
+        app.store
+            .upsert_task(
+                &serde_json::from_value(json!({
+                    "id": id, "title": id, "createdAt": created,
+                    "lists": [{ "id": "l1", "name": "Work" }]
+                }))
+                .expect("a task"),
+            )
+            .expect("stores");
+    }
+
+    let answered = call(
+        &app,
+        json!({ "kind": "setManualOrder", "listId": "l1", "order": ["t3", "t1"] }),
+    )
+    .await;
+    assert_eq!(answered["ok"], true, "{answered}");
+
+    // On screen at once, offline: the dragged rows lead, the rest follows by creation. The
+    // answer says the rows are sorted by hand, which is what lets the shell offer the drag.
+    let rows = call(&app, json!({ "kind": "rowsForList", "listId": "l1" })).await;
+    assert_eq!(rows["value"]["sortBy"], "manual");
+    let shown: Vec<&str> = rows["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(shown, vec!["t3", "t1", "t2"]);
+
+    // Journalled, then sent whole to the list's own route.
+    call(&app, json!({ "kind": "drain" })).await;
+    let post = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.method.as_str() == "POST")
+        .expect("a POST");
+    assert!(post.url.ends_with("/api/v1/lists/l1/manual-order"), "{}", post.url);
+    let body: serde_json::Value =
+        serde_json::from_slice(post.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body, json!({ "order": ["t3", "t1", "t2"] }));
+
+    // The server's reconciled order is what the cache keeps.
+    let rows = call(&app, json!({ "kind": "rowsForList", "listId": "l1" })).await;
+    let shown: Vec<&str> = rows["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(shown, vec!["t2", "t3", "t1"]);
+}

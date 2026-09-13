@@ -23,6 +23,7 @@ pub mod editing;
 pub mod external;
 pub mod filters;
 pub mod keyboard;
+pub mod manual_order;
 pub mod markdown;
 pub mod model;
 pub mod outbox;
