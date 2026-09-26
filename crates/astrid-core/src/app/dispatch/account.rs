@@ -191,7 +191,11 @@ pub(super) async fn agents(app: &App) -> Response {
         .unwrap_or_else(|_| serde_json::json!({ "connected": false }));
 
     Response::ok(serde_json::json!({
-        "agents": modes.get("agents").cloned().unwrap_or(serde_json::json!([])),
+        // Projected, not passed through: the route describes each agent as a mailbox row with a
+        // `locked` flag, and the shell read `id` and `name` off it — keys it never carried — so
+        // every agent drew nameless and off. See `rows::agent`, which also says which modes a
+        // locked agent may be offered.
+        "agents": rows::agent::rows(&modes),
         "modes": modes.get("modes").cloned().unwrap_or(serde_json::json!({})),
         // Projected, not passed through: the endpoint answers with a MAP of the services a key
         // has already been stored for, and a service with no key — the row somebody opened this

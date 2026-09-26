@@ -1388,6 +1388,42 @@ async fn registering_without_naming_lists_sends_no_list_field_at_all() {
     assert!(body.get("listIds").is_none(), "{body}");
 }
 
+/// The route describes agents as mailbox rows (`{ mailbox, email, mode, locked }`), and the
+/// shell was reading `id` and `name` off them: every agent drew nameless and, joined on an empty
+/// id, off. The hub answers with named rows, each saying which modes it may be offered — a locked
+/// harness (Muse, Codex's polling identity) only polling or off, which is all the server stores
+/// for one (task 42349da6).
+#[tokio::test]
+async fn the_agent_hub_names_the_servers_mailbox_rows_and_locks_the_harness_ones() {
+    let app = app_with(StubTransport::new().push_json(
+        "agent-modes",
+        200,
+        json!({
+            "agents": [
+                { "mailbox": "claude", "email": "claude@astrid.cc", "mode": "api", "locked": false },
+                { "mailbox": "muse", "email": "muse@astrid.cc", "mode": "polling", "locked": true },
+            ],
+            "modes": { "claude": "api", "muse": "polling" },
+        }),
+    ));
+
+    let hub = call(&app, json!({ "kind": "agents" })).await;
+    assert_eq!(hub["ok"], true, "{hub}");
+    let agents = hub["value"]["agents"].as_array().expect("agents");
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0]["id"], "claude");
+    assert_eq!(agents[0]["name"], "Claude");
+    assert_eq!(agents[0]["mode"], "api");
+    assert_eq!(
+        agents[0]["modes"],
+        json!(["api", "polling", "webhook", "off"])
+    );
+    assert_eq!(agents[1]["id"], "muse");
+    assert_eq!(agents[1]["name"], "Muse");
+    assert_eq!(agents[1]["locked"], true);
+    assert_eq!(agents[1]["modes"], json!(["polling", "off"]));
+}
+
 /// A hub that refused to draw because one of its four requests failed would be a screen
 /// nobody could use to fix the thing that failed.
 #[tokio::test]
