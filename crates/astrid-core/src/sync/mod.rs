@@ -47,6 +47,18 @@ fn delta_overlap() -> chrono::Duration {
     chrono::Duration::minutes(5)
 }
 
+/// How old the stamp may be before a pass stops asking for a delta and pulls everything.
+///
+/// A delta pass learns about deletions only from the tombstones the server lists beside the
+/// rows, and the server prunes those after a retention window (astrid-web
+/// `lib/sync-cursor-age.ts`, AWTD-993). A stamp older than the window would ask for deletions
+/// the server has already forgotten, and the rows would stay on screen with nothing raising
+/// anything. The web's own incremental paths cap their cursor at the same twenty-four hours, so
+/// a machine that was shut for a long weekend comes back with a full pull, as a browser does.
+fn max_delta_age() -> chrono::Duration {
+    chrono::Duration::hours(24)
+}
+
 /// How often a person's pass looks again for the slot while a timer pass holds it.
 const SLOT_POLL: Duration = Duration::from_millis(50);
 
@@ -204,7 +216,10 @@ impl SyncManager {
         // Stamped before the fetch, for the reason on `LAST_SYNC_KEY`. A first pass — or one
         // after a sign-out, which clears the cache — has no stamp and pulls everything.
         let started_at = self.clock.now();
-        let since = self.last_sync().map(|stamp| stamp - delta_overlap());
+        let since = self
+            .last_sync()
+            .filter(|stamp| started_at - *stamp <= max_delta_age())
+            .map(|stamp| stamp - delta_overlap());
 
         match self.fetch_and_apply(since).await {
             Ok(mut report) => {
@@ -689,6 +704,40 @@ mod tests {
             lists[1].contains("updatedSince="),
             "lists too: {}",
             lists[1]
+        );
+    }
+
+    /// A stamp older than the server keeps tombstones for is no use as a cursor (AWTD-993): the
+    /// deletions it would ask about have been pruned, and the deleted rows would stay on screen
+    /// forever. So a machine that was shut for a long weekend pulls everything, as the web does
+    /// after the same twenty-four hours.
+    #[tokio::test]
+    async fn a_stamp_older_than_a_day_asks_for_everything_again() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+        // A stamp from a day and a minute before the clock: just past the window.
+        fixture
+            .store
+            .set_metadata(LAST_SYNC_KEY, "2026-09-06T11:59:00Z")
+            .expect("stamps");
+
+        let report = fixture.sync.sync().await;
+        assert!(!report.delta, "a stale stamp is not a cursor");
+
+        // Inside the window the same machine asks for a delta, as before.
+        fixture
+            .store
+            .set_metadata(LAST_SYNC_KEY, "2026-09-06T12:30:00Z")
+            .expect("stamps");
+        let report = fixture.sync.sync().await;
+        assert!(
+            report.delta,
+            "twenty-three and a half hours is still a cursor"
         );
     }
 
