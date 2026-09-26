@@ -1082,8 +1082,83 @@ impl Response {
     }
 }
 
+/// Every variant of [`Command`], as the wire spells it: `rename_all = "camelCase"` lowercases the
+/// first letter and nothing else, so `CreateOAuthClient` is `createOAuthClient`.
+///
+/// For a shell's bindings test. Each shell keeps a hand-written list of the commands it sends —
+/// C# records today, Swift enums tomorrow — and a variant renamed here, or a `kind` mistyped
+/// there, is a command the core answers with "bad request", which a shell shows as a button that
+/// does nothing. So every shell reads its own list against this one, in its own gate.
+///
+/// Read off this file's source rather than derived at runtime: `serde` names the variants and
+/// Rust cannot enumerate them without a dependency. The scan is anchored on shapes the enum has
+/// had since M2 and fails loudly if they stop matching, so "the parser broke" cannot read as "the
+/// contract holds".
+pub fn kinds() -> std::collections::BTreeSet<String> {
+    // A checkout on Windows may carry CRLF; the scan reads lines, not bytes.
+    let source = include_str!("command.rs").replace("\r\n", "\n");
+    let start = source
+        .find("pub enum Command {")
+        .expect("command.rs declares `pub enum Command {`");
+    let body = &source[start..];
+    let end = body
+        .find("\n}\n")
+        .expect("the Command enum closes with a bare `}`");
+    let kinds: std::collections::BTreeSet<String> = body[..end]
+        .lines()
+        .filter_map(|line| {
+            // A variant is a four-space-indented capitalised identifier, followed by `{`, `,` or
+            // `(`. Doc comments, attributes and fields are all indented differently or start
+            // with something else.
+            let rest = line.strip_prefix("    ")?;
+            if rest.starts_with(' ') {
+                return None;
+            }
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let after = rest[name.len()..].trim_start();
+            let is_variant = !name.is_empty()
+                && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                && (after.starts_with('{') || after.starts_with(',') || after.starts_with('('));
+            is_variant.then(|| {
+                let mut chars = name.chars();
+                match chars.next() {
+                    Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+        })
+        .collect();
+    assert!(
+        kinds.len() >= 100,
+        "found only {} Command variants; the scan has stopped working",
+        kinds.len()
+    );
+    kinds
+}
+
 #[cfg(test)]
 mod tests {
+    /// The list a shell's bindings are checked against: every variant, spelled as the wire
+    /// spells it, and a scan that would rather fail than answer with a short list.
+    #[test]
+    fn the_command_kinds_are_every_variant_in_wire_spelling() {
+        let kinds = super::kinds();
+        assert!(kinds.contains("taskDetail"));
+        assert!(
+            kinds.contains("createOAuthClient"),
+            "the first letter and nothing else"
+        );
+        assert!(kinds.contains("revokeConnection"));
+        assert!(
+            !kinds.contains("Command"),
+            "the enum's own name is not a variant"
+        );
+        assert!(!kinds.contains("kind"), "a field is not a variant");
+    }
+
     use super::*;
 
     #[test]

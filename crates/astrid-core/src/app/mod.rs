@@ -26,7 +26,7 @@ pub mod background;
 mod command;
 mod dispatch;
 
-pub use command::{Command, Failure, FailureKind, Response};
+pub use command::{kinds as command_kinds, Command, Failure, FailureKind, Response};
 
 use std::sync::Arc;
 
