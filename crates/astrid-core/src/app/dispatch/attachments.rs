@@ -71,6 +71,10 @@ pub(super) fn attach_file(app: &App, task_id: &str, path: &str, content: Option<
             "name": file.name,
             "mimeType": file.mime_type,
             "context": { "listId": list_id },
+            // Where the bytes go once the upload answers, so a delivered file stays drawable
+            // without being fetched back (task 48f72aa7). The handler has the store and the
+            // client and no notion of where this installation keeps its files.
+            "cacheDir": app.attachment_cache().to_string_lossy(),
         }),
         &file.id,
         app.clock.now(),
