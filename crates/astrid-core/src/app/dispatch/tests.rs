@@ -2542,6 +2542,65 @@ async fn a_board_answers_with_its_columns_and_their_cards() {
     assert_eq!(columns[0]["total"], 0);
 }
 
+/// The detail carries a BOARD STATE row for a task on a board (task 5221e43f): the board's
+/// columns as chips with Done left out and the current one lit, in list mode only, and never
+/// for a task with no board column. The rule is the one the Mac, iOS and the web share.
+#[tokio::test]
+async fn the_detail_shows_the_board_state_of_a_board_task_in_list_mode_task_5221e43f() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l2", "name": "Home" })).expect("a list"),
+        )
+        .expect("stores");
+    let mut on_board = crate::model::Task::new("t1", "Water plants");
+    on_board.list_ids = Some(vec!["l1".into()]);
+    on_board.status_role = Some("doing".into());
+    app.store.upsert_task(&on_board).expect("stores");
+    let mut off_board = crate::model::Task::new("t2", "Buy milk");
+    off_board.list_ids = Some(vec!["l2".into()]);
+    app.store.upsert_task(&off_board).expect("stores");
+
+    let detail = call(&app, json!({ "kind": "taskDetail", "taskId": "t1" })).await;
+    assert_eq!(detail["ok"], true, "{detail}");
+    let state = &detail["value"]["boardState"];
+    assert_eq!(state["current"], "doing");
+    let names: Vec<&str> = state["chips"]
+        .as_array()
+        .expect("chips")
+        .iter()
+        .map(|chip| chip["name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(
+        names,
+        ["Inbox", "Ready", "Doing", "Waiting"],
+        "Done is the checkbox's job"
+    );
+    assert_eq!(state["chips"][2]["isCurrent"], true);
+
+    let compact = call(
+        &app,
+        json!({ "kind": "taskDetail", "taskId": "t1", "displayMode": "project" }),
+    )
+    .await;
+    assert!(
+        compact["value"]["boardState"].is_null(),
+        "project mode already offers the state behind the leading control"
+    );
+
+    let plain = call(&app, json!({ "kind": "taskDetail", "taskId": "t2" })).await;
+    assert!(
+        plain["value"]["boardState"].is_null(),
+        "a task with no board column gets no row"
+    );
+}
+
 /// The detail's menu: Won't do closes with a reason and no rollover, Reopen clears it, the
 /// status choices are the board's own columns, and choosing one is the same move a dragged card
 /// makes — including that Done means completed (task 016ce981).

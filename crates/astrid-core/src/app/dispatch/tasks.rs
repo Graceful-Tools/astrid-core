@@ -68,6 +68,31 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         .collect();
     subtasks.sort_by_key(|subtask| (subtask.created_at, subtask.id.clone()));
 
+    let me = app.context.account().current_user_id().ok().flatten();
+    let is_copy_only = rows::copy_only(&task, &lists, me.as_deref());
+
+    // The BOARD STATE row (task 5221e43f): the task's board's columns as chips, Done left out,
+    // only for a board task in list mode and never for a read-only viewer. The rule is shared
+    // with the web and both Apple clients and asked here, not restated. `null` means no row.
+    let board_state = rows::detail::shows_board_state(
+        mode,
+        rows::detail::is_task_in_project(&task, &lists),
+        is_copy_only,
+    )
+    .then(|| {
+        let columns = super::board::task_columns(app, &task);
+        let current = crate::board::column_for(&task, &columns);
+        serde_json::json!({
+            "current": current,
+            "chips": rows::detail::board_state_chips(&columns).iter().map(|column| serde_json::json!({
+                "id": column.id,
+                "name": column.name,
+                "kind": column.kind,
+                "isCurrent": column.id == current,
+            })).collect::<Vec<_>>(),
+        })
+    });
+
     Response::ok(serde_json::json!({
         // The description as blocks to draw, beside the text to edit: the web renders one and
         // edits the other, and a shell handed only the text drew `**bold**` with its asterisks
@@ -105,16 +130,8 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         "isCanceled": task.is_canceled(),
         // A task in a public list the reader cannot edit (task f6bc59e8): the header offers a
         // copy where the checkbox would be, and the text is not for editing.
-        "isCopyOnly": rows::copy_only(
-            &task,
-            &lists,
-            app.context
-                .account()
-                .current_user_id()
-                .ok()
-                .flatten()
-                .as_deref(),
-        ),
+        "isCopyOnly": is_copy_only,
+        "boardState": board_state,
         "link": (!crate::model::is_temp_id(&task.id))
             .then(|| format!("{}/tasks/{}", app.context.client.base_url(), task.id)),
         "comments": comments,

@@ -144,12 +144,8 @@ pub(super) fn board_columns(app: &App, project_id: Option<&str>) -> Vec<crate::b
 /// its menu. Resolved here rather than in the shell so the menu and the board read one list.
 pub(super) fn task_columns(app: &App, task: &crate::model::Task) -> Vec<crate::board::BoardColumn> {
     let lists = app.store.lists().unwrap_or_default();
-    let project_id = task.effective_list_ids().into_iter().find_map(|id| {
-        lists
-            .iter()
-            .find(|list| list.id == id)
-            .and_then(|list| list.project_id.clone())
-    });
+    // The task's own board, never the selected list's — see `rows::detail::project_id_for_task`.
+    let project_id = rows::detail::project_id_for_task(task, &lists);
     board_columns(app, project_id.as_deref())
 }
 
