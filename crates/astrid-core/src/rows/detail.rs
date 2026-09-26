@@ -241,11 +241,11 @@ mod tests {
         let plain = list("plain-list", None);
         assert!(is_task_in_project(
             &task_in(&["board-list"], None),
-            &[board.clone()]
+            std::slice::from_ref(&board)
         ));
         assert!(is_task_in_project(
             &task_in(&["plain-list"], Some("ready")),
-            &[plain.clone()]
+            std::slice::from_ref(&plain)
         ));
         assert!(!is_task_in_project(
             &task_in(&["plain-list"], None),
