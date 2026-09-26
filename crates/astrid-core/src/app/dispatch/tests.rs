@@ -1880,6 +1880,36 @@ async fn attaching_a_file_works_with_no_connection_at_all() {
     );
 }
 
+/// Task 48f72aa7: the bytes of a delivered upload go into the download cache rather than being
+/// deleted, and the handler has no idea where this installation keeps its files — so the entry
+/// carries the destination. Without it the picture is fetched back from the server that was just
+/// given it.
+#[tokio::test]
+async fn an_attachment_says_where_its_bytes_belong_once_it_has_been_sent() {
+    let app = app_with(StubTransport::new());
+    let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+    let task_id = made["value"]["id"].as_str().expect("an id").to_string();
+
+    let scratch = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+    std::fs::write(&scratch, b"a screenshot").expect("writes");
+    call(
+        &app,
+        json!({ "kind": "attachFile", "taskId": task_id, "path": scratch.to_string_lossy() }),
+    )
+    .await;
+    std::fs::remove_file(&scratch).expect("removes");
+
+    let queued = crate::outbox::journal::all(&app.store).expect("reads");
+    let upload = queued
+        .iter()
+        .find(|entry| entry.kind == crate::outbox::kind::UPLOAD_ATTACHMENT)
+        .expect("the upload is queued");
+    assert_eq!(
+        upload.payload["cacheDir"].as_str(),
+        Some(app.attachment_cache().to_string_lossy().as_ref()),
+    );
+}
+
 /// The upload has to be sent before the comment that names its file, which is what the order
 /// in the journal decides.
 #[tokio::test]

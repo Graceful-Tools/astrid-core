@@ -304,8 +304,14 @@ async fn send_chat_message(client: &ApiClient, store: &Store, entry: &Entry) -> 
 /// Send a queued file, and hand its real id to whatever is waiting for it.
 ///
 /// The comment carrying this attachment is already in the journal, naming the file by its
-/// temporary id; recording the mapping is what turns that into the real one. The copy on disk is
-/// removed only on success or on a permanent failure — a retry needs the bytes.
+/// temporary id; recording the mapping is what turns that into the real one.
+///
+/// The copy on disk leaves the pending directory only on success or on a permanent failure — a
+/// retry needs the bytes. On success it is **moved into the download cache** under the id the
+/// server gave it rather than deleted: the screen that has just drawn it is still holding the
+/// temporary id, and deleting the bytes made it fetch back the picture this device had that moment
+/// uploaded (task 48f72aa7). `cacheDir` in the payload says where they belong; an entry queued by
+/// a build that predates it simply deletes, as it always did.
 async fn upload_attachment(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
     let payload = &entry.payload;
     let text = |key: &str| payload.get(key).and_then(|value| value.as_str());
@@ -339,7 +345,19 @@ async fn upload_attachment(client: &ApiClient, store: &Store, entry: &Entry) -> 
             if let Some(temp_id) = &entry.temp_id {
                 let _ = store.record_id_mapping(temp_id, file_id, chrono::Utc::now());
             }
-            let _ = std::fs::remove_file(path);
+            match text("cacheDir") {
+                Some(cache_dir) => {
+                    crate::services::attachment::promote(
+                        std::path::Path::new(path),
+                        std::path::Path::new(cache_dir),
+                        file_id,
+                        name,
+                    );
+                }
+                None => {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
             Outcome::producing("fileId", file_id)
         }
         Err(error) => {
@@ -514,6 +532,14 @@ mod tests {
         Entry::new("e1", kind, payload, "temp_abc", t0())
     }
 
+    /// A directory of this installation's own, so two tests cannot promote into each other.
+    fn a_cache_dir() -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("astrid-cache-{}", crate::outbox::new_temp_id()));
+        std::fs::create_dir_all(&dir).expect("creates");
+        dir
+    }
+
     fn a_queued_file(bytes: &[u8]) -> std::path::PathBuf {
         let held = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
         std::fs::write(&held, bytes).expect("writes");
@@ -555,6 +581,77 @@ mod tests {
         assert!(body.contains("receipt.png"), "{body}");
         assert!(body.contains("a receipt"), "{body}");
         assert!(body.contains("l1"), "the list that decides who may read it");
+    }
+
+    /// Task 48f72aa7: a pasted screenshot drew as a chip until the thread had been fetched and the
+    /// picture downloaded again, from the machine that had just uploaded it — because delivering
+    /// the upload DELETED the only copy on disk. The bytes move into the download cache under the
+    /// id the server gave them instead, which is the first place `local_path` looks.
+    #[tokio::test]
+    async fn a_delivered_upload_keeps_its_bytes_in_the_cache_rather_than_deleting_them() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/api/v1/secure-upload/request-upload",
+            200,
+            serde_json::json!({ "fileId": "file_real" }),
+        ));
+        let cache = a_cache_dir();
+        let held = cache.join("pending").join("temp_abc");
+        std::fs::create_dir_all(held.parent().expect("a pending directory")).expect("creates");
+        std::fs::write(&held, b"a screenshot").expect("writes");
+
+        let entry = entry(
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": held.to_string_lossy(),
+                "name": "Screenshot 2026-09-26.png",
+                "mimeType": "image/png",
+                "cacheDir": cache.to_string_lossy(),
+            }),
+        )
+        .for_temp_id("temp_abc");
+        let outcome = perform(&client, &store, &entry).await;
+
+        assert!(matches!(outcome, Outcome::Done(_)));
+        assert!(!held.exists(), "the pending copy is not left behind");
+        let promoted = cache.join("file_real.png");
+        assert!(
+            promoted.exists(),
+            "the bytes belong in the cache under the id the server gave them",
+        );
+        assert_eq!(
+            std::fs::read(&promoted).expect("reads"),
+            b"a screenshot",
+            "and they are the bytes this device attached, not a re-download",
+        );
+        std::fs::remove_dir_all(&cache).expect("removes");
+    }
+
+    /// Journal rows written by a build with no `cacheDir` are already on disk in people's caches.
+    /// They keep today's behaviour rather than promoting to a directory nobody named.
+    #[tokio::test]
+    async fn an_upload_queued_before_this_change_still_just_deletes_its_copy() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/api/v1/secure-upload/request-upload",
+            200,
+            serde_json::json!({ "fileId": "file_real" }),
+        ));
+        let held = a_queued_file(b"a receipt");
+
+        let entry = entry(
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": held.to_string_lossy(),
+                "name": "receipt.png",
+                "mimeType": "image/png",
+            }),
+        )
+        .for_temp_id("temp_abc");
+
+        assert!(matches!(
+            perform(&client, &store, &entry).await,
+            Outcome::Done(_)
+        ));
+        assert!(!held.exists());
     }
 
     /// A cache somebody cleared, or a half-finished sign-out. There is nothing left to send, and

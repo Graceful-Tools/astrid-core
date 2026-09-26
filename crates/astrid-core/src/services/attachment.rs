@@ -81,21 +81,34 @@ impl AttachmentService {
 
     /// Where this file's bytes already are on this machine, or `None`.
     ///
-    /// Never touches the network. Two places count as in hand, and a thumbnail needs both: a file
-    /// somebody has opened before is in the download cache under its real id, and a file this
-    /// device attached moments ago is in the pending directory under its temporary one, waiting
-    /// for a connection.
+    /// Never touches the network. Three places count as in hand, and a thumbnail needs all of
+    /// them: a file somebody has opened before is in the download cache under its real id, a file
+    /// this device attached moments ago is in the pending directory under its temporary one,
+    /// waiting for a connection, and one whose upload has just been delivered is in the download
+    /// cache under the id the server gave it while the comment naming it still says `temp_`.
     ///
-    /// The second is the one worth stating. Posting a screenshot and then watching it load —
+    /// The last two are the ones worth stating. Posting a screenshot and then watching it load —
     /// from the machine it was taken on, out of bytes this process wrote itself — is the bug the
-    /// Mac fixed in AITD-308.
+    /// Mac fixed in AITD-308, and the third case is how it came back on Windows (task 48f72aa7):
+    /// the copy left the pending directory the instant the upload answered, and the optimistic
+    /// comment goes on naming the file by its temporary id until the thread is fetched again.
     pub fn local_path(&self, file: &SecureFile) -> Option<PathBuf> {
         let cached = self.cached_path(file);
         if cached.exists() {
             return Some(cached);
         }
         let pending = self.pending_dir().join(&file.id);
-        pending.exists().then_some(pending)
+        if pending.exists() {
+            return Some(pending);
+        }
+        // Delivered, but the row in hand predates the delivery. The mapping is kept for exactly
+        // this — a temporary id somebody is still holding — so asking it costs one indexed read.
+        let server_id = self.context.store.resolve_id(&file.id).ok()?;
+        if server_id == file.id {
+            return None;
+        }
+        let promoted = cached_path_for(&self.cache_dir, &server_id, &file.name);
+        promoted.exists().then_some(promoted)
     }
 
     /// Fetch a file's bytes and keep them. Answers with the path.
@@ -172,11 +185,46 @@ fn file_name(path: &Path) -> String {
 /// "../../etc/passwd" is a perfectly ordinary string to put in a filename field — and is never used
 /// as one.
 fn cached_path(cache_dir: &Path, file: &SecureFile) -> PathBuf {
-    let extension = Path::new(&file.name)
+    cached_path_for(cache_dir, &file.id, &file.name)
+}
+
+/// The same rule, for a file whose id is not the one on the record in hand — a delivered upload
+/// still known to its comment by the temporary id it was queued under.
+pub(crate) fn cached_path_for(cache_dir: &Path, id: &str, name: &str) -> PathBuf {
+    let extension = Path::new(name)
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("bin");
-    cache_dir.join(format!("{}.{}", file.id, extension))
+    cache_dir.join(format!("{id}.{extension}"))
+}
+
+/// Keep the bytes of a delivered upload, under the id the server gave it.
+///
+/// The Outbox used to delete the pending copy the moment the upload answered. That made a picture
+/// this device attached undrawable the instant it was delivered, and it came back only after the
+/// thread had been fetched and the file downloaded again — from the machine that had just uploaded
+/// it. Task 48f72aa7. Moving it into the download cache is the same cleanup of the pending
+/// directory, minus the round trip.
+///
+/// Failing to move is not worth reporting: the bytes are a cache, and the worst outcome is the
+/// download that used to happen every time.
+pub(crate) fn promote(pending: &Path, cache_dir: &Path, server_id: &str, name: &str) -> bool {
+    if std::fs::create_dir_all(cache_dir).is_err() {
+        return false;
+    }
+    let destination = cached_path_for(cache_dir, server_id, name);
+    // Rename first — it is atomic and free on the same volume, which the pending directory is by
+    // construction. Copy-then-delete is the fallback for the case where it somehow is not.
+    if std::fs::rename(pending, &destination).is_ok() {
+        return true;
+    }
+    match std::fs::copy(pending, &destination) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(pending);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// The body of a multipart upload: the file, then the context object.
@@ -295,6 +343,100 @@ mod tests {
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("filename=\"holiday.png\""));
         assert_eq!(text.matches("filename=").count(), 1);
+    }
+
+    /// A temporary directory of this test's own, so two of them cannot see each other's files.
+    fn a_cache_dir() -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("astrid-test-{}", crate::outbox::new_temp_id()));
+        std::fs::create_dir_all(&dir).expect("creates");
+        dir
+    }
+
+    fn service(cache_dir: &Path) -> (AttachmentService, std::sync::Arc<crate::store::Store>) {
+        use crate::api::{ApiClient, StubTransport};
+        use crate::platform::{FixedClock, MemorySecureStore};
+        use std::sync::Arc;
+
+        let store = Arc::new(crate::store::Store::in_memory().expect("opens"));
+        let context = Context::new(
+            Arc::new(ApiClient::new(
+                "https://astrid.cc",
+                Arc::new(StubTransport::new()),
+                Arc::new(MemorySecureStore::new()),
+            )),
+            store.clone(),
+            Arc::new(FixedClock::parsed("2026-09-26T12:00:00Z")),
+        );
+        (AttachmentService::new(context, cache_dir), store)
+    }
+
+    /// A file waiting for a connection draws from the copy the Outbox wrote. AITD-308 on the Mac.
+    #[test]
+    fn a_file_still_waiting_to_be_sent_is_already_in_hand() {
+        let cache = a_cache_dir();
+        let (service, _store) = service(&cache);
+        std::fs::create_dir_all(service.pending_dir()).expect("creates");
+        std::fs::write(service.pending_dir().join("temp_abc"), b"bytes").expect("writes");
+
+        assert_eq!(
+            service.local_path(&file("temp_abc", "shot.png")),
+            Some(service.pending_dir().join("temp_abc")),
+        );
+        std::fs::remove_dir_all(&cache).expect("removes");
+    }
+
+    /// Task 48f72aa7. The comment on screen names the file by the temporary id it was queued
+    /// under, and goes on doing so until the thread is fetched again — so a delivered upload has to
+    /// be findable by that id, or the picture disappears the moment it is successfully sent.
+    #[test]
+    fn a_delivered_file_is_in_hand_under_the_temporary_id_its_comment_still_uses() {
+        let cache = a_cache_dir();
+        let (service, store) = service(&cache);
+        // What the Outbox leaves behind: the bytes under the server's id, and the mapping.
+        std::fs::write(cache.join("file_real.png"), b"bytes").expect("writes");
+        store
+            .record_id_mapping(
+                "temp_abc",
+                "file_real",
+                crate::model::date::parse("2026-09-26T12:00:00Z").expect("an instant"),
+            )
+            .expect("records");
+
+        assert_eq!(
+            service.local_path(&file("temp_abc", "shot.png")),
+            Some(cache.join("file_real.png")),
+        );
+        std::fs::remove_dir_all(&cache).expect("removes");
+    }
+
+    /// Nothing anywhere is still nothing — the chip is what a screen draws until the bytes arrive,
+    /// and an unmapped id must not be reported as a path that does not exist.
+    #[test]
+    fn a_file_nobody_has_the_bytes_for_is_not_in_hand() {
+        let cache = a_cache_dir();
+        let (service, _store) = service(&cache);
+
+        assert_eq!(service.local_path(&file("f1", "shot.png")), None);
+        std::fs::remove_dir_all(&cache).expect("removes");
+    }
+
+    /// Promoting is the same cleanup as deleting, so far as the pending directory is concerned.
+    #[test]
+    fn promoting_moves_the_bytes_rather_than_copying_them() {
+        let cache = a_cache_dir();
+        let pending = cache.join("pending");
+        std::fs::create_dir_all(&pending).expect("creates");
+        let held = pending.join("temp_abc");
+        std::fs::write(&held, b"bytes").expect("writes");
+
+        assert!(promote(&held, &cache, "file_real", "shot.png"));
+        assert!(!held.exists());
+        assert_eq!(
+            std::fs::read(cache.join("file_real.png")).expect("reads"),
+            b"bytes",
+        );
+        std::fs::remove_dir_all(&cache).expect("removes");
     }
 
     #[test]
