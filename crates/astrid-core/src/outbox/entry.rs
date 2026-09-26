@@ -78,6 +78,15 @@ pub mod kind {
     pub const UPDATE_SETTINGS: &str = "updateSettings";
     /// A change to the task defaults and layout (`/users/me/smart-tasks`). Same shape.
     pub const UPDATE_SMART_TASKS: &str = "updateSmartTaskSettings";
+    /// One task starts, or stops, waiting on another (task 69a840a4).
+    ///
+    /// Both replay safely, which is what lets them queue like any other write. The server makes
+    /// the add idempotent through the edge's unique constraint — an existing link answers `200`
+    /// rather than `201` — and removing an edge that is already gone is equally a no-op. So a
+    /// journal replayed twice after a flaky connection cannot double a dependency or resurrect
+    /// one, and neither needs a client request id to be safe.
+    pub const ADD_TASK_BLOCKER: &str = "addTaskBlocker";
+    pub const REMOVE_TASK_BLOCKER: &str = "removeTaskBlocker";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -177,6 +177,24 @@ pub fn task_comments(task_id: &str) -> String {
     format!("{}/comments", task(task_id))
 }
 
+/// Both directions of one task's dependencies: `GET` reads, `POST` adds one.
+///
+/// See `astrid-web/docs/specs/TASK_BLOCKING_DEPENDENCIES.md`. Project mode gates all of these
+/// server-side, so a deployment with the feature off answers the same way for every account
+/// rather than leaving the write reachable while the row is hidden.
+pub fn task_blockers(task_id: &str) -> String {
+    format!("{}/blockers", task(task_id))
+}
+
+/// One dependency edge, for `DELETE`.
+pub fn task_blocker(task_id: &str, blocking_task_id: &str) -> String {
+    format!(
+        "{}/{}",
+        task_blockers(task_id),
+        escaped_path_component(blocking_task_id)
+    )
+}
+
 pub fn comment(id: &str) -> String {
     format!("/api/v1/comments/{}", escaped_path_component(id))
 }

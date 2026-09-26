@@ -80,6 +80,32 @@ pub fn shows_board_state(
     display_mode == super::DisplayMode::List && is_in_project && !is_read_only
 }
 
+/// Whether the detail shows the WAITING ON row.
+///
+/// A port of web's `showsTaskBlockers` (`lib/task-detail-project-state.ts`), not a redesign of it,
+/// for the same reason the field order above is written down once. Three differences from
+/// `shows_board_state` above, each deliberate:
+///
+/// - **On a board only**, exactly as the board-state row is. Blocking is a board idea.
+/// - **A read-only viewer still sees it.** The board-state row hides from one because it is a
+///   mover and would draw dead controls; a blocker is information, and a public-list reader
+///   benefits from knowing that a task is held. They get chips without the ✕ or the picker.
+/// - **Display mode does not enter into it.** The state row hides in project mode because the
+///   leading control already offers the state. Nothing else says a task is blocked, in either
+///   mode, so there is nothing to say twice.
+///
+/// With no blockers the row appears only for someone who could add one: an empty row on every
+/// task on every board is noise for a reader who cannot act on it.
+pub fn shows_task_blockers(is_in_project: bool, is_read_only: bool, has_blockers: bool) -> bool {
+    if !is_in_project {
+        return false;
+    }
+    if has_blockers {
+        return true;
+    }
+    !is_read_only
+}
+
 /// Which project a task belongs to, from its OWN list memberships.
 ///
 /// Deliberately not the list the reader has selected: a detail opens from search, from a label
@@ -270,6 +296,61 @@ mod tests {
             .iter()
             .any(|chip| chip.id == crate::board::VIRTUAL_INBOX_COLUMN_ID));
         assert!(chips.iter().any(|chip| chip.name == "Blocked"));
+    }
+
+    // ── The Waiting on row (task 69a840a4) ────────────────────────────────────────────────
+
+    /// Blocking is a board idea, so a task that is not on one has no row whatever else is true.
+    #[test]
+    fn a_task_off_every_board_has_no_waiting_on_row_task_69a840a4() {
+        assert!(!shows_task_blockers(false, false, false));
+        assert!(!shows_task_blockers(false, false, true));
+        assert!(!shows_task_blockers(false, true, true));
+    }
+
+    /// The difference from the board-state row: a read-only viewer DOES see blockers, because a
+    /// chip is information rather than a control. Knowing a task is held is worth having even
+    /// when you cannot lift the block.
+    #[test]
+    fn a_read_only_viewer_sees_blockers_but_not_an_empty_row_task_69a840a4() {
+        assert!(shows_task_blockers(true, true, true));
+        assert!(
+            !shows_task_blockers(true, true, false),
+            "an empty row is noise for a reader who could not add one anyway"
+        );
+    }
+
+    /// Someone who can edit gets the row with nothing in it, because that is where "Wait on a
+    /// task…" lives.
+    #[test]
+    fn an_editor_gets_the_row_with_nothing_in_it_task_69a840a4() {
+        assert!(shows_task_blockers(true, false, false));
+        assert!(shows_task_blockers(true, false, true));
+    }
+
+    /// The predicate says the same thing as web's `showsTaskBlockers` for all eight inputs. A
+    /// truth table rather than four assertions: this is the whole of the rule, and a port that
+    /// agrees on the cases someone thought to write is not the same as one that agrees.
+    #[test]
+    fn the_truth_table_matches_web_showstaskblockers_task_69a840a4() {
+        let table = [
+            // (in_project, read_only, has_blockers, expected)
+            (false, false, false, false),
+            (false, false, true, false),
+            (false, true, false, false),
+            (false, true, true, false),
+            (true, false, false, true),
+            (true, false, true, true),
+            (true, true, false, false),
+            (true, true, true, true),
+        ];
+        for (in_project, read_only, has_blockers, expected) in table {
+            assert_eq!(
+                shows_task_blockers(in_project, read_only, has_blockers),
+                expected,
+                "in_project={in_project} read_only={read_only} has_blockers={has_blockers}"
+            );
+        }
     }
 
     #[test]
