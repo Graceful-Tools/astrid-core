@@ -1,0 +1,57 @@
+# Astrid's shared core — Rust workspace.
+#
+# `astrid-core` is the layer every client sits on: models, API client, SQLite cache, the Outbox
+# write journal, sync, and every cross-platform contract mirrored from astrid-web (repeating
+# rollover, permissions, dates, shortcuts, search, smart parsing, editing sessions, connections).
+# It has NO platform dependency — platform services arrive through callback traits a shell
+# implements — so it builds and tests on Windows, macOS and Linux alike.
+#
+# Each client keeps its own binding layer beside its shell: astrid-windows has `astrid-ffi`, the
+# C ABI its WinUI shell calls; the Apple apps are expected to bind through UniFFI. What is shared
+# is here, and only what is shared.
+#
+# See README.md for the rules that govern what may live where.
+[workspace]
+resolver = "2"
+members = ["crates/astrid-core", "crates/xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/Graceful-Tools/astrid-core"
+
+[workspace.dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# Desktop hand-off sign-in: PKCE is SHA-256 + base64url, the callback arrives as a
+# URL that must be parsed rather than string-matched, and the verifier has to come
+# from the OS CSPRNG.
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+url = "2"
+# The HTTP stack, over the platform's own TLS: schannel on Windows, Security.framework on macOS,
+# OpenSSL on Linux. A bundled rustls would ship a second root store that ignores the enterprise
+# roots and revocation policy a managed machine expects — and its `ring` backend needs clang to
+# assemble on aarch64-pc-windows-msvc, which is one of the architectures this is built ON.
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "gzip", "stream", "charset", "http2"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "fs"] }
+async-trait = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# The offline cache. `bundled` compiles SQLite itself: the version is then the same on every
+# machine and every architecture, rather than whatever the OS happens to ship.
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "serde_json", "backup"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+# Markdown, for task descriptions, comments and chat: the same GFM the web renders through
+# `marked`, turned into blocks a shell draws. No HTML output is wanted, so no `html` feature.
+pulldown-cmark = { version = "0.13", default-features = false }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

@@ -1,0 +1,11 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Tooling
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Local overrides
+.env.local

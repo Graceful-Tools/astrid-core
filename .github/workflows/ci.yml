@@ -1,0 +1,81 @@
+# The gate. The core has no platform dependency, and this is what keeps that true: the same
+# format, lint and test run on Windows, macOS and Linux, so a dependency that only builds on one
+# of them is caught the day it lands rather than the week a client tries to consume it.
+#
+# The fixtures are generated from astrid-web. Checking them against that repo's default branch is
+# what turns a shared-behaviour change on the web into a failing build here instead of a
+# divergence a user reports later. astrid-web is public, so the checkout needs no token.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: core (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-latest
+          - name: macos
+            runner: macos-latest
+          - name: windows
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The toolchain and its components come from rust-toolchain.toml, so there is one place
+      # that decides which Rust this crate builds with.
+      - name: Show toolchain
+        run: |
+          rustup show
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  contracts:
+    name: cross-platform contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: astrid-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Graceful-Tools/astrid-web
+          path: astrid-web
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check fixtures against astrid-web
+        working-directory: astrid-core
+        run: node contracts/export-from-web.mjs --check --web ../astrid-web

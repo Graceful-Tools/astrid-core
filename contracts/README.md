@@ -54,7 +54,7 @@ A contract change is a cross-repo change, always in this order:
 
 1. Change the canonical implementation in astrid-web, with its tests.
 2. Regenerate these fixtures.
-3. Update this client until its tests pass again.
+3. Update this crate until its tests pass again, then the clients that pin it.
 4. Mirror it into astrid-ios (iOS and Mac share that code).
 
 Deploy web first — the wire is the one thing every client shares.
@@ -63,4 +63,4 @@ Deploy web first — the wire is the one thing every client shares.
 
 It moves into astrid-web as `scripts/export-contract-fixtures.ts` so the canonical repo owns the
 export and every client consumes the same artifacts (plan §5.3). The output format will not change
-when it does. It lives here for now so this client is not blocked on that work.
+when it does. It lives here for now so the clients are not blocked on that work.
