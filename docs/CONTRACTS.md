@@ -440,3 +440,24 @@ first. The web moves one task relative to another inside the existing arrangemen
 of the existing arrangement in its old order, then anything never arranged by creation — the
 same answer the server would produce from the same request, so the screen does not jump when
 its answer lands. The stored result is the server's either way; only the offline redraw differs.
+
+### D18 — the blocker picker searches this machine's cache; web searches the server
+
+`TASK_BLOCKING_DEPENDENCIES.md` says the "Wait on a task…" picker uses
+`GET /api/v1/search` and "does not filter client-side over loaded tasks", because a web picker
+that filtered the page it had already loaded offered only what happened to be on screen (web task
+`5df85b9f`). `Command::TaskBlockerCandidates` searches the cache instead, through
+`services::search::search` — the same path `Command::SearchTasks` takes, because this core has no
+server-search endpoint at all.
+
+Two reasons this is a divergence rather than the same bug. It is not one: the cache is the whole
+synced account, not a loaded page, and it uses the shared search grammar, so the result set is the
+same one the server would rank differently. And it is what every search surface in this app already
+does, so a picker that reached past it would be the only screen here whose results a train journey
+changes.
+
+What is genuinely lost is the server's permission filter *in the query*
+(`listVisibilityWhere`). A task that synced to this machine before a share was revoked can still be
+offered as a blocker; the write is then refused server-side, which is the right outcome reached
+late rather than early. Growing a server-search path in the core would close it, and is its own
+task rather than a detail of the Waiting on row (task 69a840a4).
