@@ -81,6 +81,8 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::UPDATE_SMART_TASKS => {
             send_body(client, client.patch(endpoints::SMART_TASKS), entry).await
         }
+        kind::ADD_TASK_BLOCKER => add_task_blocker(client, store, entry).await,
+        kind::REMOVE_TASK_BLOCKER => remove_task_blocker(client, store, entry).await,
         unknown => Outcome::Dead(format!(
             "no handler for {unknown} — the journal was written by a newer build"
         )),
@@ -184,6 +186,96 @@ async fn delete_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
             Outcome::done()
         }
         Err(error) => from_error(error),
+    }
+}
+
+/// One task starts waiting on another (task 69a840a4).
+///
+/// `201` created and `200` already-linked are both success: the edge's unique constraint makes the
+/// write idempotent, which is what lets a replayed journal be harmless. A `409` is the cycle
+/// refusal and is **dead-lettered rather than retried** — the graph will still contain the cycle in
+/// five minutes, so retrying is a loop that never ends. The refusal is surfaced instead, because
+/// the row has drawn an optimistic chip that has to come back off.
+async fn add_task_blocker(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let task_id = match id(entry, "taskId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .post(endpoints::task_blockers(task_id))
+        .value(body(entry));
+    match client.send(request).await {
+        Ok(value) => {
+            cache_blocked_by(store, task_id, value);
+            Outcome::done()
+        }
+        Err(error) if error.status() == Some(409) => Outcome::Dead(
+            "those tasks would end up waiting for each other, so the link was refused".into(),
+        ),
+        Err(error) => from_error(error),
+    }
+}
+
+/// One task stops waiting on another.
+///
+/// A `404` is a removal that already happened — the edge is gone, which is the state asked for —
+/// so it succeeds rather than dead-lettering, for the same reason deleting an absent task does.
+async fn remove_task_blocker(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let task_id = match id(entry, "taskId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let blocking_task_id = match id(entry, "blockingTaskId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    match client
+        .send(client.delete(endpoints::task_blocker(task_id, blocking_task_id)))
+        .await
+    {
+        Ok(value) => {
+            cache_blocked_by(store, task_id, value);
+            Outcome::done()
+        }
+        Err(error) if error.status() == Some(404) => Outcome::done(),
+        Err(error) => from_error(error),
+    }
+}
+
+/// Replace the cached `blockedBy` with what the mutation answered, and mirror the ids onto the
+/// task.
+///
+/// The mutation response carries the whole list rather than the one edge, so the optimistic chip
+/// — which may have been drawn as `hidden` for want of a local copy — is corrected by the same
+/// round trip that made the change. A response this build cannot read leaves the cache alone: the
+/// optimistic state is closer to the truth than an empty row would be.
+fn cache_blocked_by(store: &Store, task_id: &str, value: serde_json::Value) {
+    let Some(blocked_by) = value.get("blockedBy").cloned() else {
+        return;
+    };
+    let key = crate::services::dependency::cache_key(task_id);
+    let mut dependencies: crate::services::Dependencies = store
+        .metadata(&key)
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    match serde_json::from_value(blocked_by) {
+        Ok(blockers) => dependencies.blocked_by = blockers,
+        Err(_) => return,
+    }
+    if let Ok(json) = serde_json::to_string(&dependencies) {
+        let _ = store.set_metadata(&key, &json);
+    }
+    if let Ok(Some(mut task)) = store.task(task_id) {
+        task.blocked_by = Some(
+            dependencies
+                .blocked_by
+                .iter()
+                .map(|blocker| blocker.id.clone())
+                .collect(),
+        );
+        let _ = store.upsert_task(&task);
     }
 }
 

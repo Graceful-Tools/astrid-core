@@ -332,6 +332,22 @@ pub struct Task {
     /// make the whole task unreadable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_reason: Option<String>,
+    /// The tasks this one is waiting on, by id, and the tasks waiting on it.
+    ///
+    /// `GET /api/v1/tasks/:id` adds both beside `listIds`, and the wire contract
+    /// (`astrid-web/lib/api-contracts/v1-ios-shapes.ts`, `V1TaskBlockerIds`) makes them
+    /// **optional** so the server and each client ship independently: a deployment older than the
+    /// feature simply does not send them, which reads here as "nothing known", never as "nothing".
+    ///
+    /// Ids only. The titles a chip draws come from `GET /api/v1/tasks/:id/blockers`, because a
+    /// blocker the reader cannot see has an id and nothing else — and the difference between that
+    /// and a blocker that merely has not synced yet is the one thing the row must not get wrong.
+    /// Needs no cache migration: the store keeps each model's whole JSON and lifts out only the
+    /// columns something queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_by: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<Attachment>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -389,6 +405,8 @@ impl Task {
             assignee: None,
             creator_id: None,
             creator: None,
+            blocked_by: None,
+            blocks: None,
             due_date_time: None,
             is_all_day: true,
             reminder_time: None,

@@ -22,6 +22,7 @@ pub mod board;
 pub mod chat;
 pub mod comment;
 pub mod connections;
+pub mod dependency;
 pub mod external;
 pub mod list;
 pub mod list_defaults;
@@ -38,6 +39,7 @@ pub use auth::AuthService;
 pub use board::{BoardService, StatusOutcome};
 pub use chat::ChatService;
 pub use comment::CommentService;
+pub use dependency::{Blocker, Dependencies, TaskDependencyService};
 pub use external::{ExternalSyncService, Provider};
 pub use list::{ListChanges, ListService};
 pub use notifications::NotificationService;
@@ -85,6 +87,11 @@ impl Context {
 
     pub fn comments(&self) -> CommentService {
         CommentService::new(self.clone())
+    }
+
+    /// What one task is waiting on, and what waits on it.
+    pub fn dependencies(&self) -> TaskDependencyService {
+        TaskDependencyService::new(self.clone())
     }
 
     /// Links other people can open. Online-only, like the web's.

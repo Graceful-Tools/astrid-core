@@ -103,6 +103,41 @@ pub enum Command {
     Comments {
         task_id: String,
     },
+    /// Refresh what one task is waiting on, from the server (task 69a840a4).
+    ///
+    /// `TaskDetail` already answers with whatever is cached, so the row draws before this returns
+    /// and still draws with no network at all. This is the round trip that corrects it — and the
+    /// only thing that can tell "a task you cannot see" from "a task this cache has not got yet",
+    /// since the ids on the task cannot say which.
+    TaskBlockers {
+        task_id: String,
+    },
+    /// Make one task wait on another.
+    ///
+    /// Optimistic and journalled, like every other write. The server moves statuses off the back
+    /// of it — a Ready task with a new blocker becomes Waiting — and those arrive as ordinary task
+    /// updates. No client writes `statusRole` for this.
+    AddTaskBlocker {
+        task_id: String,
+        blocking_task_id: String,
+    },
+    RemoveTaskBlocker {
+        task_id: String,
+        blocking_task_id: String,
+    },
+    /// What the "Wait on a task…" picker may offer for a query.
+    ///
+    /// The search is the SERVER's (`GET /api/v1/search`), which is permission-filtered in the
+    /// query — unlike [`Command::SearchTasks`], which reads this machine's cache. A picker that
+    /// filtered a loaded page locally would offer only what happened to be on screen, which is
+    /// the bug web fixed as `5df85b9f`. Two characters is the threshold; below it the answer is
+    /// empty rather than everything.
+    TaskBlockerCandidates {
+        task_id: String,
+        query: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     /// Find a task by what it says.
     ///
     /// Over the cache, which is where every client searches: there is no server search endpoint,

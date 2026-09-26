@@ -93,7 +93,31 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         })
     });
 
+    // The WAITING ON row (task 69a840a4). Drawn from whatever is cached, so it appears with the
+    // rest of the screen and with no network at all; `TaskBlockers` is the round trip that
+    // corrects it. `null` means no row, exactly as `boardState` does — the shell holds no
+    // predicate of its own. Unlike the state row this one survives a read-only viewer: chips are
+    // information, and knowing a task is held is worth having even when you cannot lift the block.
+    let dependencies = app.context.dependencies().cached(task_id);
+    let blockers = rows::detail::shows_task_blockers(
+        rows::detail::is_task_in_project(&task, &lists),
+        is_copy_only,
+        dependencies
+            .as_ref()
+            .is_some_and(|it| !it.blocked_by.is_empty()),
+    )
+    .then(|| {
+        let dependencies = dependencies.unwrap_or_default();
+        serde_json::json!({
+            // Every chip, in the server's order, with no cap and no "+n more": a blocker the
+            // reader cannot see is counted and drawn, because it still blocks.
+            "chips": dependencies.blocked_by,
+            "canEdit": !is_copy_only,
+        })
+    });
+
     Response::ok(serde_json::json!({
+        "blockers": blockers,
         // The description as blocks to draw, beside the text to edit: the web renders one and
         // edits the other, and a shell handed only the text drew `**bold**` with its asterisks
         // (task 11cfaf6d). Which markdown means what is `crate::markdown`, mirrored from web.
@@ -142,6 +166,121 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
             "isPending": crate::model::is_temp_id(&subtask.id),
         })).collect::<Vec<_>>(),
     }))
+}
+
+/// Refresh one task's dependencies from the server, and answer with them (task 69a840a4).
+pub(super) async fn task_blockers(app: &App, task_id: &str) -> Response {
+    match app.context.dependencies().refresh(task_id).await {
+        Ok(dependencies) => Response::ok(dependencies),
+        // Offline is not a failure for a row that already has something to draw: the cache is the
+        // answer, and the refresh is the correction. Only a task with nothing cached reports the
+        // error, because then there is genuinely nothing to show.
+        Err(error) => match app.context.dependencies().cached(task_id) {
+            Some(cached) => Response::ok(cached),
+            None => Response::failed(error.into()),
+        },
+    }
+}
+
+pub(super) fn add_task_blocker(app: &App, task_id: &str, blocking_task_id: &str) -> Response {
+    match app.context.dependencies().add(task_id, blocking_task_id) {
+        Ok(dependencies) => Response::ok(dependencies),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+pub(super) fn remove_task_blocker(app: &App, task_id: &str, blocking_task_id: &str) -> Response {
+    match app.context.dependencies().remove(task_id, blocking_task_id) {
+        Ok(dependencies) => Response::ok(dependencies),
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// The candidates the "Wait on a task…" picker may offer.
+///
+/// Two characters is the threshold — `services::search::MINIMUM_QUERY_LENGTH`, not a number
+/// written again here — and below it the answer is an empty list rather than every task in the
+/// account. The three exclusions and the same-board ranking are
+/// `services::dependency::pickable`, stated there so the shell chooses nothing.
+///
+/// **This searches the cache, and the spec asks for the server's `GET /api/v1/search`.** The
+/// difference is deliberate and recorded in `docs/CONTRACTS.md`: this core has no server-search
+/// path at all — `Command::SearchTasks` reads the cache too, as every search surface in this app
+/// does — and growing one is its own task rather than a detail of this row. What the spec is
+/// guarding against is a picker that filters the page it happens to have loaded (web's
+/// `5df85b9f`); this searches the whole synced account with the shared grammar, so it does not
+/// have that bug. What it does not have is the server's permission filter *in the query*, which
+/// matters for a task synced before a share was revoked.
+pub(super) fn task_blocker_candidates(
+    app: &App,
+    task_id: &str,
+    query: &str,
+    limit: Option<usize>,
+) -> Response {
+    let trimmed = query.trim();
+
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let users = app.store.users().unwrap_or_default();
+    let current_user_id = app.context.account().current_user_id().ok().flatten();
+    let results = crate::services::search::search(
+        &tasks,
+        trimmed,
+        &crate::services::search::SearchScope {
+            list_id: None,
+            // A completed task can still be a blocker — a chip draws one struck through — so the
+            // picker offers them. Excluding them would make "why can I not find it" the first
+            // thing anybody asks.
+            include_completed: true,
+        },
+        &crate::services::search::SearchContext {
+            lists: &lists,
+            users: &users,
+            current_user_id: current_user_id.as_deref(),
+            now: app.clock.now(),
+            offset: app.clock.utc_offset(),
+        },
+    );
+
+    let dependencies = app
+        .context
+        .dependencies()
+        .cached(task_id)
+        .unwrap_or_default();
+
+    // The task's own board, so its neighbours rank first. A task off every board ranks everything
+    // equally, which is the honest answer rather than an arbitrary one.
+    let board_list_ids: Vec<String> = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => {
+            let project = rows::detail::project_id_for_task(&task, &lists);
+            lists
+                .iter()
+                .filter(|list| project.is_some() && list.project_id == project)
+                .map(|list| list.id.clone())
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+
+    let offerable =
+        crate::services::dependency::pickable(&results, task_id, &dependencies, &board_list_ids);
+    let total = offerable.len();
+    let candidates: Vec<serde_json::Value> = offerable[..limit.unwrap_or(total).min(total)]
+        .iter()
+        .map(|task| {
+            serde_json::json!({
+                "id": task.id,
+                "title": task.title,
+                "identifier": task.identifier,
+                "completed": task.completed,
+            })
+        })
+        .collect();
+
+    Response::ok(serde_json::json!({ "candidates": candidates }))
 }
 
 /// The quick date and time choices for one task.
