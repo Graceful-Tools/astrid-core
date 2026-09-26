@@ -468,23 +468,25 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         ),
         Command::DeleteWebhook => answer_done(app.context.agents().delete_webhook().await),
         Command::TestWebhook => answer(app.context.agents().test_webhook().await),
-        Command::ApiAccess => answer(app.context.api_access().oauth_clients().await),
-        Command::CreateMcpToken => match app.context.api_access().mcp_token().await {
-            // Named rather than returned bare: the shell binds to a field, and a bare string would
-            // make adding anything beside it a breaking change to every caller.
-            Ok(token) => Response::ok(serde_json::json!({ "token": token })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::RevokeMcpTokens => answer_done(app.context.api_access().revoke_mcp_tokens().await),
-        Command::CreateOAuthClient { name } => {
-            answer(app.context.api_access().create_oauth_client(&name).await)
+        Command::Connections => answer(app.context.connections().panel().await),
+        Command::RevokeConnection {
+            connection_kind,
+            id,
+        } => connections::revoke(app, &connection_kind, &id).await,
+        Command::LoadOAuthClient { client_id } => {
+            answer(app.context.connections().oauth_client(&client_id).await)
         }
-        Command::DeleteOAuthClient { client_id } => answer_done(
-            app.context
-                .api_access()
-                .delete_oauth_client(&client_id)
-                .await,
-        ),
+        Command::CheckOAuthClientDraft {
+            draft,
+            toggle_grant,
+        } => connections::check_draft(&draft, toggle_grant.as_deref()),
+        Command::CreateOAuthClient { draft } => connections::create_client(app, &draft).await,
+        Command::UpdateOAuthClient { client_id, draft } => {
+            connections::update_client(app, &client_id, &draft).await
+        }
+        Command::MintTransportCredentials { preset, agent } => {
+            connections::mint_transport_credentials(app, &preset, &agent).await
+        }
         Command::CustomAgents => answer(app.context.agents().custom_agents().await),
         Command::RegisterCustomAgent { name, list_ids } => answer(
             app.context
@@ -800,6 +802,20 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             ))
         }
         Command::ListMembers { list_id } => list_members(app, &list_id),
+        Command::EligibleNewOwners { list_id } => {
+            Response::ok(crate::services::list::transfer_availability(
+                app.context.lists().eligible_new_owners(&list_id).await,
+            ))
+        }
+        Command::TransferListOwnership {
+            list_id,
+            new_owner_id,
+        } => answer_done(
+            app.context
+                .lists()
+                .transfer_ownership(&list_id, &new_owner_id)
+                .await,
+        ),
         Command::RefreshListMembers { list_id } => {
             match app.context.lists().members(&list_id).await {
                 Ok(_) => list_members(app, &list_id),
@@ -878,6 +894,7 @@ mod attachments;
 mod board;
 mod chat;
 mod comments;
+mod connections;
 mod list_filters;
 mod lists;
 mod reminders;

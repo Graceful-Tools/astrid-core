@@ -74,18 +74,27 @@ pub fn custom_agent(id: &str) -> String {
 
 // ─── API access ───────────────────────────────────────────────────────────────────────────────
 
-/// This device swapping the session it holds for a token it can put in a header.
-///
-/// Cookie-authenticated on purpose: only a client that is already signed in may mint one. It mints
-/// or RETURNS a 90-day token, so asking twice does not litter the account with credentials nobody
-/// is holding.
-pub const MOBILE_MCP_TOKEN: &str = "/api/v1/auth/mobile-mcp-token";
+/// Everything that can act as the account — OAuth clients, approved apps, Custom Agents, access
+/// tokens, the webhook server — in one list (astrid-web #285). The mobile MCP token this client
+/// once minted at `/api/v1/auth/mobile-mcp-token` is gone from the server; the tokens it made are
+/// listed here as access tokens and revoked here, one at a time.
+pub const CONNECTIONS: &str = "/api/v1/users/me/connections";
+
+/// Revoke one connection: the kind and the id together, since ids repeat across kinds.
+pub fn connection(kind: &str, id: &str) -> String {
+    format!(
+        "{CONNECTIONS}/{}/{}",
+        escaped_path_component(kind),
+        escaped_path_component(id)
+    )
+}
+
 /// Client-credentials pairs, for a machine that is not this one.
 pub const OAUTH_CLIENTS: &str = "/api/v1/oauth/clients";
 
-/// One registered pair.
+/// One registered pair, addressed by its public half.
 pub fn oauth_client(client_id: &str) -> String {
-    format!("{OAUTH_CLIENTS}/{client_id}")
+    format!("{OAUTH_CLIENTS}/{}", escaped_path_component(client_id))
 }
 
 pub const COPILOT_STATUS: &str = "/api/v1/integrations/copilot/status";
@@ -199,6 +208,13 @@ pub fn list_invitations(list_id: &str) -> String {
 
 pub fn leave_list(list_id: &str) -> String {
     format!("{}/leave", list(list_id))
+}
+
+/// Who a list may be handed to (GET), and the handover itself (POST). Added to `/api/v1` by the
+/// web on 2026-09-13 (tasks f4b40af3, 359ca48f); until then this client could only explain that
+/// an owner cannot leave.
+pub fn transfer_ownership(list_id: &str) -> String {
+    format!("{}/transfer-ownership", list(list_id))
 }
 
 pub fn copy_list(list_id: &str) -> String {

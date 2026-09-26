@@ -1188,106 +1188,400 @@ fn app_and_transport(transport: StubTransport) -> (App, std::sync::Arc<StubTrans
     (app, transport)
 }
 
-// ── API access: the credentials handed to something that is not a person ─────────────────
+// ── Handing a list over (web tasks f4b40af3, 359ca48f) ───────────────────────────────────
 
-/// The whole point of the panel: a client that is already signed in mints its own credential
-/// rather than sending its user to a browser to do what the client is authorised for.
+/// The owner is offered a handover where a member is offered Leave; the probe's four answers
+/// reach the shell as four states, and the handover is one POST that drops the list here.
 #[tokio::test]
-async fn a_signed_in_client_mints_its_own_mcp_token() {
-    let app = app_with(StubTransport::new().push_json(
-        "mobile-mcp-token",
-        200,
-        json!({ "token": "mcp_live_abc", "userId": "u1" }),
-    ));
+async fn an_owner_is_offered_a_handover_and_the_probe_keeps_its_four_answers_apart() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "transfer-ownership",
+                200,
+                json!({ "eligibleOwners": [
+                    { "id": "dana", "name": "Dana", "email": "dana@x.io" }
+                ]}),
+            )
+            .push_json("transfer-ownership", 200, json!({ "eligibleOwners": [] }))
+            .push_json(
+                "transfer-ownership",
+                403,
+                json!({ "error": "Only the owner can transfer" }),
+            )
+            .push_json("transfer-ownership", 404, json!({ "error": "not found" }))
+            .push_json(
+                "transfer-ownership",
+                200,
+                json!({ "message": "Ownership transferred successfully" }),
+            ),
+    );
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "ownerId": "me" }))
+                .expect("a list"),
+        )
+        .expect("stores");
 
-    let minted = call(&app, json!({ "kind": "createMcpToken" })).await;
+    let settings = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+    assert_eq!(
+        settings["value"]["canTransferOwnership"], true,
+        "{settings}"
+    );
+    assert_eq!(
+        settings["value"]["canLeave"], false,
+        "an owner is not offered a plain Leave"
+    );
 
-    assert_eq!(minted["ok"], true, "{minted}");
-    assert_eq!(minted["value"]["token"], "mcp_live_abc");
+    let probe = call(&app, json!({ "kind": "eligibleNewOwners", "listId": "l1" })).await;
+    assert_eq!(probe["ok"], true, "{probe}");
+    assert_eq!(probe["value"]["availability"], "available");
+    assert_eq!(probe["value"]["owners"][0]["id"], "dana");
+
+    let nobody = call(&app, json!({ "kind": "eligibleNewOwners", "listId": "l1" })).await;
+    assert_eq!(nobody["value"]["availability"], "noEligibleOwners");
+
+    let refused = call(&app, json!({ "kind": "eligibleNewOwners", "listId": "l1" })).await;
+    assert_eq!(refused["ok"], true, "a refusal is a state, not an error");
+    assert_eq!(refused["value"]["availability"], "notPermitted");
+
+    let undeployed = call(&app, json!({ "kind": "eligibleNewOwners", "listId": "l1" })).await;
+    assert_eq!(undeployed["value"]["availability"], "unavailable");
+
+    let done = call(
+        &app,
+        json!({ "kind": "transferListOwnership", "listId": "l1", "newOwnerId": "dana" }),
+    )
+    .await;
+    assert_eq!(done["ok"], true, "{done}");
+    let sent = transport.requests();
+    let post = sent
+        .iter()
+        .find(|request| request.method.as_str() == "POST")
+        .expect("a POST");
+    assert!(post.url.ends_with("/api/v1/lists/l1/transfer-ownership"));
+    assert!(app.store.list("l1").expect("reads").is_none());
 }
 
-/// The secret exists in plaintext exactly once, in this answer. A creation that reported only
-/// success would leave the pair unusable and unrecoverable.
+// ── Connections: what can act as the account (astrid-web #285) ───────────────────────────
+
+/// The panel is the server's rows grouped the way the web groups them — three sections, not
+/// five — each row stamped with its review, and the count of rows that look unused up top. The
+/// clock is 2026-09-07, so a client made in May and never used is 129 days old.
 #[tokio::test]
-async fn registering_a_pair_answers_with_the_secret_shown_once() {
+async fn the_connections_panel_groups_by_category_and_reviews_the_unused() {
     let app = app_with(StubTransport::new().push_json(
+        "users/me/connections",
+        200,
+        json!({
+            "connections": [
+                { "id": "c1", "kind": "oauthClient", "category": "app", "owner": "you", "name": "My script",
+                  "actsAs": null, "scopes": ["tasks:read"], "createdAt": "2026-05-01T10:00:00Z",
+                  "lastUsedAt": null, "expiresAt": null, "status": "active", "revocable": true,
+                  "manageIn": "connections", "detail": { "clientId": "astrid_client_1" } },
+                { "id": "tok-1", "kind": "accessToken", "category": "token", "owner": null,
+                  "name": "GitHub Copilot cloud agent", "actsAs": "copilot@astrid.cc", "scopes": ["*"],
+                  "createdAt": "2026-05-01T10:00:00Z", "lastUsedAt": null, "expiresAt": "2027-05-01T10:00:00Z",
+                  "status": "active", "revocable": true, "manageIn": "agents" },
+            ],
+            "meta": { "apiVersion": "v1", "authSource": "session", "total": 2 },
+        }),
+    ));
+
+    let panel = call(&app, json!({ "kind": "connections" })).await;
+    assert_eq!(panel["ok"], true, "{panel}");
+    let sections = panel["value"]["sections"].as_array().expect("sections");
+    assert_eq!(sections.len(), 2);
+    assert_eq!(sections[0]["titleKey"], "connections.category.app");
+    assert_eq!(sections[0]["showsOwnerBadges"], true);
+    assert_eq!(sections[0]["rows"][0]["owner"], "you");
+    assert_eq!(
+        sections[0]["rows"][0]["editableClientId"],
+        "astrid_client_1"
+    );
+    assert_eq!(sections[0]["rows"][0]["review"]["reason"], "neverUsed");
+    assert_eq!(sections[0]["rows"][0]["review"]["days"], 129);
+    assert_eq!(sections[1]["titleKey"], "connections.category.token");
+    assert!(
+        sections[1]["rows"][0]["review"].is_null(),
+        "an access token records no usage and is never suggested"
+    );
+    assert_eq!(panel["value"]["reviewCount"], 1);
+    assert!(panel["value"]["connections"][0]["clientSecret"].is_null());
+}
+
+/// A revoke names the row's kind and id together, since ids repeat across kinds; a kind this
+/// build cannot name is refused before anything is sent.
+#[tokio::test]
+async fn revoking_a_connection_addresses_it_by_kind_and_id_and_refuses_an_unknown_kind() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "users/me/connections",
+        200,
+        json!({ "success": true, "kind": "authorizedApp", "id": "dcr-1" }),
+    ));
+
+    let done = call(
+        &app,
+        json!({ "kind": "revokeConnection", "connectionKind": "authorizedApp", "id": "dcr-1" }),
+    )
+    .await;
+    assert_eq!(done["ok"], true, "{done}");
+    let sent = transport.requests();
+    assert!(
+        sent.iter()
+            .any(|request| request.method.as_str() == "DELETE"
+                && request
+                    .url
+                    .ends_with("/api/v1/users/me/connections/authorizedApp/dcr-1")),
+        "sent: {:?}",
+        sent.iter().map(|request| &request.url).collect::<Vec<_>>()
+    );
+
+    let refused = call(
+        &app,
+        json!({ "kind": "revokeConnection", "connectionKind": "quantumLink", "id": "future-1" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false);
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "an unknown kind never reaches the server"
+    );
+}
+
+/// The secret exists in plaintext exactly once, in this answer. The body carries what the
+/// developer console sends: a trimmed name, the scopes, the grants in wire order.
+#[tokio::test]
+async fn registering_a_client_answers_with_the_secret_shown_once() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
         "oauth/clients",
         201,
         json!({
-            "client": {
-                "clientId": "astrid_client_abc",
-                "clientSecret": "shown-once",
-                "name": "Windows fixall",
-            },
+            "client": { "clientId": "astrid_client_abc", "clientSecret": "shown-once", "name": "Windows fixall" },
             "warning": "Save the client_secret now",
         }),
     ));
 
     let minted = call(
         &app,
-        json!({ "kind": "createOAuthClient", "name": "Windows fixall" }),
+        json!({
+            "kind": "createOAuthClient",
+            "name": "  Windows fixall  ",
+            "description": "",
+            "scopes": ["tasks:read", "lists:read"],
+            "grantTypes": ["client_credentials"],
+            "redirectUriText": "",
+        }),
     )
     .await;
 
     assert_eq!(minted["ok"], true, "{minted}");
     assert_eq!(minted["value"]["clientId"], "astrid_client_abc");
     assert_eq!(minted["value"]["clientSecret"], "shown-once");
+    let sent = transport.requests();
+    let body: serde_json::Value =
+        serde_json::from_slice(&sent[0].body.clone().unwrap_or_default()).expect("a body");
+    assert_eq!(body["name"], "Windows fixall");
+    assert_eq!(body["grantTypes"], json!(["client_credentials"]));
+    assert!(body.get("description").is_none(), "{body}");
+    assert!(body.get("redirectUris").is_none(), "{body}");
 }
 
-/// Listing hands back no secret at all — the server holds a hash, and a field that was
-/// sometimes a secret and sometimes null is a field somebody will try to read.
+/// A draft the core can reject is one the server never sees.
 #[tokio::test]
-async fn listing_the_pairs_never_carries_a_secret() {
-    let app = app_with(StubTransport::new().push_json(
-        "oauth/clients",
-        200,
-        json!({
-            "clients": [
-                {
-                    "clientId": "astrid_client_abc",
-                    "name": "CI",
-                    "scopes": ["tasks:read"],
-                    "isActive": true,
-                },
-            ],
-        }),
-    ));
+async fn an_invalid_client_draft_never_reaches_the_server() {
+    let (app, transport) = app_and_transport(StubTransport::new());
 
-    let panel = call(&app, json!({ "kind": "apiAccess" })).await;
-
-    assert_eq!(panel["ok"], true, "{panel}");
-    assert_eq!(
-        panel["value"]["clients"][0]["clientId"],
-        "astrid_client_abc"
-    );
-    assert!(panel["value"]["clients"][0]["clientSecret"].is_null());
-}
-
-/// The delete route matches the public half. Sending anything else answers 404, which on
-/// screen is a pair that will not go away.
-#[tokio::test]
-async fn revoking_a_pair_addresses_it_by_its_public_half() {
-    let (app, transport) = app_and_transport(StubTransport::new().push_json(
-        "oauth/clients",
-        200,
-        json!({ "success": true }),
-    ));
-
-    let done = call(
+    let refused = call(
         &app,
-        json!({ "kind": "deleteOAuthClient", "clientId": "astrid_client_abc" }),
+        json!({ "kind": "createOAuthClient", "name": "   ", "grantTypes": ["client_credentials"] }),
     )
     .await;
 
-    assert_eq!(done["ok"], true, "{done}");
-    let sent = transport.requests();
-    assert!(
-        sent.iter().any(|request| request
-            .url
-            .ends_with("/api/v1/oauth/clients/astrid_client_abc")),
-        "addressed by the public half; sent: {:?}",
-        sent.iter().map(|request| &request.url).collect::<Vec<_>>()
+    assert_eq!(refused["ok"], false);
+    assert!(transport.requests().is_empty());
+}
+
+/// The editor asks the core on every keystroke: the first problem to fix, and the grants after
+/// a toggle — with `refresh_token` and `authorization_code` travelling together, and the last
+/// grant refusing to go.
+#[tokio::test]
+async fn checking_a_draft_names_the_first_problem_and_toggles_grants_in_pairs() {
+    let app = app_with(StubTransport::new());
+
+    let check = call(
+        &app,
+        json!({
+            "kind": "checkOAuthClientDraft",
+            "name": "Browser app",
+            "grantTypes": ["client_credentials"],
+            "toggleGrant": "authorization_code",
+        }),
+    )
+    .await;
+    assert_eq!(check["ok"], true, "{check}");
+    assert_eq!(
+        check["value"]["grantTypes"],
+        json!(["client_credentials", "authorization_code", "refresh_token"])
     );
+    assert_eq!(check["value"]["problem"]["key"], "redirectRequired");
+    assert_eq!(check["value"]["canSend"], false);
+    assert!(check["value"]["scopes"]
+        .as_array()
+        .expect("scopes")
+        .iter()
+        .any(|scope| scope == "chat:write"));
+
+    let last = call(
+        &app,
+        json!({
+            "kind": "checkOAuthClientDraft",
+            "name": "Script",
+            "grantTypes": ["client_credentials"],
+            "toggleGrant": "client_credentials",
+        }),
+    )
+    .await;
+    assert_eq!(
+        last["value"]["grantTypes"],
+        json!(["client_credentials"]),
+        "the last grant cannot be turned off"
+    );
+    assert_eq!(last["value"]["canSend"], true);
+
+    let bad_uri = call(
+        &app,
+        json!({
+            "kind": "checkOAuthClientDraft",
+            "name": "Browser app",
+            "grantTypes": ["authorization_code", "refresh_token"],
+            "redirectUriText": "myapp://cb",
+        }),
+    )
+    .await;
+    assert_eq!(bad_uri["value"]["problem"]["key"], "redirectInvalid");
+    assert_eq!(bad_uri["value"]["problem"]["uri"], "myapp://cb");
+}
+
+/// An edit loads the client — the list knows its id but not its redirect URIs — and writes back
+/// only the URIs.
+#[tokio::test]
+async fn editing_a_client_loads_it_and_writes_back_only_its_redirect_uris() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "oauth/clients/astrid_client_abc",
+                200,
+                json!({
+                    "client": { "clientId": "astrid_client_abc", "name": "Browser app",
+                                "redirectUris": ["https://old.test/cb"],
+                                "grantTypes": ["authorization_code", "refresh_token"],
+                                "scopes": ["tasks:read"], "isActive": true },
+                }),
+            )
+            .push_json(
+                "oauth/clients/astrid_client_abc",
+                200,
+                json!({
+                    "client": { "clientId": "astrid_client_abc", "name": "Browser app",
+                                "redirectUris": ["https://new.test/cb"],
+                                "grantTypes": ["authorization_code", "refresh_token"],
+                                "scopes": ["tasks:read"], "isActive": true },
+                }),
+            ),
+    );
+
+    let loaded = call(
+        &app,
+        json!({ "kind": "loadOAuthClient", "clientId": "astrid_client_abc" }),
+    )
+    .await;
+    assert_eq!(loaded["ok"], true, "{loaded}");
+    assert_eq!(
+        loaded["value"]["redirectUris"],
+        json!(["https://old.test/cb"])
+    );
+    assert_eq!(
+        loaded["value"]["grantTypes"],
+        json!(["authorization_code", "refresh_token"])
+    );
+
+    let updated = call(
+        &app,
+        json!({
+            "kind": "updateOAuthClient",
+            "clientId": "astrid_client_abc",
+            "name": "Browser app",
+            "grantTypes": ["authorization_code", "refresh_token"],
+            "redirectUriText": "https://new.test/cb\n\nhttps://other.test/cb",
+        }),
+    )
+    .await;
+    assert_eq!(updated["ok"], true, "{updated}");
+    let sent = transport.requests();
+    let put = sent
+        .iter()
+        .find(|request| request.method.as_str() == "PUT")
+        .expect("a PUT");
+    let body: serde_json::Value =
+        serde_json::from_slice(&put.body.clone().unwrap_or_default()).expect("a body");
+    assert_eq!(
+        body,
+        json!({ "redirectUris": ["https://new.test/cb", "https://other.test/cb"] })
+    );
+
+    // Clearing the callback of an authorization-code client is not savable.
+    let refused = call(
+        &app,
+        json!({
+            "kind": "updateOAuthClient",
+            "clientId": "astrid_client_abc",
+            "name": "Browser app",
+            "grantTypes": ["authorization_code", "refresh_token"],
+            "redirectUriText": "",
+        }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false);
+}
+
+/// The preset request carries only the preset and the agent: scopes and grant types are the
+/// server's decision, never the client's.
+#[tokio::test]
+async fn minting_transport_credentials_sends_only_the_preset_and_the_agent() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "oauth/clients",
+        201,
+        json!({ "client": { "clientId": "astrid_client_minted", "clientSecret": "shh" } }),
+    ));
+
+    let minted = call(
+        &app,
+        json!({ "kind": "mintTransportCredentials", "preset": "webhookServer", "agent": "claude" }),
+    )
+    .await;
+
+    assert_eq!(minted["ok"], true, "{minted}");
+    assert_eq!(minted["value"]["clientId"], "astrid_client_minted");
+    assert_eq!(minted["value"]["clientSecret"], "shh");
+    let sent = transport.requests();
+    let body: serde_json::Value =
+        serde_json::from_slice(&sent[0].body.clone().unwrap_or_default()).expect("a body");
+    assert_eq!(
+        body,
+        json!({ "preset": "webhookServer", "agent": "claude" })
+    );
+
+    let refused = call(
+        &app,
+        json!({ "kind": "mintTransportCredentials", "preset": "anything", "agent": "claude" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false);
 }
 
 // ── The webhook, and the agents an account registers itself ──────────────────────────────

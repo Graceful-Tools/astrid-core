@@ -796,6 +796,49 @@ impl ListService {
         Ok(())
     }
 
+    /// Who this list may be handed to.
+    ///
+    /// The server decides: it excludes AI agents (an agent cannot stand as a list's billing
+    /// authority), people with a pending invitation (not members yet) and the owner themself, so
+    /// no client re-derives the rule from the roster, where three copies would drift. An empty
+    /// list is a 200 — "nobody to hand it to yet" — and is told apart from a refusal by
+    /// [`transfer_availability`].
+    pub async fn eligible_new_owners(&self, list_id: &str) -> Result<Vec<crate::model::User>> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::transfer_ownership(list_id));
+        let answer: serde_json::Value = self.context.client.send(request).await?;
+        Ok(answer
+            .get("eligibleOwners")
+            .and_then(serde_json::Value::as_array)
+            .map(|owners| {
+                owners
+                    .iter()
+                    .filter_map(|owner| serde_json::from_value(owner.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Hand the list to `new_owner_id` and leave it, in ONE call.
+    ///
+    /// The server does both in one transaction — `ownerId` moves, the new owner's member row
+    /// goes, the caller's row goes — so there is no window where the transfer landed and the
+    /// leave did not, and no `leave` afterwards against a list the caller is no longer on. The
+    /// cache drops the list as [`leave`](Self::leave) does. Online-only, like every membership
+    /// write: an optimistic owner change would fool every permission check until it was undone.
+    pub async fn transfer_ownership(&self, list_id: &str, new_owner_id: &str) -> Result<()> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::transfer_ownership(list_id))
+            .value(json!({ "newOwnerId": new_owner_id }));
+        self.context.client.send(request).await?;
+        self.context.store.delete_list(list_id)?;
+        Ok(())
+    }
+
     fn require(&self, id: &str) -> Result<TaskList> {
         self.context
             .store
@@ -804,6 +847,39 @@ impl ListService {
                 kind: "list",
                 id: id.to_string(),
             })
+    }
+}
+
+/// What the leave control offers an owner right now (Apple `ListOwnershipTransfer`, AITD-392).
+///
+/// The probe has four meaningfully different answers, and the point of this type is that they
+/// stay four rather than collapsing into "worked" and "didn't":
+///
+/// - people came back → offer the picker;
+/// - the list came back EMPTY → "you may, but there is nobody yet" — a 200, not an error;
+/// - 403 → not the owner. The server, not the client, decides this; show nothing;
+/// - 404 or unreachable → the route is not deployed, or the network failed. astrid-web does not
+///   auto-deploy, so a build can reach a server that has never heard of the endpoint, and the
+///   honest thing to show is "use the web app" rather than a broken button.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "availability")]
+pub enum TransferAvailability {
+    Unavailable,
+    NotPermitted,
+    NoEligibleOwners,
+    Available { owners: Vec<crate::model::User> },
+}
+
+/// Read the probe. Takes the result rather than performing it, so the mapping — the whole
+/// decision, and the part that is easy to get wrong — can be asserted without a server.
+pub fn transfer_availability(result: Result<Vec<crate::model::User>>) -> TransferAvailability {
+    match result {
+        Ok(owners) if owners.is_empty() => TransferAvailability::NoEligibleOwners,
+        Ok(owners) => TransferAvailability::Available { owners },
+        Err(ServiceError::Api(crate::api::ApiError::Http { status: 403, .. })) => {
+            TransferAvailability::NotPermitted
+        }
+        Err(_) => TransferAvailability::Unavailable,
     }
 }
 
@@ -1068,6 +1144,114 @@ mod tests {
         assert!(
             fixture.store.list("l1").expect("reads").is_some(),
             "the list must not vanish on a failure the user can see"
+        );
+    }
+
+    // ── Handing a list over (web tasks f4b40af3, 359ca48f; Apple AITD-392) ──────────────────
+
+    fn owner(id: &str) -> crate::model::User {
+        serde_json::from_value(json!({ "id": id, "name": id, "email": format!("{id}@x.io") }))
+            .expect("a user")
+    }
+
+    /// The four answers stay four. An empty list is "nobody yet", not a refusal; a 403 is the
+    /// server saying "not the owner"; a 404 or a dead network is "not from here, use the web".
+    #[test]
+    fn the_probe_has_four_answers_and_keeps_them_apart() {
+        assert_eq!(
+            transfer_availability(Ok(vec![owner("dana")])),
+            TransferAvailability::Available {
+                owners: vec![owner("dana")]
+            }
+        );
+        assert_eq!(
+            transfer_availability(Ok(vec![])),
+            TransferAvailability::NoEligibleOwners,
+            "an empty array is a 200 — you may, but there is nobody yet"
+        );
+        assert_eq!(
+            transfer_availability(Err(ServiceError::Api(crate::api::ApiError::Http {
+                status: 403,
+                message: "not the owner".into(),
+            }))),
+            TransferAvailability::NotPermitted
+        );
+        assert_eq!(
+            transfer_availability(Err(ServiceError::Api(crate::api::ApiError::Http {
+                status: 404,
+                message: "no such route".into(),
+            }))),
+            TransferAvailability::Unavailable,
+            "a server that has never heard of the route"
+        );
+        assert_eq!(
+            transfer_availability(Err(ServiceError::Api(crate::api::ApiError::Transport(
+                crate::api::transport::TransportError::Unreachable("offline".into())
+            )))),
+            TransferAvailability::Unavailable
+        );
+    }
+
+    /// The handover is one call — transfer and leave together — and the list leaves the cache
+    /// with it, as a plain leave does.
+    #[tokio::test]
+    async fn handing_a_list_over_posts_the_new_owner_and_drops_the_list_here() {
+        let transport = Arc::new(
+            StubTransport::new()
+                .push_json(
+                    "transfer-ownership",
+                    200,
+                    json!({ "eligibleOwners": [
+                        { "id": "dana", "name": "Dana", "email": "dana@x.io" }
+                    ]}),
+                )
+                .push_json(
+                    "transfer-ownership",
+                    200,
+                    json!({ "message": "Ownership transferred successfully" }),
+                ),
+        );
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let context = Context::new(
+            Arc::new(ApiClient::new(
+                "https://astrid.cc",
+                transport.clone(),
+                Arc::new(MemorySecureStore::new()),
+            )),
+            store.clone(),
+            Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
+        );
+        let service = context.lists();
+        store
+            .upsert_list(&list_json(
+                json!({ "id": "l1", "name": "Work", "ownerId": "me" }),
+            ))
+            .expect("stores");
+
+        let owners = service.eligible_new_owners("l1").await.expect("owners");
+        assert_eq!(owners.len(), 1);
+        assert_eq!(owners[0].id, "dana");
+
+        service
+            .transfer_ownership("l1", "dana")
+            .await
+            .expect("hands over");
+        let sent = transport.requests();
+        let post = sent
+            .iter()
+            .find(|request| request.method.as_str() == "POST")
+            .expect("a POST");
+        assert!(
+            post.url.ends_with("/api/v1/lists/l1/transfer-ownership"),
+            "{}",
+            post.url
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&post.body.clone().unwrap_or_default()).expect("a body");
+        assert_eq!(body, json!({ "newOwnerId": "dana" }));
+        assert!(
+            store.list("l1").expect("reads").is_none(),
+            "the caller is no longer on the list, so the cache lets it go"
         );
     }
 }

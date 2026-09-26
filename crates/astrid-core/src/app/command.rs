@@ -453,25 +453,50 @@ pub enum Command {
     /// The only way to know a webhook works: the URL is somebody else's server, and one nothing
     /// has ever reached is a setting that looks configured and is not.
     TestWebhook,
-    /// The client-credentials pairs this account has registered.
+    /// Everything that can act as this account, grouped and reviewed (astrid-web #285).
     ///
-    /// Read-only, so a panel can be opened without minting anything. Nothing here answers with a
-    /// secret: the server stores a hash and shows plaintext once, at creation.
-    ApiAccess,
-    /// Mint an MCP token for this device, or hand back the one it already has.
-    ///
-    /// The server decides which. Asking twice gives the same token rather than a second one, so a
-    /// screen that lost its copy can get it back without revoking anything.
-    CreateMcpToken,
-    /// Revoke every MCP token minted from a device. All of them: the endpoint takes no id.
-    RevokeMcpTokens,
-    /// Register a client-credentials pair, and answer with the secret shown only this once.
-    CreateOAuthClient {
-        name: String,
+    /// Read-only, so the panel opens without minting anything. Nothing here answers with a secret:
+    /// the server stores a hash and shows plaintext once, at creation.
+    Connections,
+    /// Stop one connection. `kind` is the path segment the server revokes by; a kind this build
+    /// cannot name is refused here rather than sent.
+    RevokeConnection {
+        /// Named for the row, not `kind`: that word is the command's own discriminator on the wire.
+        connection_kind: String,
+        id: String,
     },
-    /// Revoke one pair, addressed by its public half.
-    DeleteOAuthClient {
+    /// One OAuth client, for editing — the connections list knows its id but not its redirect URIs.
+    LoadOAuthClient {
         client_id: String,
+    },
+    /// Judge a draft as it is typed: the first problem to fix, the grants after a toggle with the
+    /// pairing the web applies, the URIs as lines, and the scopes a picker may offer. Pure, and
+    /// asked on every edit, so the editor never has to know a rule.
+    CheckOAuthClientDraft {
+        #[serde(flatten)]
+        draft: OAuthClientDraftFields,
+        /// A grant to flip before judging, with its pair.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toggle_grant: Option<String>,
+    },
+    /// Register a client the caller shaped, and answer with the secret shown only this once. A
+    /// draft with a problem is refused here and never reaches the server.
+    CreateOAuthClient {
+        #[serde(flatten)]
+        draft: OAuthClientDraftFields,
+    },
+    /// Change a client's redirect URIs. The rest of the draft rides along so the rule that an
+    /// authorization-code client keeps a callback applies to an edit too.
+    UpdateOAuthClient {
+        client_id: String,
+        #[serde(flatten)]
+        draft: OAuthClientDraftFields,
+    },
+    /// Client credentials for a transport the agents page configures (`githubActions`,
+    /// `webhookServer`). The server decides scopes and grant types from the preset.
+    MintTransportCredentials {
+        preset: String,
+        agent: String,
     },
     /// The agents this account has registered of its own.
     CustomAgents,
@@ -796,6 +821,16 @@ pub enum Command {
     LeaveList {
         list_id: String,
     },
+    /// Who the owner may hand this list to — the probe behind the Transfer control. Answers with
+    /// one of four states (`services::list::TransferAvailability`), never a bare error.
+    EligibleNewOwners {
+        list_id: String,
+    },
+    /// Hand the list to another member and leave it, in one call.
+    TransferListOwnership {
+        list_id: String,
+        new_owner_id: String,
+    },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
     /// The inbox, from the cache: assigned, mentioned, replied, commented, status changed,
@@ -858,6 +893,45 @@ pub enum FailureKind {
     NotFound,
     /// The cache could not be read or written.
     Cache,
+}
+
+/// An OAuth client as the editor holds it, on the wire.
+///
+/// Grant types and scopes travel as their wire strings; the core turns them into
+/// [`crate::services::connections::OAuthClientDraft`], keeping any grant it has never heard of so
+/// an edit sends it back rather than narrowing the client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OAuthClientDraftFields {
+    pub name: String,
+    pub description: String,
+    pub scopes: Vec<String>,
+    pub grant_types: Vec<String>,
+    /// One URI per line, as typed.
+    pub redirect_uri_text: String,
+}
+
+impl OAuthClientDraftFields {
+    pub fn to_draft(&self) -> crate::services::connections::OAuthClientDraft {
+        use crate::services::connections::{GrantType, OAuthClientDraft};
+        OAuthClientDraft {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            scopes: self.scopes.iter().cloned().collect(),
+            grant_types: self
+                .grant_types
+                .iter()
+                .filter_map(|raw| GrantType::parse(raw))
+                .collect(),
+            unrecognized_grant_types: self
+                .grant_types
+                .iter()
+                .filter(|raw| GrantType::parse(raw).is_none())
+                .cloned()
+                .collect(),
+            redirect_uri_text: self.redirect_uri_text.clone(),
+        }
+    }
 }
 
 /// Why a command did not work.

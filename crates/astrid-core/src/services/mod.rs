@@ -16,12 +16,12 @@
 
 pub mod account;
 pub mod agents;
-pub mod api_access;
 pub mod attachment;
 pub mod auth;
 pub mod board;
 pub mod chat;
 pub mod comment;
+pub mod connections;
 pub mod external;
 pub mod list;
 pub mod list_defaults;
@@ -113,8 +113,8 @@ impl Context {
     }
 
     /// The credentials this account hands to something that is not a person.
-    pub fn api_access(&self) -> api_access::ApiAccessService {
-        api_access::ApiAccessService::new(self.clone())
+    pub fn connections(&self) -> connections::ConnectionsService {
+        connections::ConnectionsService::new(self.clone())
     }
 
     pub fn chat(&self) -> ChatService {

@@ -99,6 +99,11 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
         // Leaving is for a list somebody else owns: an owner leaving their own list would strand
         // it, which is what deleting is for.
         "canLeave": me.is_some() && list.owner_id.as_deref() != me.as_deref(),
+        // The owner is offered a handover instead: ownership is what `canDelete` keys on, so it
+        // is handed to someone by name rather than implied by whoever remains (Apple AITD-392).
+        // Whether there is anybody to hand it to is the server's answer, asked when the control
+        // opens (`eligibleNewOwners`).
+        "canTransferOwnership": me.is_some() && list.owner_id.is_some() && list.owner_id.as_deref() == me.as_deref(),
         "currentUserId": me,
         "members": members,
     }))
