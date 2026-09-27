@@ -299,6 +299,18 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         // copy where the checkbox would be, and the text is not for editing.
         "isCopyOnly": is_copy_only,
         "boardState": board_state,
+        // Whether to DRAW the identifier here, and whether to offer "Copy task id" — the shared
+        // show-rule (`rows::identifier`, fixture `task-identifiers.json`), asked once so the shell
+        // holds no predicate. The two disagree on purpose for a task that has left every board: it
+        // stops showing its key and goes on being copyable, because the key still resolves.
+        "showsIdentifier": rows::identifier::shows_identifier(
+            rows::Surface::Detail,
+            task.identifier.as_deref().is_some_and(|id| !id.is_empty()),
+            rows::detail::is_task_in_project(&task, &lists),
+        ),
+        "offersCopyIdentifier": rows::identifier::offers_copy_identifier(
+            task.identifier.as_deref().is_some_and(|id| !id.is_empty()),
+        ),
         "link": (!crate::model::is_temp_id(&task.id))
             .then(|| format!("{}/tasks/{}", app.context.client.base_url(), task.id)),
         "comments": comments,
