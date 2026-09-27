@@ -170,6 +170,18 @@ pub enum Command {
         /// resolve the target against.
         list_id: String,
     },
+    /// Add a card at the bottom of a column (task 95c7a68f).
+    ///
+    /// One request, not a create followed by a move: the column decides the card's lists, its role
+    /// and — for Done — that it is finished, and [`crate::board::resolve_create`] is what says so.
+    /// A card created bare and moved afterwards is the Mac's AITD-328.
+    AddBoardCard {
+        /// The list the board was opened from: the card's own list, and where the project's
+        /// columns come from.
+        list_id: String,
+        column_id: String,
+        title: String,
+    },
     /// When to be reminded about one task, as offsets from its due time.
     ReminderOptions {
         task_id: String,
@@ -248,6 +260,14 @@ pub enum Command {
         assignee_id: Option<String>,
         #[serde(default)]
         parent_task_id: Option<String>,
+        /// The board status the task is born with: a role, never a list id (task 95c7a68f). `None`
+        /// is the Inbox, which is the absence of a status rather than a status of its own.
+        ///
+        /// A card typed into a board column has to arrive WITH its role — created bare and moved
+        /// afterwards is the Mac's AITD-328, where the role was dropped in between and every card
+        /// appeared in the Inbox. See [`Command::AddBoardCard`], which is how a column asks.
+        #[serde(default)]
+        status_role: Option<String>,
         /// True when the title was typed into the quick-add box, where the web's smart parsing
         /// reads `#list` tags, dates, repeats and priorities out of it when the account has it
         /// on (task 6ac2639a, CONTRACTS.md D11). A subtask typed into a detail is not parsed, as

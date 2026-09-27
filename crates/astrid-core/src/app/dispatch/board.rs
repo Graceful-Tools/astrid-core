@@ -121,6 +121,56 @@ pub(super) fn move_task_to_column(
     move_to_column(app, &task, &lists, &columns, column_id)
 }
 
+/// Add a card at the bottom of a column (task 95c7a68f).
+///
+/// The card is BORN in the column — its lists, its role and, in Done, its completion all decided
+/// here before anything is written. Not created bare and then moved: that is the Mac's AITD-328,
+/// where the role was dropped in between and every card typed into a column appeared in the Inbox.
+///
+/// Done completes through the completion service for the same reason a card dragged there does
+/// (see [`move_task_to_column`]): `update(completed: true)` skips the repeat rollover, and a
+/// repeating card is repeating whichever gesture finished it — rule 2 of `docs/ASTRID.md` §0.
+pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: String) -> Response {
+    let lists = app.store.lists().unwrap_or_default();
+    let Some(opened) = lists.iter().find(|list| list.id == list_id) else {
+        return Response::failed(Failure::not_found("list", list_id));
+    };
+    let columns = board_columns(app, opened.project_id.as_deref());
+    let Some(target) = columns.iter().find(|column| column.id == column_id) else {
+        return Response::failed(Failure::bad_request("that column is not on this board"));
+    };
+
+    // The board's own list is the card's domain list: the column is a state, not somewhere a task
+    // can be filed, and `resolve_create` is what keeps a role out of `listIds`.
+    let born = crate::board::resolve_create(target, Some(list_id));
+    let created = match create_task(
+        app,
+        NewTask {
+            title: title.trim().to_string(),
+            description: None,
+            list_ids: born.list_ids.unwrap_or_default(),
+            priority: None,
+            due_date_time: None,
+            is_all_day: None,
+            assignee_id: None,
+            parent_task_id: None,
+            status_role: born.status_role,
+            // Not the quick-add box: a card typed into a column is a title, and the web's board
+            // form does not read `#list` tags out of one either.
+            quick_add: false,
+            locale: None,
+        },
+    ) {
+        Ok(task) => task,
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    if target.kind == crate::board::ColumnKind::Done {
+        return answer(app.context.tasks().complete(&created.id, true, None, None));
+    }
+    Response::ok(created)
+}
+
 /// A project's columns, or the ones every board shares when there is no project.
 pub(super) fn board_columns(app: &App, project_id: Option<&str>) -> Vec<crate::board::BoardColumn> {
     let project = project_id.and_then(|id| {

@@ -4,6 +4,149 @@
 
 use super::*;
 
+/// Everything a new task can be told, as `createTask` says it.
+///
+/// A struct rather than eleven parameters because there are two callers now: the `createTask` arm
+/// and the board's own add-a-card (task 95c7a68f), which has to pick up a list's defaults and the
+/// rest of [`create_task`]'s work rather than reach for `TaskService::create` on its own.
+pub(super) struct NewTask {
+    pub title: String,
+    pub description: Option<String>,
+    pub list_ids: Vec<String>,
+    pub priority: Option<i64>,
+    pub due_date_time: Option<String>,
+    pub is_all_day: Option<bool>,
+    pub assignee_id: Option<String>,
+    pub parent_task_id: Option<String>,
+    pub status_role: Option<String>,
+    pub quick_add: bool,
+    pub locale: Option<String>,
+}
+
+/// Make a task: what the caller said, plus what its list says a new task looks like.
+pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<crate::model::Task> {
+    let NewTask {
+        title,
+        description,
+        list_ids,
+        priority,
+        due_date_time,
+        is_all_day,
+        assignee_id,
+        parent_task_id,
+        status_role,
+        quick_add,
+        locale,
+    } = new;
+
+    // What the caller said, before the fields move into the draft: a list's defaults
+    // fill in only what was left unsaid (task c4102c67).
+    let given = crate::services::list_defaults::Given {
+        priority: priority.is_some(),
+        due: due_date_time.is_some(),
+        assignee: assignee_id.is_some(),
+        repeating: false,
+        is_private: false,
+    };
+    let mut draft = TaskDraft::new(title);
+    draft.description = description.unwrap_or_default();
+    draft.list_ids = list_ids;
+    if let Some(priority) = priority {
+        draft.priority = crate::model::Priority::from_i64(priority);
+    }
+    draft.due_date_time = due_date_time.as_deref().and_then(date::parse);
+    if let Some(all_day) = is_all_day {
+        draft.is_all_day = all_day;
+    }
+    draft.assignee_id = assignee_id;
+    draft.parent_task_id = parent_task_id;
+    // A role, never a list id: one bad id rejects the whole write, and the board resolves a card's
+    // column from the role first (task 95c7a68f).
+    draft.status_role = status_role;
+
+    let lists = app.store.lists().unwrap_or_default();
+    let mut given = given;
+    // What the quick-add box reads out of a sentence when the account has smart parsing
+    // on — `#list` tags, "tomorrow", "weekly mon and wed", "urgent" — by the web's rule,
+    // in the reader's language, in the core (tasks 6ac2639a and CONTRACTS.md D11). A
+    // person who turned it off on the web gets the same plain title here. The tagged
+    // lists come first and the open list after, as the web orders them. A title that was
+    // nothing but keywords keeps its words: a task named after its filing beats an
+    // untitled one.
+    if quick_add
+        && app
+            .context
+            .account()
+            .smart_tasks()
+            .smart_task_creation_enabled
+    {
+        let keywords = crate::parse::smart::Keywords::for_locale(locale.as_deref().unwrap_or("en"));
+        let today = crate::filters::local_day(app.clock.now(), app.clock.utc_offset());
+        let read = crate::parse::smart::parse(&draft.title, &lists, keywords, today);
+        draft.title = read.title;
+        if !read.list_ids.is_empty() {
+            let mut filed = read.list_ids;
+            for id in draft.list_ids.drain(..) {
+                if !filed.contains(&id) {
+                    filed.push(id);
+                }
+            }
+            draft.list_ids = filed;
+        }
+        // A date word is a calendar day here, stored the way every all-day date is
+        // (CONTRACTS.md D12). It counts as given, so a list's own default does not
+        // overrule what the person typed.
+        if let Some(day) = read.due_day {
+            if draft.due_date_time.is_none() {
+                draft.due_date_time = Some(date::all_day_instant(day));
+                draft.is_all_day = true;
+            }
+            given.due = true;
+        }
+        if let Some(priority) = read.priority {
+            draft.priority = crate::model::Priority::from_i64(priority);
+            given.priority = true;
+        }
+        if let Some(repeating) = read.repeating.as_deref() {
+            draft.repeating = Some(match repeating {
+                "daily" => crate::model::Repeating::Daily,
+                "weekly" => crate::model::Repeating::Weekly,
+                "monthly" => crate::model::Repeating::Monthly,
+                "yearly" => crate::model::Repeating::Yearly,
+                _ => crate::model::Repeating::Custom,
+            });
+            if repeating == "custom" {
+                draft.repeating_data = Some(crate::model::CustomRepeatingPattern {
+                    r#type: Some("custom".into()),
+                    unit: Some("weeks".into()),
+                    interval: Some(1),
+                    end_condition: Some("never".into()),
+                    weekdays: Some(read.weekdays),
+                    ..Default::default()
+                });
+            }
+            given.repeating = true;
+        }
+    }
+
+    // The first of the task's lists the cache knows decides the defaults — a task filed
+    // in two lists takes the first one's, as the web takes its target list's.
+    if let Some(list) = draft
+        .list_ids
+        .iter()
+        .find_map(|id| lists.iter().find(|list| &list.id == id))
+    {
+        crate::services::list_defaults::apply(
+            &mut draft,
+            given,
+            list,
+            app.clock.now(),
+            app.clock.utc_offset(),
+        );
+    }
+    app.context.tasks().create(&draft)
+}
+
 /// The stable name the shell dispatches on.
 ///
 /// Spelled out rather than derived from the enum's `Debug`, because these strings cross the
