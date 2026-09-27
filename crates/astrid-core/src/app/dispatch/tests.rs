@@ -2866,6 +2866,191 @@ async fn a_board_answers_with_its_columns_and_their_cards() {
     assert_eq!(columns[0]["total"], 0);
 }
 
+/// A board with one list in it, for the add-a-card tests below.
+async fn board_app(list: serde_json::Value) -> super::App {
+    let app = app_with(StubTransport::new());
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Ship it" })).expect("a project"),
+        ])
+        .expect("stores");
+    app.store
+        .upsert_list(&serde_json::from_value(list).expect("a list"))
+        .expect("stores");
+    app
+}
+
+/// A card typed into a column is BORN in that column — role and all, in one request (task
+/// 95c7a68f).
+///
+/// The Mac's AITD-328: a first version dropped the status role on the way through, so a card
+/// typed into Doing was created with no role, resolved to Inbox, and appeared there. Hence the
+/// assertion on the role itself and not only on which column the board draws it in.
+#[tokio::test]
+async fn a_card_typed_into_a_column_is_born_in_it_task_95c7a68f() {
+    let app = board_app(json!({ "id": "l1", "name": "Work", "projectId": "p1" })).await;
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "doing",
+            "title": "  Write it down  ",
+        }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["title"], "Write it down", "trimmed");
+    assert_eq!(made["value"]["statusRole"], "doing");
+    assert_eq!(made["value"]["listIds"], json!(["l1"]));
+    assert_eq!(made["value"]["completed"], false);
+
+    let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+    let columns = board["value"]["columns"].as_array().expect("columns");
+    let doing = columns
+        .iter()
+        .find(|column| column["id"] == "doing")
+        .expect("a doing column");
+    assert_eq!(doing["total"], 1, "in the column it was typed into");
+    assert_eq!(doing["cards"][0]["title"], "Write it down");
+    assert_eq!(columns[0]["total"], 0, "and not in the Inbox");
+}
+
+/// Inbox has no status, so a card typed there carries no role — and a column that is not on this
+/// board is refused rather than guessed at (task 95c7a68f).
+#[tokio::test]
+async fn a_card_typed_into_the_inbox_carries_no_role_task_95c7a68f() {
+    let app = board_app(json!({ "id": "l1", "name": "Work", "projectId": "p1" })).await;
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "__virtual_inbox__",
+            "title": "Write it down",
+        }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(
+        made["value"]["statusRole"].is_null(),
+        "Inbox is the absence of a status, not a status called Inbox"
+    );
+
+    let refused = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "not-a-column",
+            "title": "Write it down",
+        }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["kind"], "badRequest");
+}
+
+/// A card typed into Done is completed through the COMPLETION SERVICE, not by writing the flag
+/// (task 95c7a68f, ASTRID.md §0 rule 2).
+///
+/// The list's own default repeat is what makes this provable: `update(completed: true)` would
+/// leave a finished daily task, while `complete_task` rolls it forward to tomorrow and leaves it
+/// open. The same test therefore shows that a card typed into a column takes its list's defaults,
+/// because it goes through the one create path the quick-add box uses.
+#[tokio::test]
+async fn a_card_typed_into_done_is_completed_through_the_service_task_95c7a68f() {
+    let app = board_app(json!({
+        "id": "l1",
+        "name": "Work",
+        "projectId": "p1",
+        "defaultRepeating": "daily",
+        "defaultDueDate": "today",
+        "defaultPriority": 3,
+    }))
+    .await;
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "__virtual_done__",
+            "title": "Water the plants",
+        }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(
+        made["value"]["priority"], 3,
+        "the list's default reached it"
+    );
+    assert_eq!(made["value"]["repeating"], "daily");
+    assert_eq!(
+        made["value"]["completed"], false,
+        "a repeating card completed in Done rolls forward rather than finishing"
+    );
+    let due = made["value"]["dueDateTime"]
+        .as_str()
+        .expect("a due date from the list's default");
+    let today = crate::filters::local_day(app.clock.now(), app.clock.utc_offset());
+    assert_eq!(
+        due,
+        crate::model::date::format(crate::model::date::all_day_instant(
+            today + chrono::Duration::days(1)
+        )),
+        "rolled to tomorrow, which only the completion service does"
+    );
+}
+
+/// An ordinary card typed into Done is simply done, and the board draws it there (task 95c7a68f).
+#[tokio::test]
+async fn an_ordinary_card_typed_into_done_lands_in_done_task_95c7a68f() {
+    let app = board_app(json!({ "id": "l1", "name": "Work", "projectId": "p1" })).await;
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "__virtual_done__",
+            "title": "Write it down",
+        }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["completed"], true);
+
+    let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+    let columns = board["value"]["columns"].as_array().expect("columns");
+    let done = columns
+        .iter()
+        .find(|column| column["id"] == "__virtual_done__")
+        .expect("a done column");
+    assert_eq!(done["total"], 1);
+    assert_eq!(done["cards"][0]["title"], "Write it down");
+}
+
+/// `createTask` can say which status a task is born with (task 95c7a68f). The draft and the
+/// service already carried it; the command was the only thing that could not express it.
+#[tokio::test]
+async fn create_task_can_carry_a_status_role_task_95c7a68f() {
+    let app = app_with(StubTransport::new());
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Write it down", "statusRole": "doing" }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["statusRole"], "doing");
+}
+
 /// The detail carries a BOARD STATE row for a task on a board (task 5221e43f): the board's
 /// columns as chips with Done left out and the current one lit, in list mode only, and never
 /// for a task with no board column. The rule is the one the Mac, iOS and the web share.

@@ -477,6 +477,7 @@ mod tests {
             is_all_day: None,
             assignee_id: None,
             parent_task_id: None,
+            status_role: None,
             quick_add: false,
             locale: None,
         })
