@@ -151,6 +151,17 @@ function exportSmart() {
   return runDriver('smart.mjs', 'smart')
 }
 
+// Task identifiers (`AWTD-1007`) are the one contract here whose canonical form is a hand-authored
+// CASE SET rather than an implementation to run: the server is the only minter, so there is no
+// client-side arithmetic to execute — only parsing, autolinking and showing, which every client has
+// to agree on. astrid-web owns the cases (docs/specs/TASK_IDENTIFIERS.md §"Consistency across
+// clients" says to change them there first); copying them through here rather than by hand is what
+// makes `--check` fail the moment web edits one.
+function exportTaskIdentifiers() {
+  const { $comment, ...rest } = JSON.parse(read('tests/fixtures/task-identifiers.json'))
+  return { $source: $comment, ...rest }
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
@@ -160,6 +171,7 @@ const EXPORTS = {
   'editing.json': exportEditing,
   'search.json': exportSearch,
   'smart.json': exportSmart,
+  'task-identifiers.json': exportTaskIdentifiers,
 }
 
 let failed = false

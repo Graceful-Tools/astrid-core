@@ -175,6 +175,8 @@ pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "id": row.id,
                 "title": row.title,
                 "identifier": row.identifier,
+                "showsIdentifier": row.shows_identifier,
+                "offersCopyIdentifier": row.offers_copy_identifier,
                 "completed": row.completed,
                 "priority": row.priority.as_i64(),
                 "due": due_json(&row.due),

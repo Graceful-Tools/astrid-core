@@ -23,6 +23,7 @@ pub mod credential;
 pub mod detail;
 pub mod due_picks;
 pub mod filter_picks;
+pub mod identifier;
 pub mod list_picks;
 pub mod reminder_picks;
 pub mod repeat;
@@ -290,8 +291,16 @@ pub fn day_offset(
 pub struct TaskRow {
     pub id: String,
     pub title: String,
-    /// `AST-142`, when the task has one. Drawn small beside the title, as the web draws it.
+    /// `AST-142`, when the task has one. Present whenever the task has an id, because a row is also
+    /// where "Copy task id" is offered — see `shows_identifier` for whether it is DRAWN.
     pub identifier: Option<String>,
+    /// Whether this row draws its identifier: board cards do, list rows never (`rows::identifier`).
+    /// Carried per row rather than asked per surface by the shell, so a list and a board cannot
+    /// disagree about one task.
+    pub shows_identifier: bool,
+    /// Whether the row's menu offers "Copy task id". True whenever there is an id at all, including
+    /// on rows that do not draw it.
+    pub offers_copy_identifier: bool,
     pub completed: bool,
     pub priority: Priority,
     pub due: DueLabel,
@@ -379,10 +388,19 @@ impl TaskRow {
             })
             .collect();
 
+        let has_identifier = task.identifier.as_deref().is_some_and(|id| !id.is_empty());
+        let shows_identifier = identifier::shows_identifier(
+            context.surface,
+            has_identifier,
+            detail::is_task_in_project(task, context.lists),
+        );
+
         TaskRow {
             id: task.id.clone(),
             title: task.title.clone(),
             identifier: task.identifier.clone(),
+            shows_identifier,
+            offers_copy_identifier: identifier::offers_copy_identifier(has_identifier),
             completed: task.completed,
             priority: task.priority,
             due: DueLabel::for_due(
