@@ -461,3 +461,22 @@ What is genuinely lost is the server's permission filter *in the query*
 offered as a blocker; the write is then refused server-side, which is the right outcome reached
 late rather than early. Growing a server-search path in the core would close it, and is its own
 task rather than a detail of the Waiting on row (task 69a840a4).
+
+### D19 — a dependency cycle is reported by the journal here, not by the picker
+
+`TASK_BLOCKING_DEPENDENCIES.md` gives the picker a `cycleError` — "those tasks would end up
+waiting for each other" — because web POSTs the link and reads the `409 dependency_cycle` in the
+same click. `Command::AddTaskBlocker` cannot: the write is optimistic and journalled
+(`services::dependency::add`), so it has already answered by the time the request goes, and the
+`409` arrives in `outbox::handlers::add_task_blocker`, which dead-letters the entry.
+
+So a client here has nothing to draw that copy from at pick time, and the Windows shell words its
+one failure case — a refusal the core itself returns — as "could not wait on that task" instead
+(`detail.waiting_on_error`).
+
+This is very nearly unreachable rather than merely unreported: `pickable` already drops every id in
+`dependentIds`, so the picker does not offer a task that would cycle. What remains is the race —
+two devices adding opposite edges before either syncs — and a dead-lettered entry with the reason
+on it, which is what every other refused write here also leaves behind. Saying it at the moment of
+the pick would mean giving up the optimistic write, and blocking a task on a plane is worth more
+than a message about a case the picker will not offer (task 69a840a4).
