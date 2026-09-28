@@ -87,6 +87,13 @@ pub mod kind {
     /// one, and neither needs a client request id to be safe.
     pub const ADD_TASK_BLOCKER: &str = "addTaskBlocker";
     pub const REMOVE_TASK_BLOCKER: &str = "removeTaskBlocker";
+    /// Who is on a list, changed while offline (`services::members`). Online these are sent at
+    /// once and never journalled, so a refusal reaches the person who asked.
+    pub const INVITE_TO_LIST: &str = "inviteToList";
+    pub const SET_MEMBER_ROLE: &str = "setMemberRole";
+    pub const REMOVE_MEMBER: &str = "removeMember";
+    pub const CANCEL_INVITATION: &str = "cancelInvitation";
+    pub const SET_INVITATION_ROLE: &str = "setInvitationRole";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,9 +203,17 @@ impl Entry {
                 field("commentId").map(|id| format!("comment:{id}"))
             }
             kind::SEND_CHAT_MESSAGE => field("channelId").map(|id| format!("channel:{id}")),
-            kind::CREATE_LIST | kind::UPDATE_LIST | kind::DELETE_LIST | kind::SET_MANUAL_ORDER => {
-                field("listId").map(|id| format!("list:{id}"))
-            }
+            // A list's membership changes share its lane: an invitation to a list created offline
+            // waits for the list, and two changes to one list keep their order.
+            kind::CREATE_LIST
+            | kind::UPDATE_LIST
+            | kind::DELETE_LIST
+            | kind::SET_MANUAL_ORDER
+            | kind::INVITE_TO_LIST
+            | kind::SET_MEMBER_ROLE
+            | kind::REMOVE_MEMBER
+            | kind::CANCEL_INVITATION
+            | kind::SET_INVITATION_ROLE => field("listId").map(|id| format!("list:{id}")),
             _ => None,
         };
         // An entry whose payload does not name its subject gets a lane of its own rather than

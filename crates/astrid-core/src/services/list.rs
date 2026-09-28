@@ -772,27 +772,39 @@ impl ListService {
 
     // ─── Membership ───────────────────────────────────────────────────────────────────────────
     //
-    // These reach the network directly rather than through the Outbox, and that is deliberate: an
-    // invitation is not a local fact. Queuing one offline would show a member in the list who does
-    // not exist, and the "optimistic" row would be indistinguishable from a real one to every
-    // permission check that reads it afterwards.
+    // Changing who is on a list — inviting, a role, removing — is `services::members`: sent at
+    // once, and queued only when the network is what failed.
 
     /// The roster, from the server, and kept on the cached list afterwards — the same place the
     /// lists payload puts it — so the next open draws it at once and the permission helpers read
     /// the roster the screen shows.
     pub async fn members(&self, list_id: &str) -> Result<Vec<ListMember>> {
+        Ok(self.roster(list_id).await?.0)
+    }
+
+    /// [`Self::members`], with this account's relationship to the list as the server states it
+    /// (`user_role`). "viewer" is a non-member looking at a public list, where the roster comes
+    /// back EMPTY rather than refused — so an empty roster means "not shown to you", not "nobody
+    /// here" (Apple task 4a338b53). Absent from older servers.
+    pub async fn roster(&self, list_id: &str) -> Result<(Vec<ListMember>, Option<String>)> {
         let request = self.context.client.get(endpoints::list_members(list_id));
-        let members = self
-            .context
-            .client
-            .send_collection::<ListMember>(request, Some(endpoints::envelope::MEMBERS))
-            .await?
-            .into_items();
+        let answer = self.context.client.send(request).await?;
+        let viewer_role = answer
+            .get("user_role")
+            .and_then(|role| role.as_str())
+            .map(str::to_string);
+        let members: Vec<ListMember> = crate::model::lenient(
+            answer
+                .get(endpoints::envelope::MEMBERS)
+                .cloned()
+                .unwrap_or(answer),
+        )
+        .into_items();
         if let Some(mut list) = self.context.store.list(list_id)? {
             list.list_members = Some(members.clone());
             self.context.store.upsert_list(&list)?;
         }
-        Ok(members)
+        Ok((members, viewer_role))
     }
 
     /// The roster as last seen — from the lists payload, or from the last [`Self::members`].
@@ -808,35 +820,6 @@ impl ListService {
             .list(list_id)?
             .and_then(|list| list.list_members)
             .unwrap_or_default())
-    }
-
-    pub async fn invite(&self, list_id: &str, email: &str, role: &str) -> Result<()> {
-        let request = self
-            .context
-            .client
-            .post(endpoints::list_members(list_id))
-            .value(json!({ "email": email, "role": role }));
-        self.context.client.send(request).await?;
-        Ok(())
-    }
-
-    pub async fn set_member_role(&self, list_id: &str, user_id: &str, role: &str) -> Result<()> {
-        let request = self
-            .context
-            .client
-            .put(endpoints::list_member(list_id, user_id))
-            .value(json!({ "role": role }));
-        self.context.client.send(request).await?;
-        Ok(())
-    }
-
-    pub async fn remove_member(&self, list_id: &str, user_id: &str) -> Result<()> {
-        let request = self
-            .context
-            .client
-            .delete(endpoints::list_member(list_id, user_id));
-        self.context.client.send(request).await?;
-        Ok(())
     }
 
     pub async fn leave(&self, list_id: &str) -> Result<()> {
@@ -1140,26 +1123,6 @@ mod tests {
         let list = list_json(json!({ "id": "l1", "name": "Home", "ownerId": "owner" }));
         assert!(!fixture.service.can_view("stranger", &list));
         assert!(fixture.service.can_view("owner", &list));
-    }
-
-    /// An invitation is not a local fact: it goes over the wire, and a failure is a failure the
-    /// user has to see rather than a member row that quietly is not one.
-    #[tokio::test]
-    async fn inviting_someone_goes_to_the_server_rather_than_the_journal() {
-        let fixture = fixture_with(StubTransport::new().push_json(
-            "/api/v1/lists/l1/members",
-            200,
-            json!({ "ok": true }),
-        ));
-        fixture
-            .service
-            .invite("l1", "ada@example.com", "member")
-            .await
-            .expect("invites");
-        assert!(
-            journal::all(&fixture.store).expect("reads").is_empty(),
-            "membership does not travel through the Outbox"
-        );
     }
 
     #[tokio::test]

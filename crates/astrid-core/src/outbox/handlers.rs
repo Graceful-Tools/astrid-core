@@ -71,6 +71,11 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::UPDATE_COMMENT => update_comment(client, store, entry).await,
         kind::DELETE_COMMENT => delete_comment(client, store, entry).await,
         kind::SEND_CHAT_MESSAGE => send_chat_message(client, store, entry).await,
+        kind::INVITE_TO_LIST => invite_to_list(client, store, entry).await,
+        kind::SET_MEMBER_ROLE => set_member_role(client, entry).await,
+        kind::REMOVE_MEMBER => remove_member(client, entry).await,
+        kind::CANCEL_INVITATION => cancel_invitation(client, entry).await,
+        kind::SET_INVITATION_ROLE => set_invitation_role(client, entry).await,
         kind::CREATE_LIST => create_list(client, store, entry).await,
         kind::UPDATE_LIST => update_list(client, store, entry).await,
         kind::DELETE_LIST => delete_list(client, store, entry).await,
@@ -392,6 +397,94 @@ async fn send_chat_message(client: &ApiClient, store: &Store, entry: &Entry) -> 
             Outcome::producing("messageId", &sent.id)
         }
         Err(error) => from_error(error),
+    }
+}
+
+/// Deliver an invitation made offline, and put the server's answer — a member, or an invitation
+/// waiting — where this device's queued one was.
+async fn invite_to_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let list_id = match id(entry, "listId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .post(endpoints::list_members(list_id))
+        .value(with_client_request_id(
+            body(entry),
+            &entry.client_request_id,
+        ));
+    match client.send(request).await {
+        Ok(answer) => {
+            let text = |key: &str| entry.payload["body"][key].as_str().unwrap_or_default();
+            crate::services::members::record_invite_answer(
+                store,
+                list_id,
+                text("email"),
+                text("role"),
+                entry.temp_id.as_deref(),
+                &answer,
+            );
+            Outcome::Done(None)
+        }
+        Err(error) => from_error(error),
+    }
+}
+
+async fn set_member_role(client: &ApiClient, entry: &Entry) -> Outcome {
+    let (Ok(list_id), Ok(user_id)) = (id(entry, "listId"), id(entry, "userId")) else {
+        return Outcome::Dead("a role change that names no member".into());
+    };
+    let request = client
+        .put(endpoints::list_member(list_id, user_id))
+        .value(body(entry));
+    done_or(client.send(request).await)
+}
+
+/// Removing somebody already gone is the outcome asked for.
+async fn remove_member(client: &ApiClient, entry: &Entry) -> Outcome {
+    let (Ok(list_id), Ok(user_id)) = (id(entry, "listId"), id(entry, "userId")) else {
+        return Outcome::Dead("a removal that names no member".into());
+    };
+    gone_is_done(
+        client
+            .send(client.delete(endpoints::list_member(list_id, user_id)))
+            .await,
+    )
+}
+
+async fn cancel_invitation(client: &ApiClient, entry: &Entry) -> Outcome {
+    let list_id = match id(entry, "listId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .delete(endpoints::list_invitations(list_id))
+        .value(body(entry));
+    gone_is_done(client.send(request).await)
+}
+
+async fn set_invitation_role(client: &ApiClient, entry: &Entry) -> Outcome {
+    let list_id = match id(entry, "listId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .put(endpoints::list_invitations(list_id))
+        .value(body(entry));
+    done_or(client.send(request).await)
+}
+
+fn done_or(sent: Result<serde_json::Value, ApiError>) -> Outcome {
+    match sent {
+        Ok(_) => Outcome::Done(None),
+        Err(error) => from_error(error),
+    }
+}
+
+fn gone_is_done(sent: Result<serde_json::Value, ApiError>) -> Outcome {
+    match sent {
+        Err(error) if error.status() == Some(404) => Outcome::Done(None),
+        other => done_or(other),
     }
 }
 

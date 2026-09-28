@@ -598,3 +598,15 @@ Web's `parseTaskInput` answers `priority || undefined`, so "low priority" (0) is
 words leave the title and the picker or the list's default decides. Apple's parser answered 0,
 which overrode a list whose default is high. **Resolved 2026-09-28:** Apple asks this crate.
 
+
+### D31 — membership changes offline: Apple queued them, the core refused them
+
+The Apple apps queued an invitation, a role change or a removal made offline and sent it when
+the network returned; the core (and so Windows) refused all three offline, on the grounds that
+a queued invitation would show a member who does not exist to every permission check. Web is
+online-only by nature. **Resolved 2026-09-28** in favour of the queue, without the hazard:
+every change is sent at once and a refusal fails the command, as before; only when the request
+never reached the server is it journalled (`services::members`). A queued invitation is kept
+among the list's pending **invitations**, which no permission check reads, never among its
+members; the server's answer replaces it. Changes to one list keep their order in the list's
+lane.

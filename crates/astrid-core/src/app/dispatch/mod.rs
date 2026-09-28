@@ -998,8 +998,14 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .await,
         ),
         Command::RefreshListMembers { list_id } => {
-            match app.context.lists().members(&list_id).await {
-                Ok(_) => list_members(app, &list_id),
+            match app.context.lists().roster(&list_id).await {
+                Ok((_, viewer_role)) => {
+                    let mut answer = list_members(app, &list_id);
+                    if let Some(value) = answer.value.as_mut() {
+                        value["viewerRole"] = serde_json::json!(viewer_role);
+                    }
+                    answer
+                }
                 Err(error) => Response::failed(error.into()),
             }
         }
@@ -1007,20 +1013,36 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             list_id,
             email,
             role,
-        } => answer_done(app.context.lists().invite(&list_id, &email, &role).await),
+        } => answer(app.context.members().invite(&list_id, &email, &role).await),
         Command::SetMemberRole {
             list_id,
             user_id,
             role,
-        } => answer_done(
+        } => answer(
             app.context
-                .lists()
-                .set_member_role(&list_id, &user_id, &role)
+                .members()
+                .set_role(&list_id, &user_id, &role)
                 .await,
         ),
         Command::RemoveMember { list_id, user_id } => {
-            answer_done(app.context.lists().remove_member(&list_id, &user_id).await)
+            answer(app.context.members().remove(&list_id, &user_id).await)
         }
+        Command::CancelInvitation { list_id, email } => answer(
+            app.context
+                .members()
+                .cancel_invitation(&list_id, &email)
+                .await,
+        ),
+        Command::SetInvitationRole {
+            list_id,
+            email,
+            role,
+        } => answer(
+            app.context
+                .members()
+                .set_invitation_role(&list_id, &email, &role)
+                .await,
+        ),
         Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
         Command::Notifications => inbox_response(app.context.notifications().inbox()),

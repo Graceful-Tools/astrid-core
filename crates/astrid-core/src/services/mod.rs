@@ -26,6 +26,7 @@ pub mod dependency;
 pub mod external;
 pub mod list;
 pub mod list_defaults;
+pub mod members;
 pub mod notifications;
 pub mod search;
 pub mod share;
@@ -83,6 +84,10 @@ impl Context {
     /// A board's columns: changed on the server, mirrored into the cache.
     pub fn boards(&self) -> BoardService {
         BoardService::new(self.clone())
+    }
+
+    pub fn members(&self) -> members::MemberService {
+        members::MemberService::new(self.clone())
     }
 
     pub fn comments(&self) -> CommentService {

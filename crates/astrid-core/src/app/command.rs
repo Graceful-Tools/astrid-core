@@ -1053,6 +1053,10 @@ pub enum Command {
         list_id: String,
     },
     /// Invite somebody by email.
+    ///
+    /// Membership changes are sent at once, and a refusal fails the command; only a failed
+    /// network queues one, answering `{ "queued": true }` with the cache already showing it. An
+    /// invitation answers with the `member` it made or the `invitation` waiting.
     InviteToList {
         list_id: String,
         email: String,
@@ -1066,6 +1070,17 @@ pub enum Command {
     RemoveMember {
         list_id: String,
         user_id: String,
+    },
+    /// Withdraw an invitation not yet accepted, by the address it went to.
+    CancelInvitation {
+        list_id: String,
+        email: String,
+    },
+    /// Change an invitation's role before it is accepted.
+    SetInvitationRole {
+        list_id: String,
+        email: String,
+        role: String,
     },
     /// Leave a list somebody else owns.
     LeaveList {

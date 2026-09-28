@@ -2728,6 +2728,30 @@ async fn a_list_with_no_channel_has_an_empty_chat_rather_than_an_error() {
         .is_empty());
 }
 
+/// A public list shown to somebody not on it answers an EMPTY roster rather than a refusal; the
+/// server's `user_role` is what tells "not shown to you" from "nobody here" (Apple 4a338b53).
+#[tokio::test]
+async fn a_refreshed_roster_says_how_this_account_sees_the_list() {
+    let transport = StubTransport::new().push_json(
+        "/members",
+        200,
+        json!({ "members": [], "user_role": "viewer" }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Public", "privacy": "PUBLIC" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    let roster = call(
+        &app,
+        json!({ "kind": "refreshListMembers", "listId": "l1" }),
+    )
+    .await;
+    assert_eq!(roster["value"]["viewerRole"], "viewer", "{roster}");
+}
+
 /// Membership comes with what this account may do about it, decided by the permission rules
 /// rather than by a screen — the failure mode is a control that 403s, or one that quietly is
 /// not offered to somebody who should have it.
