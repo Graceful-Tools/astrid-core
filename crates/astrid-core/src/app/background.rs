@@ -284,7 +284,11 @@ pub fn default_sync_interval() -> Duration {
 pub async fn realtime_loop(app: Arc<App>, should_continue: impl Fn() -> bool + Send + Copy) {
     while should_continue() {
         if !app.auth.is_signed_in().await {
-            tokio::time::sleep(SIGNED_OUT_RETRY).await;
+            tokio::select! {
+                _ = tokio::time::sleep(SIGNED_OUT_RETRY) => {}
+                // A sign-in says so, rather than waiting out the retry.
+                _ = app.realtime.woken() => {}
+            }
             continue;
         }
 

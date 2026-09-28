@@ -824,6 +824,18 @@ async fn a_callback_nobody_asked_for_is_refused() {
 }
 
 /// A callback that arrives after signing out must not sign the user back in.
+/// An open live stream is authenticated with the departing account's cookie, and would keep
+/// delivering that account's events into the cache the next person sees. Signing out drops it; the
+/// loop then waits for a new session.
+#[tokio::test]
+async fn signing_out_drops_the_live_stream() {
+    let app = app_with(StubTransport::new());
+    call(&app, json!({ "kind": "signOut" })).await;
+    tokio::time::timeout(std::time::Duration::from_millis(50), app.realtime().woken())
+        .await
+        .expect("the stream was told to start over");
+}
+
 #[tokio::test]
 async fn signing_out_abandons_a_sign_in_in_progress() {
     let app = app_with(StubTransport::new());

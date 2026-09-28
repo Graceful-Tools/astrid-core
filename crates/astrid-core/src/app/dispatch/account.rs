@@ -51,7 +51,12 @@ pub(super) async fn sign_out(app: &App) -> Response {
             .attachments(app.attachment_cache())
             .pending_dir(),
     );
-    match app.context.account().sign_out().await {
+    let signed_out = app.context.account().sign_out().await;
+    // After the credentials are gone, not before: dropped earlier, the stream would reconnect at
+    // once with the departing account's cookie and carry on delivering its events into the cache
+    // the next person sees. Now its reconnect finds no session and waits for one.
+    app.realtime().reconnect_now();
+    match signed_out {
         Ok(()) => Response::done(),
         Err(error) => Response::failed(error.into()),
     }
