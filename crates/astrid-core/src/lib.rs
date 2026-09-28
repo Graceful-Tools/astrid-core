@@ -22,6 +22,7 @@ pub mod board;
 pub mod editing;
 pub mod external;
 pub mod filters;
+pub mod identifier;
 pub mod keyboard;
 pub mod manual_order;
 pub mod markdown;

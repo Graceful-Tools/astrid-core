@@ -10,9 +10,12 @@
 //! What is locked: which of the three surfaces shows the id for each combination of "has an id" and
 //! "is on a board", and whether "Copy task id" is offered at all.
 //!
-//! The `parse` and `autolink` halves of the same fixture belong to the autolinking work (Windows
-//! task `5f3453e2`) and are not replayed here yet.
+//! The `parse` and `autolink` halves of the same fixture are replayed here too (task `5f3453e2`).
+//! They are the other way the same rule drifts: a client that autolinks `UTF-8` because it never
+//! checked the key against the reader's projects, or that links an id the reader cannot open and
+//! leaves them at a 404, has not made a formatting mistake — it has invented a different rule.
 
+use astrid_core::identifier::{find_links, parse_identifier, LinkContext};
 use astrid_core::model::{Task, TaskList};
 use astrid_core::rows::detail::is_task_in_project;
 use astrid_core::rows::identifier::{offers_copy_identifier, shows_identifier};
@@ -25,7 +28,54 @@ const FIXTURE: &str = include_str!("../../../contracts/fixtures/task-identifiers
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Fixture {
+    parse: Vec<ParseCase>,
+    autolink: Autolink,
     show_rule: ShowRule,
+}
+
+#[derive(Deserialize)]
+struct ParseCase {
+    input: String,
+    expected: Option<ParsedCase>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ParsedCase {
+    key: String,
+    sequence: u64,
+}
+
+#[derive(Deserialize)]
+struct Autolink {
+    cases: Vec<AutolinkCase>,
+}
+
+#[derive(Deserialize)]
+struct AutolinkCase {
+    name: String,
+    text: String,
+    context: FixtureContext,
+    links: Vec<ExpectedLink>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureContext {
+    project_key: Option<String>,
+    keys: Vec<String>,
+    #[serde(default)]
+    hidden: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExpectedLink {
+    #[serde(rename = "match")]
+    matched: String,
+    identifier: String,
+    href: String,
 }
 
 #[derive(Deserialize)]
@@ -81,10 +131,13 @@ fn surface_of(name: &str) -> Surface {
     }
 }
 
+fn fixture() -> Fixture {
+    serde_json::from_str(FIXTURE).expect("contracts/fixtures/task-identifiers.json parses")
+}
+
 #[test]
 fn every_show_rule_case_matches_web() {
-    let fixture: Fixture =
-        serde_json::from_str(FIXTURE).expect("contracts/fixtures/task-identifiers.json parses");
+    let fixture = fixture();
     assert!(
         !fixture.show_rule.cases.is_empty(),
         "the show-rule cases went missing — the fixture shape changed"
@@ -113,6 +166,85 @@ fn every_show_rule_case_matches_web() {
             case.name,
             if case.copy { "" } else { "not " }
         );
+    }
+}
+
+#[test]
+fn every_parse_case_matches_web() {
+    let fixture = fixture();
+    assert!(!fixture.parse.is_empty(), "the parse cases went missing");
+
+    for case in &fixture.parse {
+        let actual = parse_identifier(&case.input);
+        let why = case.note.as_deref().unwrap_or("no note");
+        match &case.expected {
+            Some(expected) => {
+                let parsed = actual.unwrap_or_else(|| {
+                    panic!("{:?} should parse ({why})", case.input);
+                });
+                assert_eq!(parsed.key, expected.key, "{:?}: key ({why})", case.input);
+                assert_eq!(
+                    parsed.sequence, expected.sequence,
+                    "{:?}: sequence ({why})",
+                    case.input
+                );
+            }
+            None => assert!(
+                actual.is_none(),
+                "{:?} should not parse ({why})",
+                case.input
+            ),
+        }
+    }
+}
+
+#[test]
+fn every_autolink_case_matches_web() {
+    let fixture = fixture();
+    assert!(
+        !fixture.autolink.cases.is_empty(),
+        "the autolink cases went missing"
+    );
+
+    for case in &fixture.autolink.cases {
+        let context = LinkContext {
+            project_key: case.context.project_key.clone(),
+            keys: case.context.keys.clone(),
+            hidden: case.context.hidden.clone(),
+        };
+        let found = find_links(&case.text, &context);
+
+        assert_eq!(
+            found.len(),
+            case.links.len(),
+            "{}: expected {} link(s), found {:?}",
+            case.name,
+            case.links.len(),
+            found
+                .iter()
+                .map(|link| link.matched.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        for (actual, expected) in found.iter().zip(&case.links) {
+            assert_eq!(
+                actual.matched, expected.matched,
+                "{}: matched text",
+                case.name
+            );
+            assert_eq!(
+                actual.identifier, expected.identifier,
+                "{}: identifier",
+                case.name
+            );
+            assert_eq!(actual.href, expected.href, "{}: href", case.name);
+            assert_eq!(
+                &case.text[actual.index..actual.index + actual.matched.len()],
+                actual.matched,
+                "{}: index must point at the match in the ORIGINAL text, since that is what a                  renderer slices",
+                case.name
+            );
+        }
     }
 }
 

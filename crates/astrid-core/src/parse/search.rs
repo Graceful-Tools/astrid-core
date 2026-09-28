@@ -92,19 +92,14 @@ fn state_alias(value: &str) -> Option<&'static str> {
     })
 }
 
-/// `^[A-Za-z][A-Za-z0-9]{1,4}-\d+$`, spelled out.
+/// Is this token an identifier rather than a word to search for?
+///
+/// The format itself belongs to [`crate::identifier::parse_identifier`], which the shared fixture
+/// locks (task 5f3453e2). This was a second spelling of the same pattern, and the two had already
+/// drifted: it accepted `AB-0`, which the fixture says is not an identifier because sequences start
+/// at 1. A search for `AB-0` is now a search, not a lookup that cannot hit.
 fn is_identifier(token: &str) -> bool {
-    let Some((key, number)) = token.split_once('-') else {
-        return false;
-    };
-    let mut chars = key.chars();
-    let first_is_letter = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
-    let rest_ok = chars.all(|c| c.is_ascii_alphanumeric());
-    first_is_letter
-        && rest_ok
-        && (2..=5).contains(&key.len())
-        && !number.is_empty()
-        && number.chars().all(|c| c.is_ascii_digit())
+    crate::identifier::parse_identifier(token).is_some()
 }
 
 /// Split on whitespace while respecting double quotes, so `list:"Bugs and Polish"` survives as
@@ -222,6 +217,8 @@ mod tests {
         assert!(!is_identifier("a-1"), "the key needs two characters");
         assert!(!is_identifier("toolong-1"));
         assert!(!is_identifier("1ab-2"));
+        // The format is the shared one now, so the fixture's rejections hold here too.
+        assert!(!is_identifier("AB-0"), "sequences start at 1");
     }
 
     #[test]
