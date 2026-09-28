@@ -842,6 +842,77 @@ pub(super) fn assignee_options(app: &App, task_id: &str) -> Response {
     }))
 }
 
+/// What quick-add's leading control shows before anything is typed, and who it may offer
+/// (task 8aa5732c).
+///
+/// The answer is produced by making the draft that [`create_task`] would make and reading it back,
+/// rather than by a second copy of the same rules. The control is a PREVIEW of the task about to
+/// exist: if it said "unassigned" and the created task came out assigned — which is exactly what
+/// `list_defaults` does for a list with no default (task e2505d10) — the picker would be lying about
+/// its own effect. One code path, so it cannot drift.
+///
+/// Whose face goes on the control is [`crate::rows::LeadingControl::for_task`], the same rule the
+/// rows use, in list mode, because this sits above a list.
+pub(super) fn quick_add_defaults(app: &App, list_id: Option<&str>) -> Response {
+    let lists = app.store.lists().unwrap_or_default();
+    let list = list_id.and_then(|id| lists.iter().find(|list| list.id == id));
+    let me = app.context.account().current_user_id().ok().flatten();
+
+    // An empty title: nothing has been typed yet, and no field of the draft this reads depends on
+    // one. Smart parsing is deliberately NOT run — it reads priority out of a sentence, and a
+    // control that changed as somebody typed "urgent" would fight the choice they made in it.
+    let mut draft = TaskDraft::new("");
+    if let Some(list) = list {
+        draft.list_ids = vec![list.id.clone()];
+        crate::services::list_defaults::apply(
+            &mut draft,
+            crate::services::list_defaults::Given::default(),
+            list,
+            me.as_deref(),
+            app.clock.now(),
+            app.clock.utc_offset(),
+        );
+    } else {
+        // A pseudo-list — My Tasks — has no defaults to apply, and the web falls back to the
+        // current user there rather than to nobody (`components/quick-add.tsx`).
+        draft.assignee_id = me.clone();
+    }
+
+    let known = app.store.users().unwrap_or_default();
+    let agents: Vec<crate::model::User> = known
+        .iter()
+        .filter(|user| user.is_agent())
+        .cloned()
+        .collect();
+    let current_user = app.context.account().current_user().ok().flatten();
+    // Whoever the defaults just chose has to be representable, or the picker cannot show its own
+    // starting value for a list whose default assignee is not one of its loaded members.
+    let chosen =
+        crate::rows::assignee::resolve(draft.assignee_id.as_deref(), &[known.as_slice()], None);
+    let list_ids: Vec<String> = draft.list_ids.clone();
+    let options = crate::rows::assignee::options(&crate::rows::assignee::AssigneeSources {
+        lists: &lists,
+        task_list_ids: &list_ids,
+        agents: &agents,
+        current_assignee: chosen.as_ref(),
+        current_user: current_user.as_ref(),
+        ..Default::default()
+    });
+
+    let leading = crate::rows::LeadingControl::for_task(
+        draft.assignee_id.as_deref(),
+        me.as_deref(),
+        crate::rows::DisplayMode::List,
+    );
+
+    Response::ok(serde_json::json!({
+        "priority": draft.priority.as_i64(),
+        "assigneeId": draft.assignee_id,
+        "leading": super::row_json::leading_json(&leading),
+        "options": options,
+    }))
+}
+
 /// Read an edit from the shape the shell sends.
 ///
 /// A field that is **present and null** clears; a field that is **absent** is left alone. That is

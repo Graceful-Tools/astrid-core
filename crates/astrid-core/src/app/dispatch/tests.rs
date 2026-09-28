@@ -3105,6 +3105,129 @@ async fn a_list_that_says_unassigned_still_makes_an_unassigned_task_task_e2505d1
     );
 }
 
+/// Quick-add's leading control is a PREVIEW of the task about to exist, so it is answered by the
+/// same `list_defaults` pass `createTask` runs (task 8aa5732c).
+///
+/// The failure this guards against is the picker and the create disagreeing. A list with no default
+/// assignee makes a task that is MINE (task e2505d10) — so the control above it has to draw a
+/// checkbox, not the unassigned mark. A second copy of the rule in the shell, or in this command,
+/// is how those two drift apart.
+#[tokio::test]
+async fn quick_add_previews_the_task_it_would_make_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "defaultPriority": 2 }))
+                .expect("a list"),
+        )
+        .expect("stores");
+
+    let shown = call(&app, json!({ "kind": "quickAddDefaults", "listId": "l1" })).await;
+    assert_eq!(shown["ok"], true, "{shown}");
+    assert_eq!(
+        shown["value"]["leading"]["kind"], "checkbox",
+        "a list with no default assignee makes a task that is mine, so the control is a checkbox: \
+         {shown}"
+    );
+    assert_eq!(shown["value"]["assigneeId"], "me", "{shown}");
+    assert_eq!(
+        shown["value"]["priority"], 2,
+        "the list's own default priority, which is what tints the control: {shown}"
+    );
+    assert!(
+        shown["value"]["options"][0]["userId"].is_null(),
+        "unassigned is offered first, as in every other picker: {shown}"
+    );
+
+    // And the preview told the truth: creating with nothing said produces exactly that.
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Plan", "listIds": ["l1"] }),
+    )
+    .await;
+    assert_eq!(made["value"]["assigneeId"], shown["value"]["assigneeId"]);
+    assert_eq!(made["value"]["priority"], shown["value"]["priority"]);
+}
+
+/// A list that says `unassigned` is previewed as unassigned — the control shows the list's choice
+/// rather than overruling it with "well, you are adding it" (task 8aa5732c).
+#[tokio::test]
+async fn a_list_that_says_unassigned_previews_unassigned_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(
+                json!({ "id": "l1", "name": "Triage", "defaultAssigneeId": "unassigned" }),
+            )
+            .expect("a list"),
+        )
+        .expect("stores");
+
+    let shown = call(&app, json!({ "kind": "quickAddDefaults", "listId": "l1" })).await;
+    assert_eq!(shown["value"]["leading"]["kind"], "unassigned", "{shown}");
+    assert!(shown["value"]["assigneeId"].is_null(), "{shown}");
+    assert_eq!(shown["value"]["priority"], 0, "{shown}");
+}
+
+/// A list whose default assignee is somebody else draws THEIR mark, which is the third state the
+/// control has — and the one the web's `selectedAssignee?.id === currentUser?.id` arm misses if the
+/// shell tries to decide it (task 8aa5732c).
+#[tokio::test]
+async fn a_list_assigned_to_somebody_else_previews_their_mark_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(
+                json!({ "id": "l1", "name": "Ops", "defaultAssigneeId": "dana" }),
+            )
+            .expect("a list"),
+        )
+        .expect("stores");
+
+    let shown = call(&app, json!({ "kind": "quickAddDefaults", "listId": "l1" })).await;
+    assert_eq!(shown["value"]["leading"]["kind"], "avatar", "{shown}");
+    assert_eq!(shown["value"]["leading"]["userId"], "dana", "{shown}");
+    assert_eq!(shown["value"]["assigneeId"], "dana", "{shown}");
+}
+
+/// No list — My Tasks — still offers the reader and still starts on them. A picker that came up
+/// empty there is the bug `rows::assignee` already guards for a task with no resolvable lists.
+#[tokio::test]
+async fn quick_add_without_a_list_is_still_mine_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let shown = call(&app, json!({ "kind": "quickAddDefaults" })).await;
+    assert_eq!(shown["ok"], true, "{shown}");
+    assert_eq!(shown["value"]["leading"]["kind"], "checkbox", "{shown}");
+    assert_eq!(shown["value"]["assigneeId"], "me", "{shown}");
+    assert!(
+        shown["value"]["options"].as_array().expect("options").len() >= 2,
+        "unassigned and me at the least: {shown}"
+    );
+}
+
+/// Signed out there is no creator, so the control is the unassigned mark rather than somebody
+/// else's face. Same arm as `with_no_known_creator_the_task_stays_unassigned`.
+#[tokio::test]
+async fn signed_out_quick_add_shows_unassigned_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    let shown = call(&app, json!({ "kind": "quickAddDefaults" })).await;
+    assert_eq!(shown["value"]["leading"]["kind"], "unassigned", "{shown}");
+    assert!(shown["value"]["assigneeId"].is_null(), "{shown}");
+}
+
 /// `createTask` can say which status a task is born with (task 95c7a68f). The draft and the
 /// service already carried it; the command was the only thing that could not express it.
 #[tokio::test]

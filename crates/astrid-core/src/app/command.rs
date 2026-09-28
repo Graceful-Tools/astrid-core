@@ -215,6 +215,19 @@ pub enum Command {
     AssigneeOptions {
         task_id: String,
     },
+    /// What quick-add's leading control shows before anything is typed, and who it may offer
+    /// (task 8aa5732c).
+    ///
+    /// The web's quick-add resolves this in the component — its own copy of "what does this list
+    /// assign a new task to", of `getPriorityColor`, and of the three states the control has. Asking
+    /// for it means the answer is the same one [`Command::CreateTask`] will act on, because both go
+    /// through [`crate::services::list_defaults`]; a picker that previewed one thing and created
+    /// another would be worse than no picker.
+    ///
+    /// `list_id` is the list being added to, or `None` for a pseudo-list like My Tasks.
+    QuickAddDefaults {
+        list_id: Option<String>,
+    },
     /// The signed-in user.
     CurrentUser,
     /// Whether there is a stored session. Not whether it is still valid — only the server knows
