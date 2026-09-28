@@ -58,7 +58,16 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
     if let Some(all_day) = is_all_day {
         draft.is_all_day = all_day;
     }
-    draft.assignee_id = assignee_id;
+    // `"unassigned"` is a choice, not a user id — the same spelling `quickAddDefaults` reads and
+    // that a list's own default uses. It still counts as GIVEN above, so the list's default does
+    // not overrule a deliberate choice of nobody; only the id itself goes. Without this the two
+    // doors disagreed: quick-add previewed the unassigned mark and then created a task assigned to
+    // a person called `unassigned`, which is the one thing the preview exists to prevent
+    // (task 8aa5732c).
+    draft.assignee_id = match assignee_id.as_deref() {
+        Some("unassigned") | Some("") => None,
+        _ => assignee_id,
+    };
     draft.parent_task_id = parent_task_id;
     // A role, never a list id: one bad id rejects the whole write, and the board resolves a card's
     // column from the role first (task 95c7a68f).

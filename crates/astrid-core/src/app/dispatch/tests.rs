@@ -3280,6 +3280,55 @@ async fn a_pick_in_quick_add_is_previewed_by_the_same_rule_task_8aa5732c() {
     assert_eq!(urgent["value"]["priority"], 3, "{urgent}");
 }
 
+/// The preview and the create must read the sentinel the same way (task 8aa5732c).
+///
+/// `quickAddDefaults` translated `"unassigned"` to nobody; `createTask` did not, and stored it as
+/// though it were a user id — so a quick-add that previewed the unassigned mark produced a task
+/// assigned to a person called `unassigned`, which is the one thing the preview exists to prevent.
+/// Sending `null` instead is not the fix: an absent assignee is unsaid, and the list's default
+/// would then overrule a deliberate choice of nobody. The sentinel is how "nobody, on purpose" is
+/// spelled, and it has to mean that at both doors.
+#[tokio::test]
+async fn create_reads_the_unassigned_sentinel_as_the_preview_does_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    // A list with no default assignee, so "unset means the creator" is what a plain create does —
+    // which is exactly what a choice of nobody has to beat.
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work" })).expect("a list"),
+        )
+        .expect("stores");
+
+    let previewed = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "l1", "assigneeId": "unassigned" }),
+    )
+    .await;
+    assert!(previewed["value"]["assigneeId"].is_null(), "{previewed}");
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "createTask",
+            "title": "Nobody's job",
+            "listIds": ["l1"],
+            "assigneeId": "unassigned",
+        }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(
+        made["value"]["assigneeId"].is_null(),
+        "the sentinel is a choice, not a user id: {made}"
+    );
+    // And it really was a choice — the list's "unset means you" did not fill it back in.
+    assert_ne!(made["value"]["assigneeId"], "me", "{made}");
+}
+
 /// `createTask` can say which status a task is born with (task 95c7a68f). The draft and the
 /// service already carried it; the command was the only thing that could not express it.
 #[tokio::test]
