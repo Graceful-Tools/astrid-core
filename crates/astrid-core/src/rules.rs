@@ -75,6 +75,18 @@ pub enum Rule {
         #[serde(default)]
         task_creator_id: Option<String>,
     },
+    /// What a quick-add line says — its title, `#lists`, date word, repeat and priority — see
+    /// [`crate::parse::smart`]. `today` is the person's calendar day; a date word answers as a
+    /// calendar day too (`dueDay`), which a shell stores the way it stores any all-day date.
+    SmartParse {
+        text: String,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        /// The app's language (`en`, `pt-BR`, …): its keyword tables. English when unknown.
+        #[serde(default)]
+        locale: Option<String>,
+        today: chrono::NaiveDate,
+    },
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
     RenderMarkdown { text: String },
 }
@@ -131,6 +143,17 @@ pub fn run(rule: Rule) -> Response {
             Some(user) => crate::permissions::Access::of(&user, task_creator_id.as_deref(), &list),
             None => crate::permissions::Access::NONE,
         }),
+        Rule::SmartParse {
+            text,
+            lists,
+            locale,
+            today,
+        } => Response::ok(crate::parse::smart::parse(
+            &text,
+            &lists,
+            crate::parse::smart::Keywords::for_locale(locale.as_deref().unwrap_or("en")),
+            today,
+        )),
         Rule::RenderMarkdown { text } => Response::ok(crate::markdown::render(&text)),
     }
 }
@@ -245,6 +268,20 @@ mod tests {
         }));
         assert_eq!(reply["value"]["role"], serde_json::Value::Null);
         assert_eq!(reply["value"]["canView"], false);
+    }
+
+    #[test]
+    fn a_quick_add_line_parses_to_its_parts() {
+        let reply = answer(json!({
+            "kind": "smartParse",
+            "text": "Call mum tomorrow #family urgent",
+            "lists": [{ "id": "f", "name": "Family" }],
+            "today": "2026-09-28"
+        }));
+        assert_eq!(reply["value"]["title"], "Call mum");
+        assert_eq!(reply["value"]["listIds"], json!(["f"]));
+        assert_eq!(reply["value"]["dueDay"], "2026-09-29");
+        assert_eq!(reply["value"]["priority"], 3);
     }
 
     #[test]

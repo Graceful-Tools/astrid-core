@@ -92,7 +92,8 @@ const DAY_NAMES: [(&str, Weekday); 7] = [
 ];
 
 /// What the sentence said. Only what was said: list defaults are somebody else's business.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Parsed {
     /// The sentence with its words taken out — or the sentence as typed, when nothing was left.
     pub title: String,
