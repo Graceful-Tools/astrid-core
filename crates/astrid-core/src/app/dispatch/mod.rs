@@ -101,6 +101,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             lists,
             comments,
             users,
+            projects,
+            channels,
+            messages,
         } => {
             let store = &app.store;
             // Only into an empty cache: a seed over one this crate already filled would put a
@@ -114,7 +117,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .upsert_lists(&lists)
                 .and_then(|()| store.upsert_tasks(&tasks))
                 .and_then(|()| store.upsert_comments(&comments))
-                .and_then(|()| store.upsert_users(&users));
+                .and_then(|()| store.upsert_users(&users))
+                .and_then(|()| store.upsert_projects(&projects))
+                .and_then(|()| store.upsert_channels(&channels))
+                .and_then(|()| store.upsert_messages(&messages));
             match written {
                 Ok(()) => Response::ok(serde_json::json!({
                     "seeded": true,

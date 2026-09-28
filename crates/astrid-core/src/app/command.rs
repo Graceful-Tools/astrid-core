@@ -316,6 +316,12 @@ pub enum Command {
         comments: Vec<crate::model::Comment>,
         #[serde(default)]
         users: Vec<crate::model::User>,
+        #[serde(default)]
+        projects: Vec<crate::model::Project>,
+        #[serde(default)]
+        channels: Vec<crate::model::ChatChannel>,
+        #[serde(default)]
+        messages: Vec<crate::model::ChatMessage>,
     },
     // ── Writes. These update the cache and journal the change. ───────────────────────────────
     CreateTask {

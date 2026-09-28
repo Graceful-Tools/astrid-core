@@ -5109,10 +5109,19 @@ async fn a_seed_fills_an_empty_cache_once() {
         &app,
         json!({ "kind": "seedCache",
                 "lists": [{ "id": "l1", "name": "Home", "ownerId": "me", "privacy": "PRIVATE" }],
-                "tasks": [{ "id": "t1", "title": "From Core Data", "listIds": ["l1"] }] }),
+                "tasks": [{ "id": "t1", "title": "From Core Data", "listIds": ["l1"] }],
+                "projects": [{ "id": "p1", "name": "Board" }],
+                "channels": [{ "id": "c1", "listId": "l1" }],
+                "messages": [{ "id": "m1", "channelId": "c1", "content": "offline history" }] }),
     )
     .await;
     assert_eq!(seeded["value"]["seeded"], true, "{seeded}");
+    assert_eq!(
+        call(&app, json!({ "kind": "projects" })).await["value"][0]["id"],
+        "p1"
+    );
+    let chat = call(&app, json!({ "kind": "chatMessages", "channelId": "c1" })).await;
+    assert_eq!(chat["value"][0]["content"], "offline history");
     let tasks = call(&app, json!({ "kind": "tasks" })).await;
     assert_eq!(tasks["value"][0]["title"], "From Core Data");
     let journal = call(&app, json!({ "kind": "outboxStats" })).await;
