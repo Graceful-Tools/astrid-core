@@ -24,11 +24,24 @@ pub(super) fn chat(app: &App, list_id: &str) -> Response {
     let messages = app.context.chat().messages(&channel.id).unwrap_or_default();
     let me = app.context.account().current_user_id().ok().flatten();
     let people = app.store.users().unwrap_or_default();
+    // A conversation is where a task id is quoted most, so the ids in it link (task 5f3453e2).
+    // The list's own board is the one a bare `#12` means.
+    let project_id = app
+        .store
+        .lists()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|list| list.id == list_id)
+        .and_then(|list| list.project_id);
+    let identifiers = crate::identifier::context_for(
+        &app.store.projects().unwrap_or_default(),
+        project_id.as_deref(),
+    );
 
     Response::ok(serde_json::json!({
         "channelId": channel.id,
         "name": channel.name,
-        "messages": rows::chat::transcript(&messages, me.as_deref(), &people),
+        "messages": rows::chat::transcript(&messages, me.as_deref(), &people, &identifiers),
     }))
 }
 
