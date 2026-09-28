@@ -793,15 +793,13 @@ impl ListService {
             .get("user_role")
             .and_then(|role| role.as_str())
             .map(str::to_string);
-        let members: Vec<ListMember> = crate::model::lenient(
-            answer
-                .get(endpoints::envelope::MEMBERS)
-                .cloned()
-                .unwrap_or(answer),
-        )
-        .into_items();
+        let (members, invitations) = super::members::read_roster(
+            list_id,
+            answer.get(endpoints::envelope::MEMBERS).unwrap_or(&answer),
+        );
         if let Some(mut list) = self.context.store.list(list_id)? {
             list.list_members = Some(members.clone());
+            list.invitations = Some(invitations);
             self.context.store.upsert_list(&list)?;
         }
         Ok((members, viewer_role))

@@ -325,6 +325,63 @@ fn with_request_id(body: &serde_json::Value, request_id: &str) -> serde_json::Va
     body
 }
 
+/// Read `/lists/{id}/members`: the members, and the invitations waiting beside them.
+///
+/// The web flattens the person into each row — `{ id, name, email, image, role, isAIAgent,
+/// type }`, `id` being the user's — and lists pending invitations as rows of `type: "invite"`
+/// whose id is `invite_<invitation id>`. A row already in the `ListMember` shape (`userId`) is
+/// read as one.
+pub(crate) fn read_roster(
+    list_id: &str,
+    rows: &serde_json::Value,
+) -> (Vec<ListMember>, Vec<ListInvite>) {
+    let mut members = Vec::new();
+    let mut invitations = Vec::new();
+    for row in rows.as_array().into_iter().flatten() {
+        let text = |key: &str| {
+            row.get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        };
+        if row.get("type").and_then(|kind| kind.as_str()) == Some("invite") {
+            let id = text("id").unwrap_or_default();
+            invitations.push(ListInvite {
+                id: id.strip_prefix("invite_").unwrap_or(&id).to_string(),
+                list_id: list_id.to_string(),
+                email: text("email").unwrap_or_default(),
+                role: text("role").unwrap_or_default(),
+                token: String::new(),
+                created_at: None,
+                created_by: None,
+            });
+        } else if let Some(member) = read_member(list_id, row) {
+            members.push(member);
+        }
+    }
+    (members, invitations)
+}
+
+/// One member row, flattened or not.
+fn read_member(list_id: &str, row: &serde_json::Value) -> Option<ListMember> {
+    if row.get("userId").is_some() {
+        return serde_json::from_value(row.clone()).ok();
+    }
+    let user: crate::model::User = serde_json::from_value(row.clone()).ok()?;
+    Some(ListMember {
+        id: None,
+        list_id: Some(list_id.to_string()),
+        user_id: user.id.clone(),
+        role: row
+            .get("role")
+            .and_then(|role| role.as_str())
+            .unwrap_or("member")
+            .to_string(),
+        created_at: None,
+        updated_at: None,
+        user: Some(user),
+    })
+}
+
 /// Put the server's answer to an invitation in the cached list: the member it made, or the
 /// invitation it holds — replacing this device's queued invitation, `queued_id`, when there was
 /// one. Shared with the Outbox handler that delivers a queued invitation.
@@ -336,14 +393,10 @@ pub(crate) fn record_invite_answer(
     queued_id: Option<&str>,
     answer: &serde_json::Value,
 ) -> MemberChange {
-    let member: Option<ListMember> = answer
+    let member = answer
         .get("member")
         .filter(|member| !member.is_null())
-        .and_then(|member| serde_json::from_value(member.clone()).ok())
-        .map(|mut member: ListMember| {
-            member.list_id.get_or_insert_with(|| list_id.to_string());
-            member
-        });
+        .and_then(|member| read_member(list_id, member));
     let invitation = match &member {
         Some(_) => None,
         None => Some(ListInvite {
@@ -607,5 +660,57 @@ mod tests {
             .expect("members")
             .iter()
             .any(|member| member.user_id == "ada"));
+    }
+
+    /// The web's roster flattens the person into each row and lists pending invitations beside
+    /// the members (`app/api/v1/lists/[id]/members/route.ts`). Read as `ListMember`s every row was
+    /// dropped and the cached roster wiped; each row now lands where it belongs.
+    #[test]
+    fn the_webs_roster_rows_become_members_and_invitations() {
+        let rows = json!([
+            { "id": "me", "name": "Jon", "email": "jon@example.com", "image": null,
+              "role": "owner", "isOwner": true, "isAdmin": false, "isAIAgent": false, "type": "member" },
+            { "id": "bot", "name": "Claude", "email": "claude@astrid.cc", "role": "member",
+              "isOwner": false, "isAdmin": false, "isAIAgent": true, "type": "member" },
+            { "id": "invite_i1", "name": null, "email": "ada@example.com", "role": "admin",
+              "isOwner": false, "isAIAgent": false, "type": "invite" }
+        ]);
+        let (members, invitations) = read_roster("l1", &rows);
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].user_id, "me");
+        assert_eq!(members[0].role, "owner");
+        assert_eq!(
+            members[0]
+                .user
+                .as_ref()
+                .and_then(|user| user.name.as_deref()),
+            Some("Jon")
+        );
+        assert!(members[1].user.as_ref().expect("a user").is_agent());
+        assert_eq!(invitations.len(), 1);
+        assert_eq!(invitations[0].id, "i1");
+        assert_eq!(invitations[0].email, "ada@example.com");
+        assert_eq!(invitations[0].role, "admin");
+    }
+
+    /// The invite answer's `member` is the same flattened row.
+    #[tokio::test]
+    async fn an_invitation_that_found_an_account_is_read_from_the_webs_row() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/lists/l1/members",
+            200,
+            json!({ "message": "added", "member": {
+                "id": "ada", "name": "Ada", "email": "ada@example.com", "role": "member",
+                "isOwner": false, "isAdmin": false
+            } }),
+        ));
+        let change = fixture
+            .service
+            .invite("l1", "ada@example.com", "member")
+            .await
+            .expect("invites");
+        let member = change.member.expect("a member, not an invitation");
+        assert_eq!(member.user_id, "ada");
+        assert!(change.invitation.is_none());
     }
 }
