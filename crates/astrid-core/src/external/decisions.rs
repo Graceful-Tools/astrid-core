@@ -191,6 +191,44 @@ pub fn remote_already_gone(status: u16) -> bool {
     status == 404 || status == 410
 }
 
+/// The due date to adopt from Google's date-only `due`, or `None` to leave the local task alone.
+///
+/// Google has no time of day, so a timed local due can never be clobbered by its mirror — every
+/// push comes back as a date, and adopting it turned a 3pm task into an all-day one after one round
+/// trip. An unchanged date is no change. (Apple `GoogleDueMapping.adoptedDue`.)
+pub fn adopted_due(
+    remote_due: Option<chrono::DateTime<chrono::Utc>>,
+    local_due: Option<chrono::DateTime<chrono::Utc>>,
+    local_is_all_day: bool,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    let remote_due = remote_due?;
+    if !(local_is_all_day || local_due.is_none()) || local_due == Some(remote_due) {
+        return None;
+    }
+    Some(remote_due)
+}
+
+/// The date-only value Google is sent for a local due: the day at UTC midnight.
+///
+/// An all-day due is stored at UTC midnight, so its UTC day is the day. A timed due is an instant,
+/// and the person's own day is the day — an 8pm due west of UTC is tomorrow in UTC and must not
+/// move a day in Google. (Apple `GoogleDueMapping.pushDueString`.)
+pub fn push_due(
+    due: chrono::DateTime<chrono::Utc>,
+    is_all_day: bool,
+    zone: chrono_tz::Tz,
+) -> String {
+    use chrono::TimeZone;
+    let day = if is_all_day {
+        due.date_naive()
+    } else {
+        due.with_timezone(&zone).date_naive()
+    };
+    let midnight =
+        chrono::Utc.from_utc_datetime(&day.and_hms_opt(0, 0, 0).expect("midnight exists"));
+    crate::model::date::format(midnight)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +397,38 @@ mod tests {
         assert!(remote_already_gone(410));
         assert!(!remote_already_gone(500));
         assert!(!remote_already_gone(200));
+    }
+
+    #[test]
+    fn a_timed_due_is_never_replaced_by_googles_date() {
+        let at = |text: &str| crate::model::date::parse(text);
+        let google = at("2026-09-08T00:00:00Z");
+        assert_eq!(adopted_due(google, at("2026-09-07T22:00:00Z"), false), None);
+        assert_eq!(
+            adopted_due(google, at("2026-09-07T00:00:00Z"), true),
+            google
+        );
+        assert_eq!(adopted_due(google, None, false), google);
+        assert_eq!(
+            adopted_due(google, google, true),
+            None,
+            "unchanged is no change"
+        );
+        assert_eq!(adopted_due(None, at("2026-09-07T00:00:00Z"), true), None);
+    }
+
+    #[test]
+    fn google_is_sent_the_persons_own_day() {
+        let evening = crate::model::date::parse("2026-09-08T03:00:00Z").expect("an instant");
+        // 8pm on the 7th in Los Angeles is the 8th in UTC; Google hears the 7th.
+        assert_eq!(
+            push_due(evening, false, chrono_tz::America::Los_Angeles),
+            "2026-09-07T00:00:00Z"
+        );
+        let all_day = crate::model::date::parse("2026-09-08T00:00:00Z").expect("an instant");
+        assert_eq!(
+            push_due(all_day, true, chrono_tz::America::Los_Angeles),
+            "2026-09-08T00:00:00Z"
+        );
     }
 }

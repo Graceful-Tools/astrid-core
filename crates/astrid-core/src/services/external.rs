@@ -109,6 +109,9 @@ struct RemoteItem {
     /// fields above are read too, for a proxy that ever sends them flat.
     #[serde(default)]
     metadata: Option<RemoteMetadata>,
+    /// Google's completion time, when completed.
+    #[serde(default)]
+    completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -798,6 +801,11 @@ impl ExternalSyncService {
                     }
                     PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                     PullOutcome::Apply => {
+                        // A completed item with nothing here is history, not work: importing it made
+                        // an open task of it (Apple's "imported-open flood").
+                        if item.completed && local.is_none() {
+                            continue;
+                        }
                         let task = self.apply(
                             item,
                             tasklist_id,
@@ -878,7 +886,11 @@ impl ExternalSyncService {
                     "tasklistId": tasklist_id,
                     "title": task.title,
                     "notes": task.description,
-                    "dueDate": task.due_date_time.map(date::format),
+                    "dueDate": task.due_date_time.map(|due| decisions::push_due(
+                        due,
+                        task.is_all_day,
+                        self.context.clock.time_zone(),
+                    )),
                     "completed": task.completed,
                     "remoteId": known,
                 }));
@@ -988,6 +1000,11 @@ impl ExternalSyncService {
                 }
                 PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                 PullOutcome::Apply => {
+                    // A completed item with nothing here is history, not work: importing it made
+                    // an open task of it (Apple's "imported-open flood").
+                    if item.completed && local.is_none() {
+                        continue;
+                    }
                     let task = self.apply(
                         item,
                         &link.remote_container_id,
@@ -1125,13 +1142,20 @@ impl ExternalSyncService {
                 changes.description = Some(notes.clone());
             }
         }
-        if due.is_some() && task.due_date_time != due {
-            changes.due_date_time = Some(due);
+        if let Some(adopted) = decisions::adopted_due(due, task.due_date_time, task.is_all_day) {
+            changes.due_date_time = Some(Some(adopted));
             changes.is_all_day = Some(true);
         }
-        if task.parent_task_id != parent {
+        // Only a parent that resolves: one this pass cannot place is not evidence the task was
+        // un-nested over there.
+        if parent.is_some() && task.parent_task_id != parent {
             changes.parent_task_id = Some(parent);
         }
+        let task = if changes == crate::services::TaskChanges::default() {
+            task
+        } else {
+            tasks.update(&task.id, &changes)?
+        };
         if decisions::should_adopt_remote_completion(
             item.completed,
             task.completed,
@@ -1140,13 +1164,15 @@ impl ExternalSyncService {
             task.is_repeating(),
         ) {
             // Through the completion path, because a repeating task rolls forward rather than
-            // being ticked off — see `TaskService::complete`.
-            return tasks.complete(&task.id, item.completed, Some(&task), None);
+            // being ticked off — after the item's other changes, which completing must not drop.
+            // Google's own completion time and source, so the history says when and from where.
+            let origin = crate::services::task::Origin {
+                at: item.completed_at.as_deref().and_then(date::parse),
+                source: Some("google".to_string()),
+            };
+            return tasks.complete_as(&task.id, item.completed, Some(&task), None, &origin);
         }
-        if changes == crate::services::TaskChanges::default() {
-            return Ok(task);
-        }
-        tasks.update(&task.id, &changes)
+        Ok(task)
     }
 
     /// Tell the server which remote item a task mirrors.
@@ -1222,7 +1248,11 @@ impl ExternalSyncService {
                     "linkId": link.id,
                     "title": task.title,
                     "notes": task.description,
-                    "dueDate": task.due_date_time.map(date::format),
+                    "dueDate": task.due_date_time.map(|due| decisions::push_due(
+                        due,
+                        task.is_all_day,
+                        self.context.clock.time_zone(),
+                    )),
                     "completed": task.completed,
                     "remoteId": known,
                 }));
