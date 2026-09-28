@@ -853,7 +853,12 @@ pub(super) fn assignee_options(app: &App, task_id: &str) -> Response {
 ///
 /// Whose face goes on the control is [`crate::rows::LeadingControl::for_task`], the same rule the
 /// rows use, in list mode, because this sits above a list.
-pub(super) fn quick_add_defaults(app: &App, list_id: Option<&str>) -> Response {
+pub(super) fn quick_add_defaults(
+    app: &App,
+    list_id: Option<&str>,
+    chosen_assignee: Option<&str>,
+    chosen_priority: Option<i64>,
+) -> Response {
     let lists = app.store.lists().unwrap_or_default();
     let list = list_id.and_then(|id| lists.iter().find(|list| list.id == id));
     let me = app.context.account().current_user_id().ok().flatten();
@@ -862,17 +867,34 @@ pub(super) fn quick_add_defaults(app: &App, list_id: Option<&str>) -> Response {
     // one. Smart parsing is deliberately NOT run — it reads priority out of a sentence, and a
     // control that changed as somebody typed "urgent" would fight the choice they made in it.
     let mut draft = TaskDraft::new("");
+    // What the person has picked so far counts as said at the door, exactly as it will when
+    // `createTask` runs: the list's default fills in only what is still unsaid.
+    let given = crate::services::list_defaults::Given {
+        assignee: chosen_assignee.is_some(),
+        priority: chosen_priority.is_some(),
+        ..Default::default()
+    };
+    // `"unassigned"` is a choice, not a user id — the same spelling a list's own default uses.
+    if let Some(assignee) = chosen_assignee {
+        draft.assignee_id = match assignee {
+            "unassigned" | "" => None,
+            id => Some(id.to_string()),
+        };
+    }
+    if let Some(priority) = chosen_priority {
+        draft.priority = crate::model::Priority::from_i64(priority);
+    }
     if let Some(list) = list {
         draft.list_ids = vec![list.id.clone()];
         crate::services::list_defaults::apply(
             &mut draft,
-            crate::services::list_defaults::Given::default(),
+            given,
             list,
             me.as_deref(),
             app.clock.now(),
             app.clock.utc_offset(),
         );
-    } else {
+    } else if !given.assignee {
         // A pseudo-list — My Tasks — has no defaults to apply, and the web falls back to the
         // current user there rather than to nobody (`components/quick-add.tsx`).
         draft.assignee_id = me.clone();

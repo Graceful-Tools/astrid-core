@@ -3228,6 +3228,58 @@ async fn signed_out_quick_add_shows_unassigned_task_8aa5732c() {
     assert!(shown["value"]["assigneeId"].is_null(), "{shown}");
 }
 
+/// Which of the three states a PICK produces is the same rule, so the control is re-asked rather
+/// than worked out in the shell (task 8aa5732c).
+///
+/// Choosing somebody else gives their mark; choosing yourself gives the checkbox; choosing
+/// unassigned gives the unassigned mark even in a list that would have defaulted to you — a pick is
+/// said at the door and beats the default, as it does in `createTask`.
+#[tokio::test]
+async fn a_pick_in_quick_add_is_previewed_by_the_same_rule_task_8aa5732c() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work" })).expect("a list"),
+        )
+        .expect("stores");
+
+    let theirs = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "l1", "assigneeId": "dana" }),
+    )
+    .await;
+    assert_eq!(theirs["value"]["leading"]["kind"], "avatar", "{theirs}");
+    assert_eq!(theirs["value"]["leading"]["userId"], "dana", "{theirs}");
+
+    let mine = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "l1", "assigneeId": "me" }),
+    )
+    .await;
+    assert_eq!(mine["value"]["leading"]["kind"], "checkbox", "{mine}");
+
+    // Chosen nobody, on purpose — which beats the list's "unset means you". Spelled
+    // `"unassigned"` rather than null, because a null cannot be told from "not chosen".
+    let nobody = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "l1", "assigneeId": "unassigned" }),
+    )
+    .await;
+    assert_eq!(nobody["value"]["leading"]["kind"], "unassigned", "{nobody}");
+    assert!(nobody["value"]["assigneeId"].is_null(), "{nobody}");
+
+    // A chosen priority is the tint, and it survives a list that has its own default.
+    let urgent = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "l1", "priority": 3 }),
+    )
+    .await;
+    assert_eq!(urgent["value"]["priority"], 3, "{urgent}");
+}
+
 /// `createTask` can say which status a task is born with (task 95c7a68f). The draft and the
 /// service already carried it; the command was the only thing that could not express it.
 #[tokio::test]

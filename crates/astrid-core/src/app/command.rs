@@ -225,8 +225,20 @@ pub enum Command {
     /// another would be worse than no picker.
     ///
     /// `list_id` is the list being added to, or `None` for a pseudo-list like My Tasks.
+    ///
+    /// `assignee_id` and `priority` are what the person has already CHOSEN in the picker, in the
+    /// same "said at the door beats the list's default" sense as [`Command::CreateTask`] — so the
+    /// control is re-asked after every pick rather than the shell deciding which of the three states
+    /// a pick produces.
+    ///
+    /// `assignee_id` is `"unassigned"` for "nobody, on purpose", the same spelling a list's
+    /// `default_assignee_id` uses for the same meaning, and absent for "nothing chosen yet". A bare
+    /// `null` cannot carry that distinction: `Option<Option<String>>` collapses a JSON null to
+    /// `None` through serde's derive, which is the trap `changes_from_json` is hand-written to avoid.
     QuickAddDefaults {
         list_id: Option<String>,
+        assignee_id: Option<String>,
+        priority: Option<i64>,
     },
     /// The signed-in user.
     CurrentUser,

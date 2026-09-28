@@ -81,7 +81,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
         Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
         Command::AssigneeOptions { task_id } => assignee_options(app, &task_id),
-        Command::QuickAddDefaults { list_id } => quick_add_defaults(app, list_id.as_deref()),
+        Command::QuickAddDefaults {
+            list_id,
+            assignee_id,
+            priority,
+        } => quick_add_defaults(app, list_id.as_deref(), assignee_id.as_deref(), priority),
         Command::CurrentUser => match app.context.account().current_user() {
             Ok(user) => Response::ok(user),
             Err(error) => Response::failed(error.into()),
