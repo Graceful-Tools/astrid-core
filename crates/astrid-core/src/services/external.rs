@@ -854,6 +854,7 @@ impl ExternalSyncService {
             .metadata(&key)?
             .and_then(|stamp| date::parse(&stamp));
         let now = self.context.clock.now();
+        let mut retry = PushRetry::load(&self.context.store, &key);
         let by_task: std::collections::HashMap<&String, &String> = task_links
             .iter()
             .map(|(remote, task)| (task, remote))
@@ -873,11 +874,16 @@ impl ExternalSyncService {
             let changed = match (since, task.updated_at) {
                 (Some(since), Some(updated)) => updated > since,
                 _ => true,
-            };
+            } || retry.due(&task.id);
             if !changed {
                 continue;
             }
             let known = by_task.get(&task.id).copied();
+            // A completed task with no twin is history: My Tasks mirrors what is to be done, and
+            // making twins for it pushed the whole completed history into the default list.
+            if known.is_none() && task.completed {
+                continue;
+            }
             let request = self
                 .context
                 .client
@@ -894,7 +900,19 @@ impl ExternalSyncService {
                     "completed": task.completed,
                     "remoteId": known,
                 }));
-            let answer = self.context.client.send(request).await?;
+            // One failure is that task's, not the list's: it is tried again next pass, and the
+            // rest still go. A `?` here stopped the list at its first 404 on every pass.
+            let answer = match self.context.client.send(request).await {
+                Ok(answer) => {
+                    retry.done(&task.id);
+                    answer
+                }
+                Err(error) => {
+                    tracing::debug!(task = %task.id, %error, "push failed; retried next pass");
+                    retry.failed(&task.id);
+                    continue;
+                }
+            };
             pushed += 1;
             if known.is_none() {
                 if let Some(remote_id) = answer.get("remoteId").and_then(|value| value.as_str()) {
@@ -934,6 +952,7 @@ impl ExternalSyncService {
         }
 
         self.context.store.set_metadata(&key, &date::format(now))?;
+        retry.save(&self.context.store, &key)?;
         Ok(pushed)
     }
 
@@ -1217,6 +1236,7 @@ impl ExternalSyncService {
             .metadata(&key)?
             .and_then(|stamp| date::parse(&stamp));
         let now = self.context.clock.now();
+        let mut retry = PushRetry::load(&self.context.store, &key);
 
         let task_links = self.task_links(&link.remote_container_id).await?;
         let by_task: std::collections::HashMap<&String, &String> = task_links
@@ -1234,7 +1254,7 @@ impl ExternalSyncService {
                 (Some(since), Some(updated)) => updated > since,
                 // Never pushed before, or a task with no stamp: send it once.
                 _ => true,
-            };
+            } || retry.due(&task.id);
             if !changed {
                 continue;
             }
@@ -1256,7 +1276,19 @@ impl ExternalSyncService {
                     "completed": task.completed,
                     "remoteId": known,
                 }));
-            let answer = self.context.client.send(request).await?;
+            // One failure is that task's, not the list's: it is tried again next pass, and the
+            // rest still go. A `?` here stopped the list at its first 404 on every pass.
+            let answer = match self.context.client.send(request).await {
+                Ok(answer) => {
+                    retry.done(&task.id);
+                    answer
+                }
+                Err(error) => {
+                    tracing::debug!(task = %task.id, %error, "push failed; retried next pass");
+                    retry.failed(&task.id);
+                    continue;
+                }
+            };
             pushed += 1;
 
             // A create has made a remote twin that only this response knows about. Writing the
@@ -1271,7 +1303,51 @@ impl ExternalSyncService {
         }
 
         self.context.store.set_metadata(&key, &date::format(now))?;
+        retry.save(&self.context.store, &key)?;
         Ok(pushed)
+    }
+}
+
+/// Tasks whose push failed, tried again on the next pass whatever their stamp says — so a pass
+/// can move its stamp forward without dropping them, and a task that fails for ever does not hold
+/// every other one back.
+struct PushRetry {
+    ids: std::collections::BTreeSet<String>,
+}
+
+impl PushRetry {
+    fn key(pass_key: &str) -> String {
+        format!("{pass_key}.retry")
+    }
+
+    fn load(store: &crate::store::Store, pass_key: &str) -> Self {
+        let ids = store
+            .metadata(&Self::key(pass_key))
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        PushRetry { ids }
+    }
+
+    fn due(&self, task_id: &str) -> bool {
+        self.ids.contains(task_id)
+    }
+
+    fn failed(&mut self, task_id: &str) {
+        self.ids.insert(task_id.to_string());
+    }
+
+    fn done(&mut self, task_id: &str) {
+        self.ids.remove(task_id);
+    }
+
+    fn save(&self, store: &crate::store::Store, pass_key: &str) -> Result<()> {
+        store.set_metadata(
+            &Self::key(pass_key),
+            &serde_json::to_string(&self.ids).unwrap_or_default(),
+        )?;
+        Ok(())
     }
 }
 
@@ -2044,5 +2120,33 @@ mod tests {
                 .any(|entry| entry.kind == crate::outbox::kind::DELETE_TASK),
             "the deletion reaches astrid-web, or the next pull brings the task back"
         );
+    }
+
+    /// One task failing to push is that task's problem: the rest of the list still goes, and the
+    /// failed one is tried again next pass even though the stamp moved on.
+    #[tokio::test]
+    async fn one_failed_push_does_not_stop_the_list_and_is_retried() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/tasks", 500, json!({ "error": "boom" }))
+                .push_json("google/tasks", 200, json!({ "remoteId": "tasklist-1:r2" }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        let link = link();
+        for (id, title) in [("t1", "First"), ("t2", "Second")] {
+            let mut task = crate::model::Task::new(id, title);
+            task.list_ids = Some(vec![link.astrid_list_id.clone()]);
+            fixture.store.upsert_task(&task).expect("stores");
+        }
+
+        let pushed = fixture.service.push(&link).await.expect("a pass");
+        assert_eq!(pushed, 1, "the second task still went");
+        let retry = PushRetry::load(&fixture.store, &format!("external.pushed.{}", link.id));
+        assert_eq!(retry.ids.len(), 1, "and the failed one is remembered");
     }
 }
