@@ -149,16 +149,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::AddTaskBlocker {
             task_id,
             blocking_task_id,
-        } => add_task_blocker(app, &task_id, &blocking_task_id),
+        } => add_task_blocker(app, &task_id, &blocking_task_id).await,
         Command::RemoveTaskBlocker {
             task_id,
             blocking_task_id,
-        } => remove_task_blocker(app, &task_id, &blocking_task_id),
+        } => remove_task_blocker(app, &task_id, &blocking_task_id).await,
         Command::TaskBlockerCandidates {
             task_id,
             query,
             limit,
-        } => task_blocker_candidates(app, &task_id, &query, limit),
+        } => task_blocker_candidates(app, &task_id, &query, limit).await,
         Command::IsSignedIn => Response::ok(serde_json::json!({
             "signedIn": app.auth.is_signed_in().await,
             "waitingForCallback": app.auth.is_waiting(),

@@ -2728,6 +2728,95 @@ async fn a_list_with_no_channel_has_an_empty_chat_rather_than_an_error() {
         .is_empty());
 }
 
+/// A cycle is refused by the server, and the refusal reaches the person who picked it — nothing
+/// is journalled to be refused again later, unseen (CONTRACTS D32).
+#[tokio::test]
+async fn a_blocker_that_would_make_a_cycle_is_refused_to_the_person_who_picked_it() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/tasks/t1/blockers",
+        409,
+        json!({ "error": "dependency_cycle" }),
+    );
+    let app = app_with(transport);
+    let added = call(
+        &app,
+        json!({ "kind": "addTaskBlocker", "taskId": "t1", "blockingTaskId": "t2" }),
+    )
+    .await;
+    assert_eq!(added["ok"], false, "{added}");
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+}
+
+/// Online, the server's answer is what the row shows.
+#[tokio::test]
+async fn a_blocker_added_online_shows_the_servers_answer() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/tasks/t1/blockers",
+        201,
+        json!({ "taskId": "t1", "blockingTaskId": "t2",
+                "blockedBy": [{ "id": "t2", "title": "Ship it", "identifier": "AWTD-2" }] }),
+    );
+    let app = app_with(transport);
+    let added = call(
+        &app,
+        json!({ "kind": "addTaskBlocker", "taskId": "t1", "blockingTaskId": "t2" }),
+    )
+    .await;
+    assert_eq!(
+        added["value"]["blockedBy"][0]["title"], "Ship it",
+        "{added}"
+    );
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+}
+
+/// The picker asks the server's search, whose permission filter is in the query; offline it
+/// falls back to this machine's cache.
+#[tokio::test]
+async fn the_blocker_picker_asks_the_server_then_the_cache() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/search",
+        200,
+        json!({ "tasks": [{ "id": "s1", "title": "From the server", "lists": [{ "id": "l1" }] }] }),
+    );
+    let app = app_with(transport);
+    let online = call(
+        &app,
+        json!({ "kind": "taskBlockerCandidates", "taskId": "t1", "query": "server" }),
+    )
+    .await;
+    let online_ids: Vec<&str> = online["value"]["candidates"]
+        .as_array()
+        .or_else(|| online["value"].as_array())
+        .expect("candidates")
+        .iter()
+        .filter_map(|candidate| candidate["id"].as_str())
+        .collect();
+    assert_eq!(online_ids, vec!["s1"], "{online}");
+
+    call(
+        &app,
+        json!({ "kind": "createTask", "title": "Cached offline task" }),
+    )
+    .await;
+    let offline = call(
+        &app,
+        json!({ "kind": "taskBlockerCandidates", "taskId": "t1", "query": "offline" }),
+    )
+    .await;
+    let titles: Vec<&str> = offline["value"]["candidates"]
+        .as_array()
+        .or_else(|| offline["value"].as_array())
+        .expect("candidates")
+        .iter()
+        .filter_map(|candidate| candidate["title"].as_str())
+        .collect();
+    assert_eq!(titles, vec!["Cached offline task"], "{offline}");
+}
+
 /// Making a board from a list: one request, and the board has its columns at once — the seeded
 /// status lists cached, the list attached (Apple `createBoardForList`, 2026-05-12).
 #[tokio::test]

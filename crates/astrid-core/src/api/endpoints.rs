@@ -125,6 +125,9 @@ pub const USER_SETTINGS: &str = "/api/v1/users/me/settings";
 /// that changed.
 pub const SMART_TASKS: &str = "/api/v1/users/me/smart-tasks";
 pub const USER_SEARCH: &str = "/api/v1/users/search";
+/// The server's task search — permission-filtered in the query, which is what a blocker picker
+/// needs (CONTRACTS D32).
+pub const SEARCH: &str = "/api/v1/search";
 /// The people this account has imported to suggest as collaborators (task 438494c7): `GET` lists
 /// them, `DELETE` clears them all. Windows has no address book to `POST` from.
 pub const CONTACTS: &str = "/api/v1/contacts";

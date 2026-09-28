@@ -611,11 +611,12 @@ among the list's pending **invitations**, which no permission check reads, never
 members; the server's answer replaces it. Changes to one list keep their order in the list's
 lane.
 
-### D32 — waiting on a task: Apple is online-only, the core journals (open)
+### D32 — waiting on a task: Apple was online-only, the core journalled
 
 Apple's `TaskBlockerService` sends an add or a removal at once and shows a refusal — a cycle is
 refused by the server — as `tasks.waitingOn.addError`, and asks the server's
 `GET /api/v1/search` for picker candidates. The core journals both writes optimistically, so a
 refused cycle becomes a dead letter the person never sees, and searches its own cache for
-candidates. The Apple apps keep their path until this is settled; the likely resolution is
-D31's: send at once, surface a refusal, queue only when the network failed.
+candidates. **Resolved 2026-09-28** as D31 was: an add or a removal is sent at once and a
+refusal fails the command; only a failed network journals it. The picker asks the server's search
+first and falls back to this cache offline.

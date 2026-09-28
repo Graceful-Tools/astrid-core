@@ -372,15 +372,29 @@ pub(super) async fn task_blockers(app: &App, task_id: &str) -> Response {
     }
 }
 
-pub(super) fn add_task_blocker(app: &App, task_id: &str, blocking_task_id: &str) -> Response {
-    match app.context.dependencies().add(task_id, blocking_task_id) {
+pub(super) async fn add_task_blocker(app: &App, task_id: &str, blocking_task_id: &str) -> Response {
+    match app
+        .context
+        .dependencies()
+        .add_now(task_id, blocking_task_id)
+        .await
+    {
         Ok(dependencies) => Response::ok(dependencies),
         Err(error) => Response::failed(error.into()),
     }
 }
 
-pub(super) fn remove_task_blocker(app: &App, task_id: &str, blocking_task_id: &str) -> Response {
-    match app.context.dependencies().remove(task_id, blocking_task_id) {
+pub(super) async fn remove_task_blocker(
+    app: &App,
+    task_id: &str,
+    blocking_task_id: &str,
+) -> Response {
+    match app
+        .context
+        .dependencies()
+        .remove_now(task_id, blocking_task_id)
+        .await
+    {
         Ok(dependencies) => Response::ok(dependencies),
         Err(error) => Response::failed(error.into()),
     }
@@ -393,47 +407,25 @@ pub(super) fn remove_task_blocker(app: &App, task_id: &str, blocking_task_id: &s
 /// account. The three exclusions and the same-board ranking are
 /// `services::dependency::pickable`, stated there so the shell chooses nothing.
 ///
-/// **This searches the cache, and the spec asks for the server's `GET /api/v1/search`.** The
-/// difference is deliberate and recorded in `docs/CONTRACTS.md`: this core has no server-search
-/// path at all — `Command::SearchTasks` reads the cache too, as every search surface in this app
-/// does — and growing one is its own task rather than a detail of this row. What the spec is
-/// guarding against is a picker that filters the page it happens to have loaded (web's
-/// `5df85b9f`); this searches the whole synced account with the shared grammar, so it does not
-/// have that bug. What it does not have is the server's permission filter *in the query*, which
-/// matters for a task synced before a share was revoked.
-pub(super) fn task_blocker_candidates(
+/// **The server's `GET /api/v1/search` first**, as the spec asks: its permission filter is in the
+/// query, so a task synced before a share was revoked is not offered (CONTRACTS D32). Offline, or
+/// when the search fails, this machine's cache with the shared grammar — a picker that works on a
+/// plane beats one that says nothing.
+pub(super) async fn task_blocker_candidates(
     app: &App,
     task_id: &str,
     query: &str,
     limit: Option<usize>,
 ) -> Response {
     let trimmed = query.trim();
-
-    let tasks = match app.store.tasks() {
-        Ok(tasks) => tasks,
-        Err(error) => return Response::failed(error.into()),
-    };
     let lists = app.store.lists().unwrap_or_default();
-    let users = app.store.users().unwrap_or_default();
-    let current_user_id = app.context.account().current_user_id().ok().flatten();
-    let results = crate::services::search::search(
-        &tasks,
-        trimmed,
-        &crate::services::search::SearchScope {
-            list_id: None,
-            // A completed task can still be a blocker — a chip draws one struck through — so the
-            // picker offers them. Excluding them would make "why can I not find it" the first
-            // thing anybody asks.
-            include_completed: true,
+    let results = match server_search(app, trimmed).await {
+        Some(found) => found,
+        None => match cache_search(app, trimmed, &lists) {
+            Ok(found) => found,
+            Err(response) => return response,
         },
-        &crate::services::search::SearchContext {
-            lists: &lists,
-            users: &users,
-            current_user_id: current_user_id.as_deref(),
-            now: app.clock.now(),
-            offset: app.clock.utc_offset(),
-        },
-    );
+    };
 
     let dependencies = app
         .context
@@ -1025,4 +1017,76 @@ pub(super) fn changes_from_json(value: &serde_json::Value) -> Result<TaskChanges
         }
     }
     Ok(changes)
+}
+
+/// `GET /api/v1/search`, read as tasks: `{ tasks: [{ id, title, completed, lists: [{ id }] }] }`.
+/// Nothing when the query is under the threshold or the search could not be asked.
+async fn server_search(app: &App, query: &str) -> Option<Vec<crate::model::Task>> {
+    if query.chars().count() < crate::services::search::MINIMUM_QUERY_LENGTH {
+        return Some(Vec::new());
+    }
+    let client = &app.context.client;
+    let answer = client
+        .send(
+            client
+                .get(crate::api::endpoints::SEARCH)
+                .query("q", Some(query.to_string())),
+        )
+        .await
+        .ok()?;
+    let hits = answer.get("tasks")?.as_array()?;
+    Some(
+        hits.iter()
+            .filter_map(|hit| {
+                let id = hit.get("id")?.as_str()?;
+                let mut task = crate::model::Task::new(id, hit.get("title")?.as_str()?);
+                task.completed = hit
+                    .get("completed")
+                    .and_then(|done| done.as_bool())
+                    .unwrap_or(false);
+                task.list_ids = hit
+                    .get("lists")
+                    .and_then(|lists| lists.as_array())
+                    .map(|lists| {
+                        lists
+                            .iter()
+                            .filter_map(|list| list.get("id")?.as_str().map(str::to_string))
+                            .collect()
+                    });
+                Some(task)
+            })
+            .collect(),
+    )
+}
+
+/// This machine's cache, with the shared search grammar — the offline answer.
+fn cache_search(
+    app: &App,
+    trimmed: &str,
+    lists: &[crate::model::TaskList],
+) -> Result<Vec<crate::model::Task>, Response> {
+    let tasks = app
+        .store
+        .tasks()
+        .map_err(|error| Response::failed(error.into()))?;
+    let users = app.store.users().unwrap_or_default();
+    let current_user_id = app.context.account().current_user_id().ok().flatten();
+    Ok(crate::services::search::search(
+        &tasks,
+        trimmed,
+        &crate::services::search::SearchScope {
+            list_id: None,
+            // A completed task can still be a blocker — a chip draws one struck through — so the
+            // picker offers them. Excluding them would make "why can I not find it" the first
+            // thing anybody asks.
+            include_completed: true,
+        },
+        &crate::services::search::SearchContext {
+            lists,
+            users: &users,
+            current_user_id: current_user_id.as_deref(),
+            now: app.clock.now(),
+            offset: app.clock.utc_offset(),
+        },
+    ))
 }

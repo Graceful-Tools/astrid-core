@@ -123,12 +123,93 @@ impl TaskDependencyService {
         Ok(dependencies)
     }
 
-    /// Wait on another task.
+    /// Wait on another task — sent at once, queued only when the network failed (CONTRACTS D32).
+    ///
+    /// The server refuses a cycle (`409 dependency_cycle`), and that refusal has to reach the
+    /// person who picked it rather than become a dead letter nobody sees; online, its answer is
+    /// cached and returned. Offline the write is [`Self::add`]'s: optimistic and journalled, which
+    /// is what makes blocking work on a plane.
+    pub async fn add_now(&self, task_id: &str, blocking_task_id: &str) -> Result<Dependencies> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::task_blockers(task_id))
+            .value(json!({ "blockingTaskId": blocking_task_id }));
+        match self.try_now(task_id, request).await? {
+            Some(answer) => Ok(self.take_answer(task_id, &answer)),
+            None => self.add(task_id, blocking_task_id),
+        }
+    }
+
+    /// Stop waiting on another task — the same shape as [`Self::add_now`]. Removing a link that
+    /// is already gone is the outcome asked for.
+    pub async fn remove_now(&self, task_id: &str, blocking_task_id: &str) -> Result<Dependencies> {
+        let request = self
+            .context
+            .client
+            .delete(endpoints::task_blocker(task_id, blocking_task_id));
+        match self.try_now(task_id, request).await {
+            Ok(Some(answer)) => Ok(self.take_answer(task_id, &answer)),
+            Ok(None) => self.remove(task_id, blocking_task_id),
+            Err(ServiceError::Api(error)) if error.status() == Some(404) => {
+                let mut dependencies = self.cached(task_id).unwrap_or_default();
+                dependencies
+                    .blocked_by
+                    .retain(|blocker| blocker.id != blocking_task_id);
+                self.store(task_id, &dependencies);
+                self.mirror_onto_task(task_id, &dependencies);
+                Ok(dependencies)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Send now: `Some(answer)` when the server took it, `None` when it must be queued (the
+    /// network failed, or an earlier change to this task is still waiting and must go first).
+    async fn try_now(
+        &self,
+        task_id: &str,
+        request: crate::api::Request,
+    ) -> Result<Option<serde_json::Value>> {
+        let queued = journal::all(&self.context.store)?.iter().any(|entry| {
+            matches!(
+                entry.kind.as_str(),
+                kind::ADD_TASK_BLOCKER | kind::REMOVE_TASK_BLOCKER
+            ) && matches!(
+                entry.status,
+                crate::outbox::Status::Pending | crate::outbox::Status::Running
+            ) && entry.payload.get("taskId").and_then(|id| id.as_str()) == Some(task_id)
+        });
+        if queued {
+            return Ok(None);
+        }
+        match self.context.client.send(request).await {
+            Ok(answer) => Ok(Some(answer)),
+            Err(crate::api::ApiError::Transport(_)) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// The server's answer to a change — `{ taskId, blockingTaskId, blockedBy }` — cached over
+    /// what this task waits on; what waits on it is unchanged by an edge it did not touch.
+    fn take_answer(&self, task_id: &str, answer: &serde_json::Value) -> Dependencies {
+        let mut dependencies = self.cached(task_id).unwrap_or_default();
+        if let Some(blocked_by) = answer
+            .get("blockedBy")
+            .and_then(|value| serde_json::from_value::<Vec<Blocker>>(value.clone()).ok())
+        {
+            dependencies.blocked_by = blocked_by;
+        }
+        self.store(task_id, &dependencies);
+        self.mirror_onto_task(task_id, &dependencies);
+        dependencies
+    }
+
+    /// Wait on another task, offline.
     ///
     /// Optimistic, then journalled. The chip appears immediately with whatever this cache knows
     /// about the blocker — a title if the task is local, `hidden` if it is not, which the refresh
-    /// after the write corrects. Going through the Outbox rather than the client is rule 1 of
-    /// `docs/ASTRID.md` §0, and here it is also what makes blocking work on a plane.
+    /// after the write corrects.
     pub fn add(&self, task_id: &str, blocking_task_id: &str) -> Result<Dependencies> {
         let mut dependencies = self.cached(task_id).unwrap_or_default();
         if !dependencies
