@@ -127,18 +127,32 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
         "list_updated" => decode(body).map(EventKind::ListUpdated),
         "list_deleted" => id_of(&body, "id").map(EventKind::ListDeleted),
         // Both spellings are in the wild; they mean the same thing.
-        "comment_added" | "comment_created" => decode(body).map(EventKind::CommentAdded),
-        "comment_updated" => decode(body).map(EventKind::CommentUpdated),
-        "comment_deleted" => id_of(&body, "id").map(|id| EventKind::CommentDeleted {
-            id,
-            task_id: id_of(&body, "taskId").unwrap_or_default(),
-        }),
-        "chat_message_created" => decode(body).map(EventKind::ChatMessageCreated),
-        "chat_message_updated" => decode(body).map(EventKind::ChatMessageUpdated),
-        "chat_message_deleted" => id_of(&body, "id").map(|id| EventKind::ChatMessageDeleted {
-            id,
-            channel_id: id_of(&body, "channelId").unwrap_or_default(),
-        }),
+        // The web wraps the row beside the ids (`services/comment.service.ts`, the chat routes)
+        // and names deletions by `commentId` / `messageId`. A bare row is read too.
+        "comment_added" | "comment_created" => {
+            decode(unwrap(&body, "comment", "taskId")).map(EventKind::CommentAdded)
+        }
+        "comment_updated" => {
+            decode(unwrap(&body, "comment", "taskId")).map(EventKind::CommentUpdated)
+        }
+        "comment_deleted" => id_of(&body, "commentId")
+            .or_else(|| id_of(&body, "id"))
+            .map(|id| EventKind::CommentDeleted {
+                id,
+                task_id: id_of(&body, "taskId").unwrap_or_default(),
+            }),
+        "chat_message_created" => {
+            decode(unwrap(&body, "message", "channelId")).map(EventKind::ChatMessageCreated)
+        }
+        "chat_message_updated" => {
+            decode(unwrap(&body, "message", "channelId")).map(EventKind::ChatMessageUpdated)
+        }
+        "chat_message_deleted" => id_of(&body, "messageId")
+            .or_else(|| id_of(&body, "id"))
+            .map(|id| EventKind::ChatMessageDeleted {
+                id,
+                channel_id: id_of(&body, "channelId").unwrap_or_default(),
+            }),
         "agent_typing_start" | "agent_typing_stop" => {
             let typing = Typing {
                 channel_id: id_of(&body, "channelId"),
@@ -160,6 +174,21 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
     // A payload that will not decode is the same to a reader as a type nobody knows: the next sync
     // pass carries the change either way, so it is recorded as unknown rather than thrown.
     .unwrap_or_else(|| EventKind::Unknown(kind.to_string()))
+}
+
+/// The row a wrapped event carries under `key`, given the owner id (`owner`) the envelope holds
+/// and the row leaves out. The body itself when there is no such wrapper.
+fn unwrap(body: &serde_json::Value, key: &str, owner: &str) -> serde_json::Value {
+    let Some(row) = body.get(key).filter(|row| row.is_object()) else {
+        return body.clone();
+    };
+    let mut row = row.clone();
+    if row.get(owner).is_none() {
+        if let Some(id) = body.get(owner) {
+            row[owner] = id.clone();
+        }
+    }
+    row
 }
 
 fn decode<T: serde::de::DeserializeOwned>(body: serde_json::Value) -> Option<T> {

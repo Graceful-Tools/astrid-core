@@ -73,9 +73,26 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
             store.delete_list(id).ok()?;
             Some(Change::List(id.clone()))
         }
-        EventKind::CommentAdded(comment) | EventKind::CommentUpdated(comment) => {
+        EventKind::CommentAdded(comment) => {
             store.upsert_comments(std::slice::from_ref(comment)).ok()?;
             Some(Change::Comments(comment.task_id.clone()))
+        }
+        // An edit says what the comment says now, not who wrote it or what it carries — those
+        // stay as this device has them (Apple AITD-331).
+        EventKind::CommentUpdated(edit) => {
+            let merged = match store.comment(&edit.id).ok().flatten() {
+                Some(mut cached) => {
+                    cached.content = edit.content.clone();
+                    cached.r#type = edit.r#type;
+                    if edit.updated_at.is_some() {
+                        cached.updated_at = edit.updated_at;
+                    }
+                    cached
+                }
+                None => edit.clone(),
+            };
+            store.upsert_comments(std::slice::from_ref(&merged)).ok()?;
+            Some(Change::Comments(merged.task_id.clone()))
         }
         EventKind::CommentDeleted { id, task_id } => {
             store.delete_comment(id).ok()?;
@@ -399,5 +416,99 @@ mod tests {
         let event =
             parse::parse(&frame(json!({ "type": "external_sync_refresh" }))).expect("parses");
         assert_eq!(apply(&store, &event), Some(Change::NeedsSync));
+    }
+
+    // ── Comments and chat, in the shapes the web sends ─────────────────────────────────────
+    //
+    // `services/comment.service.ts` and the chat routes wrap the row (`data.comment`,
+    // `data.message`) beside the ids, and name deletions `commentId` / `messageId`. Read as the
+    // row itself, every one of these was dropped: no live comment or chat message ever reached
+    // this cache (the Apple apps' own client read them this way).
+
+    #[test]
+    fn a_comment_from_the_stream_lands_in_its_task() {
+        let store = Store::in_memory().expect("opens");
+        let event = task_event(
+            "comment_created",
+            json!({
+                "taskId": "t1", "taskTitle": "Plan", "commentId": "c1",
+                "commentContent": "Looks good", "commenterName": "Dana", "userId": "u2",
+                "comment": {
+                    "id": "c1", "content": "Looks good", "authorName": "Dana", "authorId": "u2",
+                    "isAgent": false, "createdAt": "2026-09-07T12:00:00.000Z", "type": "TEXT",
+                    "author": { "id": "u2", "name": "Dana" }, "parentCommentId": null,
+                    "secureFiles": []
+                }
+            }),
+        );
+        assert_eq!(apply(&store, &event), Some(Change::Comments("t1".into())));
+        let comments = store.comments_for_task("t1").expect("reads");
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].content, "Looks good");
+    }
+
+    /// An edit event carries the text, not the author or the files this device already has —
+    /// it changes what it says and nothing else (Apple AITD-331).
+    #[test]
+    fn a_comment_edit_from_the_stream_keeps_what_it_did_not_say() {
+        let store = Store::in_memory().expect("opens");
+        let cached: Comment = serde_json::from_value(json!({
+            "id": "c1", "taskId": "t1", "content": "before", "authorId": "u2",
+            "secureFiles": [{ "id": "f1", "name": "a.png", "size": 1, "mimeType": "image/png" }]
+        }))
+        .expect("a comment");
+        store.upsert_comments(&[cached]).expect("stores");
+
+        let event = task_event(
+            "comment_updated",
+            json!({
+                "taskId": "t1", "commentId": "c1", "commentContent": "after",
+                "comment": { "id": "c1", "content": "after", "type": "TEXT",
+                             "updatedAt": "2026-09-07T12:05:00.000Z", "parentCommentId": null }
+            }),
+        );
+        assert_eq!(apply(&store, &event), Some(Change::Comments("t1".into())));
+        let comment = &store.comments_for_task("t1").expect("reads")[0];
+        assert_eq!(comment.content, "after");
+        assert_eq!(comment.author_id.as_deref(), Some("u2"));
+        assert_eq!(comment.secure_files.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn a_comment_deleted_elsewhere_goes() {
+        let store = Store::in_memory().expect("opens");
+        let cached: Comment =
+            serde_json::from_value(json!({ "id": "c1", "taskId": "t1", "content": "x" }))
+                .expect("a comment");
+        store.upsert_comments(&[cached]).expect("stores");
+        let event = task_event(
+            "comment_deleted",
+            json!({ "taskId": "t1", "taskTitle": "Plan", "commentId": "c1", "deletedByName": "Dana" }),
+        );
+        assert_eq!(apply(&store, &event), Some(Change::Comments("t1".into())));
+        assert!(store.comments_for_task("t1").expect("reads").is_empty());
+    }
+
+    #[test]
+    fn a_chat_message_from_the_stream_lands_in_its_channel() {
+        let store = Store::in_memory().expect("opens");
+        let event = task_event(
+            "chat_message_created",
+            json!({ "channelId": "ch1", "message": {
+                "id": "m1", "content": "hi", "authorId": "u2", "createdAt": "2026-09-07T12:00:00.000Z"
+            } }),
+        );
+        assert_eq!(apply(&store, &event), Some(Change::Chat("ch1".into())));
+        assert_eq!(
+            store.messages_in_channel("ch1").expect("reads")[0].content,
+            "hi"
+        );
+
+        let deleted = task_event(
+            "chat_message_deleted",
+            json!({ "channelId": "ch1", "messageId": "m1" }),
+        );
+        assert_eq!(apply(&store, &deleted), Some(Change::Chat("ch1".into())));
+        assert!(store.messages_in_channel("ch1").expect("reads").is_empty());
     }
 }
