@@ -218,6 +218,37 @@ impl Stats {
     }
 }
 
+/// The real ids that journaled writes name in `field` — `taskId`, `listId` — for the kinds given
+/// (every kind when `kinds` is `None`), among entries still to be sent and, with
+/// `include_completed`, those sent recently.
+///
+/// What the sync pass asks before it lets a pulled row overwrite, resurrect or forget one this
+/// machine has touched: a pull must not bring back a task deleted here whose delete is on its way,
+/// nor forget one whose edit is.
+pub fn ids_named(
+    store: &Store,
+    kinds: Option<&[&str]>,
+    field: &str,
+    include_completed: bool,
+) -> Result<std::collections::HashSet<String>> {
+    let mut ids = std::collections::HashSet::new();
+    for entry in all(store)? {
+        let live = match entry.status {
+            Status::Pending | Status::Running => true,
+            Status::Completed => include_completed,
+            Status::FailedPermanent => false,
+        };
+        if !live || kinds.is_some_and(|kinds| !kinds.contains(&entry.kind.as_str())) {
+            continue;
+        }
+        if let Some(id) = entry.payload.get(field).and_then(serde_json::Value::as_str) {
+            ids.insert(store.resolve_id(id)?);
+            ids.insert(id.to_string());
+        }
+    }
+    Ok(ids)
+}
+
 /// Whether anything is waiting to go. One indexed lookup, for the caller that asks after every
 /// command and must not pay for reading the journal each time.
 pub fn has_pending(store: &Store) -> Result<bool> {

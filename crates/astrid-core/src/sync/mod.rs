@@ -221,7 +221,7 @@ impl SyncManager {
             .filter(|stamp| started_at - *stamp <= max_delta_age())
             .map(|stamp| stamp - delta_overlap());
 
-        match self.fetch_and_apply(since).await {
+        match self.fetch_and_apply(since, started_at).await {
             Ok(mut report) => {
                 report.pushes_failed = pushes_failed;
                 report.fetched = true;
@@ -254,9 +254,18 @@ impl SyncManager {
     async fn fetch_and_apply(
         &self,
         since: Option<DateTime<Utc>>,
+        started_at: DateTime<Utc>,
     ) -> Result<SyncReport, ServiceError> {
+        use crate::outbox::{journal, kind};
         let mut report = SyncReport::default();
         let since_param = since.map(date::format);
+        // Rows deleted here whose delete is on its way — or has just landed, while a fetch that
+        // began before it was in flight. The server still lists them; a pull must not bring them
+        // back (the Apple apps' `recentlyDeletedIds`).
+        let deleting_tasks =
+            journal::ids_named(&self.store, Some(&[kind::DELETE_TASK]), "taskId", true)?;
+        let deleting_lists =
+            journal::ids_named(&self.store, Some(&[kind::DELETE_LIST]), "listId", true)?;
 
         let body = self
             .client
@@ -271,6 +280,9 @@ impl SyncManager {
             crate::model::lenient::<TaskList>(unwrap_envelope(body, endpoints::envelope::LISTS));
         report_skips("lists", &lists.skipped);
         for list in &lists.items {
+            if deleting_lists.contains(&list.id) {
+                continue;
+            }
             match self.store.list(&list.id)? {
                 Some(cached) => {
                     if is_newer(list.updated_at, cached.updated_at) {
@@ -297,7 +309,33 @@ impl SyncManager {
         // Tasks come a page at a time, and the walk stops on a short page rather than on the
         // server's count — see `api::pagination` for why that count cannot be trusted.
         let (tasks, deleted_tasks) = self.fetch_all_tasks(since_param).await?;
+        // Tasks made here that the server has not answered for yet, by the idempotency key their
+        // create carries — so a pull that brings one's server copy first replaces it rather than
+        // showing it twice.
+        let made_here: std::collections::HashMap<String, String> = self
+            .store
+            .tasks()?
+            .into_iter()
+            .filter(|task| crate::model::is_temp_id(&task.id))
+            .filter_map(|task| task.client_request_id.clone().map(|key| (key, task.id)))
+            .collect();
         for task in &tasks {
+            if deleting_tasks.contains(&task.id) {
+                continue;
+            }
+            if let Some(temp_id) = task
+                .client_request_id
+                .as_ref()
+                .and_then(|key| made_here.get(key))
+            {
+                self.store.record_id_mapping(
+                    temp_id,
+                    &task.id,
+                    task.updated_at.unwrap_or(started_at),
+                )?;
+                self.store.delete_task(temp_id)?;
+                report.changed_task_ids.push(temp_id.clone());
+            }
             match self.store.task(&task.id)? {
                 Some(cached) => {
                     if is_newer(task.updated_at, cached.updated_at) {
@@ -322,6 +360,45 @@ impl SyncManager {
                 self.store.delete_task(&id)?;
                 report.tasks_deleted += 1;
                 report.changed_task_ids.push(id);
+            }
+        }
+
+        // A full pass carries no tombstones, so what the server no longer has is known only by
+        // its absence. Left alone it would stay forever — a list deleted on the web while this
+        // machine was away (Apple task 53071260). Absence is not deletion for a row this machine
+        // made or changed and has not sent, nor for one that moved after the pass began.
+        if since.is_none() {
+            let unsent_tasks = journal::ids_named(&self.store, None, "taskId", false)?;
+            let unsent_lists = journal::ids_named(&self.store, None, "listId", false)?;
+            let fresh = |updated_at: Option<DateTime<Utc>>| {
+                updated_at.is_some_and(|at| at > started_at - delta_overlap())
+            };
+            let seen_tasks: std::collections::HashSet<&str> =
+                tasks.iter().map(|task| task.id.as_str()).collect();
+            for cached in self.store.tasks()? {
+                if !seen_tasks.contains(cached.id.as_str())
+                    && !crate::model::is_temp_id(&cached.id)
+                    && !unsent_tasks.contains(&cached.id)
+                    && !fresh(cached.updated_at)
+                {
+                    self.store.delete_task(&cached.id)?;
+                    report.tasks_deleted += 1;
+                    report.changed_task_ids.push(cached.id);
+                }
+            }
+            let seen_lists: std::collections::HashSet<&str> =
+                lists.items.iter().map(|list| list.id.as_str()).collect();
+            for cached in self.store.lists()? {
+                if !seen_lists.contains(cached.id.as_str())
+                    && !crate::model::is_temp_id(&cached.id)
+                    && !unsent_lists.contains(&cached.id)
+                    && !cached.is_virtual.unwrap_or(false)
+                    && !fresh(cached.updated_at)
+                {
+                    self.store.delete_list(&cached.id)?;
+                    report.lists_deleted += 1;
+                    report.changed_list_ids.push(cached.id);
+                }
             }
         }
 
@@ -646,6 +723,158 @@ mod tests {
         assert_eq!(report.pushes_failed, 1);
         assert!(report.fetched, "the fetch has to happen anyway");
         assert!(fixture.store.task("t9").expect("reads").is_some());
+    }
+
+    fn task(id: &str, updated_at: &str) -> Task {
+        serde_json::from_value(json!({ "id": id, "title": id, "updatedAt": updated_at }))
+            .expect("a task")
+    }
+
+    /// Journal a write that is waiting out a backoff, so the pass's drain leaves it unsent.
+    fn journal(store: &Store, kind: &str, payload: serde_json::Value, key: &str) {
+        let now = date::parse("2026-09-07T12:00:00Z").expect("an instant");
+        let entry = crate::outbox::Entry::new(format!("entry-{key}"), kind, payload, key, now);
+        let entry = match key.starts_with("temp_") {
+            true => entry.for_temp_id(key),
+            false => entry,
+        };
+        crate::outbox::journal::enqueue(store, &entry).expect("enqueues");
+        crate::outbox::journal::mark_retry(
+            store,
+            &entry.id,
+            1,
+            date::parse("2026-09-07T13:00:00Z").expect("an instant"),
+            "later",
+            now,
+        )
+        .expect("marks");
+    }
+
+    /// Deleted here, and the delete has not reached the server yet: the server still has the task,
+    /// and a pull that brings it back would put a task the person just deleted back on screen until
+    /// the delete lands (the Apple apps' `recentlyDeletedIds`, which this crate had no equivalent
+    /// of).
+    #[tokio::test]
+    async fn a_pull_does_not_bring_back_a_task_deleted_here() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                // ...and the server still has the task.
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [{ "id": "t1", "title": "Deleted here", "updatedAt": "2026-09-07T11:00:00Z" }] }),
+                ),
+        );
+        journal(
+            &fixture.store,
+            crate::outbox::kind::DELETE_TASK,
+            json!({ "taskId": "t1" }),
+            "delete-t1",
+        );
+
+        let report = fixture.sync.sync().await;
+        assert!(report.fetched);
+        assert!(
+            fixture.store.task("t1").expect("reads").is_none(),
+            "a task deleted here stays deleted while its delete is on its way"
+        );
+    }
+
+    /// The pull can bring the server's copy of a task this machine made while the create's answer
+    /// is still on its way. The copy is that task, not a second one: it takes the temporary row's
+    /// place, and the temporary id keeps pointing at it.
+    #[tokio::test]
+    async fn a_pull_that_brings_a_task_made_here_replaces_its_temporary_copy() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [{ "id": "real-a", "title": "Made here",
+                                        "clientRequestId": "temp_a",
+                                        "updatedAt": "2026-09-07T11:59:00Z" }] }),
+                ),
+        );
+        let mut made_here = task("temp_a", "2026-09-07T11:58:00Z");
+        made_here.client_request_id = Some("temp_a".into());
+        fixture.store.upsert_task(&made_here).expect("stores");
+        journal(
+            &fixture.store,
+            crate::outbox::kind::CREATE_TASK,
+            json!({ "body": { "title": "Made here" } }),
+            "temp_a",
+        );
+
+        fixture.sync.sync().await;
+        assert!(
+            fixture.store.task("temp_a").expect("reads").is_none(),
+            "no duplicate"
+        );
+        assert!(fixture.store.task("real-a").expect("reads").is_some());
+        assert_eq!(fixture.store.resolve_id("temp_a").expect("reads"), "real-a");
+    }
+
+    /// A full pass — the first, or one after more than a day away — gets no tombstones, so rows the
+    /// server no longer has are recognised by their absence. Left alone they would stay forever: a
+    /// list deleted on the web while this machine was away (Apple task 53071260).
+    ///
+    /// Absence is not always deletion. A row this machine made or changed and has not sent, and one
+    /// that moved since the pass began (a create confirmed by the delivery loop while the fetch was
+    /// in flight — Apple task f07dff56), are kept.
+    #[tokio::test]
+    async fn a_full_pass_forgets_what_the_server_no_longer_has_and_nothing_else() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+        let store = &fixture.store;
+        store
+            .upsert_task(&task("gone", "2026-09-01T00:00:00Z"))
+            .expect("stores");
+        store
+            .upsert_task(&task("temp_new", "2026-09-01T00:00:00Z"))
+            .expect("stores");
+        store
+            .upsert_task(&task("edited", "2026-09-01T00:00:00Z"))
+            .expect("stores");
+        store
+            .upsert_task(&task("just-confirmed", "2026-09-07T12:00:30Z"))
+            .expect("stores");
+        store
+            .upsert_list(&TaskList::new("gone-list", "Deleted on the web"))
+            .expect("stores");
+        journal(
+            store,
+            crate::outbox::kind::UPDATE_TASK,
+            json!({ "taskId": "edited", "body": { "title": "Mine" } }),
+            "edit-1",
+        );
+
+        let report = fixture.sync.sync().await;
+        assert!(!report.delta, "no stamp: a full pass");
+        assert!(
+            store.task("gone").expect("reads").is_none(),
+            "deleted elsewhere"
+        );
+        assert!(
+            store.list("gone-list").expect("reads").is_none(),
+            "deleted elsewhere"
+        );
+        assert!(
+            store.task("temp_new").expect("reads").is_some(),
+            "never sent"
+        );
+        assert!(
+            store.task("edited").expect("reads").is_some(),
+            "an edit still on its way"
+        );
+        assert!(
+            store.task("just-confirmed").expect("reads").is_some(),
+            "moved after the pass began"
+        );
     }
 
     fn requests_to(transport: &StubTransport, path: &str) -> Vec<String> {
