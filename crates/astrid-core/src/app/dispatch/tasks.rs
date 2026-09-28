@@ -136,10 +136,15 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
         .iter()
         .find_map(|id| lists.iter().find(|list| &list.id == id))
     {
+        // Who "me" is, for a list that names no default assignee: resolved here rather than left
+        // to the server, so the row drawn straight after the tap already says it is mine and it
+        // still holds with no network (task e2505d10).
+        let me = app.context.account().current_user_id().ok().flatten();
         crate::services::list_defaults::apply(
             &mut draft,
             given,
             list,
+            me.as_deref(),
             app.clock.now(),
             app.clock.utc_offset(),
         );

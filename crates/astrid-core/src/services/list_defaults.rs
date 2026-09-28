@@ -35,10 +35,14 @@ pub struct Given {
 }
 
 /// Fill in what the list defaults and the caller left unsaid.
+///
+/// `me` is the signed-in user's id, which is the fallback assignee for a list that has named no
+/// default — see the assignee arm below. `None` when nobody is signed in yet.
 pub fn apply(
     draft: &mut TaskDraft,
     given: Given,
     list: &TaskList,
+    me: Option<&str>,
     now: DateTime<Utc>,
     offset: FixedOffset,
 ) {
@@ -69,8 +73,19 @@ pub fn apply(
 
     if !given.assignee {
         match list.default_assignee_id.as_deref() {
-            // Unset means the task's creator, which the web leaves to the server; so does this.
-            None | Some("") => {}
+            // Unset means the task's creator — `resolveAssignee` in astrid-web's
+            // `services/assignee-authorization.ts`: `if (listDefault === null) return actorId`.
+            //
+            // This used to be a no-op that left the server to fill it in. The server does, but
+            // deferring showed: the optimistic row drawn the instant somebody hits + was
+            // unassigned, so its leading control was the unassigned mark instead of a checkbox
+            // until a sync came back — and offline, never (task e2505d10). Resolving it here makes
+            // the local answer the same as the server's, with no network, for every client.
+            //
+            // The empty string is folded in with "unset", as it was before: it is not a user id,
+            // and no list's admin tab can produce one.
+            None | Some("") => draft.assignee_id = me.map(str::to_string),
+            // A list that says `unassigned` means it, and that is not the same as saying nothing.
             Some("unassigned") => draft.assignee_id = None,
             Some(id) => draft.assignee_id = Some(id.to_string()),
         }
@@ -156,6 +171,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list_with_defaults(),
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -191,6 +207,7 @@ mod tests {
                 is_private: false,
             },
             &list_with_defaults(),
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -217,6 +234,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -239,6 +257,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -251,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn unassigned_clears_and_unset_leaves_the_creator_to_the_server() {
+    fn unassigned_clears_and_unset_means_the_creator() {
         let mut list = TaskList::new("l1", "Work");
         list.default_assignee_id = Some("unassigned".into());
         let mut draft = TaskDraft::new("Buy milk");
@@ -260,10 +279,14 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );
-        assert_eq!(draft.assignee_id, None);
+        assert_eq!(
+            draft.assignee_id, None,
+            "a list that says `unassigned` means it — that is not the same as saying nothing"
+        );
 
         let untouched = TaskList::new("l2", "Home");
         let mut draft = TaskDraft::new("Buy milk");
@@ -271,13 +294,108 @@ mod tests {
             &mut draft,
             Given::default(),
             &untouched,
+            Some("me"),
             noon_utc(),
             california(),
         );
-        assert_eq!(draft.assignee_id, None, "nothing said, nothing set");
+        assert_eq!(
+            draft.assignee_id.as_deref(),
+            Some("me"),
+            "a list with no default assigns the creator — `resolveAssignee`'s \
+             `if (listDefault === null) return actorId`"
+        );
         assert_eq!(draft.priority, Priority::None);
         assert_eq!(draft.due_date_time, None);
         assert!(draft.is_all_day);
+    }
+
+    /// The bug behind task `e2505d10`: *"new tasks in windows don't have a checkbox on list view"*.
+    ///
+    /// A list with no default assignee used to leave the draft unassigned and let the SERVER fill
+    /// the creator in. The server does do that — `resolveAssignee` returns `actorId` for a null
+    /// list default — but deferring means the optimistic row this client draws immediately is
+    /// unassigned, so its leading control is the unassigned mark rather than a checkbox, and stays
+    /// that way until a sync brings the server's answer back. Offline it never arrives at all.
+    ///
+    /// So the rule is resolved HERE, where every client gets it and it holds with no network.
+    #[test]
+    fn a_new_task_in_a_list_with_no_default_is_mine_task_e2505d10() {
+        let mut draft = TaskDraft::new("Buy milk");
+
+        apply(
+            &mut draft,
+            Given::default(),
+            &TaskList::new("l1", "Work"),
+            Some("jon"),
+            noon_utc(),
+            california(),
+        );
+
+        assert_eq!(
+            draft.assignee_id.as_deref(),
+            Some("jon"),
+            "a task I just made in a list with no default is mine, so the row draws a checkbox"
+        );
+    }
+
+    /// Signed out, or before the account is known, there is no creator to assign. Unassigned is the
+    /// honest answer — and naming a user id that is not the reader's would draw somebody else's
+    /// avatar on the row.
+    #[test]
+    fn with_no_known_creator_the_task_stays_unassigned() {
+        let mut draft = TaskDraft::new("Buy milk");
+
+        apply(
+            &mut draft,
+            Given::default(),
+            &TaskList::new("l1", "Work"),
+            None,
+            noon_utc(),
+            california(),
+        );
+
+        assert_eq!(draft.assignee_id, None);
+    }
+
+    /// A list default still wins over the creator, and a stated assignee still wins over both.
+    #[test]
+    fn the_creator_is_only_the_fallback() {
+        let mut list = TaskList::new("l1", "Work");
+        list.default_assignee_id = Some("dana".into());
+
+        let mut draft = TaskDraft::new("Buy milk");
+        apply(
+            &mut draft,
+            Given::default(),
+            &list,
+            Some("jon"),
+            noon_utc(),
+            california(),
+        );
+        assert_eq!(
+            draft.assignee_id.as_deref(),
+            Some("dana"),
+            "the list said who, so not the creator"
+        );
+
+        let mut draft = TaskDraft::new("Buy milk");
+        draft.assignee_id = Some("sam".into());
+        apply(
+            &mut draft,
+            Given {
+                assignee: true,
+                ..Given::default()
+            },
+            &list,
+            Some("jon"),
+            noon_utc(),
+            california(),
+        );
+        assert_eq!(
+            draft.assignee_id.as_deref(),
+            Some("sam"),
+            "somebody was picked, so neither the list nor the creator"
+        );
     }
 
     #[test]
@@ -289,6 +407,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -303,6 +422,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );
@@ -318,6 +438,7 @@ mod tests {
             &mut draft,
             Given::default(),
             &list,
+            Some("me"),
             noon_utc(),
             california(),
         );

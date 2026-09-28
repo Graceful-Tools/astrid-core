@@ -3035,6 +3035,76 @@ async fn an_ordinary_card_typed_into_done_lands_in_done_task_95c7a68f() {
     assert_eq!(done["cards"][0]["title"], "Write it down");
 }
 
+/// A task you just made, in a list that names no default assignee, is yours — so its row draws a
+/// CHECKBOX and not the unassigned mark (task e2505d10, reported as "new tasks in windows don't
+/// have a checkbox on list view").
+///
+/// The rule was already the server's: `resolveAssignee` returns `actorId` when the list's
+/// `defaultAssigneeId` is null. The core just used to leave it to the server, so the row drawn the
+/// instant somebody hits + was unassigned until a sync answered — and offline, forever. Asserted
+/// through `rowsForList` rather than on the draft, because the leading control is the thing that
+/// was actually wrong on screen.
+#[tokio::test]
+async fn a_task_i_just_made_has_a_checkbox_task_e2505d10() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work" })).expect("a list"),
+        )
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "listIds": ["l1"] }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(
+        made["value"]["assigneeId"], "me",
+        "the creator is resolved locally, not left to the server: {made}"
+    );
+
+    let rows = call(&app, json!({ "kind": "rowsForList", "listId": "l1" })).await;
+    assert_eq!(
+        rows["value"]["rows"][0]["leading"]["kind"], "checkbox",
+        "{rows}"
+    );
+}
+
+/// The other half of the same rule: a list that says `unassigned` means it. That is a choice
+/// somebody made on the list's admin tab, and overruling it with "well, you created it" would make
+/// the setting impossible to express.
+#[tokio::test]
+async fn a_list_that_says_unassigned_still_makes_an_unassigned_task_task_e2505d10() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(
+                json!({ "id": "l1", "name": "Triage", "defaultAssigneeId": "unassigned" }),
+            )
+            .expect("a list"),
+        )
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "listIds": ["l1"] }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(
+        made["value"]["assigneeId"].is_null(),
+        "the list said unassigned: {made}"
+    );
+}
+
 /// `createTask` can say which status a task is born with (task 95c7a68f). The draft and the
 /// service already carried it; the command was the only thing that could not express it.
 #[tokio::test]
@@ -4258,8 +4328,11 @@ async fn a_public_task_the_reader_cannot_edit_is_a_copy_control_task_f6bc59e8() 
     assert_eq!(detail["value"]["isCopyOnly"], true);
 
     let mine = call(&app, json!({ "kind": "rowsForList", "listId": home })).await;
+    // A checkbox, which is what this test's own description always claimed and what the assertion
+    // did not say: a task I just made in my own list is mine. It read "unassigned" because the
+    // creator was left to the server (task e2505d10).
     assert_eq!(
-        mine["value"]["rows"][0]["leading"]["kind"], "unassigned",
+        mine["value"]["rows"][0]["leading"]["kind"], "checkbox",
         "{mine}"
     );
     assert_eq!(mine["value"]["rows"][0]["action"], "complete");
