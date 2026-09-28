@@ -26,6 +26,14 @@ pub struct Project {
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    /// The prefix this project's task identifiers carry — `AWTD` in `AWTD-1007`.
+    ///
+    /// Unique across astrid.cc, and `None` for a project made before identifiers existed. The
+    /// server is the only minter; this is read so a client knows which keys the reader can see,
+    /// which is what decides whether `AWTD-1007` in a comment becomes a link
+    /// ([`crate::identifier::find_links`], task 5f3453e2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -60,6 +60,22 @@ pub(super) fn comment_suggestions(app: &App, task_id: &str, text: &str, caret: u
 ///
 /// Failing to resolve is not an error. The bytes are simply not here yet, and the chip is what a
 /// screen draws until they are.
+/// The autolink context for one task's comments (task 5f3453e2).
+///
+/// The reader's own boards are the keys that link, and the board this task sits on is the one whose
+/// key a bare `#12` means. Both come from this device's own cache, so drawing a comment still costs
+/// no request — see [`crate::identifier::context_for`].
+pub(super) fn identifier_context(
+    app: &App,
+    task: &crate::model::Task,
+    lists: &[crate::model::TaskList],
+) -> crate::identifier::LinkContext {
+    crate::identifier::context_for(
+        &app.store.projects().unwrap_or_default(),
+        crate::rows::detail::project_id_for_task(task, lists).as_deref(),
+    )
+}
+
 pub(super) fn fill_local_paths(app: &App, task_id: &str, rows: &mut [rows::comment::CommentRow]) {
     let attachments = app.context.attachments(app.attachment_cache());
     let Ok(files) = attachments.for_task(task_id) else {

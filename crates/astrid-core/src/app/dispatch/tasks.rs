@@ -197,6 +197,7 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
             .ok()
             .flatten()
             .as_deref(),
+        &identifier_context(app, &task, &lists),
     );
     fill_local_paths(app, task_id, &mut comments);
 

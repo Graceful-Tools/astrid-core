@@ -110,14 +110,39 @@ pub fn render(text: &str) -> Vec<Block> {
         return Vec::new();
     }
     let (with_sentinels, references) = extract_references(text);
+    parse_blocks(&with_sentinels, references)
+}
 
+/// Render markdown, and turn task ids in the prose into links (task 5f3453e2).
+///
+/// What `context` holds decides what links: without the reader's own project keys nothing does, so
+/// `UTF-8` stays `UTF-8`. See [`crate::identifier::find_links`] for the rule and the fixture behind
+/// it.
+///
+/// Ids are linked AFTER the references are masked, which is web's order and matters: an id inside
+/// the title of a `![Task](id)` pill is part of that title, not a reference of its own. Where web
+/// pushes each link out as its own sentinel, this writes markdown link syntax back into the text
+/// and lets the parser see it — the same result, because a match is always `KEY-N` or `#N` and
+/// neither carries a character markdown reads.
+pub fn render_with_identifiers(text: &str, context: &crate::identifier::LinkContext) -> Vec<Block> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    let (with_sentinels, references) = extract_references(text);
+    let linked = crate::identifier::replace_links(&with_sentinels, context, |link| {
+        format!("[{}]({})", link.matched, link.href)
+    });
+    parse_blocks(&linked, references)
+}
+
+fn parse_blocks(with_sentinels: &str, references: Vec<Reference>) -> Vec<Block> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
     let mut builder = Builder::new(references);
-    for event in Parser::new_ext(&with_sentinels, options) {
+    for event in Parser::new_ext(with_sentinels, options) {
         builder.event(event);
     }
     builder.finish()
@@ -1235,5 +1260,84 @@ mod tests {
         assert_eq!(json[0]["inlines"][0]["bold"], true);
         assert_eq!(json[0]["inlines"][2]["kind"], "reference");
         assert_eq!(json[0]["inlines"][2]["reference"], "user");
+    }
+
+    // ── Task ids in prose (task 5f3453e2) ──────────────────────────────────────────────────────
+
+    fn keys(project_key: Option<&str>) -> crate::identifier::LinkContext {
+        crate::identifier::LinkContext {
+            project_key: project_key.map(str::to_string),
+            keys: vec!["AWTD".to_string()],
+            hidden: Vec::new(),
+        }
+    }
+
+    /// The link the shell draws: a run carrying the address, with the id still readable as written.
+    /// `/t/<id>` resolves and redirects, so drawing a comment costs no lookup.
+    #[test]
+    fn an_id_in_a_comment_becomes_a_link_task_5f3453e2() {
+        let blocks = render_with_identifiers("Blocked by AWTD-1007 now.", &keys(None));
+        let Block::Paragraph { inlines } = &blocks[0] else {
+            panic!("a paragraph: {blocks:?}");
+        };
+        let linked: Vec<_> = inlines
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text {
+                    text,
+                    link: Some(href),
+                    ..
+                } => Some((text.as_str(), href.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            linked,
+            vec![("AWTD-1007", "https://astrid.cc/t/AWTD-1007")],
+            "the id links to the resolver, through safe_link's origin"
+        );
+    }
+
+    /// Without the reader's keys nothing links — which is what keeps `UTF-8` prose, and what makes
+    /// `render` and `render_with_identifiers` agree on text that has no visible references.
+    #[test]
+    fn no_context_means_no_links_task_5f3453e2() {
+        let text = "Encode as UTF-8 and see AWTD-1007.";
+        let bare = render_with_identifiers(text, &crate::identifier::LinkContext::default());
+        assert_eq!(bare, render(text));
+    }
+
+    /// The masking order web uses: an id inside a pill's TITLE belongs to that title.
+    #[test]
+    fn an_id_inside_a_task_pill_is_part_of_its_title_task_5f3453e2() {
+        let blocks = render_with_identifiers("see ![AWTD-1007 the thing](abc123)", &keys(None));
+        let Block::Paragraph { inlines } = &blocks[0] else {
+            panic!("a paragraph: {blocks:?}");
+        };
+        assert!(
+            inlines.iter().any(|inline| matches!(
+                inline,
+                Inline::Reference { label, .. } if label == "AWTD-1007 the thing"
+            )),
+            "the pill keeps its whole title: {inlines:?}"
+        );
+        assert!(
+            !inlines
+                .iter()
+                .any(|inline| matches!(inline, Inline::Text { link: Some(_), .. })),
+            "and nothing inside it became a link: {inlines:?}"
+        );
+    }
+
+    /// `#N` needs to know which project it was written in, and a code span is never prose.
+    #[test]
+    fn a_short_form_links_only_inside_its_project_task_5f3453e2() {
+        let inside = render_with_identifiers("dup of #12", &keys(Some("AWTD")));
+        assert_eq!(
+            inside,
+            render_with_identifiers("dup of [#12](/t/AWTD-12)", &keys(None))
+        );
+        let outside = render_with_identifiers("dup of #12", &keys(None));
+        assert_eq!(outside, render("dup of #12"));
     }
 }
