@@ -41,8 +41,8 @@ pub enum Rule {
         time_zone: String,
     },
     /// The calculator on its own: where a series goes next from these fields — see
-    /// [`crate::repeating::next_occurrence`]. `completion` is used as given; the all-day
-    /// adjustment to the person's own day is [`Rule::Completion`]'s, not this rule's.
+    /// [`crate::repeating::next_occurrence`], which this answers exactly, all-day handling
+    /// included.
     NextOccurrence {
         /// `daily`, `weekly`, `monthly`, `yearly` or `custom`, as the wire spells it.
         repeating: String,
@@ -62,6 +62,9 @@ pub enum Rule {
         /// web's own answer.
         #[serde(default)]
         time_zone: Option<String>,
+        /// An all-day series steps in UTC whatever the zone: its dates are UTC midnights.
+        #[serde(default)]
+        is_all_day: bool,
     },
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
     RenderMarkdown { text: String },
@@ -87,6 +90,7 @@ pub fn run(rule: Rule) -> Response {
             repeat_from,
             occurrence_count,
             time_zone,
+            is_all_day,
         } => {
             let zone = match zone(time_zone.as_deref().unwrap_or("UTC")) {
                 Ok(zone) => zone,
@@ -99,7 +103,7 @@ pub fn run(rule: Rule) -> Response {
                 "repeating": repeating,
                 "repeatingData": pattern,
                 "dueDateTime": current_due_date.map(date::format),
-                "isAllDay": false,
+                "isAllDay": is_all_day,
                 "repeatFrom": repeat_from,
                 "occurrenceCount": occurrence_count,
             }));
@@ -173,7 +177,8 @@ mod tests {
             "currentDueDate": "2026-09-28T09:00:00Z",
             "completion": "2026-09-28T12:00:00Z",
             "repeatFrom": "DUE_DATE",
-            "occurrenceCount": 4
+            "occurrenceCount": 4,
+            "timeZone": "America/Los_Angeles"
         }));
         assert_eq!(
             reply,
@@ -183,6 +188,22 @@ mod tests {
                 "newOccurrenceCount": 5
             }})
         );
+    }
+
+    /// An all-day series steps on UTC midnights even when the person is in California, where the
+    /// completion instant is already the next UTC day.
+    #[test]
+    fn an_all_day_series_steps_in_utc_whatever_the_zone() {
+        let reply = answer(json!({
+            "kind": "nextOccurrence",
+            "repeating": "daily",
+            "currentDueDate": "2026-01-06T00:00:00Z",
+            "completion": "2026-01-06T14:42:00Z",
+            "repeatFrom": "COMPLETION_DATE",
+            "timeZone": "America/Los_Angeles",
+            "isAllDay": true
+        }));
+        assert_eq!(reply["value"]["nextDueDate"], "2026-01-07T00:00:00Z");
     }
 
     #[test]
