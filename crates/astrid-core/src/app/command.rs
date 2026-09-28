@@ -275,6 +275,12 @@ pub enum Command {
     /// The whole scheme, for a shortcuts sheet.
     Shortcuts,
 
+    /// Which real ids these temporary ones became, once their creates reached the server: an
+    /// object from each temp id that has one to the id it is now. Ids with nothing to say are left
+    /// out, so an empty answer means "nothing has moved".
+    ResolveIds {
+        ids: Vec<String>,
+    },
     /// Fill an empty cache from a shell's own, once, when it starts speaking through this crate —
     /// the Apple apps' Core Data on their first launch after the move — so an offline first launch
     /// still shows everything. Journals nothing and leaves the sync cursor alone: the first pass

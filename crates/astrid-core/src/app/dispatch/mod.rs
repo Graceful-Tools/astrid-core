@@ -45,6 +45,19 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(Failure::from(error)),
             }
         }
+        Command::ResolveIds { ids } => {
+            let mut moved = serde_json::Map::new();
+            for id in ids {
+                match app.store.resolve_id(&id) {
+                    Ok(real) if real != id => {
+                        moved.insert(id, serde_json::Value::String(real));
+                    }
+                    Ok(_) => {}
+                    Err(error) => return Response::failed(Failure::from(error)),
+                }
+            }
+            Response::ok(serde_json::Value::Object(moved))
+        }
         Command::SeedCache {
             tasks,
             lists,

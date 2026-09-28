@@ -4893,3 +4893,19 @@ async fn a_seed_fills_an_empty_cache_once() {
     let tasks = call(&app, json!({ "kind": "tasks" })).await;
     assert_eq!(tasks["value"].as_array().map(Vec::len), Some(1));
 }
+
+/// A shell that holds a temporary id learns the real one once the create lands, and only the ids
+/// that moved come back.
+#[tokio::test]
+async fn resolve_ids_names_only_the_ids_that_moved() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .record_id_mapping("temp_a", "real-a", app.clock.now())
+        .expect("records");
+    let answer = call(
+        &app,
+        json!({ "kind": "resolveIds", "ids": ["temp_a", "temp_b", "real-c"] }),
+    )
+    .await;
+    assert_eq!(answer["value"], json!({ "temp_a": "real-a" }));
+}
