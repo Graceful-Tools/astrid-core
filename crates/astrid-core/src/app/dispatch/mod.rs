@@ -438,15 +438,29 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             content,
             parent_comment_id,
+            comment_type,
+            file_id,
+            author_id,
+            client_request_id,
         } => {
-            let author = app.context.account().current_user_id().ok().flatten();
-            answer(app.context.comments().post_under(
+            let author =
+                author_id.or_else(|| app.context.account().current_user_id().ok().flatten());
+            // A file already on the server travels by id; the rest of its record comes back with
+            // the comment.
+            let file = file_id.map(|id| crate::model::SecureFile {
+                id,
+                name: String::new(),
+                size: 0,
+                mime_type: String::new(),
+            });
+            answer(app.context.comments().post_as(
                 &task_id,
                 &content,
                 author.as_deref(),
-                crate::model::CommentType::Text,
-                None,
+                comment_type.unwrap_or(crate::model::CommentType::Text),
+                file.as_ref(),
                 parent_comment_id.as_deref(),
+                client_request_id.as_deref(),
             ))
         }
         Command::EditComment {
@@ -858,7 +872,24 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             path,
             content,
-        } => attach_file(app, &task_id, &path, content.as_deref()),
+            file_id,
+            name,
+            mime_type,
+            client_request_id,
+            parent_comment_id,
+        } => attach_file(
+            app,
+            &task_id,
+            &path,
+            AttachOptions {
+                content: content.as_deref(),
+                file_id: file_id.as_deref(),
+                name: name.as_deref(),
+                mime_type: mime_type.as_deref(),
+                client_request_id: client_request_id.as_deref(),
+                parent_comment_id: parent_comment_id.as_deref(),
+            },
+        ),
         Command::ClipboardPaste {
             files,
             image_extension,

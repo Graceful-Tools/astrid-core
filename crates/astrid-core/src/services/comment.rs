@@ -71,8 +71,37 @@ impl CommentService {
         file: Option<&crate::model::SecureFile>,
         parent_comment_id: Option<&str>,
     ) -> Result<Comment> {
+        self.post_as(
+            task_id,
+            content,
+            author_id,
+            comment_type,
+            file,
+            parent_comment_id,
+            None,
+        )
+    }
+
+    /// [`Self::post_under`], under an id the caller chose — the row a shell already drew for the
+    /// comment, so the one it draws next is the same row rather than a second (Apple AITD-331).
+    /// It must be a temporary id; anything else is replaced with a fresh one, because a real-
+    /// looking id on an unsent comment would be mistaken for the server's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn post_as(
+        &self,
+        task_id: &str,
+        content: &str,
+        author_id: Option<&str>,
+        comment_type: CommentType,
+        file: Option<&crate::model::SecureFile>,
+        parent_comment_id: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<Comment> {
         let now = self.context.clock.now();
-        let temp_id = outbox::new_temp_id();
+        let temp_id = id
+            .filter(|id| crate::model::is_temp_id(id))
+            .map(str::to_string)
+            .unwrap_or_else(outbox::new_temp_id);
 
         let optimistic: Comment = serde_json::from_value(json!({
             "id": temp_id,

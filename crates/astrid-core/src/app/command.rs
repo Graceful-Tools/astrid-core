@@ -543,6 +543,20 @@ pub enum Command {
         /// The comment this one answers (task 97c817dd); absent for a top-level comment.
         #[serde(default)]
         parent_comment_id: Option<String>,
+        /// `TEXT` (the default), `MARKDOWN` or `ATTACHMENT`.
+        #[serde(default, rename = "type")]
+        comment_type: Option<crate::model::CommentType>,
+        /// A file already on the server, to carry on the comment.
+        #[serde(default)]
+        file_id: Option<String>,
+        /// Whose words these are when not the signed-in person's — a comment copied with its task
+        /// keeps its author.
+        #[serde(default)]
+        author_id: Option<String>,
+        /// The temporary id of the row the shell already drew for this comment; it becomes the
+        /// comment's id until the server answers, and the idempotency key.
+        #[serde(default)]
+        client_request_id: Option<String>,
     },
     /// Change what a comment says. Offline through the Outbox, like posting one.
     EditComment {
@@ -844,6 +858,19 @@ pub enum Command {
         path: String,
         #[serde(default)]
         content: Option<String>,
+        /// The temporary id the shell already drew the file under (its thumbnail), the name to
+        /// send and the type — each defaulting to what the path says.
+        #[serde(default)]
+        file_id: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        mime_type: Option<String>,
+        /// The comment's own temporary id, as for `postComment`.
+        #[serde(default)]
+        client_request_id: Option<String>,
+        #[serde(default)]
+        parent_comment_id: Option<String>,
     },
     /// Which look the app wears, and the ones it could.
     ///

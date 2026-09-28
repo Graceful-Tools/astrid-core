@@ -46,7 +46,23 @@ pub(super) async fn download_attachment(app: &App, task_id: &str, file_id: &str)
 ///
 /// One command rather than two, because a file uploaded with no comment naming it is a file nobody
 /// can reach: it exists on the server and appears on no task.
-pub(super) fn attach_file(app: &App, task_id: &str, path: &str, content: Option<&str>) -> Response {
+/// What a shell may say about a file it attaches, beyond where it is.
+#[derive(Default)]
+pub(super) struct AttachOptions<'a> {
+    pub content: Option<&'a str>,
+    pub file_id: Option<&'a str>,
+    pub name: Option<&'a str>,
+    pub mime_type: Option<&'a str>,
+    pub client_request_id: Option<&'a str>,
+    pub parent_comment_id: Option<&'a str>,
+}
+
+pub(super) fn attach_file(
+    app: &App,
+    task_id: &str,
+    path: &str,
+    options: AttachOptions,
+) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
@@ -59,7 +75,12 @@ pub(super) fn attach_file(app: &App, task_id: &str, path: &str, content: Option<
     // somebody chooses it, and it goes when there is a connection — see the module note on
     // `astrid_core::services::attachment`.
     let service = app.context.attachments(app.attachment_cache());
-    let (file, held) = match service.queue(std::path::Path::new(path)) {
+    let (file, held) = match service.queue_as(
+        std::path::Path::new(path),
+        options.file_id,
+        options.name,
+        options.mime_type,
+    ) {
         Ok(queued) => queued,
         Err(error) => return Response::failed(error.into()),
     };
@@ -86,12 +107,14 @@ pub(super) fn attach_file(app: &App, task_id: &str, path: &str, content: Option<
 
     // Queued after the upload, so it goes second and finds the real file id waiting for it.
     let author = app.context.account().current_user_id().ok().flatten();
-    answer(app.context.comments().post(
+    answer(app.context.comments().post_as(
         task_id,
-        content.unwrap_or_default(),
+        options.content.unwrap_or_default(),
         author.as_deref(),
         crate::model::CommentType::Attachment,
         Some(&file),
+        options.parent_comment_id,
+        options.client_request_id,
     ))
 }
 

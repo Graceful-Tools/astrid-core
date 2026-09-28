@@ -4983,3 +4983,51 @@ async fn an_imported_write_is_journaled_verbatim_under_its_own_key() {
     .await;
     assert_eq!(refused["ok"], false);
 }
+
+/// The Apple apps draw a comment before they post it; the posted comment has to be that row —
+/// the id they drew it under, the author and type they said — or the thread shows it twice
+/// (AITD-331).
+#[tokio::test]
+async fn a_comment_is_posted_as_the_row_the_shell_already_drew() {
+    let app = app_with(StubTransport::new());
+    let task = call(&app, json!({ "kind": "createTask", "title": "Talk about it" })).await;
+    let task_id = task["value"]["id"].as_str().expect("an id").to_string();
+
+    let posted = call(
+        &app,
+        json!({ "kind": "postComment", "taskId": task_id, "content": "**hello**",
+                "type": "MARKDOWN", "authorId": "someone-else",
+                "clientRequestId": "temp_drawn-row", "fileId": "file-1" }),
+    )
+    .await;
+    assert_eq!(posted["ok"], true, "{posted}");
+    assert_eq!(posted["value"]["id"], "temp_drawn-row");
+    assert_eq!(posted["value"]["type"], "MARKDOWN");
+    assert_eq!(posted["value"]["authorId"], "someone-else");
+    assert_eq!(posted["value"]["secureFiles"][0]["id"], "file-1");
+}
+
+/// A photo attached from the Apple apps keeps the temporary id its thumbnail is drawn under, and
+/// the name and type the picker gave it.
+#[tokio::test]
+async fn an_attached_file_keeps_the_id_its_thumbnail_is_drawn_under() {
+    let app = app_with(StubTransport::new());
+    let task = call(&app, json!({ "kind": "createTask", "title": "Photo" })).await;
+    let task_id = task["value"]["id"].as_str().expect("an id").to_string();
+    let path = std::env::temp_dir().join(format!("astrid-{}.bin", uuid::Uuid::new_v4()));
+    std::fs::write(&path, b"not really a jpeg").expect("writes");
+
+    let posted = call(
+        &app,
+        json!({ "kind": "attachFile", "taskId": task_id, "path": path.to_string_lossy(),
+                "fileId": "temp_thumb", "name": "IMG_0001.jpg", "mimeType": "image/jpeg",
+                "clientRequestId": "temp_comment" }),
+    )
+    .await;
+    assert_eq!(posted["ok"], true, "{posted}");
+    assert_eq!(posted["value"]["id"], "temp_comment");
+    assert_eq!(posted["value"]["secureFiles"][0]["id"], "temp_thumb");
+    assert_eq!(posted["value"]["secureFiles"][0]["originalName"], "IMG_0001.jpg");
+    assert_eq!(posted["value"]["secureFiles"][0]["mimeType"], "image/jpeg");
+    let _ = std::fs::remove_file(path);
+}

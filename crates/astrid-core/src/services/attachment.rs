@@ -142,10 +142,26 @@ impl AttachmentService {
     /// The id is a temporary one, so the comment that carries this file can be queued in the same
     /// breath: the Outbox rewrites it to the real id the moment the upload answers.
     pub fn queue(&self, path: &Path) -> Result<(SecureFile, PathBuf)> {
+        self.queue_as(path, None, None, None)
+    }
+
+    /// [`Self::queue`], under the temporary id, name and type a shell already gave the file — the
+    /// id its thumbnail is drawn under, so the comment carrying the file does not draw an empty box
+    /// while the same bytes sit on disk (Apple AITD-308). An id that is not temporary is replaced.
+    pub fn queue_as(
+        &self,
+        path: &Path,
+        id: Option<&str>,
+        name: Option<&str>,
+        mime_type: Option<&str>,
+    ) -> Result<(SecureFile, PathBuf)> {
         let bytes =
             std::fs::read(path).map_err(|error| ServiceError::LocalFile(error.to_string()))?;
-        let name = file_name(path);
-        let id = crate::outbox::new_temp_id();
+        let name = name.map(str::to_string).unwrap_or_else(|| file_name(path));
+        let id = id
+            .filter(|id| crate::model::is_temp_id(id))
+            .map(str::to_string)
+            .unwrap_or_else(crate::outbox::new_temp_id);
         let pending = self.pending_dir();
         std::fs::create_dir_all(&pending)
             .map_err(|error| ServiceError::LocalFile(error.to_string()))?;
@@ -158,7 +174,9 @@ impl AttachmentService {
                 id,
                 name,
                 size: bytes.len() as i64,
-                mime_type: mime_for(path),
+                mime_type: mime_type
+                    .map(str::to_string)
+                    .unwrap_or_else(|| mime_for(path)),
             },
             held,
         ))
