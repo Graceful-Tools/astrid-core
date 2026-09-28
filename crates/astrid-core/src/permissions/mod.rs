@@ -18,7 +18,7 @@
 //! wrong in either direction is a bug: too generous and the user gets a 403 from a button we drew,
 //! too stingy and a collaborator silently loses their job with no error to explain it.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Privacy value that opens a list to people with no membership.
 ///
@@ -31,7 +31,7 @@ const PRIVACY_PUBLIC: &str = "PUBLIC";
 /// `copy_only`.
 const PUBLIC_TYPE_COLLABORATIVE: &str = "collaborative";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ListRole {
     Owner,
@@ -66,16 +66,67 @@ pub struct ListMembership {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAccess {
+    /// Defaulted so a list payload missing it decodes rather than failing: an empty owner matches
+    /// nobody, which is the safe answer.
+    #[serde(default)]
     pub owner_id: String,
     /// Checked as well as `owner_id`: some payloads carry the relation and a different id, and web
     /// treats either as ownership. A client comparing only `owner_id` locks the real owner out.
     #[serde(default)]
     pub owner: Option<UserRef>,
+    /// Defaulted to private for the same reason: a list whose privacy is missing is not public.
+    #[serde(default = "private")]
     pub privacy: String,
     #[serde(default)]
     pub public_list_type: Option<String>,
     #[serde(default)]
     pub list_members: Vec<ListMembership>,
+}
+
+fn private() -> String {
+    "PRIVATE".to_string()
+}
+
+/// Every answer about one person and one list, for a shell that asks them all at once — see
+/// [`crate::rules`]. `can_edit_task` is for a task by `task_creator_id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Access {
+    pub role: Option<ListRole>,
+    pub can_view: bool,
+    pub can_edit_tasks: bool,
+    pub has_explicit_role: bool,
+    pub can_manage: bool,
+    pub can_manage_members: bool,
+    pub can_delete: bool,
+    pub can_edit_task: bool,
+}
+
+impl Access {
+    /// Nobody signed in: no access to anything.
+    pub const NONE: Access = Access {
+        role: None,
+        can_view: false,
+        can_edit_tasks: false,
+        has_explicit_role: false,
+        can_manage: false,
+        can_manage_members: false,
+        can_delete: false,
+        can_edit_task: false,
+    };
+
+    pub fn of(user_id: &str, task_creator_id: Option<&str>, list: &ListAccess) -> Access {
+        Access {
+            role: role_in_list(user_id, list),
+            can_view: can_view_list(user_id, list),
+            can_edit_tasks: can_edit_tasks(user_id, list),
+            has_explicit_role: has_explicit_list_role(user_id, list),
+            can_manage: can_manage_list(user_id, list),
+            can_manage_members: can_manage_members(user_id, list),
+            can_delete: can_delete_list(user_id, list),
+            can_edit_task: can_edit_task(user_id, task_creator_id, list),
+        }
+    }
 }
 
 /// The part of a list that decides access.

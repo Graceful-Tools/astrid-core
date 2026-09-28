@@ -66,6 +66,15 @@ pub enum Rule {
         #[serde(default)]
         is_all_day: bool,
     },
+    /// Everything one person may do with one list (and with a task in it by `task_creator_id`) —
+    /// see [`crate::permissions`]. `list` is the list's wire shape; nobody signed in has no access.
+    ListAccess {
+        list: crate::permissions::ListAccess,
+        #[serde(default)]
+        user_id: Option<String>,
+        #[serde(default)]
+        task_creator_id: Option<String>,
+    },
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
     RenderMarkdown { text: String },
 }
@@ -114,6 +123,14 @@ pub fn run(rule: Rule) -> Response {
                 Err(error) => Response::failed(Failure::bad_request(error.to_string())),
             }
         }
+        Rule::ListAccess {
+            list,
+            user_id,
+            task_creator_id,
+        } => Response::ok(match user_id {
+            Some(user) => crate::permissions::Access::of(&user, task_creator_id.as_deref(), &list),
+            None => crate::permissions::Access::NONE,
+        }),
         Rule::RenderMarkdown { text } => Response::ok(crate::markdown::render(&text)),
     }
 }
@@ -204,6 +221,30 @@ mod tests {
             "isAllDay": true
         }));
         assert_eq!(reply["value"]["nextDueDate"], "2026-01-07T00:00:00Z");
+    }
+
+    /// D6: an uppercase role written by an old endpoint is still that role.
+    #[test]
+    fn list_access_answers_every_question_at_once() {
+        let reply = answer(json!({
+            "kind": "listAccess",
+            "list": { "id": "l1", "ownerId": "owner", "privacy": "PRIVATE",
+                      "listMembers": [{ "userId": "u2", "role": "ADMIN" }] },
+            "userId": "u2"
+        }));
+        assert_eq!(reply["value"]["role"], "admin");
+        assert_eq!(reply["value"]["canManage"], true);
+        assert_eq!(reply["value"]["canDelete"], false);
+    }
+
+    #[test]
+    fn nobody_signed_in_has_no_access() {
+        let reply = answer(json!({
+            "kind": "listAccess",
+            "list": { "id": "l1", "ownerId": "owner", "privacy": "PUBLIC" }
+        }));
+        assert_eq!(reply["value"]["role"], serde_json::Value::Null);
+        assert_eq!(reply["value"]["canView"], false);
     }
 
     #[test]
