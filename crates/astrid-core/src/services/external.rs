@@ -104,6 +104,42 @@ struct RemoteItem {
     deleted: Option<bool>,
     #[serde(default)]
     parent: Option<String>,
+    /// Where the proxy actually puts deletion and nesting: strings under `metadata`
+    /// (`deleted: "1"`, `parent: "<google id>"` — `api/v1/sync/google/tasks`). The top-level
+    /// fields above are read too, for a proxy that ever sends them flat.
+    #[serde(default)]
+    metadata: Option<RemoteMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RemoteMetadata {
+    #[serde(default)]
+    deleted: String,
+    #[serde(default)]
+    parent: String,
+}
+
+impl RemoteItem {
+    fn is_deleted(&self) -> bool {
+        self.deleted.unwrap_or(false)
+            || self
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.deleted == "1")
+    }
+
+    /// Google's own id of the parent item, when nested.
+    fn raw_parent(&self) -> Option<&str> {
+        self.parent
+            .as_deref()
+            .filter(|parent| !parent.is_empty())
+            .or_else(|| {
+                self.metadata
+                    .as_ref()
+                    .map(|metadata| metadata.parent.as_str())
+                    .filter(|parent| !parent.is_empty())
+            })
+    }
 }
 
 /// Where a pulled task goes.
@@ -742,21 +778,23 @@ impl ExternalSyncService {
                     .as_deref()
                     .and_then(|id| self.context.store.task(id).ok().flatten());
                 match decisions::pull_outcome(
-                    item.deleted.unwrap_or(false),
+                    item.is_deleted(),
                     linked_task_id.is_some(),
                     local.is_some(),
                     tombstoned.contains(&item.remote_id),
                 ) {
                     PullOutcome::DeleteLocalTwin => {
-                        if let Some(task) = &local {
-                            self.context.tasks().delete(&task.id)?;
-                            report.deleted_locally += 1;
-                        }
+                        // Tombstoned first, so the local delete's own capture sees a twin that is
+                        // already gone rather than queueing its removal.
                         ledger::record_tombstone(
                             &self.context.store,
                             PROVIDER_KEY,
                             &item.remote_id,
                         )?;
+                        if let Some(task) = &local {
+                            self.context.tasks().delete(&task.id)?;
+                            report.deleted_locally += 1;
+                        }
                     }
                     PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                     PullOutcome::Apply => {
@@ -931,20 +969,22 @@ impl ExternalSyncService {
                 .and_then(|id| self.context.store.task(id).ok().flatten());
 
             let outcome = decisions::pull_outcome(
-                item.deleted.unwrap_or(false),
+                item.is_deleted(),
                 linked_task_id.is_some(),
                 local.is_some(),
                 tombstoned.contains(&item.remote_id),
             );
             match outcome {
                 PullOutcome::DeleteLocalTwin => {
+                    // Tombstoned first, not pushed back: the deletion came from over there, and
+                    // echoing it would be this device deleting an item that is already gone.
+                    ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &item.remote_id)?;
+                    // Through the task service, journalled: removed from the cache alone, the
+                    // task came back with the next pull from astrid-web.
                     if let Some(task) = &local {
-                        self.context.store.delete_task(&task.id)?;
+                        self.context.tasks().delete(&task.id)?;
                         report.deleted_locally += 1;
                     }
-                    // Tombstoned, not pushed back: the deletion came from over there, and echoing
-                    // it would be this device deleting an item that is already gone.
-                    ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &item.remote_id)?;
                 }
                 PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
                 PullOutcome::Apply => {
@@ -1008,15 +1048,20 @@ impl ExternalSyncService {
             .query("containerId", Some(container_id.to_string()));
         let answer = self.context.client.send(request).await?;
         let mut map = std::collections::HashMap::new();
+        // `{ links: [{ astridTaskId, remoteId, … }] }` is what the route answers
+        // (`api/v1/sync/google/task-links`); the other spellings are kept for an older proxy.
         for link in answer
-            .get("taskLinks")
+            .get("links")
+            .or_else(|| answer.get("taskLinks"))
             .and_then(|value| value.as_array())
             .into_iter()
             .flatten()
         {
             if let (Some(remote), Some(task)) = (
                 link.get("remoteId").and_then(|value| value.as_str()),
-                link.get("taskId").and_then(|value| value.as_str()),
+                link.get("astridTaskId")
+                    .or_else(|| link.get("taskId"))
+                    .and_then(|value| value.as_str()),
             ) {
                 map.insert(remote.to_string(), task.to_string());
             }
@@ -1049,7 +1094,7 @@ impl ExternalSyncService {
         let tasks = self.context.tasks();
         // Nesting, when the parent is a task we hold. The key is scoped to the container because
         // Google reuses short task ids between lists — see `external::decisions::parent_key`.
-        let parent = decisions::parent_key(container_id, item.parent.as_deref())
+        let parent = decisions::parent_key(container_id, item.raw_parent())
             .and_then(|key| task_links.get(&key).cloned());
         // Google Tasks has no time of day, so a due date is a calendar day — which is exactly what
         // an all-day task is here.
@@ -1224,8 +1269,8 @@ mod tests {
                 // The deletion goes first, so its answer is queued first.
                 .push_json("google/tasks", delete_status, json!({}))
                 .push_json("google/tasks", 200, json!({ "items": pulled }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] })),
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] })),
         );
         let store = Arc::new(Store::in_memory().expect("opens"));
         let context = Context::new(
@@ -1341,9 +1386,9 @@ mod tests {
             StubTransport::new()
                 // The pull: nothing to bring in.
                 .push_json("google/tasks", 200, json!({ "items": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 // The push, and the link that follows it.
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 .push_json(
                     "google/tasks",
                     200,
@@ -1388,8 +1433,8 @@ mod tests {
         let fixture = fixture_with(
             StubTransport::new()
                 .push_json("google/tasks", 200, json!({ "items": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 .fallback(Ok(crate::api::HttpResponse {
                     status: 200,
                     headers: vec![("content-type".into(), "application/json".into())],
@@ -1427,8 +1472,8 @@ mod tests {
                     200,
                     json!({ "items": [{ "remoteId": "tasklist-1:r1", "title": "Buy milk" }] }),
                 )
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 .fallback(Ok(crate::api::HttpResponse {
                     status: 200,
                     headers: vec![("content-type".into(), "application/json".into())],
@@ -1460,11 +1505,11 @@ mod tests {
         let fixture = fixture_with(
             StubTransport::new()
                 .push_json("google/tasks", 200, items.clone())
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 .push_json("google/tasks", 200, items)
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
-                .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json("google/task-links", 200, json!({ "links": [] }))
                 .fallback(Ok(crate::api::HttpResponse {
                     status: 200,
                     headers: vec![("content-type".into(), "application/json".into())],
@@ -1522,7 +1567,7 @@ mod tests {
                 }),
             )
             .push_json("google/tasks", 200, json!({ "items": items }))
-            .push_json("google/task-links", 200, json!({ "taskLinks": [] }))
+            .push_json("google/task-links", 200, json!({ "links": [] }))
             .fallback(Ok(crate::api::HttpResponse {
                 status: 200,
                 headers: vec![("content-type".into(), "application/json".into())],
@@ -1601,7 +1646,7 @@ mod tests {
                     "google/task-links",
                     200,
                     json!({
-                        "taskLinks": [{ "remoteId": "default-list:r1", "taskId": "cm3real" }],
+                        "links": [{ "remoteId": "default-list:r1", "astridTaskId": "cm3real" }],
                     }),
                 )
                 .fallback(Ok(crate::api::HttpResponse {
@@ -1919,6 +1964,55 @@ mod tests {
         assert!(
             fixture.store.task("ext_r1").expect("reads").is_none(),
             "the task somebody deleted did not come back"
+        );
+    }
+
+    /// The proxy's real shapes (`api/v1/sync/google/{tasks,task-links}`): links under `links`
+    /// naming `astridTaskId`, and a deletion as `metadata.deleted: "1"`. Read with other names,
+    /// every link looked absent and no remote deletion was ever seen.
+    #[tokio::test]
+    async fn a_deletion_in_google_reaches_the_linked_task_in_the_proxys_shapes() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "google/tasks",
+                    200,
+                    json!({ "items": [{
+                        "remoteId": "tasklist-1:r1", "title": "Buy milk",
+                        "metadata": { "googleTaskId": "r1", "parent": "", "deleted": "1" }
+                    }], "cursor": null, "truncated": false }),
+                )
+                .push_json(
+                    "google/task-links",
+                    200,
+                    json!({ "links": [{ "remoteId": "tasklist-1:r1", "astridTaskId": "t-local",
+                                        "remoteContainerId": "tasklist-1" }] }),
+                )
+                .push_json("google/task-links", 200, json!({ "links": [] }))
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                })),
+        );
+        fixture
+            .store
+            .upsert_task(&crate::model::Task::new("t-local", "Buy milk"))
+            .expect("stores");
+
+        let report = fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+        assert_eq!(report.deleted_locally, 1, "{report:?}");
+        assert!(fixture.store.task("t-local").expect("reads").is_none());
+        let journal = crate::outbox::journal::all(&fixture.store).expect("reads");
+        assert!(
+            journal
+                .iter()
+                .any(|entry| entry.kind == crate::outbox::kind::DELETE_TASK),
+            "the deletion reaches astrid-web, or the next pull brings the task back"
         );
     }
 }
