@@ -399,6 +399,10 @@ because a keyword is matched wherever it sits on a word boundary. Both change on
 
 ### D12 — a date word is a calendar day here and an instant on web
 
+**Resolved on Apple 2026-09-28:** the Apple apps parse through this crate (`rules` →
+`smartParse`) and store the day at UTC midnight. Their English-only Swift parser stored local
+midnight, which east of UTC is the previous UTC day — "tomorrow" typed in Paris landed on today.
+
 The web's `parseRelativeDate("tomorrow")` is `new Date()` plus a day — 14:37 tomorrow, if that is
 when the task was typed — and the task is not all-day. Here the same word gives **tomorrow as an
 all-day task**, stored the way every all-day date is (`date::all_day_instant`), for the reason
@@ -587,4 +591,10 @@ copy-only list add tasks and edit any task in it; only passers-by (viewers) are 
 list. Apple's `ListPermissions` refused members as well, so a member of such a list could neither
 add nor edit on a phone or a Mac what they could on the web. **Resolved 2026-09-28**: the Apple
 apps ask this crate, which answers as web does.
+
+### D30 — "low priority" set priority 0 on Apple; the web sets none
+
+Web's `parseTaskInput` answers `priority || undefined`, so "low priority" (0) is no priority: the
+words leave the title and the picker or the list's default decides. Apple's parser answered 0,
+which overrode a list whose default is high. **Resolved 2026-09-28:** Apple asks this crate.
 
