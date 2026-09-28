@@ -1096,6 +1096,27 @@ pub enum Command {
         list_id: String,
         new_owner_id: String,
     },
+    /// Every board (project) this account has, from the cache, in the wire shape.
+    Projects,
+    /// Create a board; the server seeds its status columns. Online only.
+    CreateProject {
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+        #[serde(default)]
+        image_url: Option<String>,
+    },
+    /// Turn a list into a board in one request. Online only.
+    CreateBoardForList {
+        list_id: String,
+    },
+    /// Delete a board (owner only); its lists are detached, not deleted. Online only. Answers the
+    /// server's `{ success, detachedListIds }`.
+    DeleteProject {
+        project_id: String,
+    },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
     /// The inbox, from the cache: assigned, mentioned, replied, commented, status changed,

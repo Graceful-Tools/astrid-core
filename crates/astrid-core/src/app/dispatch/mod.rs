@@ -1048,6 +1048,29 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .await,
         ),
         Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
+        Command::Projects => answer(app.store.projects().map_err(Into::into)),
+        Command::CreateProject {
+            name,
+            description,
+            color,
+            image_url,
+        } => answer(
+            app.context
+                .boards()
+                .create_project(
+                    &name,
+                    description.as_deref(),
+                    color.as_deref(),
+                    image_url.as_deref(),
+                )
+                .await,
+        ),
+        Command::CreateBoardForList { list_id } => {
+            answer(app.context.boards().create_board_for_list(&list_id).await)
+        }
+        Command::DeleteProject { project_id } => {
+            answer(app.context.boards().delete_project(&project_id).await)
+        }
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
         Command::Notifications => inbox_response(app.context.notifications().inbox()),
         Command::RefreshNotifications => {

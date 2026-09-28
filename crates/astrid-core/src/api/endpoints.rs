@@ -18,6 +18,9 @@ use super::path::escaped_path_component;
 pub const TASKS: &str = "/api/v1/tasks";
 pub const LISTS: &str = "/api/v1/lists";
 pub const PROJECTS: &str = "/api/v1/projects";
+/// Turn a list into a board in one transaction: the project is created and the list attached, so a
+/// failure half way cannot leave an empty, same-named project behind (Apple, 2026-05-12).
+pub const PROJECTS_FROM_LIST: &str = "/api/v1/projects/from-list";
 /// A board's columns: add (POST), rename (PATCH), reorder (PUT), remove (DELETE).
 ///
 /// **The server does not have this route yet.** The web manages statuses at `/api/statuses`,

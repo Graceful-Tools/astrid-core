@@ -2728,6 +2728,108 @@ async fn a_list_with_no_channel_has_an_empty_chat_rather_than_an_error() {
         .is_empty());
 }
 
+/// Making a board from a list: one request, and the board has its columns at once — the seeded
+/// status lists cached, the list attached (Apple `createBoardForList`, 2026-05-12).
+#[tokio::test]
+async fn a_board_made_from_a_list_has_its_columns_at_once() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/from-list",
+        201,
+        json!({ "project": {
+            "id": "p1", "name": "Work",
+            "lists": [
+                { "id": "l1", "name": "Work", "listType": "regular" },
+                { "id": "s1", "name": "Doing", "listType": "status" }
+            ]
+        } }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "color": "#ff0000" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createBoardForList", "listId": "l1" }),
+    )
+    .await;
+    assert_eq!(made["value"]["id"], "p1", "{made}");
+    let attached = app.store.list("l1").expect("reads").expect("cached");
+    assert_eq!(attached.project_id.as_deref(), Some("p1"));
+    assert_eq!(
+        attached.color.as_deref(),
+        Some("#ff0000"),
+        "the richer cached list is kept"
+    );
+    assert!(
+        app.store.list("s1").expect("reads").is_some(),
+        "the column is there"
+    );
+    let projects = call(&app, json!({ "kind": "projects" })).await;
+    assert_eq!(projects["value"][0]["id"], "p1");
+}
+
+/// Deleting a board detaches its lists and keeps them.
+#[tokio::test]
+async fn deleting_a_board_detaches_its_lists() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        200,
+        json!({ "success": true, "detachedListIds": ["l1"] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Work" })).expect("a project"),
+        ])
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+
+    let deleted = call(&app, json!({ "kind": "deleteProject", "projectId": "p1" })).await;
+    assert_eq!(deleted["value"]["success"], true, "{deleted}");
+    assert!(app.store.projects().expect("reads").is_empty());
+    let list = app.store.list("l1").expect("reads").expect("kept");
+    assert!(list.project_id.is_none());
+}
+
+/// A board deleted on the web goes on the next refresh; the set is whole.
+#[tokio::test]
+async fn a_board_deleted_elsewhere_goes_on_refresh() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects",
+        200,
+        json!({ "projects": [{ "id": "p2", "name": "Kept" }] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Gone" })).expect("a project"),
+            serde_json::from_value(json!({ "id": "p2", "name": "Kept" })).expect("a project"),
+        ])
+        .expect("stores");
+    app.context
+        .boards()
+        .refresh_projects()
+        .await
+        .expect("refreshes");
+    let ids: Vec<String> = app
+        .store
+        .projects()
+        .expect("reads")
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(ids, vec!["p2"]);
+}
+
 /// A public list shown to somebody not on it answers an EMPTY roster rather than a refusal; the
 /// server's `user_role` is what tells "not shown to you" from "nobody here" (Apple 4a338b53).
 #[tokio::test]

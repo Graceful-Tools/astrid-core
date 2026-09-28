@@ -270,6 +270,13 @@ impl Store {
         })
     }
 
+    pub fn delete_project(&self, id: &str) -> Result<()> {
+        self.with(|connection| {
+            connection.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
     pub fn projects(&self) -> Result<Vec<Project>> {
         self.with(|connection| {
             let mut statement = connection.prepare("SELECT json FROM projects")?;

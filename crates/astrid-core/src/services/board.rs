@@ -186,7 +186,8 @@ impl BoardService {
         Ok(StatusOutcome::Written(write.state))
     }
 
-    /// Fetch every board the account has and cache it.
+    /// Fetch every board the account has and cache it. The answer is the whole set, so a board
+    /// it no longer includes was deleted — on the web, or on another device — and goes.
     pub async fn refresh_projects(&self) -> Result<usize> {
         let projects = self
             .context
@@ -196,8 +197,108 @@ impl BoardService {
                 Some(endpoints::envelope::PROJECTS),
             )
             .await?;
+        if !projects.skipped.is_empty() {
+            // A row that would not decode is not a deletion: keep the cache rather than guess.
+            let items = projects.into_items();
+            self.context.store.upsert_projects(&items)?;
+            return Ok(items.len());
+        }
         let items = projects.into_items();
+        let fetched: std::collections::HashSet<&str> =
+            items.iter().map(|project| project.id.as_str()).collect();
+        for cached in self.context.store.projects()? {
+            if !fetched.contains(cached.id.as_str()) {
+                self.context.store.delete_project(&cached.id)?;
+            }
+        }
         self.context.store.upsert_projects(&items)?;
         Ok(items.len())
+    }
+
+    /// Create a board, and the status columns the server seeds for it. Online: a board is a
+    /// shared structure the server numbers and seeds, not a local fact.
+    pub async fn create_project(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        color: Option<&str>,
+        image_url: Option<&str>,
+    ) -> Result<Project> {
+        let request = self.context.client.post(endpoints::PROJECTS).value(json!({
+            "name": name, "description": description, "color": color, "imageUrl": image_url,
+        }));
+        let project = self.read_project(self.context.client.send(request).await?)?;
+        self.take_project(&project, None)?;
+        Ok(project)
+    }
+
+    /// Turn `list_id` into a board, in one request.
+    pub async fn create_board_for_list(&self, list_id: &str) -> Result<Project> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::PROJECTS_FROM_LIST)
+            .value(json!({ "listId": list_id }));
+        let project = self.read_project(self.context.client.send(request).await?)?;
+        self.take_project(&project, Some(list_id))?;
+        Ok(project)
+    }
+
+    /// Delete a board (owner only), and mirror the server's cascade: its lists are detached, kept.
+    /// Status lists are the account's, shared by every board, and are not touched.
+    pub async fn delete_project(&self, project_id: &str) -> Result<serde_json::Value> {
+        let answer = self
+            .context
+            .client
+            .send(self.context.client.delete(endpoints::project(project_id)))
+            .await?;
+        self.context.store.delete_project(project_id)?;
+        for mut list in self.context.store.lists()? {
+            if list.project_id.as_deref() == Some(project_id) {
+                list.project_id = None;
+                self.context.store.upsert_list(&list)?;
+            }
+        }
+        Ok(answer)
+    }
+
+    fn read_project(&self, answer: serde_json::Value) -> Result<Project> {
+        serde_json::from_value(answer.get("project").cloned().unwrap_or(answer))
+            .map_err(|error| crate::api::ApiError::Decode(error.to_string()).into())
+    }
+
+    /// Cache a board the server just made, with what came back beside it: the seeded status
+    /// columns, and — for a board made from a list — that list, now attached. Without them the
+    /// board has no columns until the next pass, which reads as "Create Board didn't work".
+    fn take_project(&self, project: &Project, attached_list: Option<&str>) -> Result<()> {
+        self.context
+            .store
+            .upsert_projects(std::slice::from_ref(project))?;
+        for list in project.lists.iter().flatten() {
+            if Some(list.id.as_str()) == attached_list {
+                // The cached list is richer than the echo; it gains the link rather than being
+                // replaced by a thinner copy.
+                if let Some(mut cached) = self.context.store.list(&list.id)? {
+                    cached.project_id = Some(project.id.clone());
+                    if list.list_type.is_some() {
+                        cached.list_type = list.list_type.clone();
+                    }
+                    self.context.store.upsert_list(&cached)?;
+                }
+            } else if list.list_type.as_deref() == Some("status")
+                && self.context.store.list(&list.id)?.is_none()
+            {
+                self.context.store.upsert_list(list)?;
+            }
+        }
+        if let Some(list_id) = attached_list {
+            if let Some(mut cached) = self.context.store.list(list_id)? {
+                if cached.project_id.as_deref() != Some(project.id.as_str()) {
+                    cached.project_id = Some(project.id.clone());
+                    self.context.store.upsert_list(&cached)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
