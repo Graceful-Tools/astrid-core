@@ -254,6 +254,16 @@ pub(super) fn list_changes_from_json(
                 changes.recently_completed_window =
                     Some(serde_json::from_value(value.clone()).unwrap_or(None))
             }
+            "defaultIsPrivate" => changes.default_is_private = Some(value.as_bool()),
+            "publicListType" => changes.public_list_type = Some(value.as_str().map(str::to_string)),
+            "isVirtual" => changes.is_virtual = value.as_bool(),
+            "virtualListType" => {
+                changes.virtual_list_type = Some(value.as_str().map(str::to_string))
+            }
+            "projectId" => changes.project_id = Some(value.as_str().map(str::to_string)),
+            "aiAgentConfig" => {
+                changes.ai_agent_config = Some((!value.is_null()).then(|| value.clone()))
+            }
             _ => {}
         }
     }

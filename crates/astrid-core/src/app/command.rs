@@ -468,6 +468,11 @@ pub enum Command {
         name: String,
         #[serde(default)]
         color: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        /// `PRIVATE`, `SHARED` or `PUBLIC`; the server's default when absent.
+        #[serde(default)]
+        privacy: Option<crate::model::Privacy>,
     },
     UpdateList {
         list_id: String,

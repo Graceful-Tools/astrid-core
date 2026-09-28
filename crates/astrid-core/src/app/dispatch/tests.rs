@@ -4909,3 +4909,48 @@ async fn resolve_ids_names_only_the_ids_that_moved() {
     .await;
     assert_eq!(answer["value"], json!({ "temp_a": "real-a" }));
 }
+
+/// Settings the Apple apps write that this door used to drop without a word: a list's private
+/// default, its public type, its project and its agent settings reach the cache and the journal.
+#[tokio::test]
+async fn every_list_setting_a_shell_writes_is_kept() {
+    let app = app_with(StubTransport::new());
+    let made = call(
+        &app,
+        json!({ "kind": "createList", "name": "Shared work", "privacy": "PUBLIC",
+                "description": "For the team" }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["privacy"], "PUBLIC");
+    assert_eq!(made["value"]["description"], "For the team");
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+    let updated = call(
+        &app,
+        json!({ "kind": "updateList", "listId": id, "changes": {
+            "defaultIsPrivate": false, "publicListType": "collaborative", "projectId": "p1",
+            "aiAgentConfig": { "enabledTypes": ["claude"], "defaultAgentId": "ai-agent-claude" }
+        } }),
+    )
+    .await;
+    assert_eq!(updated["ok"], true, "{updated}");
+    assert_eq!(updated["value"]["defaultIsPrivate"], false);
+    assert_eq!(updated["value"]["publicListType"], "collaborative");
+    assert_eq!(updated["value"]["projectId"], "p1");
+    assert_eq!(
+        updated["value"]["aiAgentConfig"]["defaultAgentId"],
+        "ai-agent-claude"
+    );
+
+    let journal = crate::outbox::journal::all(&app.store).expect("reads");
+    let edit = journal
+        .iter()
+        .rev()
+        .find(|entry| entry.kind == crate::outbox::kind::UPDATE_LIST)
+        .expect("an update is journaled");
+    let body = &edit.payload["body"];
+    assert_eq!(body["publicListType"], "collaborative");
+    assert_eq!(body["projectId"], "p1");
+    assert_eq!(body["aiAgentConfig"]["enabledTypes"], json!(["claude"]));
+}

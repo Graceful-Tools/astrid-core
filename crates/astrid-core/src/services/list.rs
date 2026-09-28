@@ -58,6 +58,18 @@ pub struct ListChanges {
     pub filter_assigned_by: Option<Option<String>>,
     pub filter_in_lists: Option<Option<String>>,
     pub recently_completed_window: Option<Option<crate::model::RecentlyCompletedWindow>>,
+    /// Whether a task made here is private unless said otherwise; `Some(None)` is the account's.
+    pub default_is_private: Option<Option<bool>>,
+    /// `copy_only` or `collaborative`, for a public list.
+    pub public_list_type: Option<Option<String>>,
+    /// A saved filter view ("smart list") rather than somewhere tasks are filed.
+    pub is_virtual: Option<bool>,
+    pub virtual_list_type: Option<Option<String>>,
+    /// The project (board) the list belongs to; `Some(None)` takes it out of one.
+    pub project_id: Option<Option<String>>,
+    /// The agent settings as a whole, for a shell that writes them wholesale — the server replaces
+    /// the stored config, so the caller carries the enabled types through itself.
+    pub ai_agent_config: Option<Option<serde_json::Value>>,
 }
 
 impl ListChanges {
@@ -149,6 +161,26 @@ impl ListChanges {
         if let Some(value) = &self.recently_completed_window {
             list.recently_completed_window = value.clone();
         }
+        if let Some(value) = self.default_is_private {
+            list.default_is_private = value;
+        }
+        if let Some(value) = &self.public_list_type {
+            list.public_list_type = value.clone();
+        }
+        if let Some(value) = self.is_virtual {
+            list.is_virtual = Some(value);
+        }
+        if let Some(value) = &self.virtual_list_type {
+            list.virtual_list_type = value.clone();
+        }
+        if let Some(value) = &self.project_id {
+            list.project_id = value.clone();
+        }
+        if let Some(value) = &self.ai_agent_config {
+            list.ai_agent_config = value
+                .as_ref()
+                .and_then(|config| serde_json::from_value(config.clone()).ok());
+        }
     }
 
     pub fn to_body(&self) -> serde_json::Value {
@@ -227,6 +259,24 @@ impl ListChanges {
         }
         if let Some(value) = &self.recently_completed_window {
             set("recentlyCompletedWindow", json!(value));
+        }
+        if let Some(value) = self.default_is_private {
+            set("defaultIsPrivate", json!(value));
+        }
+        if let Some(value) = &self.public_list_type {
+            set("publicListType", json!(value));
+        }
+        if let Some(value) = self.is_virtual {
+            set("isVirtual", json!(value));
+        }
+        if let Some(value) = &self.virtual_list_type {
+            set("virtualListType", json!(value));
+        }
+        if let Some(value) = &self.project_id {
+            set("projectId", json!(value));
+        }
+        if let Some(value) = &self.ai_agent_config {
+            set("aiAgentConfig", json!(value));
         }
         serde_json::Value::Object(body)
     }

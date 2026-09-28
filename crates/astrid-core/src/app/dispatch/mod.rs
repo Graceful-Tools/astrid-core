@@ -352,7 +352,26 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             status_role,
         } => answer(app.context.tasks().set_status_role(&task_id, status_role)),
-        Command::CreateList { name, color } => answer(app.context.lists().create(&name, color)),
+        Command::CreateList {
+            name,
+            color,
+            description,
+            privacy,
+        } => {
+            let created = app.context.lists().create_with(&name, color, privacy);
+            match (created, description) {
+                // A description rides on the list's first edit, which the journal sends after the
+                // create: the create's body is the web's, and it takes no description.
+                (Ok(list), Some(description)) if !description.is_empty() => {
+                    let changes = crate::services::ListChanges {
+                        description: Some(Some(description)),
+                        ..Default::default()
+                    };
+                    answer(app.context.lists().update(&list.id, &changes))
+                }
+                (created, _) => answer(created),
+            }
+        }
         Command::UpdateList { list_id, changes } => match list_changes_from_json(&changes) {
             Ok(changes) => answer(app.context.lists().update(&list_id, &changes)),
             Err(failure) => Response::failed(failure),
