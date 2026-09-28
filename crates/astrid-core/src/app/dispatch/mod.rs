@@ -75,6 +75,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 kind::CREATE_COMMENT,
                 kind::UPDATE_COMMENT,
                 kind::DELETE_COMMENT,
+                // The Apple apps queued membership changes offline in Core Data (D31).
+                kind::INVITE_TO_LIST,
+                kind::SET_MEMBER_ROLE,
+                kind::REMOVE_MEMBER,
             ];
             if !known.contains(&entry_kind.as_str()) {
                 return Response::failed(Failure::bad_request(format!(
