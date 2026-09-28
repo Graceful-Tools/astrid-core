@@ -1143,8 +1143,12 @@ impl ExternalSyncService {
             let mut draft = crate::services::TaskDraft::new(item.title.clone());
             draft.description = item.notes.clone().unwrap_or_default();
             match placement {
-                // The link's list, so a pulled task appears where somebody expects it.
-                Placement::InList(list_id) => draft.list_ids = vec![list_id.clone()],
+                // The link's list, so a pulled task appears where somebody expects it — and the
+                // person's, as the Apple apps make it: a task from their own Google list is theirs.
+                Placement::InList(list_id) => {
+                    draft.list_ids = vec![list_id.clone()];
+                    draft.assignee_id = self.context.account().current_user_id().ok().flatten();
+                }
                 // My Tasks is not a list: it is "assigned to me, in no list", so that is what a
                 // task pulled from the default remote list has to become.
                 Placement::MyTasks(user_id) => draft.assignee_id = Some(user_id.clone()),
