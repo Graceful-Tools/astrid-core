@@ -310,9 +310,20 @@ impl Store {
         })
     }
 
+    /// Store comments. A server comment that echoes an optimistic one's `clientRequestId` takes its
+    /// place, whichever path brought it first — see [`Store::upsert_messages`].
     pub fn upsert_comments(&self, comments: &[Comment]) -> Result<()> {
         self.transaction(|connection| {
             for comment in comments {
+                replace_echoed(
+                    connection,
+                    "comments",
+                    "task_id",
+                    &comment.task_id,
+                    &comment.id,
+                    comment.client_request_id.as_deref(),
+                    comment.created_at,
+                )?;
                 connection.execute(
                     "INSERT OR REPLACE INTO comments (id, task_id, author_id, created_at, json)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -390,34 +401,15 @@ impl Store {
     pub fn upsert_messages(&self, messages: &[ChatMessage]) -> Result<()> {
         self.transaction(|connection| {
             for message in messages {
-                if let (false, Some(request_id)) = (
-                    crate::model::is_temp_id(&message.id),
+                replace_echoed(
+                    connection,
+                    "chat_messages",
+                    "channel_id",
+                    &message.channel_id,
+                    &message.id,
                     message.client_request_id.as_deref(),
-                ) {
-                    let echoed: Vec<String> = {
-                        let mut statement = connection.prepare(
-                            "SELECT id FROM chat_messages WHERE id LIKE 'temp\\_%' ESCAPE '\\'
-                             AND channel_id = ?1 AND json_extract(json, '$.clientRequestId') = ?2",
-                        )?;
-                        let rows = statement.query_map(
-                            rusqlite::params![message.channel_id, request_id],
-                            |row| row.get::<_, String>(0),
-                        )?;
-                        rows.collect::<rusqlite::Result<_>>()?
-                    };
-                    for temp_id in echoed {
-                        connection.execute("DELETE FROM chat_messages WHERE id = ?1", [&temp_id])?;
-                        connection.execute(
-                            "INSERT OR REPLACE INTO id_mappings (temp_id, server_id, created_at)
-                             VALUES (?1, ?2, ?3)",
-                            rusqlite::params![
-                                temp_id,
-                                message.id,
-                                date::format(message.created_at.unwrap_or_else(Utc::now))
-                            ],
-                        )?;
-                    }
-                }
+                    message.created_at,
+                )?;
                 connection.execute(
                     "INSERT OR REPLACE INTO chat_messages (id, channel_id, author_id, created_at, json)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -664,6 +656,49 @@ fn encode<T: Serialize>(value: &T) -> Result<String> {
 
 fn decode<T: DeserializeOwned>(json: &str) -> Result<T> {
     serde_json::from_str(json).map_err(|error| StoreError::Corrupt(error.to_string()))
+}
+
+/// Drop the optimistic rows (`temp_` ids) in `table` whose `clientRequestId` the server's row
+/// `id` echoes, recording each as resolving to it — so a reply or an edit written against the
+/// optimistic id still lands. Scoped to the row's owner (`owner_column` = `owner`).
+fn replace_echoed(
+    connection: &rusqlite::Connection,
+    table: &str,
+    owner_column: &str,
+    owner: &str,
+    id: &str,
+    client_request_id: Option<&str>,
+    created_at: Option<DateTime<Utc>>,
+) -> Result<()> {
+    let Some(request_id) = client_request_id else {
+        return Ok(());
+    };
+    if crate::model::is_temp_id(id) {
+        return Ok(());
+    }
+    let echoed: Vec<String> = {
+        let mut statement = connection.prepare(&format!(
+            "SELECT id FROM {table} WHERE id LIKE 'temp\\_%' ESCAPE '\\' AND id != ?1
+             AND {owner_column} = ?2 AND json_extract(json, '$.clientRequestId') = ?3"
+        ))?;
+        let rows = statement.query_map(rusqlite::params![id, owner, request_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for temp_id in echoed {
+        connection.execute(&format!("DELETE FROM {table} WHERE id = ?1"), [&temp_id])?;
+        connection.execute(
+            "INSERT OR REPLACE INTO id_mappings (temp_id, server_id, created_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                temp_id,
+                id,
+                date::format(created_at.unwrap_or_else(Utc::now))
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

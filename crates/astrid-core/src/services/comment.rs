@@ -37,8 +37,36 @@ impl CommentService {
             .client
             .send_collection::<Comment>(request, Some(endpoints::envelope::COMMENTS))
             .await?;
-        self.context.store.upsert_comments(&fetched.items)?;
-        Ok(fetched.into_items())
+        let rows = fetched.into_items();
+
+        // An edit or a delete still on its way is what the person last saw: the server's copy of
+        // that comment neither overwrites the edit nor brings the deleted one back.
+        let touched = journal::ids_named(
+            &self.context.store,
+            Some(&[kind::UPDATE_COMMENT, kind::DELETE_COMMENT]),
+            "commentId",
+            false,
+        )?;
+        let incoming: Vec<Comment> = rows
+            .iter()
+            .filter(|comment| !touched.contains(&comment.id))
+            .cloned()
+            .collect();
+        self.context.store.upsert_comments(&incoming)?;
+
+        // The list is the whole thread, so a delivered comment it does not return was deleted
+        // elsewhere. One still on its way is not evidence of anything (AITD-354).
+        let returned: std::collections::HashSet<&str> =
+            rows.iter().map(|comment| comment.id.as_str()).collect();
+        for cached in self.context.store.comments_for_task(task_id)? {
+            if !crate::model::is_temp_id(&cached.id)
+                && !returned.contains(cached.id.as_str())
+                && !touched.contains(&cached.id)
+            {
+                self.context.store.delete_comment(&cached.id)?;
+            }
+        }
+        Ok(rows)
     }
 
     /// Post a comment. It is in the thread before this returns.
@@ -328,6 +356,95 @@ mod tests {
                 .expect("refreshes")
                 .len(),
             1
+        );
+    }
+
+    /// A task's comment list is the whole thread, so a comment the server no longer returns was
+    /// deleted — on the web, or on another device while this one's stream was down. It goes.
+    /// A comment still on its way never does (the Apple apps' `CommentCachePruner`, AITD-354).
+    #[tokio::test]
+    async fn a_refresh_forgets_comments_deleted_elsewhere_but_not_unsent_ones() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/comments",
+            200,
+            json!({ "comments": [{ "id": "c2", "taskId": "t1", "content": "kept" }] }),
+        ));
+        let cached: Vec<Comment> = serde_json::from_value(json!([
+            { "id": "c1", "taskId": "t1", "content": "deleted on the web" },
+            { "id": "c2", "taskId": "t1", "content": "kept" },
+            { "id": "c9", "taskId": "t2", "content": "another task" }
+        ]))
+        .expect("decodes");
+        fixture.store.upsert_comments(&cached).expect("stores");
+        let unsent = fixture
+            .service
+            .post("t1", "on its way", None, CommentType::Text, None)
+            .expect("posts");
+
+        fixture.service.refresh("t1").await.expect("refreshes");
+        let ids: Vec<String> = fixture
+            .service
+            .for_task("t1")
+            .expect("reads")
+            .into_iter()
+            .map(|comment| comment.id)
+            .collect();
+        assert!(ids.contains(&"c2".to_string()));
+        assert!(ids.contains(&unsent.id));
+        assert!(!ids.contains(&"c1".to_string()), "{ids:?}");
+        assert_eq!(fixture.service.for_task("t2").expect("reads").len(), 1);
+    }
+
+    /// An edit waiting to be sent is what the person last saw; the server's older copy of the
+    /// comment does not overwrite it.
+    #[tokio::test]
+    async fn a_refresh_does_not_undo_an_edit_on_its_way() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/comments",
+            200,
+            json!({ "comments": [{ "id": "c1", "taskId": "t1", "content": "before" }] }),
+        ));
+        let cached: Vec<Comment> =
+            serde_json::from_value(json!([{ "id": "c1", "taskId": "t1", "content": "before" }]))
+                .expect("decodes");
+        fixture.store.upsert_comments(&cached).expect("stores");
+        fixture.service.edit("c1", "after").expect("edits");
+
+        fixture.service.refresh("t1").await.expect("refreshes");
+        assert_eq!(
+            fixture.service.for_task("t1").expect("reads")[0].content,
+            "after"
+        );
+    }
+
+    /// The stream can bring the server's copy of a comment before the post's own answer does. It
+    /// replaces the optimistic comment it echoes rather than joining it.
+    #[test]
+    fn the_servers_copy_replaces_the_comment_it_echoes() {
+        let fixture = fixture(StubTransport::new());
+        let posted = fixture
+            .service
+            .post("t1", "on it", None, CommentType::Text, None)
+            .expect("posts");
+        let echoed: Comment = serde_json::from_value(json!({
+            "id": "c1", "taskId": "t1", "content": "on it", "clientRequestId": posted.id
+        }))
+        .expect("decodes");
+        fixture
+            .store
+            .upsert_comments(std::slice::from_ref(&echoed))
+            .expect("stores");
+        let ids: Vec<String> = fixture
+            .service
+            .for_task("t1")
+            .expect("reads")
+            .into_iter()
+            .map(|comment| comment.id)
+            .collect();
+        assert_eq!(ids, vec!["c1"]);
+        assert_eq!(
+            fixture.store.resolve_id(&posted.id).expect("resolves"),
+            "c1"
         );
     }
 }
