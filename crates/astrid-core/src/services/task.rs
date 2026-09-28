@@ -442,39 +442,38 @@ impl TaskService {
             changes.last_timer_value = Some(timer.last_value.clone());
         }
 
-        // Un-completing, or a task that does not repeat: the flag is the whole operation.
-        if !completed || current.completed || !current.is_repeating() {
-            changes.completed = Some(completed);
-            changes.completed_at = Some(completed.then_some(now));
-            if !completed && current.closed_reason.is_some() {
-                // Reopening clears the reason with the flag: a task that is open again is not
-                // "won't do" either, and the web's reopen clears both (task 016ce981).
-                changes.closed_reason = Some(None);
+        // The rule is `repeating::completion`'s; this only applies it.
+        match repeating::completion(&current, completed, now, self.context.clock.utc_offset()) {
+            repeating::Completion::Toggle {
+                completed,
+                completed_at,
+                clear_closed_reason,
+            } => {
+                changes.completed = Some(completed);
+                changes.completed_at = Some(completed_at);
+                if clear_closed_reason {
+                    changes.closed_reason = Some(None);
+                }
             }
-            return self.update(id, &changes);
-        }
-
-        let outcome = next_occurrence(&current, now, self.context.clock.utc_offset());
-        match outcome.next_due_date {
-            Some(next_due) => {
-                // It rolls forward: still open, due next time round.
+            repeating::Completion::RollForward {
+                due_date_time,
+                is_all_day,
+                occurrence_count,
+            } => {
                 changes.completed = Some(false);
                 changes.completed_at = Some(None);
-                changes.due_date_time = Some(Some(next_due));
-                changes.is_all_day = Some(current.is_all_day);
-                changes.occurrence_count = Some(outcome.new_occurrence_count as i64);
-                self.update(id, &changes)
+                changes.due_date_time = Some(Some(due_date_time));
+                changes.is_all_day = Some(is_all_day);
+                changes.occurrence_count = Some(occurrence_count as i64);
             }
-            None => {
-                // The series is over. Completed, and no longer repeating — a task that showed a
-                // repeat chip after its last occurrence would look like it was coming back.
+            repeating::Completion::SeriesEnded { completed_at } => {
                 changes.completed = Some(true);
-                changes.completed_at = Some(Some(now));
+                changes.completed_at = Some(Some(completed_at));
                 changes.repeating = Some(Some(Repeating::Never));
                 changes.repeating_data = Some(None);
-                self.update(id, &changes)
             }
         }
+        self.update(id, &changes)
     }
 
     /// Delete a task. Gone from the cache immediately; the server hears about it when it can.
@@ -608,81 +607,6 @@ impl TaskService {
 pub struct TimerResult {
     pub duration_seconds: Option<i64>,
     pub last_value: Option<String>,
-}
-
-/// Work out where a repeating task goes next.
-///
-/// Delegates to [`crate::repeating`] and does no pattern math of its own. An inline copy in the
-/// iOS service once ignored `weekdays`, so a Mon/Wed/Fri task jumped a whole week instead of
-/// moving to the next selected day — rule 4 of `docs/ASTRID.md` §0 exists because of it.
-fn next_occurrence(
-    task: &Task,
-    now: DateTime<Utc>,
-    offset: chrono::FixedOffset,
-) -> repeating::NextOccurrence {
-    let repeat_from = match task.repeat_from.unwrap_or(RepeatFromMode::CompletionDate) {
-        RepeatFromMode::DueDate => repeating::RepeatFrom::DueDate,
-        RepeatFromMode::CompletionDate => repeating::RepeatFrom::CompletionDate,
-    };
-    let completion = effective_completion_date(task, repeat_from, now, offset);
-    let occurrence_count = task.occurrence_count.unwrap_or(0) as i32;
-
-    if task.repeating == Some(Repeating::Custom) {
-        if let Some(pattern) = &task.repeating_data {
-            return repeating::calculate_custom_next_occurrence(
-                &repeating::pattern_from_wire(pattern),
-                task.due_date_time,
-                completion,
-                repeat_from,
-                occurrence_count,
-            );
-        }
-    }
-
-    // A simple pattern may still carry an end condition, piggybacked on the same column.
-    let end_data = task.repeating_data.as_ref().and_then(|pattern| {
-        let wire = repeating::pattern_from_wire(pattern);
-        wire.end_condition
-            .map(|end_condition| repeating::SimplePatternEndCondition {
-                end_condition,
-                end_after_occurrences: wire.end_after_occurrences,
-                end_until_date: wire.end_until_date,
-            })
-    });
-
-    let simple = match task.repeating {
-        Some(Repeating::Daily) => repeating::Repeating::Daily,
-        Some(Repeating::Weekly) => repeating::Repeating::Weekly,
-        Some(Repeating::Monthly) => repeating::Repeating::Monthly,
-        Some(Repeating::Yearly) => repeating::Repeating::Yearly,
-        _ => repeating::Repeating::Never,
-    };
-    repeating::calculate_simple_next_occurrence(
-        simple,
-        task.due_date_time,
-        completion,
-        repeat_from,
-        occurrence_count,
-        end_data.as_ref(),
-    )
-}
-
-/// The instant a completion anchors on.
-///
-/// For an all-day task repeating from its completion, the anchor is the calendar day the person
-/// completed it on — **their** day, stored the way all-day dates are stored. Ticking one off at
-/// 21:00 in California is 04:00 UTC the next day; anchoring on that instant would move every
-/// evening completion a day past their own calendar, and the next occurrence with it.
-fn effective_completion_date(
-    task: &Task,
-    repeat_from: repeating::RepeatFrom,
-    now: DateTime<Utc>,
-    offset: chrono::FixedOffset,
-) -> DateTime<Utc> {
-    if task.is_all_day && repeat_from == repeating::RepeatFrom::CompletionDate {
-        return date::all_day_today(now, offset);
-    }
-    now
 }
 
 /// The lists a task is in, resolved against the cache. Used by the row projection and by anything

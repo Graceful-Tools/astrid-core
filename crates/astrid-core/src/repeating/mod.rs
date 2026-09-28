@@ -30,6 +30,9 @@
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 
+mod completion;
+pub use completion::{completion, next_occurrence, Completion};
+
 /// How often a task repeats. `Custom` defers to [`CustomRepeatingPattern`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

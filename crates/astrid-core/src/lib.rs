@@ -37,6 +37,7 @@ pub mod realtime;
 pub mod reminders;
 pub mod repeating;
 pub mod rows;
+pub mod rules;
 pub mod services;
 pub mod smart_tasks;
 pub mod store;
