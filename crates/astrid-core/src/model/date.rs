@@ -47,9 +47,14 @@ pub fn parse(text: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
-/// Format an instant the way this client always writes one: whole seconds, `Z`.
+/// Format an instant the way this client writes one: `Z`, and whole seconds unless the instant
+/// carries milliseconds — then those too, so two completions made in the same second still sort
+/// (AITD-369). Nothing finer than a millisecond: the server stores no more.
 pub fn format(at: DateTime<Utc>) -> String {
-    at.to_rfc3339_opts(SecondsFormat::Secs, true)
+    match at.timestamp_subsec_millis() {
+        0 => at.to_rfc3339_opts(SecondsFormat::Secs, true),
+        _ => at.to_rfc3339_opts(SecondsFormat::Millis, true),
+    }
 }
 
 /// The instant that represents an all-day task due on `day`.
@@ -127,12 +132,23 @@ pub mod required {
 
 #[cfg(test)]
 mod tests {
+    /// Two completions made in the same second must still sort — a completion stamped to the
+    /// whole second collided with its neighbour on the Apple apps (AITD-369), so an instant that
+    /// carries milliseconds keeps them. One that does not is written as it always was.
+    #[test]
+    fn an_instant_keeps_its_milliseconds_and_a_whole_second_stays_whole() {
+        let precise = parse("2026-09-28T12:00:00.123Z").expect("parses");
+        assert_eq!(format(precise), "2026-09-28T12:00:00.123Z");
+        let whole = parse("2026-09-28T12:00:00Z").expect("parses");
+        assert_eq!(format(whole), "2026-09-28T12:00:00Z");
+    }
+
     use super::*;
 
     #[test]
-    fn it_reads_the_milliseconds_prisma_writes() {
+    fn it_reads_the_milliseconds_prisma_writes_and_keeps_them() {
         let at = parse("2026-09-07T12:34:56.789Z").expect("parses");
-        assert_eq!(format(at), "2026-09-07T12:34:56Z");
+        assert_eq!(format(at), "2026-09-07T12:34:56.789Z");
     }
 
     #[test]
@@ -148,10 +164,14 @@ mod tests {
         assert_eq!(format(at), "2026-09-07T12:34:56Z");
     }
 
+    /// Nothing finer than the millisecond the server stores; a whole second is written whole, as
+    /// the Apple apps write a due date.
     #[test]
-    fn it_writes_whole_seconds_with_a_z_like_the_apple_encoder() {
+    fn it_writes_at_most_milliseconds_with_a_z() {
         let at = parse("2026-01-02T03:04:05.123456Z").expect("parses");
-        assert_eq!(format(at), "2026-01-02T03:04:05Z");
+        assert_eq!(format(at), "2026-01-02T03:04:05.123Z");
+        let whole = parse("2026-01-02T03:04:05Z").expect("parses");
+        assert_eq!(format(whole), "2026-01-02T03:04:05Z");
     }
 
     #[test]
