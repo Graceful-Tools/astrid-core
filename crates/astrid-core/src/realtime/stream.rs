@@ -46,12 +46,23 @@ pub async fn run(
             return Stopped::Cancelled;
         }
 
+        let mut woken = false;
         match client.open_stream(client.get(SSE_PATH)).await {
             Ok(mut frames) => {
                 // It connected: whatever failed before describes a world that is gone.
                 policy.connected();
                 sink.set_live(true);
-                while let Some(frame) = frames.next().await {
+                loop {
+                    let frame = tokio::select! {
+                        frame = frames.next() => frame,
+                        // Asked to start over — a machine waking holds a connection that looks
+                        // open and delivers nothing.
+                        _ = sink.woken() => {
+                            woken = true;
+                            break;
+                        }
+                    };
+                    let Some(frame) = frame else { break };
                     if !should_continue() {
                         sink.set_live(false);
                         return Stopped::Cancelled;
@@ -77,8 +88,19 @@ pub async fn run(
         }
         sink.set_live(false);
 
+        if woken {
+            policy = ReconnectPolicy::new();
+            continue;
+        }
         match policy.failed() {
-            Some(wait) => tokio::time::sleep(wait).await,
+            Some(wait) => {
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    // The backoff was chosen for a world that has changed: try now, from a clean
+                    // count.
+                    _ = sink.woken() => policy = ReconnectPolicy::new(),
+                }
+            }
             None => return Stopped::OutOfAttempts,
         }
     }
@@ -237,5 +259,42 @@ mod tests {
         run(client(stub), sink.clone(), || true).await;
         assert_eq!(*heard.lock().expect("lock"), vec![true, false]);
         assert!(!sink.is_live());
+    }
+
+    /// Waking from sleep, or the network coming back, should not wait out a backoff chosen while
+    /// the world was different (Apple `reconnectNow`, which the Mac calls on wake).
+    #[tokio::test]
+    async fn a_reconnect_now_cuts_the_backoff_short() {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let sink = Arc::new(RealtimeSink::new(store));
+        let stub = Arc::new(StreamingStub::new(vec![]));
+        let keep = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let running = {
+            let (stub, sink, keep) = (stub.clone(), sink.clone(), keep.clone());
+            tokio::spawn(async move {
+                run(client(stub), sink, move || {
+                    keep.load(std::sync::atomic::Ordering::SeqCst)
+                })
+                .await
+            })
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(
+            *stub.opened.lock().expect("lock"),
+            1,
+            "waiting out its backoff"
+        );
+        sink.reconnect_now();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(*stub.opened.lock().expect("lock"), 2, "tried again at once");
+
+        keep.store(false, std::sync::atomic::Ordering::SeqCst);
+        sink.reconnect_now();
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(1), running)
+            .await
+            .expect("stops")
+            .expect("joins");
+        assert_eq!(stopped, Stopped::Cancelled);
     }
 }

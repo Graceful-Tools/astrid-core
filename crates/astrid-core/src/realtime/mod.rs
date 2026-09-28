@@ -180,6 +180,7 @@ pub struct RealtimeSink {
     store: Arc<Store>,
     listeners: std::sync::Mutex<Vec<ChangeListener>>,
     live: std::sync::atomic::AtomicBool,
+    wake: tokio::sync::Notify,
 }
 
 impl RealtimeSink {
@@ -188,7 +189,20 @@ impl RealtimeSink {
             store,
             listeners: std::sync::Mutex::new(Vec::new()),
             live: std::sync::atomic::AtomicBool::new(false),
+            wake: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Drop the stream and connect again now, from a clean failure count — the machine woke, or
+    /// the network came back, and neither the open connection nor the backoff describes the world
+    /// any more. Remembered if nothing is listening yet, so a call made while the loop is between
+    /// steps is not lost.
+    pub fn reconnect_now(&self) {
+        self.wake.notify_one();
+    }
+
+    pub(crate) async fn woken(&self) {
+        self.wake.notified().await;
     }
 
     /// Whether the live stream is connected right now.

@@ -299,9 +299,12 @@ pub async fn realtime_loop(app: Arc<App>, should_continue: impl Fn() -> bool + S
                 tokio::time::sleep(SIGNED_OUT_RETRY).await;
             }
             // It gave up. The timer is still running, so the app is not stale — it is just slower
-            // until the next attempt succeeds.
+            // until the next attempt succeeds, or until somebody says the world changed.
             realtime::Stopped::OutOfAttempts => {
-                tokio::time::sleep(default_sync_interval()).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(default_sync_interval()) => {}
+                    _ = app.realtime.woken() => {}
+                }
             }
         }
     }

@@ -257,6 +257,9 @@ pub enum Command {
     /// Whether the live stream is connected: `{ "live": bool }`. Its edges arrive as `stream`
     /// changes.
     StreamState,
+    /// Drop the live stream and connect again now — after the machine wakes, or the network comes
+    /// back — rather than waiting out a backoff chosen while it was down.
+    ReconnectStream,
     /// What a pressed key means, given what is on screen.
     ///
     /// The shell asks rather than knowing, because the bare-key scheme is a cross-platform
