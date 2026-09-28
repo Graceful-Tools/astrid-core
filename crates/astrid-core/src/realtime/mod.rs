@@ -38,7 +38,27 @@ pub const SSE_PATH: &str = "/api/v1/sse";
 pub fn apply(store: &Store, event: &Event) -> Option<Change> {
     match &event.kind {
         EventKind::TaskCreated(task) | EventKind::TaskUpdated(task) => {
-            store.upsert_task(task).ok()?;
+            // Deleted here and the delete is on its way: a late event must not bring it back.
+            let deleting = crate::outbox::journal::ids_named(
+                store,
+                Some(&[crate::outbox::kind::DELETE_TASK]),
+                "taskId",
+                true,
+            )
+            .ok()?;
+            if deleting.contains(&task.id) {
+                return None;
+            }
+            match store.task(&task.id).ok()? {
+                // Older than what is here — the echo of an edit a newer one has overtaken. Keep
+                // the newer; its own event, or the next pass, brings the server's word on it.
+                Some(cached) if is_older(task.updated_at, cached.updated_at) => return None,
+                // Both may have moved: the same field-by-field rule the sync pass applies.
+                Some(cached) => store
+                    .upsert_task(&crate::sync::conflict::resolve(&cached, task))
+                    .ok()?,
+                None => store.upsert_task(task).ok()?,
+            }
             Some(Change::Task(task.id.clone()))
         }
         EventKind::TaskDeleted(id) => {
@@ -81,6 +101,15 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
         // was about.
         EventKind::Unknown(_) => None,
     }
+}
+
+/// Whether `incoming` is strictly older than `cached`. Equal is not older: the server's copy of the
+/// same moment is the one to keep.
+fn is_older(
+    incoming: Option<chrono::DateTime<chrono::Utc>>,
+    cached: Option<chrono::DateTime<chrono::Utc>>,
+) -> bool {
+    matches!((incoming, cached), (Some(incoming), Some(cached)) if incoming < cached)
 }
 
 /// What an applied event changed, for the shell to refresh.
@@ -228,6 +257,68 @@ mod tests {
         })))
         .expect("parses");
         assert_eq!(apply(&store, &event), Some(Change::Task("t1".into())));
+        assert!(store.task("t1").expect("reads").is_none());
+    }
+
+    fn task_event(kind: &str, data: serde_json::Value) -> Event {
+        parse::parse(&frame(json!({ "type": kind, "data": data }))).expect("parses")
+    }
+
+    /// The echo of an earlier edit — this machine's own, or a colleague's that crossed a newer one
+    /// made here — arrives after the newer edit. It must not put the older title back (Apple
+    /// `LiveUpdatePolicy`, which this crate had no equivalent of).
+    #[test]
+    fn an_older_event_does_not_overwrite_a_newer_edit_made_here() {
+        let store = Store::in_memory().expect("opens");
+        let mine: Task = serde_json::from_value(json!({
+            "id": "t1", "title": "Newer, mine", "updatedAt": "2026-09-07T12:05:00Z"
+        }))
+        .expect("a task");
+        store.upsert_task(&mine).expect("stores");
+
+        let stale = task_event(
+            "task_updated",
+            json!({ "id": "t1", "title": "Older", "updatedAt": "2026-09-07T12:00:00Z" }),
+        );
+        assert_eq!(apply(&store, &stale), None, "nothing moved");
+        assert_eq!(
+            store.task("t1").expect("reads").expect("kept").title,
+            "Newer, mine"
+        );
+
+        // An equal timestamp is the server's word on the same moment: take it.
+        let same = task_event(
+            "task_updated",
+            json!({ "id": "t1", "title": "Server's", "updatedAt": "2026-09-07T12:05:00Z" }),
+        );
+        assert_eq!(apply(&store, &same), Some(Change::Task("t1".into())));
+        assert_eq!(
+            store.task("t1").expect("reads").expect("kept").title,
+            "Server's"
+        );
+    }
+
+    /// Deleted here, delete on its way: a late event about the task must not bring it back.
+    #[test]
+    fn a_late_event_does_not_bring_back_a_task_deleted_here() {
+        let store = Store::in_memory().expect("opens");
+        crate::outbox::journal::enqueue(
+            &store,
+            &crate::outbox::Entry::new(
+                "e1",
+                crate::outbox::kind::DELETE_TASK,
+                json!({ "taskId": "t1" }),
+                "k1",
+                crate::model::date::parse("2026-09-07T12:00:00Z").expect("an instant"),
+            ),
+        )
+        .expect("enqueues");
+
+        let late = task_event(
+            "task_updated",
+            json!({ "id": "t1", "title": "Deleted here" }),
+        );
+        assert_eq!(apply(&store, &late), None);
         assert!(store.task("t1").expect("reads").is_none());
     }
 
