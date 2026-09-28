@@ -70,6 +70,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 kind::UPDATE_TASK,
                 kind::DELETE_TASK,
                 kind::COMPLETE_TASK,
+                kind::CREATE_LIST,
                 kind::UPDATE_LIST,
                 kind::CREATE_COMMENT,
                 kind::UPDATE_COMMENT,
