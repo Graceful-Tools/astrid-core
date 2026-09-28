@@ -224,7 +224,10 @@ Two answers surprise people, and both are deliberate on web:
 
 ### D6 — the Swift port resolves roles more strictly than web
 
-**This crate follows web. The divergence is on the Apple side, and it costs real users access.**
+**Resolved 2026-09-28: the Apple apps ask this crate** (`rules` → `listAccess`), so all three
+clients answer as web does. Kept for the history below.
+
+**This crate follows web. The divergence was on the Apple side, and it cost real users access.**
 
 `TaskList.role(for:)` matches membership rows with `$0.role == "admin"` and `$0.role == "member"`,
 exactly and case-sensitively, and matches the member only on `userId`. Web lowercases the role,
@@ -576,4 +579,12 @@ which is the web's. The stored numbers agree; only the words differ.
 `rows::list_picks::is_destination` excludes virtual lists and board-status lists. iOS's
 `InlineListsPicker` excludes only virtual lists and the Mac's `MacListPicker` only status lists,
 so each offers a destination the other refuses.
+
+### D29 — Apple refused members of a public copy-only list
+
+Web (`lib/list-permissions.ts`, and so the permissions fixture) lets a **member** of a public
+copy-only list add tasks and edit any task in it; only passers-by (viewers) are sent to copy the
+list. Apple's `ListPermissions` refused members as well, so a member of such a list could neither
+add nor edit on a phone or a Mac what they could on the web. **Resolved 2026-09-28**: the Apple
+apps ask this crate, which answers as web does.
 
