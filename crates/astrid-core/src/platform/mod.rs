@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, Offset, TimeZone, Utc};
+use chrono_tz::Tz;
 
 /// The key the session `Cookie` header is stored under. One name, used by the client and by
 /// sign-in, so a rename cannot sign everyone out.
@@ -108,6 +109,15 @@ pub trait Clock: Send + Sync {
     fn utc_offset(&self) -> FixedOffset {
         FixedOffset::east_opt(0).expect("UTC is a valid offset")
     }
+
+    /// The device's zone, by name — for calendar arithmetic that must survive a daylight-saving
+    /// change, which an offset at one instant cannot. "Monthly at 2pm" is 2pm in March as well as
+    /// in February.
+    ///
+    /// Defaults to UTC, for the same reason as [`Clock::utc_offset`].
+    fn time_zone(&self) -> Tz {
+        Tz::UTC
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -121,6 +131,15 @@ impl Clock for SystemClock {
     fn utc_offset(&self) -> FixedOffset {
         *chrono::Local::now().offset()
     }
+
+    /// Read from the system each time, so a person who flies to another zone gets their new
+    /// calendar without restarting. A zone the database does not know reads as UTC.
+    fn time_zone(&self) -> Tz {
+        iana_time_zone::get_timezone()
+            .ok()
+            .and_then(|name| name.parse().ok())
+            .unwrap_or(Tz::UTC)
+    }
 }
 
 /// A clock a test moves by hand.
@@ -128,6 +147,7 @@ impl Clock for SystemClock {
 pub struct FixedClock {
     now: Mutex<DateTime<Utc>>,
     offset: Mutex<FixedOffset>,
+    zone: Mutex<Tz>,
 }
 
 impl FixedClock {
@@ -135,13 +155,34 @@ impl FixedClock {
         FixedClock {
             now: Mutex::new(now),
             offset: Mutex::new(FixedOffset::east_opt(0).expect("UTC is a valid offset")),
+            zone: Mutex::new(Tz::UTC),
         }
     }
 
     /// Put the test somewhere else in the world. `hours` may be negative.
+    ///
+    /// The zone is the fixed `Etc/GMT` one for that offset, with no daylight saving; use
+    /// [`FixedClock::in_named_zone`] for a real place.
     pub fn in_zone(self, hours: i32) -> Self {
         *self.offset.lock().expect("clock lock") =
             FixedOffset::east_opt(hours * 3600).expect("a real offset");
+        // POSIX names the Etc zones with the sign inverted: Etc/GMT+7 is seven hours WEST.
+        let name = match hours {
+            0 => "Etc/GMT".to_string(),
+            east if east > 0 => format!("Etc/GMT-{east}"),
+            west => format!("Etc/GMT+{}", -west),
+        };
+        *self.zone.lock().expect("clock lock") = name.parse().expect("an Etc zone");
+        self
+    }
+
+    /// Put the test in a real place, daylight saving and all. The offset follows the zone at the
+    /// clock's current instant.
+    pub fn in_named_zone(self, zone: Tz) -> Self {
+        let now = *self.now.lock().expect("clock lock");
+        *self.offset.lock().expect("clock lock") =
+            zone.offset_from_utc_datetime(&now.naive_utc()).fix();
+        *self.zone.lock().expect("clock lock") = zone;
         self
     }
 
@@ -167,6 +208,10 @@ impl Clock for FixedClock {
 
     fn utc_offset(&self) -> FixedOffset {
         *self.offset.lock().expect("clock lock")
+    }
+
+    fn time_zone(&self) -> Tz {
+        *self.zone.lock().expect("clock lock")
     }
 }
 

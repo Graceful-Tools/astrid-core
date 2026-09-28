@@ -10,13 +10,18 @@
 //! added seven days instead of picking the next selected weekday. Collapsing the logic into one
 //! place is what fixed it.
 //!
-//! ## Everything here is UTC
+//! ## Calendar arithmetic happens in a zone
 //!
-//! Web does its arithmetic with `setUTC*` and all-day tasks are stored as UTC midnight, so UTC is
-//! the contract. The Swift port uses a UTC calendar for the time-preserving step but `Calendar
-//! .current` for the month and year steps; for a user east or west of UTC that can land a monthly
-//! rollover on a different date than web computes. That divergence is recorded in
-//! `docs/CONTRACTS.md` rather than reproduced here — this crate follows web.
+//! Every step — a day, a month, "the third Tuesday", "until the 15th" — is taken on the wall
+//! clock of a zone the caller names, then turned back into an instant. For an **all-day** task
+//! that zone is UTC, because an all-day date is stored as UTC midnight and names a calendar day,
+//! not a moment. For a **timed** task it is the person's own zone: "monthly at 2pm" is 2pm on both
+//! sides of a daylight-saving change, and the third Tuesday is a Tuesday where they live.
+//!
+//! In UTC every answer here is exactly the web's (`types/repeating.ts` runs its setters in UTC on
+//! the server), which is what the contract fixtures check. A zone other than UTC is where this
+//! crate follows the Apple apps, which always calculated in the device's calendar — see
+//! `docs/CONTRACTS.md` D1 and D3.
 //!
 //! ## Adding a field to `CustomRepeatingPattern`
 //!
@@ -27,7 +32,8 @@
 //!    covered and not just the calculator in isolation.
 //! 4. Mirror the change in astrid-web and astrid-ios.
 
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, NaiveDateTime, Offset, TimeZone, Utc};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 mod completion;
@@ -135,8 +141,10 @@ pub struct SimplePatternEndCondition {
 ///
 /// `next_due_date` is `None` exactly when `should_terminate` is true: the series is over and the
 /// task stays completed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NextOccurrence {
+    #[serde(with = "crate::model::date::optional")]
     pub next_due_date: Option<DateTime<Utc>>,
     pub should_terminate: bool,
     pub new_occurrence_count: i32,
@@ -154,14 +162,15 @@ pub fn calculate_simple_next_occurrence(
     repeat_from: RepeatFrom,
     current_occurrence_count: i32,
     end_data: Option<&SimplePatternEndCondition>,
+    zone: Tz,
 ) -> NextOccurrence {
-    let anchor = anchor_date(current_due_date, completion_date, repeat_from);
+    let anchor = anchor_date(current_due_date, completion_date, repeat_from, zone);
 
     let next = match repeating_type {
-        Repeating::Daily => adding_days(anchor, 1),
-        Repeating::Weekly => adding_days(anchor, 7),
-        Repeating::Monthly => adding_months(anchor, 1),
-        Repeating::Yearly => adding_years(anchor, 1),
+        Repeating::Daily => adding_days(anchor, 1, zone),
+        Repeating::Weekly => adding_days(anchor, 7, zone),
+        Repeating::Monthly => adding_months(anchor, 1, zone),
+        Repeating::Yearly => adding_years(anchor, 1, zone),
         // Neither is a simple pattern: custom patterns route to
         // `calculate_custom_next_occurrence`, and a task that never repeats is not completed
         // through this path at all. Returning the anchor mirrors the Swift default arm.
@@ -179,7 +188,7 @@ pub fn calculate_simple_next_occurrence(
     };
 
     let (should_terminate, new_occurrence_count) =
-        check_simple_pattern_end_condition(next, new_occurrence_count, end_data);
+        check_simple_pattern_end_condition(next, new_occurrence_count, end_data, zone);
     NextOccurrence {
         next_due_date: (!should_terminate).then_some(next),
         should_terminate,
@@ -192,6 +201,7 @@ pub fn check_simple_pattern_end_condition(
     next_due_date: DateTime<Utc>,
     new_occurrence_count: i32,
     end_data: &SimplePatternEndCondition,
+    zone: Tz,
 ) -> (bool, i32) {
     let should_terminate = match end_data.end_condition {
         // "Never" outranks the other fields even when they carry values: a series the user said
@@ -202,7 +212,7 @@ pub fn check_simple_pattern_end_condition(
             .is_some_and(|max| new_occurrence_count >= max),
         EndCondition::UntilDate => end_data
             .end_until_date
-            .is_some_and(|end| is_after_date(next_due_date, end)),
+            .is_some_and(|end| is_after_date(next_due_date, end, zone)),
     };
     (should_terminate, new_occurrence_count)
 }
@@ -214,6 +224,7 @@ pub fn calculate_custom_next_occurrence(
     completion_date: DateTime<Utc>,
     repeat_from: RepeatFrom,
     current_occurrence_count: i32,
+    zone: Tz,
 ) -> NextOccurrence {
     let new_occurrence_count = current_occurrence_count + 1;
     let terminated = NextOccurrence {
@@ -230,20 +241,20 @@ pub fn calculate_custom_next_occurrence(
         return terminated;
     }
 
-    let anchor = anchor_date(current_due_date, completion_date, repeat_from);
+    let anchor = anchor_date(current_due_date, completion_date, repeat_from, zone);
 
     let (Some(unit), Some(interval)) = (pattern.unit.as_deref(), pattern.interval) else {
         return terminated;
     };
 
     let next = match unit {
-        "days" => Some(adding_days(anchor, i64::from(interval))),
+        "days" => Some(adding_days(anchor, i64::from(interval), zone)),
         "weeks" => pattern
             .weekdays
             .as_deref()
-            .and_then(|weekdays| next_weekday_occurrence(anchor, weekdays)),
-        "months" => next_month_occurrence(anchor, pattern, interval),
-        "years" => Some(next_year_occurrence(anchor, pattern, interval)),
+            .and_then(|weekdays| next_weekday_occurrence(anchor, weekdays, zone)),
+        "months" => next_month_occurrence(anchor, pattern, interval, zone),
+        "years" => Some(next_year_occurrence(anchor, pattern, interval, zone)),
         _ => None,
     };
 
@@ -254,7 +265,7 @@ pub fn calculate_custom_next_occurrence(
     if pattern.end_condition == Some(EndCondition::UntilDate)
         && pattern
             .end_until_date
-            .is_some_and(|end| is_after_date(next, end))
+            .is_some_and(|end| is_after_date(next, end, zone))
     {
         return terminated;
     }
@@ -266,18 +277,42 @@ pub fn calculate_custom_next_occurrence(
     }
 }
 
-// Helpers. Every one of these works in UTC — see the module docs.
+// Helpers. Each takes its step on the wall clock of `zone` — see the module docs.
 
-/// Add whole days as elapsed time rather than by calendar arithmetic, so an all-day task stored at
-/// UTC midnight lands on UTC midnight again.
-fn adding_days(date: DateTime<Utc>, days: i64) -> DateTime<Utc> {
-    date + chrono::Duration::days(days)
+/// `date` as a wall-clock reading in `zone`.
+fn local(date: DateTime<Utc>, zone: Tz) -> NaiveDateTime {
+    date.with_timezone(&zone).naive_local()
+}
+
+/// A wall-clock reading in `zone` as an instant.
+///
+/// A reading the clock skips (the hour a spring-forward removes) lands an hour later, which is
+/// where the person's clock is by then; one it shows twice (the hour a fall-back repeats) takes
+/// the first, which is when it first reads that time.
+fn instant(reading: NaiveDateTime, zone: Tz) -> DateTime<Utc> {
+    use chrono::LocalResult;
+    match zone.from_local_datetime(&reading) {
+        LocalResult::Single(at) | LocalResult::Ambiguous(at, _) => at.with_timezone(&Utc),
+        LocalResult::None => zone
+            .from_local_datetime(&(reading + chrono::Duration::hours(1)))
+            .earliest()
+            .map(|at| at.with_timezone(&Utc))
+            .unwrap_or_else(|| reading.and_utc()),
+    }
+}
+
+/// Add whole calendar days. In UTC that is elapsed time, so an all-day task stored at UTC midnight
+/// lands on UTC midnight again; in a zone with daylight saving, 9am stays 9am.
+fn adding_days(date: DateTime<Utc>, days: i64, zone: Tz) -> DateTime<Utc> {
+    instant(local(date, zone) + chrono::Duration::days(days), zone)
 }
 
 /// Add months, clamping the day to what the target month has: January 31st plus a month is the
 /// 28th or 29th of February, never the 2nd or 3rd of March.
-fn adding_months(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
-    date.checked_add_months(chrono::Months::new(months))
+fn adding_months(date: DateTime<Utc>, months: u32, zone: Tz) -> DateTime<Utc> {
+    local(date, zone)
+        .checked_add_months(chrono::Months::new(months))
+        .map(|reading| instant(reading, zone))
         .unwrap_or(date)
 }
 
@@ -288,12 +323,13 @@ fn adding_months(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
 /// That is not a typo, and it is not this crate's choice. `adding_months` above clamps because
 /// web's SIMPLE monthly step clamps, with an explicit `setUTCDate(0)`; web's CUSTOM monthly step a
 /// few files away does not, and the two are reachable from the same product question. See D5.
-fn adding_months_overflowing(date: DateTime<Utc>, months: u32) -> DateTime<Utc> {
-    let zero_based = date.month0() + months;
-    let year = date.year() + (zero_based / 12) as i32;
+fn adding_months_overflowing(date: DateTime<Utc>, months: u32, zone: Tz) -> DateTime<Utc> {
+    let reading = local(date, zone);
+    let zero_based = reading.month0() + months;
+    let year = reading.year() + (zero_based / 12) as i32;
     let month = zero_based % 12 + 1;
-    from_ymd_overflowing(year, month, date.day())
-        .map(|d| d.and_time(date.time()).and_utc())
+    from_ymd_overflowing(year, month, reading.day())
+        .map(|day| instant(day.and_time(reading.time()), zone))
         .unwrap_or(date)
 }
 
@@ -304,9 +340,10 @@ fn adding_months_overflowing(date: DateTime<Utc>, months: u32) -> DateTime<Utc> 
 /// answer and is what both Apple apps do. Web is the contract, and a yearly task must roll over to
 /// the same date whichever client the user completes it on. Recorded as D5 in docs/CONTRACTS.md,
 /// with web's own clamp/overflow inconsistency, because it is worth fixing everywhere at once.
-fn adding_years(date: DateTime<Utc>, years: i32) -> DateTime<Utc> {
-    from_ymd_overflowing(date.year() + years, date.month(), date.day())
-        .map(|d| d.and_time(date.time()).and_utc())
+fn adding_years(date: DateTime<Utc>, years: i32, zone: Tz) -> DateTime<Utc> {
+    let reading = local(date, zone);
+    from_ymd_overflowing(reading.year() + years, reading.month(), reading.day())
+        .map(|day| instant(day.and_time(reading.time()), zone))
         .unwrap_or(date)
 }
 
@@ -325,6 +362,7 @@ fn anchor_date(
     current_due_date: Option<DateTime<Utc>>,
     completion_date: DateTime<Utc>,
     repeat_from: RepeatFrom,
+    zone: Tz,
 ) -> DateTime<Utc> {
     let Some(due) = current_due_date else {
         return completion_date;
@@ -333,47 +371,59 @@ fn anchor_date(
         RepeatFrom::DueDate => due,
         RepeatFrom::CompletionDate => completion_date,
     };
-    base.date_naive().and_time(due.time()).and_utc()
+    instant(
+        local(base, zone).date().and_time(local(due, zone).time()),
+        zone,
+    )
 }
 
-/// Date-only comparison. "Repeat until Dec 15" means an occurrence ON Dec 15 still runs, so the
-/// times of day must not decide it.
-fn is_after_date(candidate: DateTime<Utc>, end: DateTime<Utc>) -> bool {
-    candidate.date_naive() > end.date_naive()
+/// Date-only comparison, on the zone's calendar. "Repeat until Dec 15" means an occurrence ON Dec
+/// 15 still runs, so the times of day must not decide it.
+fn is_after_date(candidate: DateTime<Utc>, end: DateTime<Utc>, zone: Tz) -> bool {
+    local(candidate, zone).date() > local(end, zone).date()
 }
 
-/// The next selected weekday strictly after `date`.
+/// The next selected weekday strictly after `date`, by the zone's calendar.
 ///
 /// Note that `interval` plays no part: web and the Swift port both ignore it for weekly patterns,
 /// so "every 2 weeks on Mon/Wed" advances weekly on all three clients. Reproduced deliberately —
 /// this is a shared quirk to fix everywhere at once, not a Windows bug to fix here. Recorded in
 /// `docs/CONTRACTS.md`.
-fn next_weekday_occurrence(date: DateTime<Utc>, weekdays: &[Weekday]) -> Option<DateTime<Utc>> {
+fn next_weekday_occurrence(
+    date: DateTime<Utc>,
+    weekdays: &[Weekday],
+    zone: Tz,
+) -> Option<DateTime<Utc>> {
     if weekdays.is_empty() {
         return None;
     }
     // A non-empty selection always matches within seven days, so one pass is enough.
     (1..=7)
-        .map(|offset| adding_days(date, offset))
-        .find(|candidate| weekdays.iter().any(|w| w.matches(candidate.weekday())))
+        .map(|offset| adding_days(date, offset, zone))
+        .find(|candidate| {
+            weekdays
+                .iter()
+                .any(|w| w.matches(local(*candidate, zone).weekday()))
+        })
 }
 
 fn next_month_occurrence(
     date: DateTime<Utc>,
     pattern: &CustomRepeatingPattern,
     interval: i32,
+    zone: Tz,
 ) -> Option<DateTime<Utc>> {
     let months = u32::try_from(interval).ok()?;
     match pattern.month_repeat_type? {
         // Overflowing, not clamping: see `adding_months_overflowing`. A task set to the 31st skips
         // February on every client, which is a shared bug rather than one to fix here alone.
-        MonthRepeatType::SameDate => Some(adding_months_overflowing(date, months)),
+        MonthRepeatType::SameDate => Some(adding_months_overflowing(date, months, zone)),
         MonthRepeatType::SameWeekday => {
             let month_weekday = pattern.month_weekday?;
             // The intermediate step decides only WHICH month to search, but it overflows too — so
             // a fifth weekday sitting on the 31st searches the month after next. Matching web
             // matters more than being right on its own here.
-            let target_month = adding_months_overflowing(date, months);
+            let target_month = local(adding_months_overflowing(date, months, zone), zone);
             let first_of_month =
                 chrono::NaiveDate::from_ymd_opt(target_month.year(), target_month.month(), 1)?;
             let offset = (i64::from(month_weekday.weekday.number())
@@ -382,13 +432,12 @@ fn next_month_occurrence(
                 % 7
                 + i64::from(month_weekday.week_of_month.saturating_sub(1)) * 7;
             // The time of day is lost here rather than carried, matching web and Swift: both build
-            // this date from the first of the month, which is midnight. Changing it would put this
-            // client's occurrences an hour or nine out of step with the others.
-            Some(
-                (first_of_month + chrono::Duration::days(offset))
-                    .and_time(chrono::NaiveTime::MIN)
-                    .and_utc(),
-            )
+            // this date from the first of the month, which is midnight — the zone's midnight, so
+            // the day is the one the person sees (D3).
+            Some(instant(
+                (first_of_month + chrono::Duration::days(offset)).and_time(chrono::NaiveTime::MIN),
+                zone,
+            ))
         }
     }
 }
@@ -397,16 +446,23 @@ fn next_year_occurrence(
     date: DateTime<Utc>,
     pattern: &CustomRepeatingPattern,
     interval: i32,
+    zone: Tz,
 ) -> DateTime<Utc> {
-    let year = date.year() + interval;
-    let month = pattern.month.unwrap_or_else(|| date.month());
-    let day = pattern.day.unwrap_or_else(|| date.day());
+    let reading = local(date, zone);
+    let year = reading.year() + interval;
+    let month = pattern.month.unwrap_or_else(|| reading.month());
+    let day = pattern.day.unwrap_or_else(|| reading.day());
     // Overflowing rather than failing, for the same reason as `adding_years`: web's date setters
     // roll a day past the month's end forward, and a pattern saying "February 30th" passes web's
     // own validity check, so it has to land somewhere rather than stalling the series.
     from_ymd_overflowing(year, month, day)
-        .map(|d| d.and_time(date.time()).and_utc())
+        .map(|d| instant(d.and_time(reading.time()), zone))
         .unwrap_or(date)
+}
+
+/// The zone's offset from UTC at `at` — for the all-day "today" a completion anchors on.
+pub(crate) fn offset_at(zone: Tz, at: DateTime<Utc>) -> chrono::FixedOffset {
+    zone.offset_from_utc_datetime(&at.naive_utc()).fix()
 }
 
 impl Weekday {
@@ -515,6 +571,7 @@ mod tests {
                 current,
                 repeat_from,
                 occurrences,
+                Tz::UTC,
             );
             let Some(next) = result.next_due_date else {
                 break;
@@ -540,6 +597,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result
             .next_due_date
@@ -560,6 +618,7 @@ mod tests {
             RepeatFrom::CompletionDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.day(), next.hour(), next.minute()), (18, 10, 30));
@@ -574,6 +633,7 @@ mod tests {
             RepeatFrom::DueDate,
             2,
             None,
+            Tz::UTC,
         );
         assert_eq!(result.next_due_date.unwrap().day(), 22);
         assert_eq!(result.new_occurrence_count, 3);
@@ -588,6 +648,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.month(), next.day()), (2, 15));
@@ -604,6 +665,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!(next.month(), 2);
@@ -619,6 +681,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.year(), next.month(), next.day()), (2025, 6, 15));
@@ -637,6 +700,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.year(), next.month(), next.day()), (2025, 3, 1));
@@ -652,6 +716,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.month(), next.day(), next.hour()), (3, 11, 8));
@@ -673,6 +738,7 @@ mod tests {
             RepeatFrom::DueDate,
             1,
             Some(&end),
+            Tz::UTC,
         );
         assert!(!below.should_terminate, "the second of three still repeats");
         assert!(below.next_due_date.is_some());
@@ -684,6 +750,7 @@ mod tests {
             RepeatFrom::DueDate,
             2,
             Some(&end),
+            Tz::UTC,
         );
         assert!(
             at_limit.should_terminate,
@@ -709,6 +776,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             Some(&end),
+            Tz::UTC,
         );
         assert!(
             !on_the_date.should_terminate,
@@ -722,6 +790,7 @@ mod tests {
             RepeatFrom::DueDate,
             0,
             Some(&end),
+            Tz::UTC,
         );
         assert!(past_the_date.should_terminate);
         assert_eq!(past_the_date.next_due_date, None);
@@ -741,6 +810,7 @@ mod tests {
             RepeatFrom::DueDate,
             99,
             Some(&end),
+            Tz::UTC,
         );
         assert!(
             !result.should_terminate,
@@ -766,6 +836,7 @@ mod tests {
             utc(2024, 1, 15, 9, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         assert_eq!(result.next_due_date.unwrap().day(), 18);
     }
@@ -824,6 +895,7 @@ mod tests {
             utc(2024, 1, 15, 9, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!(next.day(), 22);
@@ -876,6 +948,7 @@ mod tests {
             utc(2024, 1, 31, 9, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!(
@@ -933,6 +1006,7 @@ mod tests {
             utc(2024, 6, 15, 12, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!((next.year(), next.month(), next.day()), (2026, 3, 10));
@@ -967,6 +1041,7 @@ mod tests {
             utc(2024, 1, 15, 9, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         assert_eq!(result.next_due_date, None);
         assert!(result.should_terminate);
@@ -989,6 +1064,7 @@ mod tests {
             utc(2024, 1, 15, 9, 0),
             RepeatFrom::DueDate,
             0,
+            Tz::UTC,
         );
         assert_eq!(result.next_due_date, None);
         assert!(result.should_terminate);
@@ -1005,6 +1081,7 @@ mod tests {
             RepeatFrom::CompletionDate,
             0,
             None,
+            Tz::UTC,
         );
         let next = result.next_due_date.unwrap();
         assert_eq!(

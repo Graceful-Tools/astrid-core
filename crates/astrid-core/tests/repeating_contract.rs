@@ -88,6 +88,7 @@ fn simple_patterns_match_web() {
             case.repeat_from,
             0,
             None,
+            chrono_tz::Tz::UTC,
         );
         assert_eq!(
             result.next_due_date, case.next_due_date,
@@ -104,6 +105,7 @@ fn simple_end_conditions_match_web() {
             case.next_due_date,
             case.new_occurrence_count,
             &case.end_data,
+            chrono_tz::Tz::UTC,
         );
         assert_eq!(
             should_terminate, case.should_terminate,
@@ -127,6 +129,7 @@ fn custom_patterns_match_web() {
             case.completion_date,
             case.repeat_from,
             case.current_occurrence_count,
+            chrono_tz::Tz::UTC,
         );
         assert_eq!(
             result.next_due_date, case.next_due_date,
@@ -161,6 +164,7 @@ fn custom_progressions_match_web() {
                 current,
                 case.repeat_from,
                 occurrences,
+                chrono_tz::Tz::UTC,
             );
             let Some(next) = result.next_due_date else {
                 break;

@@ -443,7 +443,7 @@ impl TaskService {
         }
 
         // The rule is `repeating::completion`'s; this only applies it.
-        match repeating::completion(&current, completed, now, self.context.clock.utc_offset()) {
+        match repeating::completion(&current, completed, now, self.context.clock.time_zone()) {
             repeating::Completion::Toggle {
                 completed,
                 completed_at,

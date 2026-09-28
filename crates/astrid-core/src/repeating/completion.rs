@@ -9,12 +9,13 @@
 //! The date math is [`super`]'s; this module only chooses between the outcomes and says what each
 //! one changes.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use serde::Serialize;
 
 use super::{
-    calculate_custom_next_occurrence, calculate_simple_next_occurrence, pattern_from_wire,
-    NextOccurrence, RepeatFrom, Repeating, SimplePatternEndCondition,
+    calculate_custom_next_occurrence, calculate_simple_next_occurrence, offset_at,
+    pattern_from_wire, NextOccurrence, RepeatFrom, Repeating, SimplePatternEndCondition,
 };
 use crate::model::{date, RepeatFromMode, Repeating as WireRepeating, Task};
 
@@ -58,14 +59,9 @@ pub enum Completion {
 ///
 /// `task` is the task as the person sees it — a view that let them edit the due date or the
 /// repeat first must pass its edited copy (rule 3 of the README), because the rollover anchors on
-/// those fields. `offset` is the device's offset from UTC: an all-day task repeating from its
-/// completion anchors on the person's own calendar day, not UTC's.
-pub fn completion(
-    task: &Task,
-    completed: bool,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
-) -> Completion {
+/// those fields. `zone` is the person's own: a timed task steps on their wall clock, and an all-day
+/// task repeating from its completion anchors on their calendar day, not UTC's.
+pub fn completion(task: &Task, completed: bool, now: DateTime<Utc>, zone: Tz) -> Completion {
     // Un-completing, completing something already completed, or a task that does not repeat: the
     // flag is the whole operation. An already-completed repeating task does not roll again.
     if !completed || task.completed || !task.is_repeating() {
@@ -76,7 +72,7 @@ pub fn completion(
         };
     }
 
-    let outcome = next_occurrence(task, now, offset);
+    let outcome = next_occurrence(task, now, zone);
     match outcome.next_due_date {
         Some(due_date_time) => Completion::RollForward {
             due_date_time,
@@ -92,13 +88,16 @@ pub fn completion(
 /// Delegates to the calculators and does no pattern math of its own. An inline copy in the iOS
 /// service once ignored `weekdays`, so a Mon/Wed/Fri task jumped a whole week instead of moving to
 /// the next selected day — rule 3 of the README exists because of it.
-pub fn next_occurrence(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> NextOccurrence {
+///
+/// An all-day task is stepped in UTC, where its date lives; a timed one in `zone`.
+pub fn next_occurrence(task: &Task, now: DateTime<Utc>, zone: Tz) -> NextOccurrence {
     let repeat_from = match task.repeat_from.unwrap_or(RepeatFromMode::CompletionDate) {
         RepeatFromMode::DueDate => RepeatFrom::DueDate,
         RepeatFromMode::CompletionDate => RepeatFrom::CompletionDate,
     };
-    let completion = effective_completion_date(task, repeat_from, now, offset);
+    let completion = effective_completion_date(task, repeat_from, now, zone);
     let occurrence_count = task.occurrence_count.unwrap_or(0) as i32;
+    let calendar = if task.is_all_day { Tz::UTC } else { zone };
 
     if task.repeating == Some(WireRepeating::Custom) {
         if let Some(pattern) = &task.repeating_data {
@@ -108,6 +107,7 @@ pub fn next_occurrence(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> 
                 completion,
                 repeat_from,
                 occurrence_count,
+                calendar,
             );
         }
     }
@@ -137,6 +137,7 @@ pub fn next_occurrence(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> 
         repeat_from,
         occurrence_count,
         end_data.as_ref(),
+        calendar,
     )
 }
 
@@ -150,10 +151,10 @@ fn effective_completion_date(
     task: &Task,
     repeat_from: RepeatFrom,
     now: DateTime<Utc>,
-    offset: FixedOffset,
+    zone: Tz,
 ) -> DateTime<Utc> {
     if task.is_all_day && repeat_from == RepeatFrom::CompletionDate {
-        return date::all_day_today(now, offset);
+        return date::all_day_today(now, offset_at(zone, now));
     }
     now
 }
@@ -166,8 +167,8 @@ mod tests {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC")
+    fn utc() -> Tz {
+        Tz::UTC
     }
 
     fn task(json: serde_json::Value) -> Task {
@@ -258,7 +259,7 @@ mod tests {
             "id": "t1", "repeating": "daily", "repeatFrom": "COMPLETION_DATE",
             "dueDateTime": "2026-09-28T00:00:00Z", "isAllDay": true
         }));
-        let pacific = FixedOffset::west_opt(7 * 3600).expect("PDT");
+        let pacific = Tz::America__Los_Angeles;
         assert_eq!(
             completion(&all_day, true, at("2026-09-29T04:00:00Z"), pacific),
             Completion::RollForward {
@@ -267,6 +268,50 @@ mod tests {
                 occurrence_count: 1
             }
         );
+    }
+
+    /// The third Tuesday is a Tuesday where the person lives. Built at UTC midnight it is Monday
+    /// evening in California, which is what the web shows today (D3); on the person's own calendar
+    /// it is the day they chose.
+    #[test]
+    fn the_third_tuesday_is_a_tuesday_in_the_persons_zone() {
+        let monthly = task(serde_json::json!({
+            "id": "t1", "repeating": "custom", "repeatFrom": "DUE_DATE", "isAllDay": false,
+            "dueDateTime": "2024-01-16T17:00:00Z",
+            "repeatingData": { "type": "custom", "unit": "months", "interval": 1,
+                "monthRepeatType": "same_weekday",
+                "monthWeekday": { "weekday": "tuesday", "weekOfMonth": 3 } }
+        }));
+        let Completion::RollForward { due_date_time, .. } = completion(
+            &monthly,
+            true,
+            at("2024-01-16T18:00:00Z"),
+            Tz::America__Los_Angeles,
+        ) else {
+            panic!("rolls forward");
+        };
+        // Midnight on Tuesday 20 February, Pacific time.
+        assert_eq!(due_date_time, at("2024-02-20T08:00:00Z"));
+    }
+
+    /// "Monthly at 2pm" is 2pm after the clocks change as well as before.
+    #[test]
+    fn a_monthly_task_keeps_its_wall_clock_time_across_daylight_saving() {
+        let monthly = task(serde_json::json!({
+            "id": "t1", "repeating": "monthly", "repeatFrom": "DUE_DATE", "isAllDay": false,
+            // 2pm PST on 15 February.
+            "dueDateTime": "2024-02-15T22:00:00Z"
+        }));
+        let Completion::RollForward { due_date_time, .. } = completion(
+            &monthly,
+            true,
+            at("2024-02-15T23:00:00Z"),
+            Tz::America__Los_Angeles,
+        ) else {
+            panic!("rolls forward");
+        };
+        // 2pm PDT on 15 March — 21:00 UTC, an hour earlier in UTC than February's.
+        assert_eq!(due_date_time, at("2024-03-15T21:00:00Z"));
     }
 
     #[test]

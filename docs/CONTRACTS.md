@@ -15,21 +15,21 @@ Canonical: `astrid-web/types/repeating.ts` and `astrid-web/lib/repeating-task-ha
 Apple: `astrid-ios/Astrid App/Utilities/RepeatingTaskHandler.swift`.
 Here: `astrid_core::repeating`.
 
-### D1 — Local calendar versus UTC for month and year steps
+### D1 — Whose calendar a step is taken on
 
-**This crate follows web.** All arithmetic here is UTC.
+**Settled 2026-09-28: all-day tasks on UTC's, timed tasks on the person's.** Every calendar step in
+`astrid_core::repeating` takes a zone (`chrono_tz::Tz`) and is done on that zone's wall clock.
 
-Web advances months and years with `setUTCMonth` / `setUTCFullYear`. The Swift port preserves the
-time of day through a UTC calendar but then calls `Calendar.current` — the device's local calendar —
-for the month and year steps and for the `until_date` comparison.
+- **All-day tasks step in UTC.** An all-day date is stored as UTC midnight and names a day, so
+  UTC is its calendar — exactly web's `setUTC*` arithmetic, and what every contract fixture checks.
+- **Timed tasks step in the person's zone.** "Monthly at 2pm" is 2pm in March as well as in
+  February, and "until the 15th" ends on their 15th. Stepping a timed task in UTC — what web does,
+  because its server runs in UTC — moves it an hour at every daylight-saving change.
 
-For a user far enough east or west of UTC, an all-day task stored at UTC midnight sits on a
-different local date, so a monthly rollover computed locally can land a day away from what web
-computes for the same completion. Two clients then disagree about when the next occurrence is due,
-and the last writer wins.
-
-Fixing it means moving Swift onto UTC, with the multi-step progression tests re-run in a non-UTC
-timezone on both platforms. Worth a task in the iOS queue; not something to paper over here.
+The Apple apps always stepped months and years in the device's calendar (`Calendar.current`);
+they now ask this crate, which answers the same for timed tasks and correctly for all-day ones,
+which the old Swift did not. Web and Windows should follow: web by passing the person's zone to
+its server-side rollover, Windows by nothing more than taking this crate.
 
 ### D2 — Weekly patterns ignore their interval
 
@@ -44,11 +44,17 @@ have, on a field the user believes is shared. It changes on web first.
 
 ### D3 — "Same weekday of the month" drops the time of day
 
-**Reproduced deliberately.**
+**Reproduced deliberately — on the person's calendar.**
 
 Both web and Swift build this date from the first of the target month, which is midnight, and then
 add days — so a task due at 10am on the third Tuesday rolls over to midnight on the next third
-Tuesday. Same reasoning as D2: the fix belongs on web, and until then matching matters more.
+Tuesday. Same reasoning as D2: dropping the time is web's to fix, and until then matching matters
+more.
+
+Whose midnight, though, is D1's question. Web's is UTC midnight, which in California is Monday
+evening — a "third Tuesday" task shown on a Monday. Swift's was local midnight, the Tuesday the
+person chose. This crate takes the midnight of the zone it steps in (D1): UTC for an all-day task,
+the person's zone for a timed one.
 
 `same_date` monthly patterns are unaffected — they keep their time.
 
@@ -302,6 +308,10 @@ undated ones are dropped. The rule holds for every other filter and fails for th
 
 ### D8 — the two Apple clients order the assignee picker differently
 
+**Resolved on the Mac (AITD-401):** `MacAssigneeOptions.build` now calls the shared
+`AssigneeOptions.build` with the agent roster and adds its unassigned row, so both Apple
+clients answer as this crate does. Kept for the history.
+
 iOS (`AssigneeOptions.build`) sorts **agents first, then you, then everyone by name**, and offers no
 unassigned row — its picker adds one in the view. The Mac (`MacAssigneeOptions.build`) offers
 **"no one" first, then you, then everyone by name**, and has no agents at all: its picker predates
@@ -499,3 +509,71 @@ Nothing in `ColumnCreate` decides this: the rule answers what a card in a column
 whether a column offers a field at all is each client's own layout. So this is a divergence to know
 about rather than one to close — if it does close, it closes on web, by adding the field, not here
 by taking it away.
+
+### D21 — completing a repeating task counts the occurrence only on the web
+
+The web completes by sending `completed: true`; the server then rolls the task forward itself
+(`lib/repeating-task-handler.ts`) and increments `occurrenceCount`. Every other client — iOS, the
+Mac, and this crate's `TaskService::complete` — rolls the task forward on the device and sends
+the new due date with `completed: false`, so the server never runs its rollover, and the v1
+update route does not read an `occurrenceCount` from the body. The count therefore never moves
+for a completion made anywhere but the web.
+
+- **Where it bites:** "end after N times" never ends for somebody who completes from a phone, a
+  Mac or Windows; the series repeats forever.
+- **This crate counts locally** (`repeating::completion` answers `RollForward` with the new
+  count), so the cache is right until the next pull overwrites it with the server's.
+- **The fix is on the server first:** accept `occurrenceCount` on the v1 update, or let clients
+  send the completion itself (`completed: true` plus `localCompletionDate`) with an idempotency
+  key so a retried delivery cannot roll a task twice. Then every client sends it.
+
+### D22 — the Apple completion filter reads values this crate does not
+
+Apple's list filter (`RecentlyCompletedPresets.applyCompletionFilterWithWindow`) knows
+`completed` (only completed tasks) and `incomplete` (only open ones), and treats `hide` or any
+unknown value as `default`. This crate (`filters::recently_completed::should_show_completed`)
+knows only `hide` and `default`, and keeps everything for any other value. The pickers differ
+too: Apple offers default / all / completed / incomplete, this crate default / hide / all.
+
+- **Where it bites:** a list saved on a Mac as "completed" shows everything on Windows; one saved
+  on Windows as "hide" shows the recent completions on Apple.
+- **To settle against the web** (`filterCompletion` in the web's list settings) before either side
+  moves.
+
+### D23 — a mention on the Mac is plain text
+
+`MacAutocomplete.insert` writes `@label ` rather than the `@[Name](id)` reference iOS and this
+crate (`parse::mentions::insert`) write, so a mention typed on the Mac is never a reference: no
+pill, no notification.
+
+### D24 — snooze moves a different field, by different amounts
+
+Apple's snooze (`ReminderPresenter.snoozeTask`) moves `dueDateTime` and offers 15 minutes, a day
+and a week, while the notification action snoozes 60 minutes. This crate's `reminders` moves
+`reminderTime` and offers 10, 30, 60 and 1440 minutes. Snoozing a reminder should not move the
+task's due date; this crate is right about the field, and the choices are to be settled against
+the web's.
+
+### D25 — My Tasks on iOS is only what is assigned to you
+
+iOS's My Tasks (`TaskListView`, inline) keeps tasks assigned to the reader. The Mac
+(`MacMyTasks.filter`) and this crate (`filters::my_tasks`) keep those **and unassigned tasks the
+reader created**, and this crate also applies the view's `filterAssignee`.
+
+### D26 — Apple's due-date quick picks cannot clear a date, and pick local midnight
+
+`DueDateQuickPicks` offers four dates and no "No due date", and builds them in the local
+calendar. This crate's `rows::due_picks` leads with "No due date" and stores all-day picks as UTC
+midnight, as every all-day date is stored.
+
+### D27 — priority labels are one step apart
+
+Apple labels 3/2/1/0 as Highest / High / Medium / Low; this crate as high / medium / low / none,
+which is the web's. The stored numbers agree; only the words differ.
+
+### D28 — each Apple list picker applies half of "can a task be filed here"
+
+`rows::list_picks::is_destination` excludes virtual lists and board-status lists. iOS's
+`InlineListsPicker` excludes only virtual lists and the Mac's `MacListPicker` only status lists,
+so each offers a destination the other refuses.
+
