@@ -215,6 +215,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 "completed": stats.completed,
                 "failed": stats.failed,
                 "hasUnsentWork": stats.has_unsent_work(),
+                "deadLetters": dead_letters(app),
             })),
             Err(error) => Response::failed(error.into()),
         },
@@ -1043,6 +1044,21 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         }
         Command::SignOut => sign_out(app).await,
     }
+}
+
+/// The newest few refused writes, as `{ kind, error }` — why a write did not land, readable where
+/// the count is shown. The journal keeps them, so the reason is never lost to a prune.
+fn dead_letters(app: &App) -> Vec<serde_json::Value> {
+    let mut dead: Vec<crate::outbox::Entry> = crate::outbox::journal::all(&app.store)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| entry.status == crate::outbox::Status::FailedPermanent)
+        .collect();
+    dead.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at));
+    dead.into_iter()
+        .take(5)
+        .map(|entry| serde_json::json!({ "kind": entry.kind, "error": entry.last_error }))
+        .collect()
 }
 
 /// Where "the tour has been seen" is remembered.

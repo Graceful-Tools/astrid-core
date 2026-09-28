@@ -824,6 +824,25 @@ async fn a_callback_nobody_asked_for_is_refused() {
 }
 
 /// A callback that arrives after signing out must not sign the user back in.
+/// A refused write says why, where its count is shown — the Apple settings screen's readout.
+#[tokio::test]
+async fn the_outbox_stats_say_why_a_write_was_refused() {
+    let app = app_with(StubTransport::new());
+    let entry = crate::outbox::build(
+        crate::outbox::kind::CREATE_TASK,
+        json!({ "body": { "title": "x" } }),
+        "temp_1",
+        app.clock.now(),
+    );
+    crate::outbox::journal::enqueue(&app.store, &entry).expect("enqueues");
+    crate::outbox::journal::mark_dead(&app.store, &entry.id, "403 not yours", app.clock.now())
+        .expect("records");
+    let stats = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert_eq!(stats["value"]["failed"], 1);
+    assert_eq!(stats["value"]["deadLetters"][0]["kind"], "createTask");
+    assert_eq!(stats["value"]["deadLetters"][0]["error"], "403 not yours");
+}
+
 /// An open live stream is authenticated with the departing account's cookie, and would keep
 /// delivering that account's events into the cache the next person sees. Signing out drops it; the
 /// loop then waits for a new session.

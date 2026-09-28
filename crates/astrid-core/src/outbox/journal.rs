@@ -212,7 +212,8 @@ pub fn entry(store: &Store, id: &str) -> Result<Option<Entry>> {
     })
 }
 
-/// Remove an entry outright. Only sign-out and the tests do this; ordinary life dead-letters.
+/// Remove an entry outright. Sign-out, withdrawing a chat message that was never sent, and the
+/// tests do this; ordinary life dead-letters.
 pub fn remove(store: &Store, id: &str) -> Result<()> {
     store.transaction(|connection| {
         connection.execute("DELETE FROM outbox WHERE id = ?1", [id])?;
