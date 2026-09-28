@@ -44,7 +44,7 @@ pub use external::{ExternalSyncService, Provider};
 pub use list::{ListChanges, ListService};
 pub use notifications::NotificationService;
 pub use share::ShareService;
-pub use task::{TaskChanges, TaskDraft, TaskService};
+pub use task::{Origin, TaskChanges, TaskDraft, TaskService, TimerResult};
 
 use std::sync::Arc;
 

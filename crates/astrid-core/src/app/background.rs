@@ -483,6 +483,11 @@ mod tests {
             status_role: None,
             quick_add: false,
             locale: None,
+            repeating: None,
+            repeating_data: None,
+            repeat_from: None,
+            is_private: None,
+            apply_list_defaults: true,
         })
         .await;
         // Let the loop take its turn. No time passes: the wake-up is the bell, not a timer.

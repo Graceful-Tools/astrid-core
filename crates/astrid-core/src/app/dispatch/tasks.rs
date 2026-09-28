@@ -21,6 +21,11 @@ pub(super) struct NewTask {
     pub status_role: Option<String>,
     pub quick_add: bool,
     pub locale: Option<String>,
+    pub repeating: Option<String>,
+    pub repeating_data: Option<Box<crate::model::CustomRepeatingPattern>>,
+    pub repeat_from: Option<String>,
+    pub is_private: Option<bool>,
+    pub apply_list_defaults: bool,
 }
 
 /// Make a task: what the caller said, plus what its list says a new task looks like.
@@ -37,6 +42,11 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
         status_role,
         quick_add,
         locale,
+        repeating,
+        repeating_data,
+        repeat_from,
+        is_private,
+        apply_list_defaults,
     } = new;
 
     // What the caller said, before the fields move into the draft: a list's defaults
@@ -45,8 +55,8 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
         priority: priority.is_some(),
         due: due_date_time.is_some(),
         assignee: assignee_id.is_some(),
-        repeating: false,
-        is_private: false,
+        repeating: repeating.is_some(),
+        is_private: is_private.is_some(),
     };
     let mut draft = TaskDraft::new(title);
     draft.description = description.unwrap_or_default();
@@ -69,6 +79,14 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
         _ => assignee_id,
     };
     draft.parent_task_id = parent_task_id;
+    draft.repeating =
+        repeating.and_then(|value| serde_json::from_value(serde_json::json!(value)).ok());
+    draft.repeating_data = repeating_data.map(|pattern| *pattern);
+    draft.repeat_from =
+        repeat_from.and_then(|value| serde_json::from_value(serde_json::json!(value)).ok());
+    if let Some(is_private) = is_private {
+        draft.is_private = is_private;
+    }
     // A role, never a list id: one bad id rejects the whole write, and the board resolves a card's
     // column from the role first (task 95c7a68f).
     draft.status_role = status_role;
@@ -139,12 +157,14 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
     }
 
     // The first of the task's lists the cache knows decides the defaults — a task filed
-    // in two lists takes the first one's, as the web takes its target list's.
-    if let Some(list) = draft
-        .list_ids
-        .iter()
-        .find_map(|id| lists.iter().find(|list| &list.id == id))
-    {
+    // in two lists takes the first one's, as the web takes its target list's. Skipped when the
+    // shell has applied them itself or is importing a task that must arrive as it was.
+    if let Some(list) = apply_list_defaults.then_some(()).and(
+        draft
+            .list_ids
+            .iter()
+            .find_map(|id| lists.iter().find(|list| &list.id == id)),
+    ) {
         // Who "me" is, for a list that names no default assignee: resolved here rather than left
         // to the server, so the row drawn straight after the tap already says it is mine and it
         // still holds with no network (task e2505d10).

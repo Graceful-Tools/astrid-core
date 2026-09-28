@@ -68,6 +68,13 @@ pub enum Command {
     Task {
         task_id: String,
     },
+    /// Cached tasks in their wire shape: every one, or those named (a temporary id reads as the
+    /// task it became). For a shell that keeps its own models and filters them itself — the Apple
+    /// apps' views bind to `[Task]` — rather than drawing this crate's rows.
+    Tasks {
+        #[serde(default)]
+        ids: Option<Vec<String>>,
+    },
     /// Everything one task's detail screen needs: the task, its comments, its subtasks, its list
     /// chips, and the order to lay the fields out in.
     ///
@@ -268,6 +275,20 @@ pub enum Command {
     /// The whole scheme, for a shortcuts sheet.
     Shortcuts,
 
+    /// Fill an empty cache from a shell's own, once, when it starts speaking through this crate —
+    /// the Apple apps' Core Data on their first launch after the move — so an offline first launch
+    /// still shows everything. Journals nothing and leaves the sync cursor alone: the first pass
+    /// still pulls everything, and the server's answer replaces what was seeded.
+    SeedCache {
+        #[serde(default)]
+        tasks: Vec<crate::model::Task>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        comments: Vec<crate::model::Comment>,
+        #[serde(default)]
+        users: Vec<crate::model::User>,
+    },
     // ── Writes. These update the cache and journal the change. ───────────────────────────────
     CreateTask {
         title: String,
@@ -303,6 +324,19 @@ pub enum Command {
         /// reads out of a sentence. Absent means English.
         #[serde(default)]
         locale: Option<String>,
+        #[serde(default)]
+        repeating: Option<String>,
+        #[serde(default)]
+        repeating_data: Option<Box<crate::model::CustomRepeatingPattern>>,
+        #[serde(default)]
+        repeat_from: Option<String>,
+        #[serde(default)]
+        is_private: Option<bool>,
+        /// Fill what the caller left unsaid from the list's defaults. On unless a shell has already
+        /// applied them itself — the Apple apps did, before they spoke through here — or is
+        /// importing a task that must arrive exactly as it was (a sync provider's).
+        #[serde(default = "yes")]
+        apply_list_defaults: bool,
     },
     /// Edit a task. The body is the same shape the API takes, so a field the shell learns about
     /// needs no change here — see [`crate::services::TaskChanges`] for how absent and null differ.
@@ -314,6 +348,23 @@ pub enum Command {
     CompleteTask {
         task_id: String,
         completed: bool,
+        /// The task as the person sees it, in the wire shape, when a view let them edit its due
+        /// date or repeat first: the rollover anchors on those fields, and the cache may be a sync
+        /// behind (rule 3 of the README).
+        #[serde(default)]
+        task: Option<Box<crate::model::Task>>,
+        /// What a timer produced, when the task was completed from one.
+        #[serde(default)]
+        timer_duration: Option<i64>,
+        #[serde(default)]
+        last_timer_value: Option<String>,
+        /// When it was completed, if not now: a sync provider backdating a tick made elsewhere.
+        #[serde(default)]
+        completed_at: Option<String>,
+        /// Who completed it — `astrid`, `google`, `github`, `apple` — so a provider can tell its
+        /// own echo from a person's tick.
+        #[serde(default)]
+        source: Option<String>,
     },
     DeleteTask {
         task_id: String,

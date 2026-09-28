@@ -30,6 +30,49 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             offset,
             limit,
         } => rows_for_list(app, &list_id, display_mode, surface, offset, limit),
+        Command::Tasks { ids } => {
+            let store = &app.store;
+            let found = match ids {
+                None => store.tasks(),
+                Some(ids) => ids
+                    .iter()
+                    .map(|id| store.resolve_id(id).and_then(|id| store.task(&id)))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|tasks| tasks.into_iter().flatten().collect()),
+            };
+            match found {
+                Ok(tasks) => Response::ok(tasks),
+                Err(error) => Response::failed(Failure::from(error)),
+            }
+        }
+        Command::SeedCache {
+            tasks,
+            lists,
+            comments,
+            users,
+        } => {
+            let store = &app.store;
+            // Only into an empty cache: a seed over one this crate already filled would put a
+            // stale copy over what the server said.
+            match store.tasks().map(|cached| cached.is_empty()) {
+                Ok(true) => {}
+                Ok(false) => return Response::ok(serde_json::json!({ "seeded": false })),
+                Err(error) => return Response::failed(Failure::from(error)),
+            }
+            let written = store
+                .upsert_lists(&lists)
+                .and_then(|()| store.upsert_tasks(&tasks))
+                .and_then(|()| store.upsert_comments(&comments))
+                .and_then(|()| store.upsert_users(&users));
+            match written {
+                Ok(()) => Response::ok(serde_json::json!({
+                    "seeded": true,
+                    "tasks": tasks.len(),
+                    "lists": lists.len(),
+                })),
+                Err(error) => Response::failed(Failure::from(error)),
+            }
+        }
         Command::Task { task_id } => match app.context.tasks().task(&task_id) {
             Ok(Some(task)) => Response::ok(task),
             Ok(None) => Response::failed(Failure::not_found("task", task_id)),
@@ -142,6 +185,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             status_role,
             quick_add,
             locale,
+            repeating,
+            repeating_data,
+            repeat_from,
+            is_private,
+            apply_list_defaults,
         } => answer(create_task(
             app,
             NewTask {
@@ -156,6 +204,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 status_role,
                 quick_add,
                 locale,
+                repeating,
+                repeating_data,
+                repeat_from,
+                is_private,
+                apply_list_defaults,
             },
         )),
         Command::UpdateTask { task_id, changes } => match changes_from_json(&changes) {
@@ -164,11 +217,33 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         },
         // The only path to a completion, and the reason `TaskChanges::completed` is never set by
         // the shell: see `crate::services::task`.
-        Command::CompleteTask { task_id, completed } => answer(
-            app.context
-                .tasks()
-                .complete(&task_id, completed, None, None),
-        ),
+        Command::CompleteTask {
+            task_id,
+            completed,
+            task,
+            timer_duration,
+            last_timer_value,
+            completed_at,
+            source,
+        } => {
+            let timer = (timer_duration.is_some() || last_timer_value.is_some()).then_some(
+                crate::services::TimerResult {
+                    duration_seconds: timer_duration,
+                    last_value: last_timer_value,
+                },
+            );
+            let origin = crate::services::Origin {
+                at: completed_at.as_deref().and_then(date::parse),
+                source,
+            };
+            answer(app.context.tasks().complete_as(
+                &task_id,
+                completed,
+                task.as_deref(),
+                timer,
+                &origin,
+            ))
+        }
         Command::DeleteTask { task_id } => match app.context.tasks().delete(&task_id) {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),

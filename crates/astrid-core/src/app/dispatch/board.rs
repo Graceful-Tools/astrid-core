@@ -159,6 +159,11 @@ pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: S
             // form does not read `#list` tags out of one either.
             quick_add: false,
             locale: None,
+            repeating: None,
+            repeating_data: None,
+            repeat_from: None,
+            is_private: None,
+            apply_list_defaults: true,
         },
     ) {
         Ok(task) => task,

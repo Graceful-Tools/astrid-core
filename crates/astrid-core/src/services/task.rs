@@ -107,6 +107,9 @@ pub struct TaskChanges {
     /// Why the task is closed, when not because it is done. `Some(None)` clears it, which a reopen
     /// does together with the flag (task 016ce981).
     pub closed_reason: Option<Option<String>>,
+    /// Who completed it — `astrid`, `google`, `github`, `apple`. Set with a completion, so a sync
+    /// provider can tell its own echo from a person's tick.
+    pub completed_source: Option<Option<String>>,
 }
 
 impl TaskChanges {
@@ -179,6 +182,9 @@ impl TaskChanges {
         if let Some(value) = &self.closed_reason {
             task.closed_reason = value.clone();
         }
+        if let Some(value) = &self.completed_source {
+            task.completed_source = value.clone();
+        }
         if let Some(value) = self.is_private {
             task.is_private = value;
         }
@@ -246,6 +252,9 @@ impl TaskChanges {
         }
         if let Some(value) = &self.closed_reason {
             set("closedReason", json!(value));
+        }
+        if let Some(value) = &self.completed_source {
+            set("completedSource", json!(value));
         }
         if let Some(value) = self.is_private {
             set("isPrivate", json!(value));
@@ -423,6 +432,22 @@ impl TaskService {
         on_screen: Option<&Task>,
         timer: Option<TimerResult>,
     ) -> Result<Task> {
+        self.complete_as(id, completed, on_screen, timer, &Origin::default())
+    }
+
+    /// [`TaskService::complete`], saying who completed it and when, for a completion that did not
+    /// happen here and now — a sync provider bringing in a tick made in Google Tasks an hour ago.
+    ///
+    /// The series still rolls from now, as it does for a tick made here: the stamp is the record of
+    /// when, not the anchor of what comes next.
+    pub fn complete_as(
+        &self,
+        id: &str,
+        completed: bool,
+        on_screen: Option<&Task>,
+        timer: Option<TimerResult>,
+        origin: &Origin,
+    ) -> Result<Task> {
         let now = self.context.clock.now();
         let mut current = self.require(id)?;
         if let Some(edited) = on_screen {
@@ -450,7 +475,10 @@ impl TaskService {
                 clear_closed_reason,
             } => {
                 changes.completed = Some(completed);
-                changes.completed_at = Some(completed_at);
+                changes.completed_at = Some(completed_at.map(|now| origin.at.unwrap_or(now)));
+                if completed {
+                    changes.completed_source = origin.source.clone().map(Some);
+                }
                 if clear_closed_reason {
                     changes.closed_reason = Some(None);
                 }
@@ -468,7 +496,8 @@ impl TaskService {
             }
             repeating::Completion::SeriesEnded { completed_at } => {
                 changes.completed = Some(true);
-                changes.completed_at = Some(Some(completed_at));
+                changes.completed_at = Some(Some(origin.at.unwrap_or(completed_at)));
+                changes.completed_source = origin.source.clone().map(Some);
                 changes.repeating = Some(Some(Repeating::Never));
                 changes.repeating_data = Some(None);
             }
@@ -600,6 +629,15 @@ impl TaskService {
                 id: id.to_string(),
             })
     }
+}
+
+/// Who completed a task, and when, when it was not a person here and now.
+#[derive(Debug, Clone, Default)]
+pub struct Origin {
+    /// When it was completed, if not now.
+    pub at: Option<DateTime<Utc>>,
+    /// `astrid`, `google`, `github` or `apple`.
+    pub source: Option<String>,
 }
 
 /// What a timer produced, when a task was completed from one.

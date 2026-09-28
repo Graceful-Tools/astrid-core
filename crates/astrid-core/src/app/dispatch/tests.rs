@@ -4767,3 +4767,129 @@ async fn a_manual_reorder_redraws_at_once_and_reaches_the_route_task_7883f710() 
         .collect();
     assert_eq!(shown, vec!["t2", "t3", "t1"]);
 }
+
+/// A shell that applies a list's defaults itself — the Apple apps, until their services are this
+/// crate's — must be able to say so, or a task it made with no date would be given the list's.
+/// The same switch lets a sync provider import a task exactly as it was.
+#[tokio::test]
+async fn a_shell_can_create_a_task_without_the_list_s_defaults() {
+    let app = app_with(StubTransport::new().push_json("/members", 200, json!({ "members": [] })));
+    call(&app, json!({ "kind": "createList", "name": "Work" })).await;
+    let work = list_id_named(&app, "Work").await;
+    call(
+        &app,
+        json!({ "kind": "updateList", "listId": work,
+                "changes": { "defaultPriority": 2, "defaultDueDate": "tomorrow" } }),
+    )
+    .await;
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "As it was", "listIds": [work],
+                "applyListDefaults": false, "repeating": "daily", "isPrivate": false,
+                "repeatFrom": "DUE_DATE" }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(made["value"]["dueDateTime"].is_null(), "{made}");
+    assert_eq!(made["value"]["priority"], 0);
+    assert_eq!(made["value"]["repeating"], "daily");
+    assert_eq!(made["value"]["repeatFrom"], "DUE_DATE");
+    assert_eq!(made["value"]["isPrivate"], false);
+}
+
+/// Rule 3 through the door: a view that let the person move the due date first completes the task
+/// as they see it, so the series rolls from the date on screen, not the cache's.
+#[tokio::test]
+async fn completing_rolls_from_the_task_as_the_person_sees_it() {
+    let app = app_with(StubTransport::new());
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Water plants", "repeating": "daily",
+                "repeatFrom": "DUE_DATE", "dueDateTime": "2026-09-07T09:00:00Z",
+                "isAllDay": false }),
+    )
+    .await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    let mut on_screen = made["value"].clone();
+    on_screen["dueDateTime"] = json!("2026-09-10T09:00:00Z");
+
+    let done = call(
+        &app,
+        json!({ "kind": "completeTask", "taskId": id, "completed": true, "task": on_screen }),
+    )
+    .await;
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(done["value"]["dueDateTime"], "2026-09-11T09:00:00Z");
+    assert_eq!(done["value"]["completed"], false);
+}
+
+/// A tick brought in from elsewhere keeps its own time and says where it came from, so a sync
+/// provider can tell its echo from a person's.
+#[tokio::test]
+async fn a_completion_from_elsewhere_keeps_its_time_and_names_its_source() {
+    let app = app_with(StubTransport::new());
+    let made = call(&app, json!({ "kind": "createTask", "title": "Imported" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+    let done = call(
+        &app,
+        json!({ "kind": "completeTask", "taskId": id, "completed": true,
+                "completedAt": "2026-09-06T08:30:00Z", "source": "google",
+                "timerDuration": 300 }),
+    )
+    .await;
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(done["value"]["completed"], true);
+    assert_eq!(done["value"]["completedAt"], "2026-09-06T08:30:00Z");
+    assert_eq!(done["value"]["completedSource"], "google");
+    assert_eq!(done["value"]["timerDuration"], 300);
+}
+
+/// The wire-shape read a shell with its own models binds to: every task, or the named ones, with a
+/// temporary id reading as the task it is.
+#[tokio::test]
+async fn tasks_answers_every_cached_task_or_the_named_ones() {
+    let app = app_with(StubTransport::new());
+    let a = call(&app, json!({ "kind": "createTask", "title": "A" })).await;
+    call(&app, json!({ "kind": "createTask", "title": "B" })).await;
+    let a_id = a["value"]["id"].as_str().expect("an id").to_string();
+
+    let all = call(&app, json!({ "kind": "tasks" })).await;
+    assert_eq!(all["value"].as_array().map(Vec::len), Some(2), "{all}");
+
+    let named = call(&app, json!({ "kind": "tasks", "ids": [a_id, "nobody"] })).await;
+    assert_eq!(named["value"].as_array().map(Vec::len), Some(1), "{named}");
+    assert_eq!(named["value"][0]["title"], "A");
+}
+
+/// The Apple apps' first launch after the move: their own cache goes in once, so an offline start
+/// still shows everything — and never over a cache this crate already filled.
+#[tokio::test]
+async fn a_seed_fills_an_empty_cache_once() {
+    let app = app_with(StubTransport::new());
+    let seeded = call(
+        &app,
+        json!({ "kind": "seedCache",
+                "lists": [{ "id": "l1", "name": "Home", "ownerId": "me", "privacy": "PRIVATE" }],
+                "tasks": [{ "id": "t1", "title": "From Core Data", "listIds": ["l1"] }] }),
+    )
+    .await;
+    assert_eq!(seeded["value"]["seeded"], true, "{seeded}");
+    let tasks = call(&app, json!({ "kind": "tasks" })).await;
+    assert_eq!(tasks["value"][0]["title"], "From Core Data");
+    let journal = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert_eq!(
+        journal["value"]["hasUnsentWork"], false,
+        "a seed journals nothing"
+    );
+
+    let again = call(
+        &app,
+        json!({ "kind": "seedCache", "tasks": [{ "id": "t2", "title": "Stale" }] }),
+    )
+    .await;
+    assert_eq!(again["value"]["seeded"], false);
+    let tasks = call(&app, json!({ "kind": "tasks" })).await;
+    assert_eq!(tasks["value"].as_array().map(Vec::len), Some(1));
+}
