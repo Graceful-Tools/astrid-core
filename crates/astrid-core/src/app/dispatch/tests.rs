@@ -2817,6 +2817,39 @@ async fn the_blocker_picker_asks_the_server_then_the_cache() {
     assert_eq!(titles, vec!["Cached offline task"], "{offline}");
 }
 
+/// Neighbours first means the task's own lists, as web ranks (`rankBlockerCandidates` is given
+/// `task.lists`) — not every list on its board.
+#[tokio::test]
+async fn the_blocker_picker_ranks_the_tasks_own_lists_first() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/search",
+        200,
+        json!({ "tasks": [
+            { "id": "c1", "title": "Same board, other list", "lists": [{ "id": "doing" }] },
+            { "id": "c2", "title": "Same list", "lists": [{ "id": "work" }] }
+        ] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_task(
+            &serde_json::from_value(json!({ "id": "t1", "title": "Mine", "listIds": ["work"] }))
+                .expect("a task"),
+        )
+        .expect("stores");
+    let found = call(
+        &app,
+        json!({ "kind": "taskBlockerCandidates", "taskId": "t1", "query": "list" }),
+    )
+    .await;
+    let ids: Vec<&str> = found["value"]["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .filter_map(|candidate| candidate["id"].as_str())
+        .collect();
+    assert_eq!(ids, vec!["c2", "c1"], "{found}");
+}
+
 /// Making a board from a list: one request, and the board has its columns at once — the seeded
 /// status lists cached, the list attached (Apple `createBoardForList`, 2026-05-12).
 #[tokio::test]

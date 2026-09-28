@@ -433,17 +433,11 @@ pub(super) async fn task_blocker_candidates(
         .cached(task_id)
         .unwrap_or_default();
 
-    // The task's own board, so its neighbours rank first. A task off every board ranks everything
-    // equally, which is the honest answer rather than an arbitrary one.
+    // The task's own lists, so its neighbours rank first — web's `rankBlockerCandidates` passes
+    // `task.lists`, not every list on the board. A task on no list ranks everything equally,
+    // which is the honest answer rather than an arbitrary one.
     let board_list_ids: Vec<String> = match app.context.tasks().task(task_id) {
-        Ok(Some(task)) => {
-            let project = rows::detail::project_id_for_task(&task, &lists);
-            lists
-                .iter()
-                .filter(|list| project.is_some() && list.project_id == project)
-                .map(|list| list.id.clone())
-                .collect()
-        }
+        Ok(Some(task)) => task.effective_list_ids(),
         _ => Vec::new(),
     };
 
