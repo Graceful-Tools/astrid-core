@@ -513,6 +513,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 "pushesFailed": report.pushes_failed,
             }))
         }
+        Command::RetryDeadLetters => {
+            match crate::outbox::journal::revive_dead(&app.store, app.clock.now()) {
+                Ok(revived) => {
+                    // Refused again or not, the answer is how many were given the chance.
+                    let _ = app.runner.drain().await;
+                    Response::ok(serde_json::json!({ "revived": revived }))
+                }
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::Drain => match app.runner.drain().await {
             Ok(report) => Response::ok(serde_json::json!({
                 "completed": report.completed,

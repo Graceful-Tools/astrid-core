@@ -588,6 +588,8 @@ pub enum Command {
     Sync,
     /// Drain the Outbox without fetching. What a "retry now" button does.
     Drain,
+    /// Give every write the server refused another go, then drain. Answers `{ "revived": n }`.
+    RetryDeadLetters,
     /// Refresh a task's comments from the server.
     RefreshComments {
         task_id: String,

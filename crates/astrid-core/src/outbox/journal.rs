@@ -150,6 +150,24 @@ pub fn mark_dead(store: &Store, id: &str, error: &str, now: DateTime<Utc>) -> Re
     })
 }
 
+/// Give every dead-lettered entry another go, from scratch: pending, no attempts, due now. What a
+/// "retry failed writes" button does — the person has fixed whatever refused them (signed back in,
+/// been re-added to the list). Answers how many.
+///
+/// An entry refused for a reason that has not changed is refused again and dead-lettered again,
+/// with the same evidence; nothing is lost by trying.
+pub fn revive_dead(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+    store.transaction(|connection| {
+        let revived = connection.execute(
+            "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = ?1,
+                               updated_at = ?1
+             WHERE status = 'failedPermanent'",
+            [date::format(now)],
+        )?;
+        Ok(revived)
+    })
+}
+
 /// Rewrite an entry's payload — used when a temporary id it names is resolved to a real one.
 pub fn update_payload(
     store: &Store,
@@ -431,6 +449,22 @@ mod tests {
         let read = entry(&store, "e1").expect("reads").expect("present");
         assert_eq!(read.status, Status::FailedPermanent);
         assert_eq!(read.last_error.as_deref(), Some("403 not yours"));
+    }
+
+    #[test]
+    fn a_dead_letter_can_be_given_another_go() {
+        let store = Store::in_memory().expect("opens");
+        enqueue(&store, &new_entry("e1")).expect("enqueues");
+        enqueue(&store, &new_entry("e2")).expect("enqueues");
+        mark_retry(&store, "e1", 9, t0() + Duration::hours(1), "500", t0()).expect("records");
+        mark_dead(&store, "e1", "403 not yours", t0()).expect("records");
+
+        let later = t0() + Duration::minutes(5);
+        assert_eq!(revive_dead(&store, later).expect("revives"), 1);
+        let read = entry(&store, "e1").expect("reads").expect("present");
+        assert_eq!(read.status, Status::Pending);
+        assert_eq!(read.attempts, 0);
+        assert_eq!(read.next_attempt_at, later);
     }
 
     #[test]
