@@ -907,15 +907,63 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             channel_id,
             content,
             reply_to_id,
-        } => {
-            let author = app.context.account().current_user_id().ok().flatten();
-            answer(app.context.chat().send(
-                &channel_id,
-                &content,
-                author.as_deref(),
-                reply_to_id.as_deref(),
-            ))
+            message_type,
+            file_id,
+            path,
+            name,
+            mime_type,
+            client_request_id,
+        } => send_chat_message(
+            app,
+            &channel_id,
+            &content,
+            ChatSendOptions {
+                reply_to_id: reply_to_id.as_deref(),
+                message_type,
+                file_id: file_id.as_deref(),
+                path: path.as_deref(),
+                name: name.as_deref(),
+                mime_type: mime_type.as_deref(),
+                client_request_id: client_request_id.as_deref(),
+            },
+        ),
+        Command::ResolveChatChannel {
+            list_id,
+            virtual_key,
+        } => answer(
+            app.context
+                .chat()
+                .resolve_channel(list_id.as_deref(), virtual_key.as_deref())
+                .await,
+        ),
+        Command::ChatMessages { channel_id } => answer(app.context.chat().messages(&channel_id)),
+        Command::LoadChatMessages {
+            channel_id,
+            before,
+            limit,
+        } => load_chat_messages(app, &channel_id, before.as_deref(), limit).await,
+        Command::ForgetChatMessage { message_id } => {
+            answer_done(app.context.chat().forget(&message_id))
         }
+        Command::PostAgentResponse {
+            channel_id,
+            content,
+        } => answer_done(
+            app.context
+                .chat()
+                .post_agent_response(&channel_id, &content)
+                .await,
+        ),
+        Command::RequestAstridResponse {
+            channel_id,
+            message_id,
+            content,
+        } => answer_done(
+            app.context
+                .chat()
+                .request_astrid_response(&channel_id, message_id.as_deref(), &content)
+                .await,
+        ),
         Command::ListMembers { list_id } => list_members(app, &list_id),
         Command::EligibleNewOwners { list_id } => {
             Response::ok(crate::services::list::transfer_availability(

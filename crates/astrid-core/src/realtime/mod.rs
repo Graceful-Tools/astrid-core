@@ -15,7 +15,7 @@ pub mod parse;
 pub mod reconnect;
 pub mod stream;
 
-pub use parse::{Event, EventKind, Frame};
+pub use parse::{Event, EventKind, Frame, Typing};
 pub use reconnect::ReconnectPolicy;
 pub use stream::{run, Stopped};
 
@@ -89,10 +89,7 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
             store.delete_message(id).ok()?;
             Some(Change::Chat(channel_id.clone()))
         }
-        EventKind::AgentTyping { channel_id, active } => Some(Change::AgentTyping {
-            channel_id: channel_id.clone(),
-            active: *active,
-        }),
+        EventKind::AgentTyping(typing) => Some(Change::AgentTyping(typing.clone())),
         EventKind::SettingsUpdated => Some(Change::Settings),
         EventKind::ExternalSyncRefresh => Some(Change::NeedsSync),
         // A heartbeat means the connection is alive, which is worth nothing to a reader.
@@ -119,10 +116,7 @@ pub enum Change {
     List(String),
     Comments(String),
     Chat(String),
-    AgentTyping {
-        channel_id: String,
-        active: bool,
-    },
+    AgentTyping(Typing),
     Settings,
     /// A reminder has come due while the app was running.
     ///
@@ -156,8 +150,9 @@ impl Change {
             Change::List(id) => serde_json::json!({ "change": "list", "id": id }),
             Change::Comments(id) => serde_json::json!({ "change": "comments", "taskId": id }),
             Change::Chat(id) => serde_json::json!({ "change": "chat", "channelId": id }),
-            Change::AgentTyping { channel_id, active } => serde_json::json!({
-                "change": "agentTyping", "channelId": channel_id, "active": active
+            Change::AgentTyping(typing) => serde_json::json!({
+                "change": "agentTyping", "channelId": typing.channel_id, "taskId": typing.task_id,
+                "agentName": typing.agent_name, "active": typing.active
             }),
             Change::Settings => serde_json::json!({ "change": "settings" }),
             Change::RemindersDue => serde_json::json!({ "change": "remindersDue" }),

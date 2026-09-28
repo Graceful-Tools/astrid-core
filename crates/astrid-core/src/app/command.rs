@@ -971,6 +971,63 @@ pub enum Command {
         content: String,
         #[serde(default)]
         reply_to_id: Option<String>,
+        /// `TEXT` (the default), `MARKDOWN` or `ATTACHMENT`.
+        #[serde(default, rename = "type")]
+        message_type: Option<crate::model::CommentType>,
+        /// A file to carry. With `path`, a file on this device: copied, queued, and uploaded
+        /// before the message goes, under this id when it is a temporary one — the id its
+        /// thumbnail is already drawn with. Without, a file already on the server.
+        #[serde(default)]
+        file_id: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        mime_type: Option<String>,
+        /// The id a shell already drew the message under; see `postComment`.
+        #[serde(default)]
+        client_request_id: Option<String>,
+    },
+    /// The chat channel for a list, or — with `virtualKey` — for a virtual list such as My Tasks.
+    /// From the cache, else from the server, which creates it on first use. Fails offline when
+    /// this device has never seen it.
+    ResolveChatChannel {
+        #[serde(default)]
+        list_id: Option<String>,
+        #[serde(default)]
+        virtual_key: Option<String>,
+    },
+    /// A channel's cached messages in the wire shape, oldest first — for a shell that draws its
+    /// own transcript. [`Command::Chat`] is the projected one.
+    ChatMessages {
+        channel_id: String,
+    },
+    /// Fetch a page of a channel's history into the cache: the newest, or the one before
+    /// `before`. Answers `{ "messages": [the channel, oldest first], "hasMore": bool }`.
+    LoadChatMessages {
+        channel_id: String,
+        #[serde(default)]
+        before: Option<String>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// Take a message out of this device's transcript; one not yet sent is not sent. Chat has no
+    /// delete on the server.
+    ForgetChatMessage {
+        message_id: String,
+    },
+    /// Post, as the agent, an answer this device produced itself. Online only.
+    PostAgentResponse {
+        channel_id: String,
+        content: String,
+    },
+    /// Ask the server to answer as Astrid when this device cannot. Online only.
+    RequestAstridResponse {
+        channel_id: String,
+        #[serde(default)]
+        message_id: Option<String>,
+        content: String,
     },
     /// Who a list is shared with, and what this account may do about it.
     ///

@@ -257,6 +257,20 @@ pub fn channel_messages(channel_id: &str) -> String {
     )
 }
 
+pub fn channel(channel_id: &str) -> String {
+    format!("{CHAT_CHANNELS}/{}", escaped_path_component(channel_id))
+}
+
+/// Where an answer this device already produced — the on-device model's — is posted as the agent.
+pub fn channel_agent_response(channel_id: &str) -> String {
+    format!("{}/agent-response", channel(channel_id))
+}
+
+/// Where the server is asked to answer as Astrid when this device cannot (task 9dce4c73).
+pub fn channel_astrid_response(channel_id: &str) -> String {
+    format!("{}/astrid-response", channel(channel_id))
+}
+
 /// Where a share link is minted (task 016ce981).
 pub const SHORTCODES: &str = "/api/v1/shortcodes";
 
@@ -285,6 +299,10 @@ mod tests {
         assert_eq!(task_comments("t1"), "/api/v1/tasks/t1/comments");
         assert_eq!(list_member("l1", "u1"), "/api/v1/lists/l1/members/u1");
         assert_eq!(channel_messages("c1"), "/api/v1/chat/channels/c1/messages");
+        assert_eq!(
+            channel_astrid_response("c1"),
+            "/api/v1/chat/channels/c1/astrid-response"
+        );
     }
 
     /// The point of building paths here: an id that arrived from a deep link cannot add a segment,

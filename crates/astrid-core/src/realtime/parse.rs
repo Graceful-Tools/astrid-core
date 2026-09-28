@@ -47,10 +47,7 @@ pub enum EventKind {
         id: String,
         channel_id: String,
     },
-    AgentTyping {
-        channel_id: String,
-        active: bool,
-    },
+    AgentTyping(Typing),
     SettingsUpdated,
     ExternalSyncRefresh,
     Connected,
@@ -103,6 +100,18 @@ pub fn parse(frame: Frame<'_>) -> Option<Event> {
     })
 }
 
+/// An agent starting or stopping a reply — in a list's chat, or on a task's comments.
+///
+/// The name is what the indicator says ("Claude is typing…"); the web sends it on the start event.
+/// A typing event names a channel, a task, or both; one naming neither says nothing and is dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typing {
+    pub channel_id: Option<String>,
+    pub task_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub active: bool,
+}
+
 fn read(kind: &str, body: serde_json::Value) -> EventKind {
     let id_of = |body: &serde_json::Value, field: &str| {
         body.get(field)
@@ -130,16 +139,16 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
             id,
             channel_id: id_of(&body, "channelId").unwrap_or_default(),
         }),
-        "agent_typing_start" => {
-            id_of(&body, "channelId").map(|channel_id| EventKind::AgentTyping {
-                channel_id,
-                active: true,
-            })
+        "agent_typing_start" | "agent_typing_stop" => {
+            let typing = Typing {
+                channel_id: id_of(&body, "channelId"),
+                task_id: id_of(&body, "taskId"),
+                agent_name: id_of(&body, "agentName"),
+                active: kind == "agent_typing_start",
+            };
+            (typing.channel_id.is_some() || typing.task_id.is_some())
+                .then_some(EventKind::AgentTyping(typing))
         }
-        "agent_typing_stop" => id_of(&body, "channelId").map(|channel_id| EventKind::AgentTyping {
-            channel_id,
-            active: false,
-        }),
         "user_settings_updated" | "my_tasks_preferences_updated" | "feature_flags_updated" => {
             Some(EventKind::SettingsUpdated)
         }
@@ -227,21 +236,42 @@ mod tests {
                 .expect("parses");
         assert_eq!(
             start.kind,
-            EventKind::AgentTyping {
-                channel_id: "c1".into(),
+            EventKind::AgentTyping(Typing {
+                channel_id: Some("c1".into()),
+                task_id: None,
+                agent_name: None,
                 active: true
-            }
+            })
         );
         let stop =
             parse("data: {\"type\":\"agent_typing_stop\",\"data\":{\"channelId\":\"c1\"}}\n\n")
                 .expect("parses");
-        assert_eq!(
+        assert!(matches!(
             stop.kind,
-            EventKind::AgentTyping {
-                channel_id: "c1".into(),
-                active: false
-            }
+            EventKind::AgentTyping(Typing { active: false, .. })
+        ));
+    }
+
+    /// The indicator says who is typing, and a reply being written on a task's comments is typing
+    /// too — the Apple apps drew both from the stream before the core carried either.
+    #[test]
+    fn typing_names_the_agent_and_may_be_on_a_task() {
+        let start = parse(
+            "data: {\"type\":\"agent_typing_start\",\"data\":{\"taskId\":\"t1\",\"agentName\":\"Claude\"}}\n\n",
+        )
+        .expect("parses");
+        assert_eq!(
+            start.kind,
+            EventKind::AgentTyping(Typing {
+                channel_id: None,
+                task_id: Some("t1".into()),
+                agent_name: Some("Claude".into()),
+                active: true
+            })
         );
+        let nowhere =
+            parse("data: {\"type\":\"agent_typing_stop\",\"data\":{}}\n\n").expect("parses");
+        assert!(!matches!(nowhere.kind, EventKind::AgentTyping(_)));
     }
 
     /// A type from a newer server is recorded, not thrown. Whatever it was about arrives on the

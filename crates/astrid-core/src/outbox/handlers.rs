@@ -380,13 +380,15 @@ async fn send_chat_message(client: &ApiClient, store: &Store, entry: &Entry) -> 
                 }
             };
             // The optimistic message keeps its place in the transcript until the real one lands,
-            // then it is replaced rather than joined by a duplicate.
+            // then it is replaced rather than joined by a duplicate — and a reply written to it
+            // meanwhile resolves to the real one.
+            let _ = store.upsert_messages(std::slice::from_ref(&sent));
             if let Some(temp_id) = &entry.temp_id {
                 if temp_id != &sent.id {
                     let _ = store.delete_message(temp_id);
+                    let _ = store.record_id_mapping(temp_id, &sent.id, chrono::Utc::now());
                 }
             }
-            let _ = store.upsert_messages(std::slice::from_ref(&sent));
             Outcome::producing("messageId", &sent.id)
         }
         Err(error) => from_error(error),

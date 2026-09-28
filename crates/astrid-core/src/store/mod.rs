@@ -384,9 +384,40 @@ impl Store {
         })
     }
 
+    /// Store messages. A server message that echoes an optimistic one's `clientRequestId` takes
+    /// its place — the stream can bring the server's copy before the send's own answer does — and
+    /// the optimistic id is recorded as resolving to the real one, so a reply to it still lands.
     pub fn upsert_messages(&self, messages: &[ChatMessage]) -> Result<()> {
         self.transaction(|connection| {
             for message in messages {
+                if let (false, Some(request_id)) = (
+                    crate::model::is_temp_id(&message.id),
+                    message.client_request_id.as_deref(),
+                ) {
+                    let echoed: Vec<String> = {
+                        let mut statement = connection.prepare(
+                            "SELECT id FROM chat_messages WHERE id LIKE 'temp\\_%' ESCAPE '\\'
+                             AND channel_id = ?1 AND json_extract(json, '$.clientRequestId') = ?2",
+                        )?;
+                        let rows = statement.query_map(
+                            rusqlite::params![message.channel_id, request_id],
+                            |row| row.get::<_, String>(0),
+                        )?;
+                        rows.collect::<rusqlite::Result<_>>()?
+                    };
+                    for temp_id in echoed {
+                        connection.execute("DELETE FROM chat_messages WHERE id = ?1", [&temp_id])?;
+                        connection.execute(
+                            "INSERT OR REPLACE INTO id_mappings (temp_id, server_id, created_at)
+                             VALUES (?1, ?2, ?3)",
+                            rusqlite::params![
+                                temp_id,
+                                message.id,
+                                date::format(message.created_at.unwrap_or_else(Utc::now))
+                            ],
+                        )?;
+                    }
+                }
                 connection.execute(
                     "INSERT OR REPLACE INTO chat_messages (id, channel_id, author_id, created_at, json)
                      VALUES (?1, ?2, ?3, ?4, ?5)",

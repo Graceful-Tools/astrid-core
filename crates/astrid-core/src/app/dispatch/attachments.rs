@@ -71,41 +71,19 @@ pub(super) fn attach_file(
     // The list decides who may read the file afterwards, so the server is told which one.
     let list_id = task.effective_list_ids().into_iter().next();
 
-    // A copy on disk and a temporary id, not a request. The file is on the task the moment
-    // somebody chooses it, and it goes when there is a connection — see the module note on
-    // `astrid_core::services::attachment`.
-    let service = app.context.attachments(app.attachment_cache());
-    let (file, held) = match service.queue_as(
-        std::path::Path::new(path),
+    let file = match queue_upload(
+        app,
+        path,
         options.file_id,
         options.name,
         options.mime_type,
+        serde_json::json!({ "listId": list_id }),
     ) {
-        Ok(queued) => queued,
-        Err(error) => return Response::failed(error.into()),
+        Ok(file) => file,
+        Err(response) => return response,
     };
 
-    let entry = crate::outbox::build(
-        crate::outbox::kind::UPLOAD_ATTACHMENT,
-        serde_json::json!({
-            "localPath": held.to_string_lossy(),
-            "name": file.name,
-            "mimeType": file.mime_type,
-            "context": { "listId": list_id },
-            // Where the bytes go once the upload answers, so a delivered file stays drawable
-            // without being fetched back (task 48f72aa7). The handler has the store and the
-            // client and no notion of where this installation keeps its files.
-            "cacheDir": app.attachment_cache().to_string_lossy(),
-        }),
-        &file.id,
-        app.clock.now(),
-    )
-    .for_temp_id(&file.id);
-    if let Err(error) = crate::outbox::journal::enqueue(&app.store, &entry) {
-        return Response::failed(error.into());
-    }
-
-    // Queued after the upload, so it goes second and finds the real file id waiting for it.
+    // Queued after the upload, so it waits for it and finds the real file id waiting for it.
     let author = app.context.account().current_user_id().ok().flatten();
     answer(app.context.comments().post_as(
         task_id,
@@ -116,6 +94,46 @@ pub(super) fn attach_file(
         options.parent_comment_id,
         options.client_request_id,
     ))
+}
+
+/// Copy a file into the pending directory and journal its upload.
+///
+/// A copy on disk and a temporary id, not a request. The file is on the task, or in the
+/// conversation, the moment somebody chooses it, and it goes when there is a connection — see the
+/// module note on `astrid_core::services::attachment`. `context` tells the server whose file it is
+/// (`listId`, or `channelId` for a conversation with no list).
+pub(super) fn queue_upload(
+    app: &App,
+    path: &str,
+    file_id: Option<&str>,
+    name: Option<&str>,
+    mime_type: Option<&str>,
+    context: serde_json::Value,
+) -> Result<crate::model::SecureFile, Response> {
+    let service = app.context.attachments(app.attachment_cache());
+    let (file, held) = service
+        .queue_as(std::path::Path::new(path), file_id, name, mime_type)
+        .map_err(|error| Response::failed(error.into()))?;
+
+    let entry = crate::outbox::build(
+        crate::outbox::kind::UPLOAD_ATTACHMENT,
+        serde_json::json!({
+            "localPath": held.to_string_lossy(),
+            "name": file.name,
+            "mimeType": file.mime_type,
+            "context": context,
+            // Where the bytes go once the upload answers, so a delivered file stays drawable
+            // without being fetched back (task 48f72aa7). The handler has the store and the
+            // client and no notion of where this installation keeps its files.
+            "cacheDir": app.attachment_cache().to_string_lossy(),
+        }),
+        &file.id,
+        app.clock.now(),
+    )
+    .for_temp_id(&file.id);
+    crate::outbox::journal::enqueue(&app.store, &entry)
+        .map_err(|error| Response::failed(error.into()))?;
+    Ok(file)
 }
 
 /// What a paste should attach, if anything.
