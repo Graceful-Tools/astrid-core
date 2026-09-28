@@ -480,3 +480,22 @@ two devices adding opposite edges before either syncs — and a dead-lettered en
 on it, which is what every other refused write here also leaves behind. Saying it at the moment of
 the pick would mean giving up the optimistic write, and blocking a task on a plane is worth more
 than a message about a case the picker will not offer (task 69a840a4).
+
+### D20 — a board column's add field is offered in Done here and on the Mac, never on web
+
+`MacBoardView.addCardField(col)` puts an add field at the foot of **every** column, Done included,
+and Windows copied that placement when it grew one (task 95c7a68f). Web does not:
+`project-status-board.tsx` renders `isDoneColumn ? null : <form>`, so typing a new card straight
+into Done is possible on two clients and not on the third.
+
+The behaviour is deliberate on both sides rather than an oversight on one. A card typed into Done is
+a thing somebody did and is recording afterwards — the commonest way a list gets an entry it never
+had — and `dispatch::board::add_board_card` creates it and then completes it through
+`TaskService::complete`, so a repeating card typed there rolls forward exactly as one dragged there
+does. Web's reading is that a column meaning "finished" is a strange place to start something, and
+its quick-add sits above the board instead.
+
+Nothing in `ColumnCreate` decides this: the rule answers what a card in a column is made of, and
+whether a column offers a field at all is each client's own layout. So this is a divergence to know
+about rather than one to close — if it does close, it closes on web, by adding the field, not here
+by taking it away.
