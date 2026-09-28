@@ -281,6 +281,22 @@ pub enum Command {
     ResolveIds {
         ids: Vec<String>,
     },
+    /// Put a write another client's journal already applied on screen into this one, to be sent
+    /// as it was: the Apple apps' queued writes, carried over on their first launch through this
+    /// crate so an offline edit made before the update still reaches the server.
+    ///
+    /// The cache is not touched — the edit is already in it, from `seedCache` — and the payload is
+    /// journaled verbatim, in this journal's own shape for `kind` (`{"body":…}` for `createTask`,
+    /// `{"taskId":…,"body":…}` for `updateTask`, and so on). `clientRequestId` is the original
+    /// idempotency key, so a write the old journal did send is not made twice.
+    ImportJournalEntry {
+        #[serde(rename = "entryKind")]
+        entry_kind: String,
+        payload: serde_json::Value,
+        client_request_id: String,
+        #[serde(default)]
+        temp_id: Option<String>,
+    },
     /// Fill an empty cache from a shell's own, once, when it starts speaking through this crate —
     /// the Apple apps' Core Data on their first launch after the move — so an offline first launch
     /// still shows everything. Journals nothing and leaves the sync cursor alone: the first pass

@@ -58,6 +58,39 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             }
             Response::ok(serde_json::Value::Object(moved))
         }
+        Command::ImportJournalEntry {
+            entry_kind,
+            payload,
+            client_request_id,
+            temp_id,
+        } => {
+            use crate::outbox::kind;
+            let known = [
+                kind::CREATE_TASK,
+                kind::UPDATE_TASK,
+                kind::DELETE_TASK,
+                kind::COMPLETE_TASK,
+                kind::UPDATE_LIST,
+                kind::CREATE_COMMENT,
+                kind::UPDATE_COMMENT,
+                kind::DELETE_COMMENT,
+            ];
+            if !known.contains(&entry_kind.as_str()) {
+                return Response::failed(Failure::bad_request(format!(
+                    "{entry_kind} is not a write this journal imports"
+                )));
+            }
+            let entry =
+                crate::outbox::build(&entry_kind, payload, &client_request_id, app.clock.now());
+            let entry = match temp_id {
+                Some(temp_id) => entry.for_temp_id(temp_id),
+                None => entry,
+            };
+            match crate::outbox::journal::enqueue(&app.store, &entry) {
+                Ok(_) => Response::done(),
+                Err(error) => Response::failed(Failure::from(error)),
+            }
+        }
         Command::SeedCache {
             tasks,
             lists,

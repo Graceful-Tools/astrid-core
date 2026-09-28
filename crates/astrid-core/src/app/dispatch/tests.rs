@@ -4954,3 +4954,32 @@ async fn every_list_setting_a_shell_writes_is_kept() {
     assert_eq!(body["projectId"], "p1");
     assert_eq!(body["aiAgentConfig"]["enabledTypes"], json!(["claude"]));
 }
+
+/// A write another client's journal queued offline goes out from this one, as it was, under its
+/// original idempotency key.
+#[tokio::test]
+async fn an_imported_write_is_journaled_verbatim_under_its_own_key() {
+    let app = app_with(StubTransport::new());
+    let answer = call(
+        &app,
+        json!({ "kind": "importJournalEntry", "entryKind": "updateTask",
+                "payload": { "taskId": "temp_x", "body": { "completed": true } },
+                "clientRequestId": "crid-1", "tempId": "temp_x" }),
+    )
+    .await;
+    assert_eq!(answer["ok"], true, "{answer}");
+    let journal = crate::outbox::journal::all(&app.store).expect("reads");
+    let entry = journal.last().expect("journaled");
+    assert_eq!(entry.kind, "updateTask");
+    assert_eq!(entry.client_request_id, "crid-1");
+    assert_eq!(entry.temp_id.as_deref(), Some("temp_x"));
+    assert_eq!(entry.payload["body"]["completed"], true);
+
+    let refused = call(
+        &app,
+        json!({ "kind": "importJournalEntry", "entryKind": "somethingElse",
+                "payload": {}, "clientRequestId": "crid-2" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false);
+}
