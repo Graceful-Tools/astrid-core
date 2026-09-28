@@ -12,6 +12,7 @@ pub mod transport;
 
 pub use client::{ApiClient, ApiError, Request, API_PREFIX, DEFAULT_BASE_URL};
 pub use pagination::{fetch_all, Page};
+pub use platform::Platform;
 pub use transport::{
     HttpRequest, HttpResponse, HttpTransport, Method, ReqwestTransport, StubTransport,
     TransportError,

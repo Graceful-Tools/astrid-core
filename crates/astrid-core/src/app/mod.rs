@@ -50,6 +50,9 @@ pub struct Config {
     /// exit criterion needs.
     #[serde(default = "default_base_url")]
     pub base_url: String,
+    /// Which client this is, stated on every request (`x-platform`). Windows when absent.
+    #[serde(default)]
+    pub platform: crate::api::Platform,
 }
 
 fn default_base_url() -> String {
@@ -112,7 +115,10 @@ impl App {
         } else {
             Store::open(&config.cache_path)?
         });
-        let client = Arc::new(ApiClient::new(&config.base_url, transport, secure_store));
+        let client = Arc::new(
+            ApiClient::new(&config.base_url, transport, secure_store)
+                .with_platform(config.platform),
+        );
         let runner = Arc::new(Runner::new(client.clone(), store.clone(), clock.clone()));
         let sync = Arc::new(SyncManager::new(
             client.clone(),
@@ -230,6 +236,7 @@ mod tests {
             &Config {
                 cache_path: ":memory:".into(),
                 base_url: "https://astrid.cc".into(),
+                platform: Default::default(),
             },
             Arc::new(MemorySecureStore::new()),
             Arc::new(transport),

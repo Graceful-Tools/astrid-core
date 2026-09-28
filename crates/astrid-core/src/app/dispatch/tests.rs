@@ -911,6 +911,7 @@ async fn resolving_a_shortcut_reaches_no_network() {
         &Config {
             cache_path: ":memory:".into(),
             base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
         },
         std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
         transport.clone(),
@@ -1179,6 +1180,7 @@ fn app_and_transport(transport: StubTransport) -> (App, std::sync::Arc<StubTrans
         &Config {
             cache_path: ":memory:".into(),
             base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
         },
         std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
         transport.clone(),

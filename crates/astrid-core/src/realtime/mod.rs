@@ -118,6 +118,30 @@ pub enum Change {
     Notifications,
 }
 
+impl Change {
+    /// The change as a shell reads it: `{"change":"task","id":…}` and so on — the vocabulary the
+    /// Windows FFI has always sent, now answered here so every shell hears the same words.
+    pub fn to_json(&self) -> String {
+        let value = match self {
+            Change::Task(id) => serde_json::json!({ "change": "task", "id": id }),
+            Change::List(id) => serde_json::json!({ "change": "list", "id": id }),
+            Change::Comments(id) => serde_json::json!({ "change": "comments", "taskId": id }),
+            Change::Chat(id) => serde_json::json!({ "change": "chat", "channelId": id }),
+            Change::AgentTyping { channel_id, active } => serde_json::json!({
+                "change": "agentTyping", "channelId": channel_id, "active": active
+            }),
+            Change::Settings => serde_json::json!({ "change": "settings" }),
+            Change::RemindersDue => serde_json::json!({ "change": "remindersDue" }),
+            Change::NeedsSync => serde_json::json!({ "change": "needsSync" }),
+            Change::Synced { task_ids, list_ids } => serde_json::json!({
+                "change": "synced", "taskIds": task_ids, "listIds": list_ids
+            }),
+            Change::Notifications => serde_json::json!({ "change": "notifications" }),
+        };
+        value.to_string()
+    }
+}
+
 /// Something told when the cache moves. The shell registers one and refreshes what it names.
 pub type ChangeListener = Box<dyn Fn(&Change) + Send + Sync>;
 

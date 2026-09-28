@@ -26,6 +26,32 @@ pub const HEADER_NAME: &str = "x-platform";
 /// What this build claims to be. Matches `AnalyticsPlatform.WINDOWS_APP` on the server.
 pub const PLATFORM: &str = "windows-app";
 
+/// Which client this build is. A closed set, because the server matches each value by equality
+/// (`AnalyticsPlatform` in `lib/analytics-events.ts`): a free-text value with a typo would count as
+/// nothing, silently. Each shell names its own; the default is the Windows app this crate first
+/// shipped in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+pub enum Platform {
+    #[default]
+    #[serde(rename = "windows-app")]
+    Windows,
+    #[serde(rename = "ios-app")]
+    Ios,
+    #[serde(rename = "mac-app")]
+    Mac,
+}
+
+impl Platform {
+    /// The header value, exactly as the server matches it.
+    pub fn wire(self) -> &'static str {
+        match self {
+            Platform::Windows => PLATFORM,
+            Platform::Ios => "ios-app",
+            Platform::Mac => "mac-app",
+        }
+    }
+}
+
 /// Astrid-bound requests only.
 ///
 /// Blob uploads and third-party token endpoints are not ours to label; our analytics header is not
@@ -51,6 +77,17 @@ mod tests {
 
     /// Not `ios-app` or `mac-app`: this build is neither, and claiming to be one would mix the
     /// platforms together in a way no dashboard could unpick afterwards.
+    /// The Apple values, pinned the same way: they are `AnalyticsPlatform.IOS_APP` / `MAC_APP`,
+    /// and what the Swift apps sent before they spoke through this crate.
+    #[test]
+    fn each_shell_names_itself_exactly_as_the_server_matches_it() {
+        assert_eq!(Platform::default().wire(), "windows-app");
+        assert_eq!(Platform::Ios.wire(), "ios-app");
+        assert_eq!(Platform::Mac.wire(), "mac-app");
+        let read: Platform = serde_json::from_str("\"mac-app\"").expect("reads");
+        assert_eq!(read, Platform::Mac);
+    }
+
     #[test]
     fn it_does_not_claim_to_be_another_client() {
         assert_ne!(PLATFORM, "ios-app");

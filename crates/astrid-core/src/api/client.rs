@@ -152,6 +152,8 @@ pub struct ApiClient {
     base_url: String,
     transport: Arc<dyn HttpTransport>,
     secure_store: Arc<dyn SecureStore>,
+    /// What this build states in `x-platform` — see [`platform_header`].
+    platform: platform_header::Platform,
 }
 
 impl ApiClient {
@@ -164,7 +166,14 @@ impl ApiClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             transport,
             secure_store,
+            platform: platform_header::Platform::default(),
         }
+    }
+
+    /// State a different platform on every request — the Apple apps' shells set theirs.
+    pub fn with_platform(mut self, platform: platform_header::Platform) -> Self {
+        self.platform = platform;
+        self
     }
 
     pub fn base_url(&self) -> &str {
@@ -322,10 +331,13 @@ impl ApiClient {
             url.push_str(&encoded.join("&"));
         }
 
-        let mut headers = vec![("accept".to_string(), "application/json".to_string()), {
-            let (name, value) = platform_header::header();
-            (name.to_string(), value.to_string())
-        }];
+        let mut headers = vec![
+            ("accept".to_string(), "application/json".to_string()),
+            (
+                platform_header::HEADER_NAME.to_string(),
+                self.platform.wire().to_string(),
+            ),
+        ];
         if let Some(cookie) = self.secure_store.get(SESSION_COOKIE_KEY).await {
             headers.push(("cookie".to_string(), cookie));
         }

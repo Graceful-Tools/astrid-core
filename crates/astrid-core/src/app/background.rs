@@ -321,6 +321,7 @@ mod tests {
                 &Config {
                     cache_path: ":memory:".into(),
                     base_url: "https://astrid.cc".into(),
+                    platform: Default::default(),
                 },
                 secure,
                 Arc::new(transport),
@@ -340,6 +341,7 @@ mod tests {
                 &Config {
                     cache_path: ":memory:".into(),
                     base_url: "https://astrid.cc".into(),
+                    platform: Default::default(),
                 },
                 Arc::new(MemorySecureStore::new()),
                 transport.clone(),
@@ -440,6 +442,7 @@ mod tests {
                 &Config {
                     cache_path: ":memory:".into(),
                     base_url: "https://astrid.cc".into(),
+                    platform: Default::default(),
                 },
                 secure,
                 transport.clone(),
@@ -602,6 +605,7 @@ mod tests {
                 &Config {
                     cache_path: ":memory:".into(),
                     base_url: "https://astrid.cc".into(),
+                    platform: Default::default(),
                 },
                 secure,
                 transport.clone(),
@@ -645,6 +649,7 @@ mod tests {
                 &Config {
                     cache_path: ":memory:".into(),
                     base_url: "https://astrid.cc".into(),
+                    platform: Default::default(),
                 },
                 Arc::new(MemorySecureStore::new()),
                 transport.clone(),

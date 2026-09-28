@@ -33,6 +33,7 @@ fn app_with_tasks(count: usize) -> App {
         &Config {
             cache_path: ":memory:".into(),
             base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
         },
         Arc::new(MemorySecureStore::new()),
         Arc::new(StubTransport::new()),
