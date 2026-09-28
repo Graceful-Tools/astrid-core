@@ -50,8 +50,10 @@ pub async fn run(
             Ok(mut frames) => {
                 // It connected: whatever failed before describes a world that is gone.
                 policy.connected();
+                sink.set_live(true);
                 while let Some(frame) = frames.next().await {
                     if !should_continue() {
+                        sink.set_live(false);
                         return Stopped::Cancelled;
                     }
                     match frame {
@@ -65,11 +67,15 @@ pub async fn run(
                     }
                 }
             }
-            Err(ApiError::Unauthorized) => return Stopped::Unauthorized,
+            Err(ApiError::Unauthorized) => {
+                sink.set_live(false);
+                return Stopped::Unauthorized;
+            }
             Err(error) => {
                 tracing::debug!(%error, "the live stream could not be opened");
             }
         }
+        sink.set_live(false);
 
         match policy.failed() {
             Some(wait) => tokio::time::sleep(wait).await,
@@ -208,5 +214,28 @@ mod tests {
         // ...so it gets a full five attempts after that one, rather than stopping at five in
         // total. Nine opens: four failures, the connection, then five more.
         assert_eq!(*stub.opened.lock().expect("lock"), 9);
+    }
+
+    /// A chat panel polls only while the stream is down, so it has to hear both edges — once
+    /// each, not once per frame (Apple `ChatPollingPolicy`).
+    #[tokio::test(start_paused = true)]
+    async fn the_stream_says_when_it_goes_up_and_down() {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let sink = Arc::new(RealtimeSink::new(store));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let log = heard.clone();
+        sink.on_change(move |change| {
+            if let crate::realtime::Change::Stream { live } = change {
+                log.lock().expect("lock").push(*live);
+            }
+        });
+        let stub = Arc::new(StreamingStub::new(vec![Ok(vec![
+            "data: {\"type\":\"ping\"}\n\n".to_string(),
+            "data: {\"type\":\"ping\"}\n\n".to_string(),
+        ])]));
+
+        run(client(stub), sink.clone(), || true).await;
+        assert_eq!(*heard.lock().expect("lock"), vec![true, false]);
+        assert!(!sink.is_live());
     }
 }

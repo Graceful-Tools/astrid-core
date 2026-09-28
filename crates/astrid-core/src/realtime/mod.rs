@@ -139,6 +139,11 @@ pub enum Change {
     /// The inbox moved — a sync pass fetched it and it differs from what was cached. The web
     /// sends no live event for the inbox, so this is how the bell learns.
     Notifications,
+    /// The live stream connected (`true`) or dropped (`false`). Said once per edge. What a chat
+    /// panel polls on: the stream delivers messages, and polling on top of it is duplication.
+    Stream {
+        live: bool,
+    },
 }
 
 impl Change {
@@ -161,6 +166,7 @@ impl Change {
                 "change": "synced", "taskIds": task_ids, "listIds": list_ids
             }),
             Change::Notifications => serde_json::json!({ "change": "notifications" }),
+            Change::Stream { live } => serde_json::json!({ "change": "stream", "live": live }),
         };
         value.to_string()
     }
@@ -173,6 +179,7 @@ pub type ChangeListener = Box<dyn Fn(&Change) + Send + Sync>;
 pub struct RealtimeSink {
     store: Arc<Store>,
     listeners: std::sync::Mutex<Vec<ChangeListener>>,
+    live: std::sync::atomic::AtomicBool,
 }
 
 impl RealtimeSink {
@@ -180,6 +187,19 @@ impl RealtimeSink {
         RealtimeSink {
             store,
             listeners: std::sync::Mutex::new(Vec::new()),
+            live: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the live stream is connected right now.
+    pub fn is_live(&self) -> bool {
+        self.live.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Record the stream connecting or dropping, announcing only a change.
+    pub(crate) fn set_live(&self, live: bool) {
+        if self.live.swap(live, std::sync::atomic::Ordering::SeqCst) != live {
+            self.publish(Change::Stream { live });
         }
     }
 

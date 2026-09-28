@@ -254,6 +254,9 @@ pub enum Command {
     IsSignedIn,
     /// The Outbox's state, for the "not synced yet" indicator.
     OutboxStats,
+    /// Whether the live stream is connected: `{ "live": bool }`. Its edges arrive as `stream`
+    /// changes.
+    StreamState,
     /// What a pressed key means, given what is on screen.
     ///
     /// The shell asks rather than knowing, because the bare-key scheme is a cross-platform

@@ -513,6 +513,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 "pushesFailed": report.pushes_failed,
             }))
         }
+        Command::StreamState => {
+            Response::ok(serde_json::json!({ "live": app.realtime().is_live() }))
+        }
         Command::RetryDeadLetters => {
             match crate::outbox::journal::revive_dead(&app.store, app.clock.now()) {
                 Ok(revived) => {
