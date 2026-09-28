@@ -110,7 +110,11 @@ pub fn renders_inline(mime_type: &str) -> bool {
 /// reply right after its parent, in the order the replies were written. A reply whose parent is
 /// not in the thread — deleted, or beyond the page — is drawn as an ordinary comment rather than
 /// as an indent under nothing.
-pub fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
+pub fn rows(
+    comments: &[Comment],
+    me: Option<&str>,
+    identifiers: &crate::identifier::LinkContext,
+) -> Vec<CommentRow> {
     let drawable: Vec<&Comment> = comments
         .iter()
         .filter(|comment| !is_empty(comment))
@@ -126,20 +130,30 @@ pub fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
 
     let mut rows = Vec::with_capacity(drawable.len());
     for parent in drawable.iter().filter(|comment| is_top_level(comment)) {
-        rows.push(row(parent, me, None));
+        rows.push(row(parent, me, None, identifiers));
         let parent_is_mine = me.is_some() && parent.author_id.as_deref() == me;
         for reply in drawable
             .iter()
             .filter(|comment| comment.parent_comment_id.as_deref() == Some(parent.id.as_str()))
         {
-            rows.push(row(reply, me, Some((&parent.id, parent_is_mine))));
+            rows.push(row(
+                reply,
+                me,
+                Some((&parent.id, parent_is_mine)),
+                identifiers,
+            ));
         }
     }
     rows
 }
 
 /// One row. `under` is the parent it nests beneath, and whether that parent is mine.
-fn row(comment: &Comment, me: Option<&str>, under: Option<(&String, bool)>) -> CommentRow {
+fn row(
+    comment: &Comment,
+    me: Option<&str>,
+    under: Option<(&String, bool)>,
+    identifiers: &crate::identifier::LinkContext,
+) -> CommentRow {
     CommentRow {
         id: comment.id.clone(),
         content: comment.content.clone(),
@@ -160,7 +174,9 @@ fn row(comment: &Comment, me: Option<&str>, under: Option<(&String, bool)>) -> C
             .map(|(_, parent_is_mine)| parent_is_mine)
             .unwrap_or(false),
         blocks: if shows_text(&comment.content) {
-            crate::markdown::render(&comment.content)
+            // A task id in a comment is a link (task 5f3453e2). What `identifiers` holds decides
+            // whether any of them are: the reader's own board keys, and the board this task is on.
+            crate::markdown::render_with_identifiers(&comment.content, identifiers)
         } else {
             Vec::new()
         },
@@ -203,6 +219,13 @@ mod tests {
 
     fn comment(value: serde_json::Value) -> Comment {
         serde_json::from_value(value).expect("a comment")
+    }
+
+    /// Nearly every test here is about WHICH comments draw and how they nest, not about task ids
+    /// in their text, so they project with no visible project keys — the context in which nothing
+    /// autolinks. The tests that are about ids call [`super::rows`] with a real one.
+    fn rows(comments: &[Comment], me: Option<&str>) -> Vec<CommentRow> {
+        super::rows(comments, me, &crate::identifier::LinkContext::default())
     }
 
     fn a_file(mime: &str) -> serde_json::Value {
@@ -472,5 +495,51 @@ mod tests {
             None,
         );
         assert!(rows[0].is_pending);
+    }
+
+    /// A task id in a comment is drawn as a link, so it can be followed rather than retyped
+    /// (task 5f3453e2). The rule and the resolving route are the core's; the shell draws the run.
+    #[test]
+    fn a_task_id_in_a_comment_is_a_link_task_5f3453e2() {
+        let projected = super::rows(
+            &[comment(
+                json!({ "id": "c1", "content": "dup of AWTD-1007" }),
+            )],
+            None,
+            &crate::identifier::LinkContext {
+                project_key: None,
+                keys: vec!["AWTD".to_string()],
+                hidden: Vec::new(),
+            },
+        );
+        let Some(crate::markdown::Block::Paragraph { inlines }) = projected[0].blocks.first()
+        else {
+            panic!("a paragraph: {:?}", projected[0].blocks);
+        };
+        assert!(
+            inlines.iter().any(|inline| matches!(
+                inline,
+                crate::markdown::Inline::Text { text, link: Some(href), .. }
+                    if text == "AWTD-1007" && href == "https://astrid.cc/t/AWTD-1007"
+            )),
+            "the id should carry its address: {inlines:?}"
+        );
+    }
+
+    /// And a key the reader has no board for is prose, in a comment as anywhere else — the reason
+    /// the context is threaded here rather than assumed.
+    #[test]
+    fn an_unknown_key_in_a_comment_stays_text_task_5f3453e2() {
+        let projected = rows(
+            &[comment(json!({ "id": "c1", "content": "encode as UTF-8" }))],
+            None,
+        );
+        let Some(crate::markdown::Block::Paragraph { inlines }) = projected[0].blocks.first()
+        else {
+            panic!("a paragraph");
+        };
+        assert!(!inlines
+            .iter()
+            .any(|inline| matches!(inline, crate::markdown::Inline::Text { link: Some(_), .. })));
     }
 }

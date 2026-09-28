@@ -372,7 +372,15 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             let me = app.context.account().current_user_id().ok().flatten();
             match app.context.comments().refresh(&task_id).await {
                 Ok(comments) => {
-                    let mut rows = rows::comment::rows(&comments, me.as_deref());
+                    // The same autolink context the detail builds, for the same reason the
+                    // projection is shared: a refreshed comment must not draw differently from
+                    // the screen it lands in.
+                    let lists = app.store.lists().unwrap_or_default();
+                    let identifiers = match app.store.task(&task_id).ok().flatten() {
+                        Some(task) => identifier_context(app, &task, &lists),
+                        None => crate::identifier::LinkContext::default(),
+                    };
+                    let mut rows = rows::comment::rows(&comments, me.as_deref(), &identifiers);
                     fill_local_paths(app, &task_id, &mut rows);
                     Response::ok(rows)
                 }

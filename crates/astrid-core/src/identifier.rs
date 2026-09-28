@@ -190,6 +190,56 @@ pub fn find_links(text: &str, context: &LinkContext) -> Vec<IdentifierLink> {
     links
 }
 
+/// The context for text read inside `project_id`, from the projects this device knows.
+///
+/// The reader's own projects ARE the visible keys: the store holds what the account can see, so a
+/// key that is not there belongs to a board this reader cannot open — and `UTF-8` belongs to no
+/// board at all. `project_id` is what lets `#12` mean anything; outside a project it stays text.
+///
+/// [`LinkContext::hidden`] is left empty deliberately. A client cannot know that one particular task
+/// is invisible to the reader without asking — which is exactly the lookup this design avoids — so
+/// the key check is the guard here, and a stale reference resolves to "not found" at `/t/<id>`
+/// rather than leaking anything.
+pub fn context_for(projects: &[crate::model::Project], project_id: Option<&str>) -> LinkContext {
+    LinkContext {
+        project_key: project_id.and_then(|id| {
+            projects
+                .iter()
+                .find(|project| project.id == id)
+                .and_then(|project| project.key.clone())
+        }),
+        keys: projects
+            .iter()
+            .filter_map(|project| project.key.clone())
+            .collect(),
+        hidden: Vec::new(),
+    }
+}
+
+/// Rewrite every reference through `render`, leaving the rest of the text alone.
+///
+/// Mirrors web's `replaceIdentifierLinks`, and is how a renderer turns ids into links without
+/// knowing anything about the format.
+pub fn replace_links(
+    text: &str,
+    context: &LinkContext,
+    render: impl Fn(&IdentifierLink) -> String,
+) -> String {
+    let links = find_links(text, context);
+    if links.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for link in &links {
+        out.push_str(&text[cursor..link.index]);
+        out.push_str(&render(link));
+        cursor = link.index + link.matched.len();
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
 /// A `KEY-N` starting exactly at `at`: its key, its sequence, and where it ends.
 ///
 /// The key is tried longest-first, which is what the regex's greedy repetition does — `AWTD2-44` is
@@ -466,5 +516,60 @@ mod tests {
     #[test]
     fn an_unclosed_fence_masks_what_follows_it() {
         assert!(find_links("```\nAWTD-1", &context(None, &["AWTD"])).is_empty());
+    }
+
+    /// What a renderer does with the spans: the text between them must survive untouched, and two
+    /// references in one sentence must not shift each other's offsets.
+    #[test]
+    fn replacing_leaves_everything_between_the_references_alone() {
+        let rewritten = replace_links(
+            "Blocked by AWTD-1007 and AWTD-8; ask AITD-2.",
+            &context(None, &["AWTD"]),
+            |link| format!("[{}]({})", link.matched, link.href),
+        );
+        assert_eq!(
+            rewritten,
+            "Blocked by [AWTD-1007](/t/AWTD-1007) and [AWTD-8](/t/AWTD-8); ask AITD-2."
+        );
+    }
+
+    #[test]
+    fn replacing_nothing_returns_the_text_as_it_came() {
+        let text = "Nothing to see here.";
+        assert_eq!(
+            replace_links(text, &context(None, &["AWTD"]), |_| String::new()),
+            text
+        );
+    }
+
+    fn project(id: &str, key: Option<&str>) -> crate::model::Project {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": id,
+            "key": key,
+        }))
+        .expect("a project")
+    }
+
+    /// The reader's own boards are the visible keys, and the board they are reading inside is the
+    /// one whose key `#N` means.
+    #[test]
+    fn a_context_is_built_from_the_boards_this_device_knows() {
+        let projects = [
+            project("p1", Some("AWTD")),
+            project("p2", Some("AITD")),
+            project("p3", None),
+        ];
+
+        let inside = context_for(&projects, Some("p2"));
+        assert_eq!(inside.project_key.as_deref(), Some("AITD"));
+        assert_eq!(inside.keys, vec!["AWTD".to_string(), "AITD".to_string()]);
+        assert!(inside.hidden.is_empty());
+
+        let outside = context_for(&projects, None);
+        assert_eq!(outside.project_key, None);
+
+        // A board from before identifiers existed lends no key to anything.
+        assert_eq!(context_for(&projects, Some("p3")).project_key, None);
     }
 }
