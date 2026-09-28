@@ -820,7 +820,8 @@ impl ExternalSyncService {
                             tasklist_id,
                             [(task.id.clone(), item.remote_id.clone())],
                         )?;
-                        if linked_task_id.is_none()
+                        // Whenever the server's map lacks it — see the linked-list pass below.
+                        if !task_links.contains_key(&item.remote_id)
                             && self
                                 .record_task_link(&task.id, &item.remote_id, tasklist_id)
                                 .await
@@ -1040,9 +1041,11 @@ impl ExternalSyncService {
                         &link.remote_container_id,
                         [(task.id.clone(), item.remote_id.clone())],
                     )?;
-                    // Only when it is new to us. Re-sending an existing link every pass is a write
-                    // per task per five minutes for something that has not changed.
-                    if linked_task_id.is_none()
+                    // Whenever the server's map lacks it — not only when the item is new here. A
+                    // task pulled while its create was still in the journal is matched through this
+                    // device's own note next pass, and if the server is never told, every other
+                    // device makes a second twin. An existing server link is not re-sent.
+                    if !task_links.contains_key(&item.remote_id)
                         && self
                             .record_task_link(&task.id, &item.remote_id, &link.remote_container_id)
                             .await
@@ -2148,5 +2151,53 @@ mod tests {
         assert_eq!(pushed, 1, "the second task still went");
         let retry = PushRetry::load(&fixture.store, &format!("external.pushed.{}", link.id));
         assert_eq!(retry.ids.len(), 1, "and the failed one is remembered");
+    }
+
+    /// A task pulled before its create had reached astrid-web is matched through this device's own
+    /// note on the next pass — and must then be linked on the server too, or every other device
+    /// makes a second twin of it.
+    #[tokio::test]
+    async fn a_twin_known_only_here_is_linked_on_the_server_once_it_can_be() {
+        let transport = StubTransport::new()
+            .push_json(
+                "google/tasks",
+                200,
+                json!({ "items": [{ "remoteId": "tasklist-1:r1", "title": "Buy milk" }] }),
+            )
+            .push_json("google/task-links", 200, json!({ "links": [] }))
+            .push_json("google/task-links", 200, json!({ "links": [] }))
+            .fallback(Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: b"{}".to_vec(),
+            }));
+        let sent = transport.recorded.clone();
+        let fixture = fixture_with(transport);
+        fixture
+            .store
+            .upsert_task(&crate::model::Task::new("t-real", "Buy milk"))
+            .expect("stores");
+        ledger::remember_links(
+            &fixture.store,
+            PROVIDER_KEY,
+            "tasklist-1",
+            [("t-real".to_string(), "tasklist-1:r1".to_string())],
+        )
+        .expect("remembers");
+
+        fixture
+            .service
+            .sync_google_link(&link())
+            .await
+            .expect("a pass");
+        let linked = sent.lock().expect("lock").iter().any(|request| {
+            request.method == crate::api::Method::Put
+                && request.url.contains("google/task-links")
+                && request
+                    .body
+                    .as_ref()
+                    .is_some_and(|body| String::from_utf8_lossy(body).contains("t-real"))
+        });
+        assert!(linked, "the server was told which task mirrors r1");
     }
 }
