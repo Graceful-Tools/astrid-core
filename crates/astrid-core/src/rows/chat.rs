@@ -11,6 +11,8 @@
 //! - **Delivered or not** is the temporary id, the same signal the task rows use. A message typed
 //!   offline is in the transcript at the moment it was typed and stays where it was typed; the
 //!   only thing that changes when it lands is that it stops saying "sending".
+//! - **What it says** is markdown, and a task id in it is a link — the same rules a comment and a
+//!   description follow, because a conversation is where an id gets quoted most.
 //! - **Said by nobody** is a message the server authored — "Dana joined the list". Drawing it as a
 //!   bubble from a person with no name is how those come to look like somebody's message.
 
@@ -25,6 +27,14 @@ use crate::model::{is_temp_id, ChatMessage, User};
 pub struct MessageRow {
     pub id: String,
     pub content: String,
+    /// What the message says, as blocks a screen can draw — the same projection a comment and a
+    /// description get (task 5f3453e2).
+    ///
+    /// Web has always drawn chat through `renderMarkdownWithLinks`; Windows drew `content` into a
+    /// text block, so a task id in a conversation could only be retyped, and `**bold**` arrived
+    /// with its asterisks. `content` stays for whoever wants the text as written — a reply
+    /// preview, an accessibility name, a copy.
+    pub blocks: Vec<crate::markdown::Block>,
     /// Who said it, or `None` when the server did.
     pub author_name: Option<String>,
     /// Avatar fallback. Empty for a message nobody said.
@@ -48,6 +58,7 @@ pub fn transcript(
     messages: &[ChatMessage],
     current_user_id: Option<&str>,
     people: &[User],
+    identifiers: &crate::identifier::LinkContext,
 ) -> Vec<MessageRow> {
     messages
         .iter()
@@ -61,6 +72,7 @@ pub fn transcript(
             MessageRow {
                 id: message.id.clone(),
                 content: message.content.clone(),
+                blocks: crate::markdown::render_with_identifiers(&message.content, identifiers),
                 // `known_name` rather than `display_name`, whose fallback is English. An author
                 // we know nothing about but an id is named by the shell.
                 author_name: author
@@ -90,6 +102,22 @@ pub fn transcript(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// These tests are about whose message it is and whether anybody said it, not about the ids in
+    /// it, so they project with no visible project keys — where nothing autolinks. The test that is
+    /// about ids calls [`super::transcript`] with a real context.
+    fn transcript(
+        messages: &[ChatMessage],
+        current_user_id: Option<&str>,
+        people: &[User],
+    ) -> Vec<MessageRow> {
+        super::transcript(
+            messages,
+            current_user_id,
+            people,
+            &crate::identifier::LinkContext::default(),
+        )
+    }
 
     fn message(id: &str, author: Option<&str>, content: &str) -> ChatMessage {
         serde_json::from_value(json!({
@@ -180,5 +208,41 @@ mod tests {
     fn nothing_is_mine_when_nobody_is_signed_in() {
         let rows = transcript(&[message("m1", Some("dana"), "hello")], None, &[]);
         assert!(!rows[0].is_mine);
+    }
+
+    /// A conversation draws what it says, and a task id in it is a link (task 5f3453e2). Web has
+    /// always rendered chat this way; Windows drew the raw text.
+    #[test]
+    fn a_message_is_drawn_as_blocks_and_its_ids_link_task_5f3453e2() {
+        let rows = super::transcript(
+            &[message(
+                "m1",
+                Some("dana"),
+                "see **AWTD-1007** for the rest",
+            )],
+            Some("me"),
+            &[],
+            &crate::identifier::LinkContext {
+                project_key: None,
+                keys: vec!["AWTD".to_string()],
+                hidden: Vec::new(),
+            },
+        );
+
+        let Some(crate::markdown::Block::Paragraph { inlines }) = rows[0].blocks.first() else {
+            panic!("a paragraph: {:?}", rows[0].blocks);
+        };
+        assert!(
+            inlines.iter().any(|inline| matches!(
+                inline,
+                crate::markdown::Inline::Text { text, link: Some(href), bold, .. }
+                    if text == "AWTD-1007" && href == "https://astrid.cc/t/AWTD-1007" && *bold
+            )),
+            "the id links and keeps the emphasis it was written with: {inlines:?}"
+        );
+        assert_eq!(
+            rows[0].content, "see **AWTD-1007** for the rest",
+            "the text as written survives for a reply preview or a copy"
+        );
     }
 }
