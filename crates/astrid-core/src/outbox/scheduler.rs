@@ -86,10 +86,47 @@ pub fn runnable(entries: &[Entry], now: DateTime<Utc>, in_flight: &HashSet<Strin
     let mut ready: Vec<Entry> = entries
         .iter()
         .filter(|entry| is_runnable(entry, now, &completed, in_flight))
+        .filter(|entry| !awaits_older_producer(entry, entries))
         .cloned()
         .collect();
     ready.sort_by_key(|entry| (entry.created_at, entry.sequence));
     ready
+}
+
+/// Whether `entry` names a temporary id that an older, unfinished entry has still to produce.
+///
+/// The implicit dependency the journal does not write down: a photo comment is enqueued after its
+/// upload, a comment after the offline create of the task it is on, each in a lane of its own. Sent
+/// before the id it names is real, the write is refused and dead-lettered — the photo, or the
+/// comment, simply gone. Only an OLDER producer counts, so a create never waits on itself and the
+/// edits in its lane keep their FIFO order. A producer that failed for good is not unfinished:
+/// the write goes, is refused, and is dead-lettered with its reason, as [`temp_stranded`] would.
+fn awaits_older_producer(entry: &Entry, entries: &[Entry]) -> bool {
+    let mut named = Vec::new();
+    temp_ids_in(&entry.payload, &mut named);
+    if named.is_empty() {
+        return false;
+    }
+    entries.iter().any(|other| {
+        other.id != entry.id
+            && matches!(other.status, Status::Pending | Status::Running)
+            && (other.created_at, other.sequence) < (entry.created_at, entry.sequence)
+            && other
+                .temp_id
+                .as_ref()
+                .is_some_and(|produced| named.contains(&produced.as_str()))
+    })
+}
+
+fn temp_ids_in<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(text) if crate::model::is_temp_id(text) => found.push(text),
+        serde_json::Value::Array(items) => items.iter().for_each(|item| temp_ids_in(item, found)),
+        serde_json::Value::Object(fields) => {
+            fields.values().for_each(|field| temp_ids_in(field, found))
+        }
+        _ => {}
+    }
 }
 
 /// At most one entry per lane, oldest first, up to `limit`.
@@ -306,6 +343,10 @@ mod tests {
         }
         fn updated_at(mut self, offset: i64) -> Self {
             self.entry.updated_at = t0() + Duration::seconds(offset);
+            self
+        }
+        fn payload(mut self, payload: serde_json::Value) -> Self {
+            self.entry.payload = payload;
             self
         }
         fn build(self) -> Entry {
@@ -609,5 +650,80 @@ mod tests {
         assert_eq!(status_of("b"), Status::Pending);
         assert_eq!(status_of("c"), Status::Completed);
         assert_eq!(status_of("d"), Status::FailedPermanent);
+    }
+
+    // ── Temporary ids another entry has still to produce ────────────────────────────────────
+
+    /// A photo comment is journaled after its upload, in a lane of its own. Run side by side, the
+    /// comment went out naming the file by its temporary id, the server refused it, and the photo
+    /// was dead-lettered — gone. It waits for the upload instead (Apple AITD-308 follow-up).
+    #[test]
+    fn a_write_naming_a_file_still_uploading_waits_for_the_upload() {
+        let upload = entry("upload")
+            .kind(kind::UPLOAD_ATTACHMENT)
+            .temp("temp_file")
+            .build();
+        let comment = entry("comment")
+            .temp("temp_comment")
+            .payload(serde_json::json!({ "taskId": "t1", "body": { "fileId": "temp_file" } }))
+            .created_at(1)
+            .build();
+        let entries = vec![upload.clone(), comment.clone()];
+        assert_eq!(
+            ids(&runnable(&entries, t0(), &HashSet::new())),
+            vec!["upload"]
+        );
+
+        // Uploaded: the id is the server's now, and the comment may go.
+        let done = entry("upload")
+            .kind(kind::UPLOAD_ATTACHMENT)
+            .temp("temp_file")
+            .status(Status::Completed)
+            .build();
+        assert_eq!(
+            ids(&runnable(&[done, comment], t0(), &HashSet::new())),
+            vec!["comment"]
+        );
+    }
+
+    /// The same for a comment on a task created offline: it waits for the task.
+    #[test]
+    fn a_write_naming_a_task_not_yet_created_waits_for_the_create() {
+        let create = entry("create")
+            .kind(kind::CREATE_TASK)
+            .temp("temp_task")
+            .build();
+        let comment = entry("comment")
+            .temp("temp_comment")
+            .payload(serde_json::json!({ "taskId": "temp_task", "body": {} }))
+            .created_at(1)
+            .build();
+        let entries = vec![create, comment];
+        assert_eq!(
+            ids(&runnable(&entries, t0(), &HashSet::new())),
+            vec!["create"]
+        );
+    }
+
+    /// Only an OLDER producer holds a write back: an entry naming its own temporary id — a create
+    /// — and the edits behind it in its lane are not waiting on themselves.
+    #[test]
+    fn a_create_is_not_held_back_by_its_own_temporary_id() {
+        let create = entry("create")
+            .kind(kind::CREATE_TASK)
+            .temp("temp_task")
+            .payload(serde_json::json!({ "body": { "clientRequestId": "temp_task" } }))
+            .build();
+        let later = entry("later")
+            .kind(kind::CREATE_TASK)
+            .temp("temp_other")
+            .payload(serde_json::json!({ "body": { "parentTaskId": "temp_task" } }))
+            .created_at(1)
+            .build();
+        let entries = vec![create, later];
+        assert_eq!(
+            ids(&runnable(&entries, t0(), &HashSet::new())),
+            vec!["create"]
+        );
     }
 }

@@ -4990,7 +4990,11 @@ async fn an_imported_write_is_journaled_verbatim_under_its_own_key() {
 #[tokio::test]
 async fn a_comment_is_posted_as_the_row_the_shell_already_drew() {
     let app = app_with(StubTransport::new());
-    let task = call(&app, json!({ "kind": "createTask", "title": "Talk about it" })).await;
+    let task = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Talk about it" }),
+    )
+    .await;
     let task_id = task["value"]["id"].as_str().expect("an id").to_string();
 
     let posted = call(
@@ -5027,7 +5031,10 @@ async fn an_attached_file_keeps_the_id_its_thumbnail_is_drawn_under() {
     assert_eq!(posted["ok"], true, "{posted}");
     assert_eq!(posted["value"]["id"], "temp_comment");
     assert_eq!(posted["value"]["secureFiles"][0]["id"], "temp_thumb");
-    assert_eq!(posted["value"]["secureFiles"][0]["originalName"], "IMG_0001.jpg");
+    assert_eq!(
+        posted["value"]["secureFiles"][0]["originalName"],
+        "IMG_0001.jpg"
+    );
     assert_eq!(posted["value"]["secureFiles"][0]["mimeType"], "image/jpeg");
     let _ = std::fs::remove_file(path);
 }
