@@ -172,10 +172,15 @@ async fn update_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
             if let Ok(task) =
                 serde_json::from_value::<Task>(unwrap_envelope(value, endpoints::envelope::TASK))
             {
-                let task = match store.task(&task.id) {
+                let mut task = match store.task(&task.id) {
                     Ok(Some(cached)) => task.keeping_unsent(&cached),
                     _ => task,
                 };
+                // The v1 PUT does not take a reminder time yet, so its answer carries the old one;
+                // taken as-is it undid a snooze made here. What this edit asked for stands.
+                if let Some(asked) = entry.payload["body"].get("reminderTime") {
+                    task.reminder_time = asked.as_str().and_then(crate::model::date::parse);
+                }
                 let _ = store.upsert_task(&task);
             }
             Outcome::done()
@@ -1245,5 +1250,33 @@ mod tests {
         let sent = transport.requests();
         let body = String::from_utf8_lossy(sent[0].body.as_deref().expect("a body")).to_string();
         assert!(body.contains("temp_upload_key"), "{body}");
+    }
+
+    /// The v1 task PUT ignores reminderTime, and its answer carries the old one: a snooze made
+    /// here must not be undone by it.
+    #[tokio::test]
+    async fn an_edits_answer_does_not_undo_a_snooze() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/api/v1/tasks/t1",
+            200,
+            serde_json::json!({ "task": { "id": "t1", "title": "Call", "reminderTime": "2026-09-07T09:00:00Z" } }),
+        ));
+        store.upsert_task(&Task::new("t1", "Call")).expect("stores");
+        perform(
+            &client,
+            &store,
+            &entry(
+                kind::UPDATE_TASK,
+                serde_json::json!({
+                    "taskId": "t1", "body": { "reminderTime": "2026-09-07T12:15:00Z" }
+                }),
+            ),
+        )
+        .await;
+        let task = store.task("t1").expect("reads").expect("kept");
+        assert_eq!(
+            task.reminder_time,
+            crate::model::date::parse("2026-09-07T12:15:00Z")
+        );
     }
 }
