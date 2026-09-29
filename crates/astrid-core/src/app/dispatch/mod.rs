@@ -540,6 +540,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::StreamState => {
             Response::ok(serde_json::json!({ "live": app.realtime().is_live() }))
         }
+        Command::ClearCache => match app.store.clear_rows(crate::sync::LAST_SYNC_KEY) {
+            Ok(()) => {
+                app.realtime().publish(crate::realtime::Change::Synced {
+                    task_ids: Vec::new(),
+                    list_ids: Vec::new(),
+                });
+                Response::done()
+            }
+            Err(error) => Response::failed(error.into()),
+        },
         Command::NetworkRestored => {
             match crate::outbox::journal::wake_offline(&app.store, app.clock.now()) {
                 Ok(woken) => {

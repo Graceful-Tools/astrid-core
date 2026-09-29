@@ -914,6 +914,21 @@ async fn an_ai_key_is_saved_with_put_and_deleted_by_body() {
     assert!(body.contains("openai"), "{body}");
 }
 
+/// Clearing the cache forgets rows but keeps what has not been sent.
+#[tokio::test]
+async fn clearing_the_cache_keeps_the_journal() {
+    let app = app_with(StubTransport::new());
+    call(&app, json!({ "kind": "createTask", "title": "Unsent" })).await;
+    call(&app, json!({ "kind": "clearCache" })).await;
+    assert!(app.store.tasks().expect("reads").is_empty());
+    assert_eq!(
+        crate::outbox::journal::all(&app.store)
+            .expect("reads")
+            .len(),
+        1
+    );
+}
+
 /// An upgrade that runs again after a partial failure imports each write once.
 #[tokio::test]
 async fn a_write_is_imported_once() {

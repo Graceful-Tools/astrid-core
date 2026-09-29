@@ -257,6 +257,9 @@ pub enum Command {
     /// Whether the live stream is connected: `{ "live": bool }`. Its edges arrive as `stream`
     /// changes.
     StreamState,
+    /// Forget the cached rows (not the journal, not the credentials) and start the next sync
+    /// from scratch. For a shell whose isolation guard caught rows that are not this account's.
+    ClearCache,
     /// The device is back online: writes waiting for the network go now, the delivery loop is
     /// woken, and the live stream starts over. What a shell calls from its reachability monitor.
     NetworkRestored,

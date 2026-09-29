@@ -542,6 +542,29 @@ impl Store {
 
     /// Forget everything. Sign-out calls this: a cache that outlives its session is a cache that
     /// shows the previous user's tasks to the next one.
+    /// Forget the account's rows but keep what it has not sent and how to sign in: the next sync
+    /// is a full pass that rebuilds them. For a cache that has been caught holding what is not
+    /// this account's — a shell's isolation guard — where signing out would be the wrong answer to
+    /// a guard that can be wrong.
+    pub fn clear_rows(&self, sync_stamp_key: &str) -> Result<()> {
+        self.transaction(|connection| {
+            for table in [
+                "tasks",
+                "task_lists_membership",
+                "lists",
+                "projects",
+                "users",
+                "comments",
+                "chat_channels",
+                "chat_messages",
+            ] {
+                connection.execute(&format!("DELETE FROM {table}"), [])?;
+            }
+            connection.execute("DELETE FROM metadata WHERE key = ?1", [sync_stamp_key])?;
+            Ok(())
+        })
+    }
+
     pub fn clear(&self) -> Result<()> {
         self.transaction(|connection| {
             for table in [

@@ -35,7 +35,7 @@ use crate::store::Store;
 /// The instant the pass *started*, not the instant it finished: an edit made on the web while
 /// the fetch was in flight has an `updatedAt` between the two, and stamping the end would skip
 /// it forever.
-const LAST_SYNC_KEY: &str = "sync.last-completed";
+pub(crate) const LAST_SYNC_KEY: &str = "sync.last-completed";
 
 /// How far behind the stamp a delta pass asks from.
 ///
