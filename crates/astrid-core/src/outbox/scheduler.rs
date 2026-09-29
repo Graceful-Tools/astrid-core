@@ -90,15 +90,60 @@ fn completed_ids(entries: &[Entry]) -> HashSet<String> {
 /// Completion is derived from the journal itself rather than passed in, so a dependency that
 /// finished a moment ago is already visible here.
 pub fn runnable(entries: &[Entry], now: DateTime<Utc>, in_flight: &HashSet<String>) -> Vec<Entry> {
-    let completed = completed_ids(entries);
-    let mut ready: Vec<Entry> = entries
-        .iter()
-        .filter(|entry| is_runnable(entry, now, &completed, in_flight))
-        .filter(|entry| !awaits_older_producer(entry, entries))
+    let mut ready: Vec<Entry> = eligible(entries, in_flight)
+        .into_iter()
+        .filter(|entry| now >= entry.next_attempt_at)
         .cloned()
         .collect();
     ready.sort_by_key(|entry| (entry.created_at, entry.sequence));
     ready
+}
+
+/// The entries that may run as soon as their time comes: pending, their dependencies done, not
+/// waiting for an id another entry has still to produce — and each the oldest unfinished entry
+/// in its lane.
+///
+/// **The lane head only.** While the oldest write to a thing waits — for its backoff, or for an id
+/// it names — a newer write to the same thing must not go ahead of it: it would land first and
+/// then be overwritten by the older one, or act on a task the older one deletes.
+///
+/// [`runnable`] and [`next_wakeup`] both read this, so what the timer waits for and what a drain
+/// sends can never disagree — when they did, the delivery loop turned with no wait at all for as
+/// long as a producer's backoff lasted.
+fn eligible<'a>(entries: &'a [Entry], in_flight: &HashSet<String>) -> Vec<&'a Entry> {
+    let completed = completed_ids(entries);
+    let unfinished = |entry: &Entry| matches!(entry.status, Status::Pending | Status::Running);
+    let order = |entry: &Entry| (entry.created_at, entry.sequence);
+
+    // The oldest unfinished entry of every lane, and of every temporary id's producers, once.
+    let mut lane_heads: std::collections::HashMap<String, (DateTime<Utc>, i64)> =
+        std::collections::HashMap::new();
+    let mut producers: std::collections::HashMap<&str, (DateTime<Utc>, i64)> =
+        std::collections::HashMap::new();
+    for entry in entries.iter().filter(|entry| unfinished(entry)) {
+        let key = order(entry);
+        lane_heads
+            .entry(entry.serialization_key())
+            .and_modify(|head| *head = (*head).min(key))
+            .or_insert(key);
+        if let Some(temp_id) = entry.temp_id.as_deref() {
+            producers
+                .entry(temp_id)
+                .and_modify(|oldest| *oldest = (*oldest).min(key))
+                .or_insert(key);
+        }
+    }
+
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.status == Status::Pending
+                && !in_flight.contains(&entry.id)
+                && dependencies_satisfied(entry, &completed)
+                && lane_heads.get(&entry.serialization_key()) == Some(&order(entry))
+                && !awaits_older_producer(entry, &producers)
+        })
+        .collect()
 }
 
 /// Whether `entry` names a temporary id that an older, unfinished entry has still to produce.
@@ -106,23 +151,19 @@ pub fn runnable(entries: &[Entry], now: DateTime<Utc>, in_flight: &HashSet<Strin
 /// The implicit dependency the journal does not write down: a photo comment is enqueued after its
 /// upload, a comment after the offline create of the task it is on, each in a lane of its own. Sent
 /// before the id it names is real, the write is refused and dead-lettered — the photo, or the
-/// comment, simply gone. Only an OLDER producer counts, so a create never waits on itself and the
-/// edits in its lane keep their FIFO order. A producer that failed for good is not unfinished:
-/// the write goes, is refused, and is dead-lettered with its reason, as [`temp_stranded`] would.
-fn awaits_older_producer(entry: &Entry, entries: &[Entry]) -> bool {
+/// comment, simply gone. Only an OLDER producer counts, so a create never waits on itself. A
+/// producer that failed for good is not unfinished: the write goes, is refused, and is
+/// dead-lettered with its reason, as [`temp_stranded`] would.
+fn awaits_older_producer(
+    entry: &Entry,
+    producers: &std::collections::HashMap<&str, (DateTime<Utc>, i64)>,
+) -> bool {
     let mut named = Vec::new();
     temp_ids_in(&entry.payload, &mut named);
-    if named.is_empty() {
-        return false;
-    }
-    entries.iter().any(|other| {
-        other.id != entry.id
-            && matches!(other.status, Status::Pending | Status::Running)
-            && (other.created_at, other.sequence) < (entry.created_at, entry.sequence)
-            && other
-                .temp_id
-                .as_ref()
-                .is_some_and(|produced| named.contains(&produced.as_str()))
+    named.iter().any(|temp_id| {
+        producers
+            .get(temp_id)
+            .is_some_and(|oldest| *oldest < (entry.created_at, entry.sequence))
     })
 }
 
@@ -172,23 +213,13 @@ pub fn next_wakeup(
     now: DateTime<Utc>,
     in_flight: &HashSet<String>,
 ) -> Option<DateTime<Utc>> {
-    let completed = completed_ids(entries);
-    if entries
-        .iter()
-        .any(|entry| is_runnable(entry, now, &completed, in_flight))
-    {
+    let eligible = eligible(entries, in_flight);
+    if eligible.iter().any(|entry| now >= entry.next_attempt_at) {
         return None;
     }
-    entries
-        .iter()
-        .filter(|entry| {
-            entry.status == Status::Pending
-                && !in_flight.contains(&entry.id)
-                && dependencies_satisfied(entry, &completed)
-                && entry.next_attempt_at > now
-        })
-        .map(|entry| entry.next_attempt_at)
-        .min()
+    // An entry waiting on a dependency, a producer or an older entry in its lane is woken by that
+    // one finishing, not by a timer — setting one for it would spin.
+    eligible.iter().map(|entry| entry.next_attempt_at).min()
 }
 
 /// Drop completed entries that are old **and** no longer referenced by anything pending.
@@ -732,6 +763,59 @@ mod tests {
         assert_eq!(
             ids(&runnable(&entries, t0(), &HashSet::new())),
             vec!["create"]
+        );
+    }
+
+    // ── Waiting, and the timer that says when to look again ────────────────────────────────
+
+    /// A write waiting for its producer, whose producer is in backoff: the loop must sleep until
+    /// the producer's time, not spin. `next_wakeup` answered "something is ready" (None) while
+    /// `runnable` answered nothing, and the delivery loop turned with no wait for as long as the
+    /// backoff lasted.
+    #[test]
+    fn a_write_waiting_on_a_producer_in_backoff_sleeps_until_the_producer_is_due() {
+        let upload = entry("upload")
+            .kind(kind::UPLOAD_ATTACHMENT)
+            .temp("temp_file")
+            .due_in(120)
+            .build();
+        let comment = entry("comment")
+            .temp("temp_comment")
+            .payload(serde_json::json!({ "taskId": "t1", "body": { "fileId": "temp_file" } }))
+            .created_at(1)
+            .build();
+        let entries = vec![upload, comment];
+        assert!(runnable(&entries, t0(), &HashSet::new()).is_empty());
+        assert_eq!(
+            next_wakeup(&entries, t0(), &HashSet::new()),
+            Some(t0() + Duration::seconds(120))
+        );
+    }
+
+    /// Strict order within a lane: while the oldest write to a thing is waiting — for its
+    /// backoff, or for an id it names — a newer write to the same thing does not go ahead of it
+    /// and then get overwritten by it.
+    #[test]
+    fn a_newer_write_does_not_overtake_an_older_one_in_its_lane() {
+        let older = entry("older")
+            .kind(kind::UPDATE_TASK)
+            .payload(serde_json::json!({ "taskId": "t1", "body": { "title": "first" } }))
+            .due_in(60)
+            .build();
+        let newer = entry("newer")
+            .kind(kind::UPDATE_TASK)
+            .payload(serde_json::json!({ "taskId": "t1", "body": { "title": "second" } }))
+            .created_at(1)
+            .build();
+        let other = entry("other")
+            .kind(kind::UPDATE_TASK)
+            .payload(serde_json::json!({ "taskId": "t2", "body": { "title": "elsewhere" } }))
+            .created_at(2)
+            .build();
+        let entries = vec![older, newer, other];
+        assert_eq!(
+            ids(&runnable(&entries, t0(), &HashSet::new())),
+            vec!["other"]
         );
     }
 }
