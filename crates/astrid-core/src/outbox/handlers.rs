@@ -136,7 +136,7 @@ fn unwrap_envelope(value: serde_json::Value, key: &str) -> serde_json::Value {
 
 async fn create_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
     let request = client.post(endpoints::TASKS).value(with_client_request_id(
-        body(entry),
+        without_placeholder_assignee(body(entry)),
         &entry.client_request_id,
     ));
     match client.send(request).await {
@@ -172,7 +172,9 @@ async fn update_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         Ok(id) => id,
         Err(outcome) => return outcome,
     };
-    let request = client.put(endpoints::task(task_id)).value(body(entry));
+    let request = client
+        .put(endpoints::task(task_id))
+        .value(without_placeholder_assignee(body(entry)));
     match client.send(request).await {
         Ok(value) => {
             if let Ok(task) =
@@ -728,6 +730,26 @@ async fn send_body(client: &ApiClient, request: crate::api::Request, entry: &Ent
 /// Set here rather than by the caller so no create can be enqueued without one. A create that
 /// times out and is retried without a key is the duplicate-task bug, and it is invisible until
 /// someone's network is bad.
+/// The id the Apple apps give the person using them before they have an account.
+const PLACEHOLDER_USER_PREFIX: &str = "local_";
+
+/// A task made before signing in names that placeholder as its assignee, and the server knows no
+/// such user: sent as-is, every one of those writes was refused and dead-lettered the moment the
+/// person signed in. The field is left off — the app assigns the tasks to the account it signed in
+/// to, with an edit queued behind the create.
+fn without_placeholder_assignee(mut body: serde_json::Value) -> serde_json::Value {
+    let placeholder = body
+        .get("assigneeId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|id| id.starts_with(PLACEHOLDER_USER_PREFIX));
+    if placeholder {
+        if let Some(object) = body.as_object_mut() {
+            object.remove("assigneeId");
+        }
+    }
+    body
+}
+
 fn with_client_request_id(
     mut body: serde_json::Value,
     client_request_id: &str,
@@ -779,6 +801,29 @@ mod tests {
         let held = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
         std::fs::write(&held, bytes).expect("writes");
         held
+    }
+
+    /// Made before signing in, assigned to the placeholder user: the create goes without the
+    /// assignee rather than being refused for naming someone the server never heard of.
+    #[tokio::test]
+    async fn a_task_made_before_signing_in_is_not_sent_naming_the_placeholder_user() {
+        let (client, store, transport) = fixture(StubTransport::new().push_json(
+            "/api/v1/tasks",
+            200,
+            serde_json::json!({ "task": { "id": "t1", "title": "Milk" } }),
+        ));
+        let entry = entry(
+            kind::CREATE_TASK,
+            serde_json::json!({ "body": { "title": "Milk", "assigneeId": "local_1234" } }),
+        );
+        assert!(matches!(
+            perform(&client, &store, &entry).await,
+            Outcome::Done(_)
+        ));
+        let sent = transport.requests();
+        let body = String::from_utf8_lossy(sent[0].body.as_deref().unwrap_or_default()).to_string();
+        assert!(!body.contains("local_1234"), "{body}");
+        assert!(body.contains("Milk"), "{body}");
     }
 
     /// The temporary id is what the comment queued beside this names its file by, so the mapping
