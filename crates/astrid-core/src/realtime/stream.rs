@@ -52,6 +52,8 @@ pub async fn run(
                 // It connected: whatever failed before describes a world that is gone.
                 policy.connected();
                 sink.set_live(true);
+                // A frame read after a sign-out belongs to the departing account.
+                let epoch = sink.session_epoch();
                 loop {
                     let frame = tokio::select! {
                         frame = frames.next() => frame,
@@ -63,6 +65,10 @@ pub async fn run(
                         }
                     };
                     let Some(frame) = frame else { break };
+                    if sink.session_epoch() != epoch {
+                        woken = true;
+                        break;
+                    }
                     if !should_continue() {
                         sink.set_live(false);
                         return Stopped::Cancelled;

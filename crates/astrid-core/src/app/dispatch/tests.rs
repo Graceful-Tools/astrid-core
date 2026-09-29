@@ -843,6 +843,47 @@ async fn the_outbox_stats_say_why_a_write_was_refused() {
     assert_eq!(stats["value"]["deadLetters"][0]["error"], "403 not yours");
 }
 
+/// A pass already on its way back holds the departing account's data: sign-out waits for it
+/// before clearing, so nothing it writes lands in the next person's cache. And every file this
+/// installation holds goes — downloads too, not only the uploads still waiting.
+#[tokio::test]
+async fn signing_out_waits_for_a_pass_in_flight_and_takes_every_file_with_it() {
+    let app = std::sync::Arc::new(app_with(StubTransport::new()));
+    std::fs::create_dir_all(app.attachment_cache()).expect("makes the cache");
+    let download = app.attachment_cache().join("cm3file.png");
+    std::fs::write(&download, b"a picture").expect("writes");
+
+    let pass = app
+        .store
+        .session()
+        .enter()
+        .expect("a pass may run before sign-out");
+    let signing_out = {
+        let app = app.clone();
+        tokio::spawn(async move { call(&app, json!({ "kind": "signOut" })).await })
+    };
+    tokio::task::yield_now().await;
+    assert!(
+        !signing_out.is_finished(),
+        "sign-out waits for the pass in flight"
+    );
+    assert!(
+        app.store.session().enter().is_none(),
+        "and nothing new starts meanwhile"
+    );
+
+    drop(pass);
+    signing_out.await.expect("joins");
+    assert!(
+        !download.exists(),
+        "downloaded files belong to the departing account too"
+    );
+    assert!(
+        app.store.session().enter().is_some(),
+        "and the session opens for whoever is next"
+    );
+}
+
 /// An open live stream is authenticated with the departing account's cookie, and would keep
 /// delivering that account's events into the cache the next person sees. Signing out drops it; the
 /// loop then waits for a new session.

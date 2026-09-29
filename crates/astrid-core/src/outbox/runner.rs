@@ -73,6 +73,10 @@ impl Runner {
     /// Run everything that can run, and keep running while completing one thing unblocks another.
     pub async fn drain(&self) -> Result<DrainReport> {
         let mut report = DrainReport::default();
+        // Signing out: the journal is the departing account's, about to be wiped.
+        let Some(_pass) = self.store.session().enter() else {
+            return Ok(report);
+        };
         for _ in 0..MAX_PASSES {
             let now = self.clock.now();
             let entries = journal::load(&self.store)?;

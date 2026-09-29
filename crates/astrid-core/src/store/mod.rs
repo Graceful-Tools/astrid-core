@@ -17,6 +17,7 @@
 //! neither buys speed. The mutex is never held across anything that can block.
 
 pub mod schema;
+pub mod session;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -69,9 +70,17 @@ pub struct TaskSummary {
 
 pub struct Store {
     connection: Mutex<Connection>,
+    /// Who may write the signed-in account's data, and when sign-out has closed that — see
+    /// [`session`].
+    session: session::SessionGate,
 }
 
 impl Store {
+    /// The account's session: passes enter it, sign-out closes it.
+    pub fn session(&self) -> &session::SessionGate {
+        &self.session
+    }
+
     /// Open (and migrate) the cache at `path`, creating it if it is not there.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let connection = Connection::open(path)?;
@@ -96,6 +105,7 @@ impl Store {
         schema::migrate(&mut connection)?;
         Ok(Store {
             connection: Mutex::new(connection),
+            session: session::SessionGate::default(),
         })
     }
 

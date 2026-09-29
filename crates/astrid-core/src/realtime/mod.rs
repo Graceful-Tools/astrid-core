@@ -222,6 +222,11 @@ impl RealtimeSink {
         self.wake.notified().await;
     }
 
+    /// The session a frame is read under — see [`crate::store::session`].
+    pub(crate) fn session_epoch(&self) -> u64 {
+        self.store.session().epoch()
+    }
+
     /// Whether the live stream is connected right now.
     pub fn is_live(&self) -> bool {
         self.live.load(std::sync::atomic::Ordering::SeqCst)

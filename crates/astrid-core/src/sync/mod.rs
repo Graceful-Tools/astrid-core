@@ -200,6 +200,13 @@ impl SyncManager {
             }
         }
         let _slot = InFlight(&self.in_flight);
+        // Signing out: this pass would be writing the departing account's data.
+        let Some(_pass) = self.store.session().enter() else {
+            return SyncReport {
+                skipped: true,
+                ..SyncReport::default()
+            };
+        };
         self.run_pass().await
     }
 

@@ -39,23 +39,31 @@ pub(super) fn inbox_response(inbox: crate::services::Result<crate::model::Inbox>
 
 /// Forget the session and everything this machine held for it. Sign-out, and the tail of deleting
 /// the account (task 19fd9289).
+/// How long sign-out waits for a sync pass or drain already in flight to finish.
+const SIGN_OUT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub(super) async fn sign_out(app: &App) -> Response {
     // The flow in progress goes with the session. Leaving it would let a callback from before the
     // sign-out complete afterwards and sign the user back in.
     app.auth.cancel();
-    // Files waiting to be uploaded go too. The journal that would have sent them is about to be
-    // wiped, so they are bytes belonging to the departing account with nothing left to send them —
-    // and the next person on this machine should not be holding them.
-    let _ = std::fs::remove_dir_all(
-        app.context
-            .attachments(app.attachment_cache())
-            .pending_dir(),
-    );
+    // Close the session first: no sync pass or drain starts, the ones in flight are waited for
+    // (bounded — one stuck on a dead network must not hold sign-out), and the stream stops
+    // applying frames. Cleared before this, the cache was refilled with the departing account's
+    // data by whatever was already on its way back.
+    let session = app.store.session();
+    let settled = session.close(SIGN_OUT_WAIT).await;
+    if !settled {
+        tracing::debug!("sign-out went ahead with a pass still in flight");
+    }
+    // Every file this installation holds goes: the ones waiting to be uploaded — their journal is
+    // about to be wiped — and the downloads. The next person on this machine should not hold them.
+    let _ = std::fs::remove_dir_all(app.attachment_cache());
+    // The credentials, then the cache (`AccountService::sign_out`).
     let signed_out = app.context.account().sign_out().await;
     // After the credentials are gone, not before: dropped earlier, the stream would reconnect at
-    // once with the departing account's cookie and carry on delivering its events into the cache
-    // the next person sees. Now its reconnect finds no session and waits for one.
+    // once with the departing account's cookie. Now its reconnect finds no session and waits.
     app.realtime().reconnect_now();
+    session.reopen();
     match signed_out {
         Ok(()) => Response::done(),
         Err(error) => Response::failed(error.into()),

@@ -598,10 +598,11 @@ impl AccountService {
 
     /// Forget everything. Sign-out: the cache, the journal, the credential.
     pub async fn sign_out(&self) -> Result<()> {
-        self.context.store.clear()?;
+        // The credentials first: anything that starts after this finds nobody signed in.
         let store = self.context.client.secure_store();
         let _ = store.delete(crate::platform::SESSION_COOKIE_KEY).await;
         let _ = store.delete(CURRENT_USER_ID_KEY).await;
+        self.context.store.clear()?;
         Ok(())
     }
 }
