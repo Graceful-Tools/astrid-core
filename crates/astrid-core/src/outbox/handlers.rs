@@ -436,6 +436,26 @@ async fn invite_to_list(client: &ApiClient, store: &Store, entry: &Entry) -> Out
             );
             Outcome::Done(None)
         }
+        // The route has no idempotency key: a replay after a lost answer is told the person is
+        // already invited or already on the list — which is what was asked for. The queued
+        // invitation row goes; the next roster read shows the server's.
+        Err(ApiError::Http {
+            status: 400,
+            message,
+        }) if message.contains("already been sent")
+            || message.contains("already a member")
+            || message.contains("already the owner") =>
+        {
+            if let (Ok(Some(mut list)), Some(temp_id)) =
+                (store.list(list_id), entry.temp_id.as_deref())
+            {
+                if let Some(invitations) = list.invitations.as_mut() {
+                    invitations.retain(|invite| invite.id != temp_id);
+                }
+                let _ = store.upsert_list(&list);
+            }
+            Outcome::Done(None)
+        }
         Err(error) => from_error(error),
     }
 }
@@ -522,10 +542,18 @@ async fn upload_attachment(client: &ApiClient, store: &Store, entry: &Entry) -> 
         Err(error) => return Outcome::Dead(format!("the queued file is gone: {error}")),
     };
     let mime = text("mimeType").unwrap_or("application/octet-stream");
-    let context = payload
+    let mut context = payload
         .get("context")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    // What the upload route dedupes on: a retry after a lost answer gets the same file back
+    // rather than a second blob and file row.
+    if let Some(fields) = context.as_object_mut() {
+        fields.insert(
+            "clientRequestId".into(),
+            serde_json::json!(entry.client_request_id),
+        );
+    }
 
     let boundary = format!("astrid-{}", entry.client_request_id);
     let body =
@@ -1170,5 +1198,52 @@ mod tests {
         let task = store.task("t1").expect("reads").expect("kept");
         assert_eq!(task.title, "Renamed");
         assert_eq!(task.blocked_by, Some(vec!["t9".to_string()]));
+    }
+
+    /// A replayed invitation is told it was already sent (the route has no idempotency key). That
+    /// is what was asked for, not a failure to dead-letter.
+    #[tokio::test]
+    async fn a_replayed_invitation_that_already_landed_is_done() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/api/v1/lists/l1/members",
+            400,
+            serde_json::json!({ "error": "An invitation has already been sent to this email" }),
+        ));
+        let mut invite = entry(
+            kind::INVITE_TO_LIST,
+            serde_json::json!({ "listId": "l1", "body": { "email": "ada@example.com", "role": "member" } }),
+        );
+        invite.temp_id = Some("temp_i".into());
+        assert!(matches!(
+            perform(&client, &store, &invite).await,
+            Outcome::Done(_)
+        ));
+    }
+
+    /// The upload route dedupes on the context's clientRequestId; without it a retry after a lost
+    /// answer uploaded the file twice.
+    #[tokio::test]
+    async fn an_upload_carries_its_idempotency_key() {
+        let held = std::env::temp_dir().join(format!("astrid-{}", crate::outbox::new_temp_id()));
+        std::fs::write(&held, b"bytes").expect("writes");
+        let (client, store, transport) = fixture(StubTransport::new().push_json(
+            "/request-upload",
+            200,
+            serde_json::json!({ "fileId": "f1" }),
+        ));
+        let upload = Entry::new(
+            "e1",
+            kind::UPLOAD_ATTACHMENT,
+            serde_json::json!({
+                "localPath": held.to_string_lossy(), "name": "a.png", "mimeType": "image/png",
+                "context": { "listId": "l1" }
+            }),
+            "temp_upload_key",
+            t0(),
+        );
+        perform(&client, &store, &upload).await;
+        let sent = transport.requests();
+        let body = String::from_utf8_lossy(sent[0].body.as_deref().expect("a body")).to_string();
+        assert!(body.contains("temp_upload_key"), "{body}");
     }
 }

@@ -158,6 +158,9 @@ impl CommentService {
                     "type": comment_type,
                     "fileId": file.map(|file| file.id.clone()),
                     "parentCommentId": parent_comment_id,
+                    // When it was written, not when it was delivered: the route keeps it "for
+                    // offline-first ordering", so a comment typed offline keeps its place.
+                    "createdAt": crate::model::date::format(now),
                 }
             }),
             &temp_id,
