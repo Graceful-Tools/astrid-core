@@ -914,6 +914,24 @@ async fn an_ai_key_is_saved_with_put_and_deleted_by_body() {
     assert!(body.contains("openai"), "{body}");
 }
 
+/// An upgrade that runs again after a partial failure imports each write once.
+#[tokio::test]
+async fn a_write_is_imported_once() {
+    let app = app_with(StubTransport::new());
+    let import = json!({
+        "kind": "importJournalEntry", "entryKind": "removeMember",
+        "payload": { "listId": "l1", "userId": "u2" }, "clientRequestId": "cdmember-u2-delete"
+    });
+    call(&app, import.clone()).await;
+    call(&app, import).await;
+    assert_eq!(
+        crate::outbox::journal::all(&app.store)
+            .expect("reads")
+            .len(),
+        1
+    );
+}
+
 /// An open live stream is authenticated with the departing account's cookie, and would keep
 /// delivering that account's events into the cache the next person sees. Signing out drops it; the
 /// loop then waits for a new session.

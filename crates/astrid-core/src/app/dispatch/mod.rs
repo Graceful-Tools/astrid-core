@@ -85,6 +85,19 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                     "{entry_kind} is not a write this journal imports"
                 )));
             }
+            // Imported once: an upgrade that runs again after a partial failure must not queue a
+            // write it already moved.
+            match crate::outbox::journal::all(&app.store) {
+                Ok(entries)
+                    if entries.iter().any(|entry| {
+                        entry.kind == entry_kind && entry.client_request_id == client_request_id
+                    }) =>
+                {
+                    return Response::done();
+                }
+                Ok(_) => {}
+                Err(error) => return Response::failed(error.into()),
+            }
             let entry =
                 crate::outbox::build(&entry_kind, payload, &client_request_id, app.clock.now());
             let entry = match temp_id {
