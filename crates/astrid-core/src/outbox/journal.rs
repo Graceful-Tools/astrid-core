@@ -175,15 +175,25 @@ pub fn wake_offline(store: &Store, now: DateTime<Utc>) -> Result<usize> {
 /// with the same evidence; nothing is lost by trying.
 pub fn revive_dead(store: &Store, now: DateTime<Utc>) -> Result<usize> {
     store.transaction(|connection| {
+        // Not a deletion, and not an old one: replayed after days, a delete removes what somebody
+        // has since gone back to, and a full-field edit overwrites what changed elsewhere since.
         let revived = connection.execute(
             "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = ?1,
                                updated_at = ?1
-             WHERE status = 'failedPermanent'",
-            [date::format(now)],
+             WHERE status = 'failedPermanent'
+               AND kind NOT IN ('deleteTask', 'deleteList', 'deleteComment')
+               AND updated_at >= ?2",
+            rusqlite::params![
+                date::format(now),
+                date::format(now - chrono::Duration::days(REVIVE_WINDOW_DAYS))
+            ],
         )?;
         Ok(revived)
     })
 }
+
+/// How far back a "retry failed writes" reaches.
+pub const REVIVE_WINDOW_DAYS: i64 = 7;
 
 /// Rewrite an entry's payload — used when a temporary id it names is resolved to a real one.
 pub fn update_payload(
@@ -226,6 +236,18 @@ pub fn entry(store: &Store, id: &str) -> Result<Option<Entry>> {
             connection.prepare(&format!("SELECT {COLUMNS} FROM outbox WHERE id = ?1"))?;
         let found = statement.query_row([id], read_entry).optional()?;
         found.transpose()
+    })
+}
+
+/// Remove an entry only if nothing has claimed it yet. Answers whether it was removed — `false`
+/// when it is already being sent.
+pub fn remove_if_pending(store: &Store, id: &str) -> Result<bool> {
+    store.transaction(|connection| {
+        let removed = connection.execute(
+            "DELETE FROM outbox WHERE id = ?1 AND status = 'pending'",
+            [id],
+        )?;
+        Ok(removed == 1)
     })
 }
 
@@ -483,6 +505,45 @@ mod tests {
         assert_eq!(read.status, Status::Pending);
         assert_eq!(read.attempts, 0);
         assert_eq!(read.next_attempt_at, later);
+    }
+
+    /// Retrying refused writes does not replay a delete, nor anything refused more than a week
+    /// ago: either would overwrite or remove what has happened since.
+    #[test]
+    fn a_retry_leaves_old_writes_and_deletes_alone() {
+        let store = Store::in_memory().expect("opens");
+        let mut delete = new_entry("delete");
+        delete.kind = kind::DELETE_TASK.to_string();
+        enqueue(&store, &delete).expect("enqueues");
+        enqueue(&store, &new_entry("old")).expect("enqueues");
+        enqueue(&store, &new_entry("recent")).expect("enqueues");
+        mark_dead(&store, "delete", "403", t0()).expect("records");
+        mark_dead(&store, "old", "403", t0()).expect("records");
+        mark_dead(&store, "recent", "403", t0() + Duration::days(9)).expect("records");
+
+        let now = t0() + Duration::days(10);
+        assert_eq!(revive_dead(&store, now).expect("revives"), 1);
+        assert_eq!(
+            entry(&store, "recent")
+                .expect("reads")
+                .expect("present")
+                .status,
+            Status::Pending
+        );
+        assert_eq!(
+            entry(&store, "old")
+                .expect("reads")
+                .expect("present")
+                .status,
+            Status::FailedPermanent
+        );
+        assert_eq!(
+            entry(&store, "delete")
+                .expect("reads")
+                .expect("present")
+                .status,
+            Status::FailedPermanent
+        );
     }
 
     #[test]

@@ -59,6 +59,10 @@ pub struct Runner {
     client: Arc<ApiClient>,
     store: Arc<Store>,
     clock: Arc<dyn Clock>,
+    /// One drain at a time. Three callers drain — the delivery loop, the sync pass, a retry — and
+    /// each starts by returning entries left running by a crash to pending; unserialised, one
+    /// drain did that to an entry another was sending, and it went twice.
+    draining: tokio::sync::Mutex<()>,
 }
 
 impl Runner {
@@ -67,6 +71,7 @@ impl Runner {
             client,
             store,
             clock,
+            draining: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -77,6 +82,7 @@ impl Runner {
         let Some(_pass) = self.store.session().enter() else {
             return Ok(report);
         };
+        let _one_at_a_time = self.draining.lock().await;
         for _ in 0..MAX_PASSES {
             let now = self.clock.now();
             let entries = journal::load(&self.store)?;

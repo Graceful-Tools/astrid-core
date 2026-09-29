@@ -544,8 +544,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::RetryDeadLetters => {
             match crate::outbox::journal::revive_dead(&app.store, app.clock.now()) {
                 Ok(revived) => {
-                    // Refused again or not, the answer is how many were given the chance.
-                    let _ = app.runner.drain().await;
+                    // The delivery loop sends them; the caller does not wait on the network.
+                    app.outbox_nudge().notify_one();
                     Response::ok(serde_json::json!({ "revived": revived }))
                 }
                 Err(error) => Response::failed(error.into()),

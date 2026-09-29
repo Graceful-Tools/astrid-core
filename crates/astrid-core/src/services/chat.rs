@@ -172,6 +172,8 @@ impl ChatService {
         before: Option<DateTime<Utc>>,
         limit: Option<u32>,
     ) -> Result<bool> {
+        // Only what was held before asking can be missing from the answer because it was deleted.
+        let held_before = self.context.store.messages_in_channel(channel_id)?;
         let request = self
             .context
             .client
@@ -194,10 +196,7 @@ impl ChatService {
             covers_whole_channel: before.is_none() && !has_more,
             ..Window::of(&page)
         };
-        let stale = stale_ids(
-            &window,
-            &self.context.store.messages_in_channel(channel_id)?,
-        );
+        let stale = stale_ids(&window, &held_before);
         self.context.store.upsert_messages(&page)?;
         for id in stale {
             self.context.store.delete_message(&id)?;
@@ -212,9 +211,11 @@ impl ChatService {
             for entry in journal::all(&self.context.store)? {
                 if entry.kind == kind::SEND_CHAT_MESSAGE
                     && entry.temp_id.as_deref() == Some(message_id)
-                    && entry.status == outbox::Status::Pending
+                    // Claimed between the look and the delete — already on its way: it lands, and
+                    // taking it out of the transcript now would only make it reappear.
+                    && !journal::remove_if_pending(&self.context.store, &entry.id)?
                 {
-                    journal::remove(&self.context.store, &entry.id)?;
+                    return Ok(());
                 }
             }
         }

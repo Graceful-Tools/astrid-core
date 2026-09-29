@@ -31,6 +31,16 @@ impl CommentService {
 
     /// Fetch the thread from the server and replace what is cached for that task.
     pub async fn refresh(&self, task_id: &str) -> Result<Vec<Comment>> {
+        // What was here before asking: only those can be missing from the answer because they
+        // were deleted. One that arrived meanwhile — from the stream, or a create delivered while
+        // the request was out — is newer than the answer, not absent from it.
+        let held_before: std::collections::HashSet<String> = self
+            .context
+            .store
+            .comments_for_task(task_id)?
+            .into_iter()
+            .map(|comment| comment.id)
+            .collect();
         let request = self.context.client.get(endpoints::task_comments(task_id));
         let fetched = self
             .context
@@ -60,6 +70,7 @@ impl CommentService {
             rows.iter().map(|comment| comment.id.as_str()).collect();
         for cached in self.context.store.comments_for_task(task_id)? {
             if !crate::model::is_temp_id(&cached.id)
+                && held_before.contains(&cached.id)
                 && !returned.contains(cached.id.as_str())
                 && !touched.contains(&cached.id)
             {
@@ -449,5 +460,25 @@ mod tests {
             fixture.store.resolve_id(&posted.id).expect("resolves"),
             "c1"
         );
+    }
+
+    /// A comment that arrives while the refresh is in flight — the stream, or a delivered create
+    /// — is not in an answer that predates it, and is not deleted for it.
+    #[tokio::test]
+    async fn a_comment_that_arrives_mid_refresh_is_not_pruned() {
+        let fixture =
+            fixture(StubTransport::new().push_json("/comments", 200, json!({ "comments": [] })));
+        let arrived: Comment =
+            serde_json::from_value(json!({ "id": "c-new", "taskId": "t1", "content": "hi" }))
+                .expect("decodes");
+        // The stream lands a comment between the snapshot and the answer.
+        let (outcome, ()) = tokio::join!(fixture.service.refresh("t1"), async {
+            fixture
+                .store
+                .upsert_comments(std::slice::from_ref(&arrived))
+                .expect("stores");
+        });
+        outcome.expect("refreshes");
+        assert_eq!(fixture.service.for_task("t1").expect("reads").len(), 1);
     }
 }
