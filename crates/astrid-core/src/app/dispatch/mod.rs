@@ -580,7 +580,17 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
-        Command::SearchUsers { query } => answer(app.context.account().search_users(&query).await),
+        Command::SearchUsers {
+            query,
+            task_id,
+            list_ids,
+            include_agents,
+        } => answer(
+            app.context
+                .account()
+                .search_users(&query, task_id.as_deref(), &list_ids, include_agents)
+                .await,
+        ),
         Command::Agents => agents(app).await,
         Command::AstridModel => answer(app.context.agents().astrid_model().await),
         Command::SetAstridModel { agent_id } => answer(

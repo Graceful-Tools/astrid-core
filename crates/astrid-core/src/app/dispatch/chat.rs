@@ -50,12 +50,19 @@ pub(super) fn chat(app: &App, list_id: &str) -> Response {
 /// The channels first: a list whose channel this client has never seen has nothing to fetch
 /// messages for, and that is the ordinary state the first time a conversation is opened.
 pub(super) async fn refresh_chat(app: &App, list_id: &str) -> Response {
-    if let Err(error) = app.context.chat().refresh_channels().await {
-        return Response::failed(error.into());
-    }
-    let channel = match app.context.chat().channel_for_list(list_id) {
-        Ok(Some(channel)) => channel,
-        Ok(None) => {
+    // Get-or-create, the only way the web offers to find a list's channel (the channels route
+    // has no GET, and asking it answered 405 every time). A deployment without chat refuses it,
+    // which is no channel rather than an error.
+    let channel = match app
+        .context
+        .chat()
+        .resolve_channel(Some(list_id), None)
+        .await
+    {
+        Ok(channel) => channel,
+        Err(crate::services::ServiceError::Api(error))
+            if matches!(error.status(), Some(403..=405)) =>
+        {
             return Response::ok(serde_json::json!({
                 "channelId": serde_json::Value::Null,
                 "messages": [],
@@ -63,7 +70,12 @@ pub(super) async fn refresh_chat(app: &App, list_id: &str) -> Response {
         }
         Err(error) => return Response::failed(error.into()),
     };
-    if let Err(error) = app.context.chat().refresh_messages(&channel.id).await {
+    if let Err(error) = app
+        .context
+        .chat()
+        .load_messages(&channel.id, None, None)
+        .await
+    {
         return Response::failed(error.into());
     }
     chat(app, list_id)

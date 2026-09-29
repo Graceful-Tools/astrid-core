@@ -612,6 +612,13 @@ pub enum Command {
     /// Search for people to assign or invite.
     SearchUsers {
         query: String,
+        /// The task the person is being found for — the server searches its lists' people.
+        #[serde(default)]
+        task_id: Option<String>,
+        #[serde(default)]
+        list_ids: Vec<String>,
+        #[serde(default)]
+        include_agents: bool,
     },
     /// The Agent Hub: every agent, the mode it is set to, and whether it has what it needs.
     ///

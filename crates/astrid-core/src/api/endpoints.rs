@@ -106,6 +106,9 @@ pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";
 pub const GOOGLE_TASKS: &str = "/api/v1/sync/google/tasks";
 pub const GOOGLE_TASK_LINKS: &str = "/api/v1/sync/google/task-links";
 pub const GITHUB_REPOSITORIES: &str = "/api/v1/github/repositories";
+/// The repositories a list can be mirrored to for Issues sync — `{ repos: [{ id: "owner/repo" }] }`.
+/// Not [`GITHUB_REPOSITORIES`], which is the GitHub App's and answers numeric ids.
+pub const GITHUB_SYNC_REPOS: &str = "/api/v1/sync/github/repos";
 
 /// Where a provider's browser hand-off starts.
 pub fn integration_authorize(provider: &str) -> String {

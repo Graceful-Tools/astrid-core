@@ -884,6 +884,36 @@ async fn signing_out_waits_for_a_pass_in_flight_and_takes_every_file_with_it() {
     );
 }
 
+/// The credentials route takes PUT (it has no POST) and reads a delete's service from the body.
+#[tokio::test]
+async fn an_ai_key_is_saved_with_put_and_deleted_by_body() {
+    let transport = StubTransport::new()
+        .push_json("/ai-credentials", 200, json!({ "success": true }))
+        .push_json("/ai-credentials", 200, json!({ "success": true }));
+    let sent = transport.recorded.clone();
+    let app = app_with(transport);
+    call(
+        &app,
+        json!({ "kind": "saveAgentCredential", "serviceId": "openai", "key": "sk-x" }),
+    )
+    .await;
+    call(
+        &app,
+        json!({ "kind": "deleteAgentCredential", "serviceId": "openai" }),
+    )
+    .await;
+    let sent = sent.lock().expect("lock");
+    let credential_requests: Vec<_> = sent
+        .iter()
+        .filter(|request| request.url.contains("/ai-credentials"))
+        .collect();
+    assert_eq!(credential_requests[0].method, crate::api::Method::Put);
+    assert_eq!(credential_requests[1].method, crate::api::Method::Delete);
+    let body = String::from_utf8_lossy(credential_requests[1].body.as_deref().expect("a body"))
+        .to_string();
+    assert!(body.contains("openai"), "{body}");
+}
+
 /// An open live stream is authenticated with the departing account's cookie, and would keep
 /// delivering that account's events into the cache the next person sees. Signing out drops it; the
 /// loop then waits for a new session.

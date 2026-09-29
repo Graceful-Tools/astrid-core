@@ -115,7 +115,8 @@ impl AgentService {
         let request = self
             .context
             .client
-            .post(endpoints::AI_CREDENTIALS)
+            // PUT: the route has no POST (`app/api/v1/users/me/ai-credentials`), which answered 405.
+            .put(endpoints::AI_CREDENTIALS)
             .value(json!({ "serviceId": service_id, "apiKey": key }));
         self.context.client.send(request).await?;
         Ok(())
@@ -141,7 +142,8 @@ impl AgentService {
             .context
             .client
             .delete(endpoints::AI_CREDENTIALS)
-            .query("serviceId", Some(service_id.to_string()));
+            // In the body, which is where the route reads it; as a query it answered 500.
+            .value(json!({ "serviceId": service_id }));
         self.context.client.send(request).await?;
         Ok(())
     }

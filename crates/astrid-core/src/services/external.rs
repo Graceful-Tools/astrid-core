@@ -299,7 +299,7 @@ impl ExternalSyncService {
     pub async fn containers(&self, provider: Provider) -> Result<(Vec<Container>, Option<String>)> {
         let path = match provider {
             Provider::GoogleTasks => endpoints::GOOGLE_TASKLISTS.to_string(),
-            Provider::GitHub => endpoints::GITHUB_REPOSITORIES.to_string(),
+            Provider::GitHub => endpoints::GITHUB_SYNC_REPOS.to_string(),
         };
         let answer = self
             .context
@@ -308,7 +308,7 @@ impl ExternalSyncService {
             .await?;
         let key = match provider {
             Provider::GoogleTasks => "tasklists",
-            Provider::GitHub => "repositories",
+            Provider::GitHub => "repos",
         };
         let containers = answer
             .get(key)

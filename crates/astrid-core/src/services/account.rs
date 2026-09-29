@@ -460,12 +460,19 @@ impl AccountService {
     ///
     /// **Absent means no.** See the module note: assuming yes shows a control that does nothing to
     /// everyone on an older server.
+    /// Whether the deployment offers `name`. The route groups them (`auth`, `sync`, `product`);
+    /// a name is found at the top level or inside any group.
     pub fn supports(&self, name: &str) -> Result<bool> {
-        Ok(self
-            .capabilities()?
-            .get(name)
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false))
+        let capabilities = self.capabilities()?;
+        let direct = capabilities.get(name).and_then(serde_json::Value::as_bool);
+        let grouped = || {
+            capabilities.as_object().and_then(|groups| {
+                groups
+                    .values()
+                    .find_map(|group| group.get(name).and_then(serde_json::Value::as_bool))
+            })
+        };
+        Ok(direct.or_else(grouped).unwrap_or(false))
     }
 
     pub fn capabilities(&self) -> Result<serde_json::Value> {
@@ -521,12 +528,30 @@ impl AccountService {
         Ok(response.body.len() as u64)
     }
 
-    pub async fn search_users(&self, query: &str) -> Result<Vec<User>> {
+    /// `task_id` or `list_ids` scope the search — the server answers only with people who share
+    /// one of those lists, and with nobody but you when given neither — and `include_agents` adds
+    /// the AI agents that can be assigned (`lib/user-search-scope.ts`).
+    pub async fn search_users(
+        &self,
+        query: &str,
+        task_id: Option<&str>,
+        list_ids: &[String],
+        include_agents: bool,
+    ) -> Result<Vec<User>> {
         let request = self
             .context
             .client
             .get(endpoints::USER_SEARCH)
-            .query("q", Some(query.to_string()));
+            .query("q", Some(query.to_string()))
+            .query("taskId", task_id.map(str::to_string))
+            .query(
+                "listIds",
+                (!list_ids.is_empty()).then(|| list_ids.join(",")),
+            )
+            .query(
+                "includeAIAgents",
+                include_agents.then(|| "true".to_string()),
+            );
         let found = self
             .context
             .client
@@ -709,7 +734,12 @@ mod tests {
         let fixture = fixture(StubTransport::new().push_json(
             "/api/v1/capabilities",
             200,
-            json!({ "capabilities": { "chat": true, "board": false } }),
+            // The route's own grouping (`app/api/v1/capabilities/route.ts`).
+            json!({ "capabilities": {
+                "auth": { "google": true, "apple": false },
+                "sync": { "googleTasks": true, "githubIssues": false },
+                "product": { "chat": true, "board": false }
+            } }),
         ));
         assert!(!fixture.service.supports("chat").expect("reads"));
 
@@ -719,7 +749,9 @@ mod tests {
             .await
             .expect("refreshes");
         assert!(fixture.service.supports("chat").expect("reads"));
+        assert!(fixture.service.supports("googleTasks").expect("reads"));
         assert!(!fixture.service.supports("board").expect("reads"));
+        assert!(!fixture.service.supports("githubIssues").expect("reads"));
         assert!(
             !fixture.service.supports("somethingLater").expect("reads"),
             "a capability nobody has heard of is not a capability"
@@ -857,7 +889,11 @@ mod tests {
             200,
             json!({ "users": [{ "id": "u9", "name": "Ada", "email": "ada@example.com" }] }),
         ));
-        let found = fixture.service.search_users("ada").await.expect("searches");
+        let found = fixture
+            .service
+            .search_users("ada", Some("t1"), &[], true)
+            .await
+            .expect("searches");
         assert_eq!(found.len(), 1);
         assert_eq!(
             fixture

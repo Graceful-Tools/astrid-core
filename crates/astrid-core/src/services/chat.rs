@@ -59,31 +59,6 @@ impl ChatService {
         Ok(self.context.store.messages_in_channel(channel_id)?)
     }
 
-    pub async fn refresh_channels(&self) -> Result<Vec<ChatChannel>> {
-        let request = self.context.client.get(endpoints::CHAT_CHANNELS);
-        let fetched = self
-            .context
-            .client
-            .send_collection::<ChatChannel>(request, Some(endpoints::envelope::CHANNELS))
-            .await?;
-        self.context.store.upsert_channels(&fetched.items)?;
-        Ok(fetched.into_items())
-    }
-
-    pub async fn refresh_messages(&self, channel_id: &str) -> Result<Vec<ChatMessage>> {
-        let request = self
-            .context
-            .client
-            .get(endpoints::channel_messages(channel_id));
-        let fetched = self
-            .context
-            .client
-            .send_collection::<ChatMessage>(request, Some(endpoints::envelope::MESSAGES))
-            .await?;
-        self.context.store.upsert_messages(&fetched.items)?;
-        Ok(fetched.into_items())
-    }
-
     /// Send a message. It is in the transcript before this returns, at the moment it was typed.
     pub fn send(
         &self,
@@ -458,32 +433,6 @@ mod tests {
         assert_eq!(contents, vec!["typed first", "arrived second"]);
     }
 
-    #[tokio::test]
-    async fn a_channel_can_be_found_by_the_list_it_belongs_to() {
-        let fixture = fixture(StubTransport::new().push_json(
-            "/api/v1/chat/channels",
-            200,
-            json!({ "channels": [
-                { "id": "c1", "listId": "l1" },
-                { "id": "c2", "listId": "l2" }
-            ] }),
-        ));
-        fixture.service.refresh_channels().await.expect("refreshes");
-        assert_eq!(
-            fixture
-                .service
-                .channel_for_list("l2")
-                .expect("reads")
-                .expect("present")
-                .id,
-            "c2"
-        );
-    }
-
-    /// The stream can deliver the server's copy of a message before the send's own answer does.
-    /// It carries the optimistic message's `clientRequestId`, and it replaces that message rather
-    /// than joining it — two copies of what somebody said, one stuck on "sending" (the Apple
-    /// apps' `handleMessageCreated` did this by hand).
     #[test]
     fn the_servers_copy_replaces_the_message_it_echoes() {
         let fixture = fixture(StubTransport::new());
