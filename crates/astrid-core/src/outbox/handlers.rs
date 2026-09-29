@@ -54,6 +54,12 @@ fn from_error(error: ApiError) -> Outcome {
     if let ApiError::Transport(transport) = &error {
         return Outcome::Offline(format!("{}{transport}", super::journal::OFFLINE_PREFIX));
     }
+    // No session — it expired, or nobody has signed in yet. Signing in fixes it, and the write is
+    // not at fault: it waits like an offline one (woken by `networkRestored`, which a sign-in
+    // sends) instead of being refused for good with everything else queued behind it.
+    if matches!(error, ApiError::Unauthorized) {
+        return Outcome::Offline(format!("{}no session", super::journal::OFFLINE_PREFIX));
+    }
     match error.status() {
         Some(status) if super::scheduler::is_permanent_failure(status) => {
             Outcome::Dead(format!("{status}: {error}"))

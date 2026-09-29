@@ -623,4 +623,26 @@ mod tests {
             .expect("present");
         assert_eq!(entry.next_attempt_at, t0());
     }
+
+    /// A 401 means the session is gone — expired, or nobody signed in yet — not that the write is
+    /// wrong. It waits, costing no attempt, for a session; dead-lettered, every write queued while
+    /// signed out, or across an expiry, was lost.
+    #[tokio::test]
+    async fn a_write_refused_for_want_of_a_session_waits_for_one() {
+        let fixture = fixture(StubTransport::new().fallback(Ok(crate::api::HttpResponse {
+            status: 401,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: b"{\"error\":\"unauthorized\"}".to_vec(),
+        })));
+        enqueue(&fixture.store, create_task("e1", "temp_1"));
+        for _ in 0..20 {
+            fixture.runner.drain().await.expect("drains");
+            fixture.clock.advance(Duration::minutes(10));
+        }
+        let entry = journal::entry(&fixture.store, "e1")
+            .expect("reads")
+            .expect("present");
+        assert_eq!(entry.status, crate::outbox::Status::Pending);
+        assert_eq!(entry.attempts, 0);
+    }
 }
