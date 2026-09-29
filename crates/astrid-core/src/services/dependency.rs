@@ -130,6 +130,14 @@ impl TaskDependencyService {
     /// cached and returned. Offline the write is [`Self::add`]'s: optimistic and journalled, which
     /// is what makes blocking work on a plane.
     pub async fn add_now(&self, task_id: &str, blocking_task_id: &str) -> Result<Dependencies> {
+        let task_id = self.context.store.resolve_id(task_id)?;
+        let task_id = task_id.as_str();
+        let blocking_task_id = self.context.store.resolve_id(blocking_task_id)?;
+        let blocking_task_id = blocking_task_id.as_str();
+        if crate::model::is_temp_id(task_id) || crate::model::is_temp_id(blocking_task_id) {
+            // Either end not on the server yet: the write waits in the journal for it.
+            return self.add(task_id, blocking_task_id);
+        }
         let request = self
             .context
             .client
@@ -144,6 +152,13 @@ impl TaskDependencyService {
     /// Stop waiting on another task — the same shape as [`Self::add_now`]. Removing a link that
     /// is already gone is the outcome asked for.
     pub async fn remove_now(&self, task_id: &str, blocking_task_id: &str) -> Result<Dependencies> {
+        let task_id = self.context.store.resolve_id(task_id)?;
+        let task_id = task_id.as_str();
+        let blocking_task_id = self.context.store.resolve_id(blocking_task_id)?;
+        let blocking_task_id = blocking_task_id.as_str();
+        if crate::model::is_temp_id(task_id) || crate::model::is_temp_id(blocking_task_id) {
+            return self.remove(task_id, blocking_task_id);
+        }
         let request = self
             .context
             .client

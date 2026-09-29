@@ -800,6 +800,7 @@ impl ListService {
         if let Some(mut list) = self.context.store.list(list_id)? {
             list.list_members = Some(members.clone());
             list.invitations = Some(invitations);
+            let list = super::members::with_pending_applied(&self.context.store, list);
             self.context.store.upsert_list(&list)?;
         }
         Ok((members, viewer_role))

@@ -52,6 +52,9 @@ impl MemberService {
 
     /// Invite somebody by email.
     pub async fn invite(&self, list_id: &str, email: &str, role: &str) -> Result<MemberChange> {
+        // A list created offline answers to its real id once delivered, and to nothing before.
+        let list_id = self.context.store.resolve_id(list_id)?;
+        let list_id = list_id.as_str();
         let body = json!({ "email": email, "role": role });
         let temp_id = outbox::new_temp_id();
         let request = self
@@ -98,6 +101,9 @@ impl MemberService {
     }
 
     pub async fn set_role(&self, list_id: &str, user_id: &str, role: &str) -> Result<MemberChange> {
+        // A list created offline answers to its real id once delivered, and to nothing before.
+        let list_id = self.context.store.resolve_id(list_id)?;
+        let list_id = list_id.as_str();
         let body = json!({ "role": role });
         let request = self
             .context
@@ -126,6 +132,9 @@ impl MemberService {
     }
 
     pub async fn remove(&self, list_id: &str, user_id: &str) -> Result<MemberChange> {
+        // A list created offline answers to its real id once delivered, and to nothing before.
+        let list_id = self.context.store.resolve_id(list_id)?;
+        let list_id = list_id.as_str();
         let request = self
             .context
             .client
@@ -152,6 +161,9 @@ impl MemberService {
     /// Withdraw an invitation not yet accepted. Addressed by email: an unaccepted invitation has no
     /// user to name, and there may not even be an account yet (AITD-388).
     pub async fn cancel_invitation(&self, list_id: &str, email: &str) -> Result<MemberChange> {
+        // A list created offline answers to its real id once delivered, and to nothing before.
+        let list_id = self.context.store.resolve_id(list_id)?;
+        let list_id = list_id.as_str();
         // One still queued here never reached the server: withdrawing it is withdrawing the entry.
         if self.withdraw_queued_invite(list_id, email)? {
             return Ok(MemberChange::default());
@@ -188,6 +200,8 @@ impl MemberService {
         email: &str,
         role: &str,
     ) -> Result<MemberChange> {
+        let list_id = self.context.store.resolve_id(list_id)?;
+        let list_id = list_id.as_str();
         let body = json!({ "email": email, "role": role });
         let request = self
             .context
@@ -225,7 +239,8 @@ impl MemberService {
         list_id: &str,
         request: crate::api::Request,
     ) -> Result<Option<serde_json::Value>> {
-        if self.has_queued_changes(list_id)? {
+        // Not on the server yet, or behind another change to it that is: queue.
+        if crate::model::is_temp_id(list_id) || self.has_queued_changes(list_id)? {
             return Ok(None);
         }
         match self.context.client.send(request).await {
@@ -323,6 +338,81 @@ fn with_request_id(body: &serde_json::Value, request_id: &str) -> serde_json::Va
     let mut body = body.clone();
     body["clientRequestId"] = json!(request_id);
     body
+}
+
+/// `list` as the server answered it, with this machine's membership changes that have not been
+/// sent yet laid over it, oldest first — so a roster refresh or a sync pass does not undo on
+/// screen a removal, a role change or an invitation still waiting for the network.
+pub(crate) fn with_pending_applied(store: &crate::store::Store, mut list: TaskList) -> TaskList {
+    let Ok(entries) = journal::all(store) else {
+        return list;
+    };
+    for entry in entries.iter().filter(|entry| {
+        is_member_kind(&entry.kind)
+            && matches!(entry.status, Status::Pending | Status::Running)
+            && entry.payload.get("listId").and_then(|id| id.as_str()) == Some(list.id.as_str())
+    }) {
+        let text = |pointer: &str| {
+            entry
+                .payload
+                .pointer(pointer)
+                .and_then(|value| value.as_str())
+        };
+        let same_email =
+            |invite: &ListInvite, email: &str| invite.email.eq_ignore_ascii_case(email);
+        match entry.kind.as_str() {
+            kind::INVITE_TO_LIST => {
+                if let (Some(email), Some(role)) = (text("/body/email"), text("/body/role")) {
+                    let invitations = list.invitations.get_or_insert_with(Vec::new);
+                    if !invitations.iter().any(|invite| same_email(invite, email)) {
+                        invitations.push(ListInvite {
+                            id: entry.temp_id.clone().unwrap_or_else(|| entry.id.clone()),
+                            list_id: list.id.clone(),
+                            email: email.to_string(),
+                            role: role.to_string(),
+                            token: String::new(),
+                            created_at: Some(entry.created_at),
+                            created_by: None,
+                        });
+                    }
+                }
+            }
+            kind::SET_MEMBER_ROLE => {
+                if let (Some(user_id), Some(role)) = (text("/userId"), text("/body/role")) {
+                    for member in list.list_members.iter_mut().flatten() {
+                        if member.user_id == user_id {
+                            member.role = role.to_string();
+                        }
+                    }
+                }
+            }
+            kind::REMOVE_MEMBER => {
+                if let (Some(user_id), Some(members)) =
+                    (text("/userId"), list.list_members.as_mut())
+                {
+                    members.retain(|member| member.user_id != user_id);
+                }
+            }
+            kind::CANCEL_INVITATION => {
+                if let (Some(email), Some(invitations)) =
+                    (text("/body/email"), list.invitations.as_mut())
+                {
+                    invitations.retain(|invite| !same_email(invite, email));
+                }
+            }
+            kind::SET_INVITATION_ROLE => {
+                if let (Some(email), Some(role)) = (text("/body/email"), text("/body/role")) {
+                    for invite in list.invitations.iter_mut().flatten() {
+                        if same_email(invite, email) {
+                            invite.role = role.to_string();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    list
 }
 
 /// Read `/lists/{id}/members`: the members, and the invitations waiting beside them.
@@ -712,5 +802,35 @@ mod tests {
         let member = change.member.expect("a member, not an invitation");
         assert_eq!(member.user_id, "ada");
         assert!(change.invitation.is_none());
+    }
+
+    /// A removal waiting for the network is not undone on screen by the next roster read.
+    #[tokio::test]
+    async fn a_queued_change_survives_a_roster_refresh() {
+        let fixture = fixture(offline());
+        fixture.service.remove("l1", "dana").await.expect("queues");
+        let refreshed: TaskList = serde_json::from_value(json!({
+            "id": "l1", "name": "Shared",
+            "listMembers": [{ "userId": "me", "role": "owner" }, { "userId": "dana", "role": "member" }]
+        }))
+        .expect("the server's list");
+        let shown = with_pending_applied(&fixture.store, refreshed);
+        assert_eq!(shown.list_members.expect("members").len(), 1);
+    }
+
+    /// A list made offline has no address on the server yet: the invitation waits for it.
+    #[tokio::test]
+    async fn an_invitation_to_a_list_not_yet_created_is_queued() {
+        let fixture = fixture(StubTransport::new());
+        let change = fixture
+            .service
+            .invite("temp_newlist", "ada@example.com", "member")
+            .await
+            .expect("queues");
+        assert!(change.queued);
+        assert!(
+            fixture.sent.lock().expect("lock").is_empty(),
+            "nothing sent to a temp_ URL"
+        );
     }
 }

@@ -305,6 +305,8 @@ impl SyncManager {
                         if list.default_due_time.is_none() {
                             list.default_due_time = cached.default_due_time.clone();
                         }
+                        let list =
+                            crate::services::members::with_pending_applied(&self.store, list);
                         self.store.upsert_list(&list)?;
                         report.lists_updated += 1;
                         report.changed_list_ids.push(list.id.clone());
