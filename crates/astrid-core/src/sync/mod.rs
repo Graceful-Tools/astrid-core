@@ -299,7 +299,13 @@ impl SyncManager {
             match self.store.list(&list.id)? {
                 Some(cached) => {
                     if is_newer(list.updated_at, cached.updated_at) {
-                        self.store.upsert_list(list)?;
+                        // The collection never carries the default due time (the single-list
+                        // read does); its absence here is not a cleared one.
+                        let mut list = list.clone();
+                        if list.default_due_time.is_none() {
+                            list.default_due_time = cached.default_due_time.clone();
+                        }
+                        self.store.upsert_list(&list)?;
                         report.lists_updated += 1;
                         report.changed_list_ids.push(list.id.clone());
                     }
@@ -1283,5 +1289,29 @@ mod tests {
         let second = fixture.sync.sync().await;
         assert!(second.delta, "{second:?}");
         assert!(fixture.store.list("l-gone").expect("reads").is_none());
+    }
+
+    /// The lists collection never carries a list's default due time; a pass must not clear it.
+    #[tokio::test]
+    async fn a_pass_keeps_a_lists_default_due_time() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [
+                    { "id": "l1", "name": "Work", "updatedAt": "2026-09-07T12:30:00Z" }
+                ] }),
+                )
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+        let cached: TaskList = serde_json::from_value(json!({
+            "id": "l1", "name": "Work", "defaultDueTime": "09:00", "updatedAt": "2026-09-01T00:00:00Z"
+        }))
+        .expect("a list");
+        fixture.store.upsert_list(&cached).expect("stores");
+        fixture.sync.sync().await;
+        let list = fixture.store.list("l1").expect("reads").expect("kept");
+        assert_eq!(list.default_due_time.as_deref(), Some("09:00"));
     }
 }

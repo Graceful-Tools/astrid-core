@@ -35,6 +35,7 @@ pub fn has_conflict(local: &Task, server: &Task) -> bool {
 
 /// Merge a local task with the server's version.
 pub fn resolve(local: &Task, server: &Task) -> Task {
+    let server = &server.clone().keeping_unsent(local);
     if !has_conflict(local, server) {
         return server.clone();
     }

@@ -394,6 +394,19 @@ pub fn is_closed_reason(value: &str) -> bool {
 }
 
 impl Task {
+    /// This task as the server sent it, with what the response never carries kept from the
+    /// cached copy: the blocker ids ride only on the single-task read, so a PUT answer or a list
+    /// page that leaves them out is not saying the task stopped waiting.
+    pub fn keeping_unsent(mut self, cached: &Task) -> Task {
+        if self.blocked_by.is_none() {
+            self.blocked_by = cached.blocked_by.clone();
+        }
+        if self.blocks.is_none() {
+            self.blocks = cached.blocks.clone();
+        }
+        self
+    }
+
     /// A task with nothing but an id and a title, for the paths that build one from scratch.
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Task {

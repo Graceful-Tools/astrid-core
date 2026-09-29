@@ -172,6 +172,10 @@ async fn update_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
             if let Ok(task) =
                 serde_json::from_value::<Task>(unwrap_envelope(value, endpoints::envelope::TASK))
             {
+                let task = match store.task(&task.id) {
+                    Ok(Some(cached)) => task.keeping_unsent(&cached),
+                    _ => task,
+                };
                 let _ = store.upsert_task(&task);
             }
             Outcome::done()
@@ -612,17 +616,16 @@ async fn set_manual_order(client: &ApiClient, store: &Store, entry: &Entry) -> O
         .value(serde_json::json!({ "order": order }));
     match client.send(request).await {
         Ok(value) => {
+            // Only the order. The answer's list is the raw row (`lib/list-manual-order.ts`): no
+            // per-person favourite or view, no roster names, no count — taken whole, it knocked
+            // the list out of Favorites and blanked its members until the next pass.
             let kept: Option<Vec<String>> = value
                 .get("order")
+                .or_else(|| value.pointer("/list/manualSortOrder"))
                 .cloned()
                 .and_then(|order| serde_json::from_value(order).ok());
-            if let Ok(mut list) = serde_json::from_value::<TaskList>(unwrap_envelope(
-                value,
-                endpoints::envelope::LIST,
-            )) {
-                if kept.is_some() {
-                    list.manual_sort_order = kept;
-                }
+            if let (Some(order), Ok(Some(mut list))) = (kept, store.list(list_id)) {
+                list.manual_sort_order = Some(order);
                 let _ = store.upsert_list(&list);
             }
             Outcome::done()
@@ -1102,5 +1105,70 @@ mod tests {
         assert!(
             matches!(perform(&client, &store, &entry).await, Outcome::Done(Some(ref r)) if r["taskId"] == "cm3real")
         );
+    }
+
+    /// The reorder answer is the raw list row (`astrid-web lib/list-manual-order.ts`): no
+    /// favourite, no member names, no count. Only its order is taken.
+    #[tokio::test]
+    async fn a_reorder_answer_changes_the_order_and_nothing_else() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/manual-order",
+            200,
+            serde_json::json!({ "list": {
+                "id": "l1", "name": "Home", "manualSortOrder": ["t2", "t1"],
+                "listMembers": [{ "userId": "u2", "role": "member" }]
+            } }),
+        ));
+        let cached: TaskList = serde_json::from_value(serde_json::json!({
+            "id": "l1", "name": "Home", "isFavorite": true, "taskCount": 12,
+            "manualSortOrder": ["t1", "t2"],
+            "listMembers": [{ "userId": "u2", "role": "member", "user": { "id": "u2", "name": "Dana" } }]
+        }))
+        .expect("a list");
+        store.upsert_list(&cached).expect("stores");
+
+        let outcome = perform(
+            &client,
+            &store,
+            &entry(
+                kind::SET_MANUAL_ORDER,
+                serde_json::json!({ "listId": "l1", "order": ["t2", "t1"] }),
+            ),
+        )
+        .await;
+        assert!(matches!(outcome, Outcome::Done(_)));
+        let list = store.list("l1").expect("reads").expect("kept");
+        assert_eq!(
+            list.manual_sort_order,
+            Some(vec!["t2".to_string(), "t1".to_string()])
+        );
+        assert_eq!(list.is_favorite, Some(true), "still a favourite");
+        let members = list.list_members.expect("members");
+        assert!(members[0].user.is_some(), "the roster keeps its names");
+    }
+
+    /// An edit's answer does not carry the blocker ids; it is not saying the task stopped waiting.
+    #[tokio::test]
+    async fn an_edits_answer_keeps_what_the_task_is_waiting_on() {
+        let (client, store, _) = fixture(StubTransport::new().push_json(
+            "/api/v1/tasks/t1",
+            200,
+            serde_json::json!({ "task": { "id": "t1", "title": "Renamed" } }),
+        ));
+        let mut cached = Task::new("t1", "Old");
+        cached.blocked_by = Some(vec!["t9".to_string()]);
+        store.upsert_task(&cached).expect("stores");
+        perform(
+            &client,
+            &store,
+            &entry(
+                kind::UPDATE_TASK,
+                serde_json::json!({ "taskId": "t1", "body": { "title": "Renamed" } }),
+            ),
+        )
+        .await;
+        let task = store.task("t1").expect("reads").expect("kept");
+        assert_eq!(task.title, "Renamed");
+        assert_eq!(task.blocked_by, Some(vec!["t9".to_string()]));
     }
 }
