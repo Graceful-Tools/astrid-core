@@ -31,6 +31,9 @@ pub enum Outcome {
     Retry(String),
     /// It did not work and never will. Dead-letter it.
     Dead(String),
+    /// The request never reached the server. Not a failure of the write: it waits for the
+    /// network without using up an attempt.
+    Offline(String),
 }
 
 impl Outcome {
@@ -48,6 +51,9 @@ impl Outcome {
 /// The classification lives in [`super::scheduler::is_permanent_failure`] so that this — the part
 /// with I/O in it — holds no policy of its own.
 fn from_error(error: ApiError) -> Outcome {
+    if let ApiError::Transport(transport) = &error {
+        return Outcome::Offline(format!("{}{transport}", super::journal::OFFLINE_PREFIX));
+    }
     match error.status() {
         Some(status) if super::scheduler::is_permanent_failure(status) => {
             Outcome::Dead(format!("{status}: {error}"))
@@ -878,7 +884,7 @@ mod tests {
         );
         let outcome = perform(&client, &store, &entry).await;
 
-        assert!(matches!(outcome, Outcome::Retry(_)));
+        assert!(matches!(outcome, Outcome::Offline(_)));
         assert!(held.exists(), "a retry needs the bytes");
         std::fs::remove_file(&held).expect("removes");
     }

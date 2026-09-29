@@ -150,6 +150,23 @@ pub fn mark_dead(store: &Store, id: &str, error: &str, now: DateTime<Utc>) -> Re
     })
 }
 
+/// What an entry waiting for the network has as its `last_error`, so the network coming back can
+/// find it.
+pub const OFFLINE_PREFIX: &str = "offline: ";
+
+/// The network is back: every write that was waiting for it may go now rather than at the end of
+/// its wait. Answers how many.
+pub fn wake_offline(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+    store.transaction(|connection| {
+        let woken = connection.execute(
+            "UPDATE outbox SET next_attempt_at = ?1
+             WHERE status = 'pending' AND last_error LIKE ?2",
+            rusqlite::params![date::format(now), format!("{OFFLINE_PREFIX}%")],
+        )?;
+        Ok(woken)
+    })
+}
+
 /// Give every dead-lettered entry another go, from scratch: pending, no attempts, due now. What a
 /// "retry failed writes" button does — the person has fixed whatever refused them (signed back in,
 /// been re-added to the list). Answers how many.

@@ -527,6 +527,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::StreamState => {
             Response::ok(serde_json::json!({ "live": app.realtime().is_live() }))
         }
+        Command::NetworkRestored => {
+            match crate::outbox::journal::wake_offline(&app.store, app.clock.now()) {
+                Ok(woken) => {
+                    app.outbox_nudge().notify_one();
+                    app.realtime().reconnect_now();
+                    Response::ok(serde_json::json!({ "woken": woken }))
+                }
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::ReconnectStream => {
             app.realtime().reconnect_now();
             Response::done()

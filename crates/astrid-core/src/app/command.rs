@@ -257,6 +257,9 @@ pub enum Command {
     /// Whether the live stream is connected: `{ "live": bool }`. Its edges arrive as `stream`
     /// changes.
     StreamState,
+    /// The device is back online: writes waiting for the network go now, the delivery loop is
+    /// woken, and the live stream starts over. What a shell calls from its reachability monitor.
+    NetworkRestored,
     /// Drop the live stream and connect again now — after the machine wakes, or the network comes
     /// back — rather than waiting out a backoff chosen while it was down.
     ReconnectStream,

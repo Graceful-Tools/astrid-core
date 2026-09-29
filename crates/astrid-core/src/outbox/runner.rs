@@ -146,6 +146,17 @@ impl Runner {
                     report.retried += 1;
                 }
             }
+            Outcome::Offline(reason) => {
+                journal::mark_retry(
+                    &self.store,
+                    &entry.id,
+                    entry.attempts,
+                    now + scheduler::offline_wait(),
+                    &reason,
+                    now,
+                )?;
+                report.retried += 1;
+            }
             Outcome::Dead(reason) => {
                 journal::mark_dead(&self.store, &entry.id, &reason, now)?;
                 report.dead_lettered += 1;
@@ -377,8 +388,12 @@ mod tests {
         assert_eq!(stored.payload["taskId"], "cm3parent");
     }
 
+    /// Being offline is not a failure of the write. It waits for the network without using up
+    /// its attempts: counted as failures, eight of them — about four minutes offline — refused
+    /// every queued write for good. (The Apple apps' Outbox treated offline as "blocked" and
+    /// never counted it.)
     #[tokio::test]
-    async fn being_offline_retries_with_a_backoff_rather_than_giving_up() {
+    async fn being_offline_waits_without_using_up_attempts() {
         let fixture =
             fixture(StubTransport::new().fallback(Err(TransportError::Unreachable("dns".into()))));
         enqueue(&fixture.store, create_task("e1", "temp_1"));
@@ -389,12 +404,29 @@ mod tests {
         let entry = journal::entry(&fixture.store, "e1")
             .expect("reads")
             .expect("present");
-        assert_eq!(entry.attempts, 1);
-        assert_eq!(entry.next_attempt_at, t0() + scheduler::backoff(1));
+        assert_eq!(entry.attempts, 0, "offline is not an attempt");
+        assert_eq!(entry.next_attempt_at, t0() + scheduler::offline_wait());
         assert_eq!(
             fixture.runner.next_wakeup().expect("reads"),
             Some(entry.next_attempt_at)
         );
+    }
+
+    /// A day on a plane: every try fails to reach the server, and the write is still there,
+    /// still pending, when the network comes back.
+    #[tokio::test]
+    async fn a_long_outage_never_dead_letters_a_write() {
+        let fixture =
+            fixture(StubTransport::new().fallback(Err(TransportError::Unreachable("dns".into()))));
+        enqueue(&fixture.store, create_task("e1", "temp_1"));
+        for _ in 0..50 {
+            fixture.runner.drain().await.expect("drains");
+            fixture.clock.advance(Duration::minutes(30));
+        }
+        let entry = journal::entry(&fixture.store, "e1")
+            .expect("reads")
+            .expect("present");
+        assert_eq!(entry.status, crate::outbox::Status::Pending);
     }
 
     /// A backoff that is not yet up means the drain does nothing at all, rather than hammering.
@@ -465,10 +497,15 @@ mod tests {
         assert_eq!(update.status, super::super::entry::Status::FailedPermanent);
     }
 
-    /// Eight failures and it stops. A queue that retries forever is a queue that never drains.
+    /// Eight failures the server answered and it stops. A queue that retries a failing server
+    /// forever is a queue that never drains. (An unreachable network is not one of them.)
     #[tokio::test]
     async fn an_entry_gives_up_after_its_attempts_are_gone() {
-        let fixture = fixture(StubTransport::new().fallback(Err(TransportError::Timeout)));
+        let fixture = fixture(StubTransport::new().fallback(Ok(crate::api::HttpResponse {
+            status: 503,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: b"{\"error\":\"unavailable\"}".to_vec(),
+        })));
         enqueue(&fixture.store, create_task("e1", "temp_1"));
 
         for _ in 0..scheduler::MAX_ATTEMPTS {
@@ -549,5 +586,31 @@ mod tests {
 
         let report = fixture.runner.drain().await.expect("drains");
         assert_eq!(report.completed, 1);
+    }
+
+    /// The network coming back sends what was waiting for it at once, rather than at the end of
+    /// its wait.
+    #[tokio::test]
+    async fn the_network_coming_back_wakes_what_waited_for_it() {
+        let fixture =
+            fixture(StubTransport::new().fallback(Err(TransportError::Unreachable("dns".into()))));
+        enqueue(&fixture.store, create_task("e1", "temp_1"));
+        fixture.runner.drain().await.expect("drains");
+        assert!(
+            journal::entry(&fixture.store, "e1")
+                .expect("reads")
+                .expect("present")
+                .next_attempt_at
+                > t0()
+        );
+
+        assert_eq!(
+            journal::wake_offline(&fixture.store, t0()).expect("wakes"),
+            1
+        );
+        let entry = journal::entry(&fixture.store, "e1")
+            .expect("reads")
+            .expect("present");
+        assert_eq!(entry.next_attempt_at, t0());
     }
 }

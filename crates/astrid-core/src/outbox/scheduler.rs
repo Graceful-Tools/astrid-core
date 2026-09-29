@@ -27,6 +27,14 @@ pub const MAX_BACKOFF_SECS: i64 = 300;
 /// How long a completed entry is kept before pruning. Referenced ones are kept regardless.
 pub const COMPLETED_RETENTION_SECS: i64 = 3600;
 
+/// How long a write waits before trying again when the request never reached the server. Short
+/// and flat, and it costs no attempt: the network coming back also nudges the loop at once.
+pub const OFFLINE_WAIT_SECS: i64 = 30;
+
+pub fn offline_wait() -> Duration {
+    Duration::seconds(OFFLINE_WAIT_SECS)
+}
+
 /// How long to wait after the `attempts`-th failure.
 pub fn backoff(attempts: i64) -> Duration {
     let exponent = attempts.saturating_sub(1).clamp(0, 32) as u32;
