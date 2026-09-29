@@ -245,25 +245,12 @@ impl HttpTransport for ReqwestTransport {
             return Err(TransportError::Refused(status));
         }
 
-        // Frames are separated by a blank line, and a frame can arrive across any number of TCP
-        // reads. Buffering until the separator is the only correct way to read this; splitting on
-        // whatever a read happened to contain produces frames that parse most of the time.
-        let mut buffer = String::new();
+        // Frames are separated by a blank line and can arrive across any number of reads — and a
+        // read can end inside a character. `FrameBuffer` holds bytes until an event is whole.
+        let mut buffer = super::frames::FrameBuffer::default();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let frames = match chunk {
-                Ok(bytes) => {
-                    buffer.push_str(&String::from_utf8_lossy(&bytes));
-                    let mut frames = Vec::new();
-                    while let Some(end) = buffer.find(
-                        "
-
-",
-                    ) {
-                        let frame: String = buffer.drain(..end + 2).collect();
-                        frames.push(Ok(frame));
-                    }
-                    frames
-                }
+                Ok(bytes) => buffer.push(&bytes).into_iter().map(Ok).collect(),
                 Err(error) => vec![Err(TransportError::Unreachable(error.to_string()))],
             };
             futures_util::stream::iter(frames)

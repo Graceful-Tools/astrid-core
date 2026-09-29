@@ -5,6 +5,7 @@
 
 pub mod client;
 pub mod endpoints;
+pub mod frames;
 pub mod pagination;
 pub mod path;
 pub mod platform;
