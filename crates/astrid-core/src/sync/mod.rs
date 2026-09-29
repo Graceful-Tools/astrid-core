@@ -335,9 +335,8 @@ impl SyncManager {
         // showing it twice.
         let made_here: std::collections::HashMap<String, String> = self
             .store
-            .tasks()?
+            .temp_tasks()?
             .into_iter()
-            .filter(|task| crate::model::is_temp_id(&task.id))
             .filter_map(|task| task.client_request_id.clone().map(|key| (key, task.id)))
             .collect();
         for task in &tasks {

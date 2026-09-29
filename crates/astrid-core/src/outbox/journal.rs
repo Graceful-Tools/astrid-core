@@ -239,6 +239,23 @@ pub fn entry(store: &Store, id: &str) -> Result<Option<Entry>> {
     })
 }
 
+/// The newest `limit` refused writes — for the "why did this not land" readout, without reading
+/// the whole journal every time the count is drawn.
+pub fn dead_letters(store: &Store, limit: usize) -> Result<Vec<Entry>> {
+    store.transaction(|connection| {
+        let mut statement = connection.prepare(&format!(
+            "SELECT {COLUMNS} FROM outbox WHERE status = 'failedPermanent'
+             ORDER BY updated_at DESC LIMIT ?1"
+        ))?;
+        let rows = statement.query_map([limit as i64], read_entry)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row??);
+        }
+        Ok(entries)
+    })
+}
+
 /// Remove an entry only if nothing has claimed it yet. Answers whether it was removed — `false`
 /// when it is already being sent.
 pub fn remove_if_pending(store: &Store, id: &str) -> Result<bool> {

@@ -163,6 +163,17 @@ impl Store {
         })
     }
 
+    /// The tasks made here that the server has not answered for yet — a range on the primary
+    /// key, so a pass does not decode every task to find the few it wants.
+    pub fn temp_tasks(&self) -> Result<Vec<Task>> {
+        self.with(|connection| {
+            let mut statement = connection
+                .prepare("SELECT json FROM tasks WHERE id >= 'temp_' AND id < 'temp`'")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
     pub fn tasks_in_list(&self, list_id: &str) -> Result<Vec<Task>> {
         self.with(|connection| {
             let mut statement = connection.prepare(
@@ -695,7 +706,9 @@ fn replace_echoed(
     }
     let echoed: Vec<String> = {
         let mut statement = connection.prepare(&format!(
-            "SELECT id FROM {table} WHERE id LIKE 'temp\\_%' ESCAPE '\\' AND id != ?1
+            // A range on the primary key rather than LIKE, which no index can serve: only this
+            // machine's few optimistic rows are ever looked at, however long the thread.
+            "SELECT id FROM {table} WHERE id >= 'temp_' AND id < 'temp`' AND id != ?1
              AND {owner_column} = ?2 AND json_extract(json, '$.clientRequestId') = ?3"
         ))?;
         let rows = statement.query_map(rusqlite::params![id, owner, request_id], |row| {

@@ -216,7 +216,7 @@ impl Change {
 }
 
 /// Something told when the cache moves. The shell registers one and refreshes what it names.
-pub type ChangeListener = Box<dyn Fn(&Change) + Send + Sync>;
+pub type ChangeListener = Arc<dyn Fn(&Change) + Send + Sync>;
 
 /// Everything a listener needs to hold, so the shell subscribes once rather than per screen.
 pub struct RealtimeSink {
@@ -269,7 +269,7 @@ impl RealtimeSink {
         self.listeners
             .lock()
             .expect("listener lock")
-            .push(Box::new(listener));
+            .push(Arc::new(listener));
     }
 
     /// Tell everyone about something that did not come from the stream.
@@ -277,8 +277,15 @@ impl RealtimeSink {
     /// A reminder coming due is a change in what the app should be showing, and it reaches the
     /// shell the same way a colleague's edit does — one subscription, not two.
     pub fn publish(&self, change: Change) {
-        for listener in self.listeners.lock().expect("listener lock").iter() {
-            listener(&change);
+        self.tell(&change);
+    }
+
+    /// Call each listener with the lock released: a listener that subscribes, or one that is
+    /// slow, must neither deadlock the sink nor hold up every other caller behind it.
+    fn tell(&self, change: &Change) {
+        let listeners: Vec<ChangeListener> = self.listeners.lock().expect("listener lock").clone();
+        for listener in listeners {
+            listener(change);
         }
     }
 
@@ -291,9 +298,7 @@ impl RealtimeSink {
     /// Apply one event and tell everyone what moved.
     pub fn apply_event(&self, event: &Event) -> Option<Change> {
         let change = apply(&self.store, event)?;
-        for listener in self.listeners.lock().expect("listener lock").iter() {
-            listener(&change);
-        }
+        self.tell(&change);
         Some(change)
     }
 }
@@ -607,5 +612,18 @@ mod tests {
             store.list("l2").expect("reads").is_none(),
             "not brought back"
         );
+    }
+
+    /// A listener that subscribes from inside its callback — a screen opening in response to a
+    /// change — must not deadlock the sink.
+    #[test]
+    fn a_listener_may_subscribe_from_its_own_callback() {
+        let sink = Arc::new(RealtimeSink::new(Arc::new(
+            Store::in_memory().expect("opens"),
+        )));
+        let inner = sink.clone();
+        sink.on_change(move |_| inner.on_change(|_| {}));
+        sink.publish(Change::Settings);
+        sink.publish(Change::Settings);
     }
 }
