@@ -48,6 +48,15 @@ pub enum EventKind {
         channel_id: String,
     },
     AgentTyping(Typing),
+    /// A task changed and the event names it rather than carrying it — the web sends the lean
+    /// agent shape of a task (`taskId`, `task: {…}`), which is not the task. Fetched, then applied
+    /// as an update.
+    TaskTouched(String),
+    /// A list changed — its settings, or who is on it — and is fetched rather than taken from
+    /// the event, whose row is thinner than the list (no favourite, no roster, no count).
+    ListTouched(String),
+    /// A task's thread changed and the event carries only a preview (an agent's reply).
+    CommentsTouched(String),
     SettingsUpdated,
     ExternalSyncRefresh,
     Connected,
@@ -120,17 +129,40 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
     };
 
     match kind {
+        // The web names the task (`taskId`) and carries a lean agent projection beside it, not
+        // the task — so the task is fetched. A body that is the task itself is read as one.
+        "task_created" | "task_updated" | "task_completed" | "task_assigned"
+            if body.get("taskId").is_some() =>
+        {
+            id_of(&body, "taskId").map(EventKind::TaskTouched)
+        }
         "task_created" => decode(body).map(EventKind::TaskCreated),
         "task_updated" => decode(body).map(EventKind::TaskUpdated),
-        "task_deleted" => id_of(&body, "id").map(EventKind::TaskDeleted),
-        "list_created" => decode(body).map(EventKind::ListCreated),
-        "list_updated" => decode(body).map(EventKind::ListUpdated),
-        "list_deleted" => id_of(&body, "id").map(EventKind::ListDeleted),
+        "task_deleted" => id_of(&body, "taskId")
+            .or_else(|| id_of(&body, "id"))
+            .map(EventKind::TaskDeleted),
+        // A list row on the stream is thinner than the list this account sees (per-person
+        // favourite and view, roster, count); replacing the cached one with it lost all of those.
+        "list_created" | "list_updated" => id_of(&body, "id")
+            .or_else(|| id_of(&body, "listId"))
+            .map(EventKind::ListTouched),
+        "list_deleted" => id_of(&body, "listId")
+            .or_else(|| id_of(&body, "id"))
+            .map(EventKind::ListDeleted),
+        // Who is on a list changed. Fetched: a removal of this account answers 403/404 and the
+        // list goes.
+        "list_member_added"
+        | "list_member_removed"
+        | "list_member_role_changed"
+        | "list_admin_role_granted" => id_of(&body, "listId").map(EventKind::ListTouched),
         // Both spellings are in the wild; they mean the same thing.
         // The web wraps the row beside the ids (`services/comment.service.ts`, the chat routes)
         // and names deletions by `commentId` / `messageId`. A bare row is read too.
         "comment_added" | "comment_created" => {
-            decode(unwrap(&body, "comment", "taskId")).map(EventKind::CommentAdded)
+            decode(unwrap(&body, "comment", "taskId"))
+                .map(EventKind::CommentAdded)
+                // An agent's reply arrives as a preview with no row; the thread is fetched.
+                .or_else(|| id_of(&body, "taskId").map(EventKind::CommentsTouched))
         }
         "comment_updated" => {
             decode(unwrap(&body, "comment", "taskId")).map(EventKind::CommentUpdated)

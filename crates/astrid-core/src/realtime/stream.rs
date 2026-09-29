@@ -75,7 +75,16 @@ pub async fn run(
                     }
                     match frame {
                         Ok(frame) => {
-                            sink.receive(&frame);
+                            // An event that names a row rather than carrying it is fetched first
+                            // (`resolve`) — and not applied if the session moved on meanwhile.
+                            if let Some(event) = super::parse::parse(&frame) {
+                                for event in super::resolve::resolve(&client, event).await {
+                                    if sink.session_epoch() != epoch {
+                                        break;
+                                    }
+                                    sink.apply_event(&event);
+                                }
+                            }
                         }
                         Err(error) => {
                             tracing::debug!(%error, "the live stream dropped; reconnecting");

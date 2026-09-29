@@ -13,6 +13,7 @@
 
 pub mod parse;
 pub mod reconnect;
+pub mod resolve;
 pub mod stream;
 
 pub use parse::{Event, EventKind, Frame, Typing};
@@ -66,6 +67,26 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
             Some(Change::Task(id.clone()))
         }
         EventKind::ListCreated(list) | EventKind::ListUpdated(list) => {
+            // Deleted here, or changed here and not yet sent — its settings, who is on it: the
+            // event does not know about that, and applying it would bring the list back or undo
+            // the change on screen until it lands. The sync after delivery settles it.
+            let touched_here =
+                crate::outbox::journal::ids_named(store, None, "listId", false).ok()?;
+            let deleting = crate::outbox::journal::ids_named(
+                store,
+                Some(&[crate::outbox::kind::DELETE_LIST]),
+                "listId",
+                true,
+            )
+            .ok()?;
+            if touched_here.contains(&list.id) || deleting.contains(&list.id) {
+                return None;
+            }
+            if let Some(cached) = store.list(&list.id).ok()? {
+                if is_older(list.updated_at, cached.updated_at) {
+                    return None;
+                }
+            }
             store.upsert_list(list).ok()?;
             Some(Change::List(list.id.clone()))
         }
@@ -110,6 +131,11 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
         EventKind::SettingsUpdated => Some(Change::Settings),
         EventKind::ExternalSyncRefresh => Some(Change::NeedsSync),
         // A heartbeat means the connection is alive, which is worth nothing to a reader.
+        // Resolved by the stream (it has the client) into the event they stand for; nothing
+        // to apply as they are.
+        EventKind::TaskTouched(_) | EventKind::ListTouched(_) | EventKind::CommentsTouched(_) => {
+            None
+        }
         EventKind::Connected | EventKind::Ping => None,
         // An event from a newer server. Not an error: the next sync pass will carry whatever it
         // was about.
@@ -259,7 +285,12 @@ impl RealtimeSink {
     /// Apply one frame and tell everyone what moved.
     pub fn receive(&self, frame: &str) -> Option<Change> {
         let event = parse::parse(frame)?;
-        let change = apply(&self.store, &event)?;
+        self.apply_event(&event)
+    }
+
+    /// Apply one event and tell everyone what moved.
+    pub fn apply_event(&self, event: &Event) -> Option<Change> {
+        let change = apply(&self.store, event)?;
         for listener in self.listeners.lock().expect("listener lock").iter() {
             listener(&change);
         }
@@ -515,5 +546,66 @@ mod tests {
         );
         assert_eq!(apply(&store, &deleted), Some(Change::Chat("ch1".into())));
         assert!(store.messages_in_channel("ch1").expect("reads").is_empty());
+    }
+
+    // ── Lists get the guards tasks have ─────────────────────────────────────────────────────
+
+    fn list_event(list: serde_json::Value) -> Event {
+        Event {
+            kind: EventKind::ListUpdated(serde_json::from_value(list).expect("a list")),
+        }
+    }
+
+    /// A list deleted here whose delete is on its way, or changed here and not yet sent, is left
+    /// as this machine has it; an event older than the cached list is ignored.
+    #[test]
+    fn a_list_event_does_not_undo_what_this_machine_did() {
+        let store = Store::in_memory().expect("opens");
+        store
+            .upsert_list(
+                &serde_json::from_value(json!({
+                    "id": "l1", "name": "Renamed here", "updatedAt": "2026-09-07T12:05:00Z"
+                }))
+                .expect("a list"),
+            )
+            .expect("stores");
+
+        let older =
+            list_event(json!({ "id": "l1", "name": "Old", "updatedAt": "2026-09-07T12:00:00Z" }));
+        assert_eq!(apply(&store, &older), None);
+
+        let entry = crate::outbox::build(
+            crate::outbox::kind::UPDATE_LIST,
+            json!({ "listId": "l1", "body": { "name": "Renamed here" } }),
+            "temp_edit",
+            chrono::Utc::now(),
+        );
+        crate::outbox::journal::enqueue(&store, &entry).expect("journals");
+        let newer = list_event(
+            json!({ "id": "l1", "name": "Server", "updatedAt": "2026-09-07T12:10:00Z" }),
+        );
+        assert_eq!(
+            apply(&store, &newer),
+            None,
+            "an edit on its way is not undone"
+        );
+        assert_eq!(
+            store.list("l1").expect("reads").expect("kept").name,
+            "Renamed here"
+        );
+
+        let gone = crate::outbox::build(
+            crate::outbox::kind::DELETE_LIST,
+            json!({ "listId": "l2" }),
+            "temp_delete",
+            chrono::Utc::now(),
+        );
+        crate::outbox::journal::enqueue(&store, &gone).expect("journals");
+        let late = list_event(json!({ "id": "l2", "name": "Deleted here" }));
+        assert_eq!(apply(&store, &late), None);
+        assert!(
+            store.list("l2").expect("reads").is_none(),
+            "not brought back"
+        );
     }
 }
