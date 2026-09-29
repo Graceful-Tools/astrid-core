@@ -100,6 +100,9 @@ impl SyncReport {
     }
 }
 
+/// How many rows a full pass asks about one by one before deleting them. More wait for the next.
+const MAX_CONFIRMED_PER_PASS: usize = 50;
+
 pub struct SyncManager {
     client: Arc<ApiClient>,
     store: Arc<Store>,
@@ -282,7 +285,10 @@ impl SyncManager {
                     .query("updatedSince", since_param.clone()),
             )
             .await?;
-        let deleted_lists = ids_named(&body, endpoints::envelope::DELETED_LISTS);
+        // `deletedIds` is what the lists route sends (`app/api/v1/lists/route.ts`); the older name
+        // is read too. Read under the wrong name, a list deleted elsewhere stayed for a day.
+        let mut deleted_lists = ids_named(&body, endpoints::envelope::DELETED_TASKS);
+        deleted_lists.extend(ids_named(&body, endpoints::envelope::DELETED_LISTS));
         let lists =
             crate::model::lenient::<TaskList>(unwrap_envelope(body, endpoints::envelope::LISTS));
         report_skips("lists", &lists.skipped);
@@ -315,7 +321,7 @@ impl SyncManager {
 
         // Tasks come a page at a time, and the walk stops on a short page rather than on the
         // server's count — see `api::pagination` for why that count cannot be trusted.
-        let (tasks, deleted_tasks) = self.fetch_all_tasks(since_param).await?;
+        let (tasks, deleted_tasks, tasks_whole) = self.fetch_all_tasks(since_param).await?;
         // Tasks made here that the server has not answered for yet, by the idempotency key their
         // create carries — so a pull that brings one's server copy first replaces it rather than
         // showing it twice.
@@ -382,34 +388,74 @@ impl SyncManager {
             };
             let seen_tasks: std::collections::HashSet<&str> =
                 tasks.iter().map(|task| task.id.as_str()).collect();
-            for cached in self.store.tasks()? {
-                if !seen_tasks.contains(cached.id.as_str())
-                    && !crate::model::is_temp_id(&cached.id)
-                    && !unsent_tasks.contains(&cached.id)
-                    && !fresh(cached.updated_at)
-                {
-                    self.store.delete_task(&cached.id)?;
+            // A row that would not decode is still on the server; with one, the listing cannot say
+            // what is missing, so nothing is taken on its word this pass.
+            let absent_tasks: Vec<String> = if tasks_whole {
+                self.store
+                    .tasks()?
+                    .into_iter()
+                    .filter(|cached| {
+                        !seen_tasks.contains(cached.id.as_str())
+                            && !crate::model::is_temp_id(&cached.id)
+                            && !unsent_tasks.contains(&cached.id)
+                            && !fresh(cached.updated_at)
+                    })
+                    .map(|cached| cached.id)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            // Absent from a paged listing is not proof: a row shifts pages when another is deleted
+            // mid-walk, and a feed can leave out what the account can still open. Each one is asked
+            // about on its own and only a server that says it is gone deletes it — a bounded number
+            // per pass, the rest on the next.
+            for id in absent_tasks.into_iter().take(MAX_CONFIRMED_PER_PASS) {
+                if self.confirmed_gone(endpoints::task(&id)).await {
+                    self.store.delete_task(&id)?;
                     report.tasks_deleted += 1;
-                    report.changed_task_ids.push(cached.id);
+                    report.changed_task_ids.push(id);
                 }
             }
             let seen_lists: std::collections::HashSet<&str> =
                 lists.items.iter().map(|list| list.id.as_str()).collect();
-            for cached in self.store.lists()? {
-                if !seen_lists.contains(cached.id.as_str())
-                    && !crate::model::is_temp_id(&cached.id)
-                    && !unsent_lists.contains(&cached.id)
-                    && !cached.is_virtual.unwrap_or(false)
-                    && !fresh(cached.updated_at)
-                {
-                    self.store.delete_list(&cached.id)?;
+            let absent_lists: Vec<String> = if lists.skipped.is_empty() {
+                self.store
+                    .lists()?
+                    .into_iter()
+                    .filter(|cached| {
+                        !seen_lists.contains(cached.id.as_str())
+                            && !crate::model::is_temp_id(&cached.id)
+                            && !unsent_lists.contains(&cached.id)
+                            && !cached.is_virtual.unwrap_or(false)
+                            && !fresh(cached.updated_at)
+                    })
+                    .map(|cached| cached.id)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            for id in absent_lists.into_iter().take(MAX_CONFIRMED_PER_PASS) {
+                if self.confirmed_gone(endpoints::list(&id)).await {
+                    self.store.delete_list(&id)?;
                     report.lists_deleted += 1;
-                    report.changed_list_ids.push(cached.id);
+                    report.changed_list_ids.push(id);
                 }
             }
         }
 
         Ok(report)
+    }
+
+    /// Whether the server says this row is gone — not found, or no longer this account's. Any other
+    /// answer, a network failure included, keeps it.
+    async fn confirmed_gone(&self, path: String) -> bool {
+        matches!(
+            self.client.send(self.client.get(path)).await,
+            Err(ApiError::Http {
+                status: 403 | 404 | 410,
+                ..
+            })
+        )
     }
 
     /// Every task page, and every tombstone the pages carried.
@@ -420,12 +466,14 @@ impl SyncManager {
     async fn fetch_all_tasks(
         &self,
         since: Option<String>,
-    ) -> Result<(Vec<Task>, Vec<String>), ApiError> {
+    ) -> Result<(Vec<Task>, Vec<String>, bool), ApiError> {
         const PAGE: usize = 1000;
         let deleted = Mutex::new(Vec::new());
+        let whole = std::sync::atomic::AtomicBool::new(true);
         let tasks = crate::api::fetch_all(PAGE, |limit, offset| {
             let since = since.clone();
             let deleted = &deleted;
+            let whole = &whole;
             async move {
                 let request = self
                     .client
@@ -447,6 +495,9 @@ impl SyncManager {
                     endpoints::envelope::TASKS,
                 ));
                 report_skips("tasks", &page.skipped);
+                if !page.skipped.is_empty() {
+                    whole.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
                 Ok::<crate::api::Page<Task>, ApiError>(crate::api::Page {
                     items: page.into_items(),
                     total: None,
@@ -455,7 +506,7 @@ impl SyncManager {
         })
         .await?;
         let deleted = deleted.into_inner().expect("tombstone lock");
-        Ok((tasks, deleted))
+        Ok((tasks, deleted, whole.into_inner()))
     }
 
     /// Fetch the projects. Separate from the main pass because a deployment without boards answers
@@ -835,7 +886,13 @@ mod tests {
         let fixture = fixture(
             StubTransport::new()
                 .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
-                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json("/api/v1/tasks/gone", 404, json!({ "error": "not found" }))
+                .push_json(
+                    "/api/v1/lists/gone-list",
+                    404,
+                    json!({ "error": "not found" }),
+                ),
         );
         let store = &fixture.store;
         store
@@ -987,7 +1044,7 @@ mod tests {
                 .push_json(
                     "/api/v1/lists",
                     200,
-                    json!({ "lists": [], "deletedListIds": ["l1", "never-had-it"] }),
+                    json!({ "lists": [], "deletedIds": ["l1", "never-had-it"] }),
                 )
                 .push_json(
                     "/api/v1/tasks",
@@ -1153,5 +1210,78 @@ mod tests {
 
         assert!(report.skipped);
         assert!(!report.fetched);
+    }
+
+    /// Absent from a paged listing is not proof a task is gone: one the server still answers for
+    /// is kept, and a listing with a row that would not decode prunes nothing at all.
+    #[tokio::test]
+    async fn a_full_pass_deletes_only_what_the_server_confirms_is_gone() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json(
+                    "/api/v1/tasks/still-there",
+                    200,
+                    json!({ "task": { "id": "still-there" } }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_task(&task("still-there", "2026-09-01T00:00:00Z"))
+            .expect("stores");
+        fixture.sync.sync().await;
+        assert!(
+            fixture.store.task("still-there").expect("reads").is_some(),
+            "the server still has it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_listing_with_an_unreadable_row_prunes_nothing() {
+        let transport = StubTransport::new()
+            .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+            .push_json("/api/v1/tasks", 200, json!({ "tasks": [{ "id": 7 }] }));
+        let sent = transport.recorded.clone();
+        let fixture = fixture(transport);
+        fixture
+            .store
+            .upsert_task(&task("maybe", "2026-09-01T00:00:00Z"))
+            .expect("stores");
+        fixture.sync.sync().await;
+        assert!(fixture.store.task("maybe").expect("reads").is_some());
+        assert!(
+            !sent
+                .lock()
+                .expect("lock")
+                .iter()
+                .any(|request| request.url.contains("/api/v1/tasks/maybe")),
+            "not even asked about"
+        );
+    }
+
+    /// The lists route names its deletions `deletedIds`. Read as `deletedListIds`, a list deleted
+    /// elsewhere stayed in the sidebar until the next full pass.
+    #[tokio::test]
+    async fn a_list_deleted_elsewhere_goes_on_a_delta_pass() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [], "deletedIds": ["l-gone"] }),
+                )
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+        fixture.sync.sync().await;
+        fixture
+            .store
+            .upsert_list(&TaskList::new("l-gone", "Deleted on the web"))
+            .expect("stores");
+        let second = fixture.sync.sync().await;
+        assert!(second.delta, "{second:?}");
+        assert!(fixture.store.list("l-gone").expect("reads").is_none());
     }
 }
