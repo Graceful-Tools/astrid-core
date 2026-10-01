@@ -147,18 +147,27 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
             .map(EventKind::TaskDeleted),
         // A list row on the stream is thinner than the list this account sees (per-person
         // favourite and view, roster, count); replacing the cached one with it lost all of those.
-        "list_created" | "list_updated" => id_of(&body, "id")
-            .or_else(|| id_of(&body, "listId"))
-            .map(EventKind::ListTouched),
+        // Since AWTD-1046 the event also carries `v1List`, the list `GET /api/v1/lists/{id}`
+        // answers for this recipient, which is applied as the fetch would be (AITD-445).
+        "list_created" | "list_updated" => decoded(&body, "v1List")
+            .map(EventKind::ListUpdated)
+            .or_else(|| {
+                id_of(&body, "id")
+                    .or_else(|| id_of(&body, "listId"))
+                    .map(EventKind::ListTouched)
+            }),
         "list_deleted" => id_of(&body, "listId")
             .or_else(|| id_of(&body, "id"))
             .map(EventKind::ListDeleted),
-        // Who is on a list changed. Fetched: a removal of this account answers 403/404 and the
+        // Who is on a list changed. Applied from `v1List` when the event carries it; fetched
+        // otherwise — the member just removed gets no `v1List`, the fetch answers 403/404 and the
         // list goes.
         "list_member_added"
         | "list_member_removed"
         | "list_member_role_changed"
-        | "list_admin_role_granted" => id_of(&body, "listId").map(EventKind::ListTouched),
+        | "list_admin_role_granted" => decoded(&body, "v1List")
+            .map(EventKind::ListUpdated)
+            .or_else(|| id_of(&body, "listId").map(EventKind::ListTouched)),
         // Both spellings are in the wild; they mean the same thing.
         // The web wraps the row beside the ids (`services/comment.service.ts`, the chat routes)
         // and names deletions by `commentId` / `messageId`. A bare row is read too.
@@ -403,6 +412,51 @@ mod tests {
                 EventKind::TaskTouched("t1".into()),
                 "{v1:?}"
             );
+        }
+    }
+
+    /// AITD-445 (web AWTD-1046): list and membership events carry `v1List`, the list
+    /// `GET /api/v1/lists/{id}` answers for this recipient — their own favourite and view
+    /// included — so it is applied as that row and nothing is fetched.
+    #[test]
+    fn aitd_445_a_list_event_carrying_v1_list_is_that_list() {
+        for kind in [
+            "list_created",
+            "list_updated",
+            "list_member_added",
+            "list_member_role_changed",
+            "list_admin_role_granted",
+            "list_member_removed",
+        ] {
+            let frame = format!(
+                "data: {{\"type\":\"{kind}\",\"data\":{{\"listId\":\"l1\",\
+                 \"v1List\":{{\"id\":\"l1\",\"name\":\"Whole\",\"isFavorite\":true}}}}}}\n\n"
+            );
+            match parse(&frame).expect("parses").kind {
+                EventKind::ListUpdated(list) => {
+                    assert_eq!(list.id, "l1", "{kind}");
+                    assert_eq!(list.name, "Whole", "{kind}");
+                }
+                other => panic!("{kind}: expected the v1 list, got {other:?}"),
+            }
+        }
+    }
+
+    /// AITD-445: no usable `v1List` — an older server, a read the server could not make, or the
+    /// member just removed, who can no longer see the list — so it is fetched as before. For the
+    /// removed member that fetch is refused and the list goes.
+    #[test]
+    fn aitd_445_a_list_event_without_a_usable_v1_list_is_fetched() {
+        for kind in ["list_updated", "list_member_removed"] {
+            for v1 in ["", ",\"v1List\":null", ",\"v1List\":{\"name\":\"no id\"}"] {
+                let frame =
+                    format!("data: {{\"type\":\"{kind}\",\"data\":{{\"listId\":\"l1\"{v1}}}}}\n\n");
+                assert_eq!(
+                    parse(&frame).expect("parses").kind,
+                    EventKind::ListTouched("l1".into()),
+                    "{kind} {v1:?}"
+                );
+            }
         }
     }
 
