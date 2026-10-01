@@ -130,11 +130,15 @@ fn read(kind: &str, body: serde_json::Value) -> EventKind {
 
     match kind {
         // The web names the task (`taskId`) and carries a lean agent projection beside it, not
-        // the task — so the task is fetched. A body that is the task itself is read as one.
+        // the task. Since AWTD-1040 it also carries `v1Task` — exactly what
+        // `GET /api/v1/tasks/{id}` answers — which is applied as the fetch would be (AITD-444).
+        // Without it the task is fetched. A body that is the task itself is read as one.
         "task_created" | "task_updated" | "task_completed" | "task_assigned"
             if body.get("taskId").is_some() =>
         {
-            id_of(&body, "taskId").map(EventKind::TaskTouched)
+            decoded(&body, "v1Task")
+                .map(EventKind::TaskUpdated)
+                .or_else(|| id_of(&body, "taskId").map(EventKind::TaskTouched))
         }
         "task_created" => decode(body).map(EventKind::TaskCreated),
         "task_updated" => decode(body).map(EventKind::TaskUpdated),
@@ -225,6 +229,14 @@ fn unwrap(body: &serde_json::Value, key: &str, owner: &str) -> serde_json::Value
 
 fn decode<T: serde::de::DeserializeOwned>(body: serde_json::Value) -> Option<T> {
     serde_json::from_value(body).ok()
+}
+
+/// The row the server put whole under `key` — the same one its `GET` answers — if it is there and
+/// reads as one. `None` (absent, `null`, or not a row) means fetch it, as before the field existed.
+fn decoded<T: serde::de::DeserializeOwned>(body: &serde_json::Value, key: &str) -> Option<T> {
+    body.get(key)
+        .filter(|row| row.is_object())
+        .and_then(|row| decode(row.clone()))
 }
 
 #[cfg(test)]
@@ -349,6 +361,49 @@ mod tests {
         let event = parse("data: {\"type\":\"task_created\",\"data\":{\"title\":\"no id\"}}\n\n")
             .expect("parses");
         assert_eq!(event.kind, EventKind::Unknown("task_created".into()));
+    }
+
+    /// AITD-444 (web AWTD-1040): a task event carries `v1Task`, the row `GET /api/v1/tasks/{id}`
+    /// answers, so it is applied as that row and nothing is fetched. `task` beside it is still the
+    /// lean projection and is never the row.
+    #[test]
+    fn aitd_444_a_task_event_carrying_v1_task_is_that_task() {
+        for kind in [
+            "task_created",
+            "task_updated",
+            "task_completed",
+            "task_assigned",
+        ] {
+            let frame = format!(
+                "data: {{\"type\":\"{kind}\",\"data\":{{\"taskId\":\"t1\",\
+                 \"task\":{{\"id\":\"t1\",\"title\":\"lean\"}},\
+                 \"v1Task\":{{\"id\":\"t1\",\"title\":\"Whole\",\"assigneeId\":\"u1\"}}}}}}\n\n"
+            );
+            match parse(&frame).expect("parses").kind {
+                EventKind::TaskUpdated(task) => {
+                    assert_eq!(task.title, "Whole", "{kind}");
+                    assert_eq!(task.assignee_id.as_deref(), Some("u1"), "{kind}");
+                }
+                other => panic!("{kind}: expected the v1 task, got {other:?}"),
+            }
+        }
+    }
+
+    /// AITD-444: an older server, a recipient no longer on the task's lists, or a load the server
+    /// could not make — no usable `v1Task`, so the task is fetched as before.
+    #[test]
+    fn aitd_444_a_task_event_without_a_usable_v1_task_is_fetched() {
+        for v1 in ["", ",\"v1Task\":null", ",\"v1Task\":{\"title\":\"no id\"}"] {
+            let frame = format!(
+                "data: {{\"type\":\"task_updated\",\"data\":{{\"taskId\":\"t1\",\
+                 \"task\":{{\"id\":\"t1\",\"title\":\"lean\"}}{v1}}}}}\n\n"
+            );
+            assert_eq!(
+                parse(&frame).expect("parses").kind,
+                EventKind::TaskTouched("t1".into()),
+                "{v1:?}"
+            );
+        }
     }
 
     #[test]

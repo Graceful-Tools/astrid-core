@@ -6,6 +6,9 @@
 //! reply arrives as a preview. Applying any of those as if it were the row wiped fields on this
 //! machine or was dropped outright. So the stream fetches the row — through the same endpoints a
 //! sync pass reads — and applies that, under the same stale-event and deleted-here guards.
+//!
+//! A newer server also sends the row itself beside the reference (`v1Task`, `v1List`); the parser
+//! reads that as the fetched row, so only an event without one reaches here as a reference.
 
 use super::parse::{Event, EventKind};
 use crate::api::{endpoints, ApiClient, ApiError};
@@ -125,6 +128,28 @@ mod tests {
                 assert_eq!(task.assignee_id.as_deref(), Some("u1"));
             }
             other => panic!("expected the fetched task, got {other:?}"),
+        }
+    }
+
+    /// AITD-444: an event carrying `v1Task` is applied without a request — the stub answers
+    /// nothing, so a fetch would come back empty.
+    #[tokio::test]
+    async fn aitd_444_a_task_event_carrying_v1_task_is_not_fetched() {
+        let client = client(StubTransport::new());
+        let resolved = resolve(
+            &client,
+            event(json!({ "type": "task_completed", "data": {
+                "taskId": "t1",
+                "task": { "id": "t1", "title": "lean" },
+                "v1Task": { "id": "t1", "title": "Whole", "completed": true }
+            } })),
+        )
+        .await;
+        match &resolved[..] {
+            [Event {
+                kind: EventKind::TaskUpdated(task),
+            }] => assert_eq!(task.title, "Whole"),
+            other => panic!("expected the v1 task, got {other:?}"),
         }
     }
 
