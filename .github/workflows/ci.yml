@@ -101,6 +101,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: astrid-web/package-lock.json
+
+      # The markdown driver runs web's own renderer — `marked`, DOMPurify — in a jsdom window, so
+      # it needs astrid-web's packages. Scripts are skipped: nothing here builds or generates.
+      - name: Install astrid-web's packages
+        working-directory: astrid-web
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Check fixtures against astrid-web
         working-directory: astrid-core

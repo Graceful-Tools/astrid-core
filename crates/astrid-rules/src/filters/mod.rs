@@ -17,10 +17,10 @@
 //! completion filter, which reads an unknown value as `default` the way iOS does (open tasks plus
 //! recent completions, so still never an empty list; `docs/CONTRACTS.md` D22).
 //!
-//! The due-date filter has one gap in that rule, inherited rather than chosen: a task with no due
-//! date is decided before the filter is read, so an unrecognised value hides undated tasks while
-//! keeping dated ones. It is reproduced here rather than fixed, because fixing it on one client
-//! makes three clients disagree about what a list contains. See `docs/CONTRACTS.md` D7.
+//! The due-date filter has one gap in that rule, inherited from iOS rather than chosen: a task with
+//! no due date is decided before the filter is read, so an unrecognised value hides undated tasks
+//! while keeping dated ones. Web keeps them; this follows iOS (`docs/CONTRACTS.md` D7, measured by
+//! `contracts/fixtures/filters.json`).
 
 pub mod my_tasks;
 pub mod recently_completed;
@@ -118,8 +118,8 @@ pub fn matches_due_date(
         return true;
     };
     // Undated tasks are answered before the filter is examined, which is what makes an
-    // unrecognised value hide them. Faithful to the Swift and web implementations; see the module
-    // note and `docs/CONTRACTS.md` D7.
+    // unrecognised value hide them. Faithful to the Swift implementation (web keeps them); see the
+    // module note and `docs/CONTRACTS.md` D7.
     let Some(due) = task.due_date_time else {
         return filter == "no_date";
     };
@@ -244,6 +244,19 @@ pub fn sort_by_setting<T: std::borrow::Borrow<Task>>(
                 .then_with(|| priority_of(b).cmp(&priority_of(a)))
         }),
         "createdAt" => tasks.sort_by_key(|task| std::cmp::Reverse(created_at_of(task))),
+        // "Recently completed" (web's `lib/task-sort.ts`, iOS's `sortTasksByListSetting`, task
+        // c6e87fb8): completed tasks LEAD, most recently completed first — `completedAt`, else
+        // `updatedAt`, and a task with neither last — and the open half keeps auto's order.
+        "completedAt" => tasks.sort_by(|a, b| {
+            let (a, b) = (a.borrow(), b.borrow());
+            b.completed.cmp(&a.completed).then_with(|| {
+                if a.completed {
+                    completion_stamp(b).cmp(&completion_stamp(a))
+                } else {
+                    auto_order(a, b)
+                }
+            })
+        }),
         "manual" => match manual_order.filter(|order| !order.is_empty()) {
             Some(order) => {
                 let position = |task: &T| order.iter().position(|id| id == &id_of(task));
@@ -261,13 +274,22 @@ pub fn sort_by_setting<T: std::borrow::Borrow<Task>>(
             None => tasks.sort_by_key(|task| std::cmp::Reverse(created_at_of(task))),
         },
         // "auto", and anything a newer build introduced.
-        _ => tasks.sort_by(|a, b| {
-            completed_last(a, b)
-                .then_with(|| priority_of(b).cmp(&priority_of(a)))
-                .then_with(|| due_date_order(a, b))
-                .then_with(|| created_at_of(a).cmp(&created_at_of(b)))
-        }),
+        _ => tasks.sort_by(|a, b| auto_order(a.borrow(), b.borrow())),
     }
+}
+
+/// Auto: open before completed, then priority (highest first), due date, and age.
+fn auto_order(a: &Task, b: &Task) -> std::cmp::Ordering {
+    completed_last(a, b)
+        .then_with(|| b.priority.cmp(&a.priority))
+        .then_with(|| due_date_order(a, b))
+        .then_with(|| created_at_of(a).cmp(&created_at_of(b)))
+}
+
+/// When a completed task was finished, for "Recently completed": `completedAt` is the real stamp
+/// (backdatable by sync), `updatedAt` the legacy fallback. `None` sorts before every stamp.
+fn completion_stamp(task: &Task) -> Option<DateTime<Utc>> {
+    task.completed_at.or(task.updated_at)
 }
 
 fn completed_last(a: &Task, b: &Task) -> std::cmp::Ordering {
@@ -737,6 +759,39 @@ mod tests {
         let mut tasks = vec![task("a"), new_one, task("b")];
         sort_by_setting(&mut tasks, Some("manual"), Some(&order));
         assert_eq!(ids(&tasks), vec!["b", "a", "new"]);
+    }
+
+    /// "Recently completed" sorted as auto on this crate while web and iOS lead with what was
+    /// finished last (task c6e87fb8); found by `tests/filters_contract.rs`.
+    #[test]
+    fn recently_completed_leads_with_the_latest_completion_task_c6e87fb8() {
+        let mut open_high = task("open-high");
+        open_high.priority = Priority::High;
+        let mut early = task("early");
+        early.completed = true;
+        early.completed_at = Some(at("2026-09-01T12:00:00Z"));
+        let mut late = task("late");
+        late.completed = true;
+        late.completed_at = Some(at("2026-09-06T12:00:00Z"));
+        let mut legacy = task("legacy");
+        legacy.completed = true;
+        legacy.updated_at = Some(at("2026-09-03T12:00:00Z"));
+        let mut unstamped = task("unstamped");
+        unstamped.completed = true;
+
+        let mut tasks = vec![task("open-none"), unstamped, early, open_high, legacy, late];
+        sort_by_setting(&mut tasks, Some("completedAt"), None);
+        assert_eq!(
+            ids(&tasks),
+            vec![
+                "late",
+                "legacy",
+                "early",
+                "unstamped",
+                "open-high",
+                "open-none"
+            ]
+        );
     }
 
     #[test]
