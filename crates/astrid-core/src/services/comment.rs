@@ -185,17 +185,20 @@ impl CommentService {
 
     pub fn edit(&self, comment_id: &str, content: &str) -> Result<()> {
         let now = self.context.clock.now();
+        let mut task_id = None;
         if let Some(mut comment) = self.context.store.comment(comment_id)? {
             comment.content = content.to_string();
             comment.updated_at = Some(now);
             self.context
                 .store
                 .upsert_comments(std::slice::from_ref(&comment))?;
+            task_id = Some(comment.task_id);
         }
 
+        // `taskId` is not sent; it says which thread the delivery touched (AITD-454).
         let entry = outbox::build(
             kind::UPDATE_COMMENT,
-            json!({ "commentId": comment_id, "body": { "content": content } }),
+            json!({ "commentId": comment_id, "taskId": task_id, "body": { "content": content } }),
             &outbox::new_temp_id(),
             now,
         );
@@ -209,11 +212,17 @@ impl CommentService {
 
     pub fn delete(&self, comment_id: &str) -> Result<()> {
         let now = self.context.clock.now();
+        let task_id = self
+            .context
+            .store
+            .comment(comment_id)?
+            .map(|comment| comment.task_id);
         self.context.store.delete_comment(comment_id)?;
 
+        // `taskId` is not sent; it says which thread the delivery touched (AITD-454).
         let entry = outbox::build(
             kind::DELETE_COMMENT,
-            json!({ "commentId": comment_id }),
+            json!({ "commentId": comment_id, "taskId": task_id }),
             &outbox::new_temp_id(),
             now,
         );

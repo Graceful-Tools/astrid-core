@@ -366,6 +366,11 @@ pub fn stats(store: &Store) -> Result<Stats> {
 const COLUMNS: &str = "id, kind, payload, client_request_id, depends_on, temp_id, status, \
      attempts, next_attempt_at, last_error, result, created_at, updated_at, sequence";
 
+/// [`all`], on a connection a caller already holds — a sync pass inside its transaction.
+pub(crate) fn all_in(connection: &Connection) -> Result<Vec<Entry>> {
+    read_all(connection)
+}
+
 fn read_all(connection: &Connection) -> Result<Vec<Entry>> {
     let mut statement = connection.prepare(&format!(
         "SELECT {COLUMNS} FROM outbox ORDER BY sequence ASC"

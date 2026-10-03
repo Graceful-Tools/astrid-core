@@ -24,7 +24,7 @@ pub mod scheduler;
 
 pub use entry::{kind, Entry, Status};
 pub use journal::Stats;
-pub use runner::{DrainReport, Runner};
+pub use runner::{Delivery, DrainReport, Runner};
 
 use chrono::{DateTime, Utc};
 
