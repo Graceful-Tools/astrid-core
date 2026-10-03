@@ -51,6 +51,7 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # fixtures against ../astrid-web (Node.js required)
+cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 node contracts/export-from-web.mjs --web ../astrid-web   # regenerate them
 ```
 
@@ -72,17 +73,27 @@ nothing.
 
 ## Layout
 
+Two crates. `astrid-rules` is the pure half — no clock, disk, network or entropy, so it also
+builds for `wasm32-unknown-unknown` and the web can run the same rules (CI checks that build).
+`astrid-core` is everything that waits on something, and re-exports every `astrid-rules` module at
+its old path (`astrid_core::repeating`, `astrid_core::rules`, `astrid_core::model`, …), so a client
+names the same items either way.
+
 ```
-crates/astrid-core/src/
+crates/astrid-rules/src/
   model/        wire shapes; lenient decoding, because the server is permissive
+  repeating/ permissions/ filters/ parse/ keyboard/ board.rs editing.rs markdown.rs rows/ …
+                pure, fixture-locked rules and the projections a screen draws from
+  rules.rs      the stateless door: JSON in, JSON out, synchronous (`rules::run_json`)
+  envelope.rs   the `{ ok, value?, error? }` answer both doors share
+crates/astrid-rules/tests/   the fixture-locked contract tests
+crates/astrid-core/src/
   api/          the only place that speaks HTTP
   store/        the SQLite cache; the read path never waits on the network
   outbox/       the write path: idempotent, retrying, dependency-ordered, dead-lettering
   services/     the canonical control points — tasks, lists, comments, chat, connections, …
   sync/ realtime/   the delta pull and the live stream
   app/          the command layer, the one door a shell uses
-  repeating/ permissions/ filters/ parse/ keyboard/ board.rs editing.rs rows/
-                pure, fixture-locked rules and the projections a screen draws from
 crates/xtask/   cargo xtask check-contracts
 contracts/      the fixtures generated from astrid-web, and the exporter (see contracts/README.md)
 docs/CONTRACTS.md   the decisions and known divergences between clients

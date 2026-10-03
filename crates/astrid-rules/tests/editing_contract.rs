@@ -4,7 +4,7 @@
 //! scripted sequences; each step here replays the same sequence and compares every field the
 //! web reported — the active editor, what to commit, what to revert.
 
-use astrid_core::editing::{self, Session};
+use astrid_rules::editing::{self, Session};
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/editing.json");
 

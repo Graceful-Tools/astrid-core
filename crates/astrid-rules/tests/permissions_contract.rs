@@ -11,7 +11,7 @@
 //! `docs/CONTRACTS.md` §5: web also derives a role from the list's project and from two legacy
 //! arrays, none of which exist on the wire shape a client receives.
 
-use astrid_core::permissions::{
+use astrid_rules::permissions::{
     can_delete_list, can_edit_task, can_edit_tasks, can_manage_list, can_manage_members,
     can_view_list, has_explicit_list_role, role_in_list, ListAccess, ListRole,
 };

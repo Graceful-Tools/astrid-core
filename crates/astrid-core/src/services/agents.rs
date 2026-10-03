@@ -29,29 +29,8 @@ use serde_json::json;
 use super::{Context, Result};
 use crate::api::endpoints;
 
-/// How one agent runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentMode {
-    /// Astrid runs it. Nothing to set up.
-    Api,
-    /// The account's own agent asks for work.
-    Polling,
-    /// The account's own agent is told about work.
-    Webhook,
-    /// It does not run.
-    Off,
-}
-
-impl AgentMode {
-    /// Whether this mode needs a credential of the account's own before it will do anything.
-    ///
-    /// The question a hub answers with "needs setup", and the reason it is here rather than in a
-    /// view: two platforms deciding it separately is two definitions of "ready".
-    pub fn needs_own_credential(self) -> bool {
-        matches!(self, AgentMode::Polling | AgentMode::Webhook)
-    }
-}
+/// How one agent runs. Defined with the rows that draw it, in `astrid-rules`.
+pub use crate::rows::agent::AgentMode;
 
 /// One agent, and how it is set to run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

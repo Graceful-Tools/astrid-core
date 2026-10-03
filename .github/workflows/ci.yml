@@ -59,6 +59,28 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  # astrid-rules is the half of the core the web loads as WebAssembly. It builds for
+  # wasm32-unknown-unknown only while it stays pure — no clock, disk, socket or OS entropy — so a
+  # dependency that reaches for one fails here, the day it lands, rather than in the web's build.
+  wasm:
+    name: astrid-rules (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Build
+        run: cargo build -p astrid-rules --target wasm32-unknown-unknown
+
+      - name: Clippy
+        run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
+
   contracts:
     name: cross-platform contracts
     runs-on: ubuntu-latest

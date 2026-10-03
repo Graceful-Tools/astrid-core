@@ -13,7 +13,7 @@
 # See README.md for the rules that govern what may live where.
 [workspace]
 resolver = "2"
-members = ["crates/astrid-core", "crates/xtask"]
+members = ["crates/astrid-rules", "crates/astrid-core", "crates/xtask"]
 
 [workspace.package]
 version = "0.1.0"

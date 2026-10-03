@@ -27,7 +27,10 @@ workflow.
 7. **Contracts are fixtures, not prose.** Web first, regenerate, then here, then the clients.
    **On disagreement, follow iOS:** where this crate and iOS differ, the crate takes iOS's
    behaviour (Jon, 2026-10-03; README rule 6).
-8. **Nothing platform-specific lives here.** A platform need arrives through a trait in
+8. **`astrid-rules` stays pure.** No clock, disk, network or entropy in `crates/astrid-rules` —
+   "now" and the zone are arguments. It is what the web loads as WebAssembly; CI builds it for
+   `wasm32-unknown-unknown`, and a dependency that breaks that build belongs in `astrid-core`.
+9. **Nothing platform-specific lives here.** A platform need arrives through a trait in
    `astrid_core::platform`, implemented by the shell. The Windows C ABI is astrid-windows's
    `astrid-ffi`; Apple bindings belong to astrid-ios.
 
@@ -40,11 +43,13 @@ cargo test --workspace                                   # the inner loop
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts                              # against ../astrid-web
+cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 ```
 
 ## Quality gate
 
-All four commands above, green, before pushing. CI runs them on Windows, macOS and Linux and
+All five commands above, green, before pushing (the wasm build needs `rustup target add
+wasm32-unknown-unknown` once). CI runs them on Windows, macOS and Linux and
 checks the fixtures against astrid-web's `main`.
 
 ## Test locations
@@ -52,7 +57,7 @@ checks the fixtures against astrid-web's `main`.
 | Type | Path |
 |---|---|
 | Unit tests | alongside the code, in `#[cfg(test)] mod tests` |
-| Fixture-locked contract tests | `crates/astrid-core/tests/*_contract.rs` |
+| Fixture-locked contract tests | `crates/astrid-rules/tests/*_contract.rs` |
 | The command layer's tests | `crates/astrid-core/src/app/dispatch/tests.rs` |
 
 ---

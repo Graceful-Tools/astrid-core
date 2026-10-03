@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 iana-time-zone = { workspace = true }
@@ -25,7 +26,6 @@ futures-util = { workspace = true }
 rusqlite = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
-pulldown-cmark = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

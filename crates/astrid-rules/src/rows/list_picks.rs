@@ -43,9 +43,16 @@ pub const LIST_COLOR_PALETTE: [&str; 8] = [
 ];
 
 /// A colour for a list the user did not colour themselves — the web's `randomListColor`.
+///
+/// The randomness is std's per-process hash keys rather than the OS's entropy source: a list
+/// colour needs variety, not secrecy, and this crate reads nothing from the machine so that it
+/// builds for WebAssembly. (On `wasm32-unknown-unknown` the keys are fixed and so is the pick.)
 pub fn random_list_color() -> &'static str {
-    let index = (uuid::Uuid::new_v4().as_u128() % LIST_COLOR_PALETTE.len() as u128) as usize;
-    LIST_COLOR_PALETTE[index]
+    use std::hash::{BuildHasher, Hasher};
+    let bits = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish();
+    LIST_COLOR_PALETTE[(bits % LIST_COLOR_PALETTE.len() as u64) as usize]
 }
 
 /// No more than this many suggestions, as the web shows.
