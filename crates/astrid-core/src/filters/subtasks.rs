@@ -289,6 +289,25 @@ mod tests {
         assert!(spliced.len() <= MAX_SPLICE_DEPTH + 2);
     }
 
+    /// iOS's splice (`TaskListView.filteredTasks`, and the shared `SubtaskSplicing.swift`) stops
+    /// following children once a row is ten deep: depth 0 to 10 render, eleven rows of a chain.
+    /// Already the same here; this pins it under the follow-iOS rule.
+    #[test]
+    fn subtask_splice_depth_cap_matches_ios() {
+        let root = Task::new("t0", "Root");
+        let mut all = vec![root.clone()];
+        for depth in 1..=15 {
+            all.push(child(
+                &format!("t{depth}"),
+                &format!("t{}", depth - 1),
+                "2026-09-06T12:00:00Z",
+            ));
+        }
+        let spliced = splice(&[root], &all, true, |_| true);
+        assert_eq!(spliced.len(), 11);
+        assert_eq!(spliced.last().map(|task| task.id.as_str()), Some("t10"));
+    }
+
     #[test]
     fn depth_counts_the_parents_above_a_task() {
         let parent = Task::new("p", "Parent");

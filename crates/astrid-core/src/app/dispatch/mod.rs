@@ -1218,6 +1218,7 @@ use chat::*;
 use comments::*;
 use list_filters::*;
 use lists::*;
+pub(in crate::app) use reminders::due_reminders;
 use reminders::*;
 use row_json::*;
 use tasks::*;

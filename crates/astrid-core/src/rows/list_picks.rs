@@ -7,10 +7,11 @@
 //!
 //! What is a rule here, and why:
 //!
-//! - **What is offered.** Only destinations: never a virtual list ("Today" is somewhere to look,
-//!   not somewhere a task lives) and never a board column (a state, not a place). The web's
-//!   `selectableLists` makes the same cut. Minus the lists the task is already in, filtered by
-//!   what was typed, and no more than the first ten — the web's `.slice(0, 10)`.
+//! - **What is offered.** Every list but a virtual one ("Today" is somewhere to look, not
+//!   somewhere a task lives) — iOS's `InlineListsPicker` rule, followed since 2026-10-03
+//!   (`docs/CONTRACTS.md` D28). Board columns and labels are lists a task can be in, so they are
+//!   offered; the web's `selectableLists` also cuts columns. Minus the lists the task is already
+//!   in, filtered by what was typed, and no more than the first ten — the web's `.slice(0, 10)`.
 //! - **When a create is offered.** A typed name no list already has. Offering to create "Home"
 //!   beside an existing "Home" is how an account comes to have two.
 //! - **What a list created from here looks like.** Its privacy follows the task's current lists,
@@ -71,12 +72,12 @@ pub struct ListPicks {
     pub create_name: Option<String>,
 }
 
-/// Whether a task can be filed in this list at all.
+/// Whether a task can be filed in this list at all: anything but a virtual list.
 ///
-/// The same cut `ListService::destinations` makes, stated once more here because this module
-/// is handed every list the store has and has to make it itself.
+/// iOS's `InlineListsPicker` rule (D28, resolved toward iOS). `ListService::destinations` asks
+/// this too, so there is one answer.
 pub fn is_destination(list: &TaskList) -> bool {
-    list.is_domain_list() && !list.is_virtual.unwrap_or(false)
+    !list.is_virtual.unwrap_or(false)
 }
 
 fn pick(list: &TaskList) -> ListPick {
@@ -152,7 +153,7 @@ mod tests {
     }
 
     /// The editor offers the lists a task is not in, keeps the ones it is, and never offers a
-    /// column or a view (task d3f3b111).
+    /// view (task d3f3b111). A board column is offered since D28 followed iOS.
     #[test]
     fn the_task_s_lists_are_selected_and_the_rest_are_offered_task_d3f3b111() {
         let mut column = list("ready", "Ready");
@@ -172,10 +173,30 @@ mod tests {
         assert_eq!(ids(&picks.selected), vec!["home"]);
         assert_eq!(
             ids(&picks.options),
-            vec!["garden", "work"],
-            "by name, minus the selected"
+            vec!["garden", "ready", "work"],
+            "by name, minus the selected and the view"
         );
         assert_eq!(picks.create_name, None, "nothing typed, nothing to create");
+    }
+
+    /// D28, resolved toward iOS (`InlineListsPicker.filteredLists`): only virtual lists are
+    /// refused. A board column and a label are lists a task can be in, so they are offered.
+    #[test]
+    fn d28_list_picker_excludes_virtual_lists_only() {
+        let mut column = list("ready", "Ready");
+        column.list_type = Some("status".into());
+        let mut label = list("bug", "Bug");
+        label.list_type = Some("label".into());
+        let mut today = list("today", "Today");
+        today.is_virtual = Some(true);
+
+        assert!(is_destination(&column));
+        assert!(is_destination(&label));
+        assert!(is_destination(&list("home", "Home")));
+        assert!(!is_destination(&today));
+
+        let picks = picks(&[], &[column, label, today, list("home", "Home")], "");
+        assert_eq!(ids(&picks.options), vec!["bug", "home", "ready"]);
     }
 
     #[test]

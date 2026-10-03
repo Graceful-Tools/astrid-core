@@ -25,26 +25,55 @@ pub(super) fn shown_key(task_id: &str) -> String {
     format!("reminder.shown.{task_id}")
 }
 
+/// The key a snooze made on this device is remembered under (D24): iOS reschedules its own
+/// notification for the snoozed time; this is that, for the in-app reminder.
+pub(super) fn snoozed_key(task_id: &str) -> String {
+    format!("{SNOOZED_PREFIX}{task_id}")
+}
+
+const SNOOZED_PREFIX: &str = "reminder.snoozed.";
+
+/// Every snooze mark on this device, read in one pass.
+fn snoozes(app: &App) -> std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> {
+    app.store
+        .metadata_with_prefix(SNOOZED_PREFIX)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let id = key.strip_prefix(SNOOZED_PREFIX)?.to_string();
+            Some((id, date::parse(&value)?))
+        })
+        .collect()
+}
+
+/// The reminders whose time has come and which have not been shown — for the command and for the
+/// background loop, which must agree.
+pub(in crate::app) fn due_reminders(
+    app: &App,
+    tasks: &[crate::model::Task],
+) -> Vec<crate::reminders::Reminder> {
+    let snoozes = snoozes(app);
+    crate::reminders::due_now(
+        tasks,
+        app.clock.now(),
+        |id| snoozes.get(id).copied(),
+        |id, at| {
+            app.store
+                .metadata(&shown_key(id))
+                .ok()
+                .flatten()
+                .is_some_and(|stamp| stamp == at.to_rfc3339())
+        },
+    )
+}
+
 /// Reminders whose time has come and which have not been shown.
 pub(super) fn reminders_due(app: &App) -> Response {
     let tasks = match app.store.tasks() {
         Ok(tasks) => tasks,
         Err(error) => return Response::failed(error.into()),
     };
-    let now = app.clock.now();
-    let due = crate::reminders::due_now(&tasks, now, |id| {
-        let Some(task) = tasks.iter().find(|task| task.id == id) else {
-            return false;
-        };
-        let Some(at) = task.reminder_time else {
-            return false;
-        };
-        app.store
-            .metadata(&shown_key(id))
-            .ok()
-            .flatten()
-            .is_some_and(|stamp| stamp == at.to_rfc3339())
-    });
+    let due = due_reminders(app, &tasks);
     Response::ok(serde_json::json!({ "reminders": due }))
 }
 
@@ -54,7 +83,13 @@ pub(super) fn mark_reminder_shown(app: &App, task_id: &str) -> Response {
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
         Err(error) => return Response::failed(error.into()),
     };
-    let Some(at) = task.reminder_time else {
+    let snoozed = app
+        .store
+        .metadata(&snoozed_key(task_id))
+        .ok()
+        .flatten()
+        .and_then(|value| date::parse(&value));
+    let Some(at) = crate::reminders::reminder_at(&task, snoozed) else {
         // Nothing to remember. Not an error: the reminder may have been cleared between the
         // banner going up and somebody dismissing it.
         return Response::done();
@@ -68,18 +103,27 @@ pub(super) fn mark_reminder_shown(app: &App, task_id: &str) -> Response {
     }
 }
 
-/// Move a reminder forward.
-///
-/// A write rather than a timer: an in-memory snooze is lost on a restart, and it leaves the
-/// server's copy of the reminder where it was, so the push still arrives at the original time.
+/// Snooze a reminder, as iOS does (`ReminderPresenter.snoozeTask`, D24): the task becomes due at
+/// now plus the snooze, as a timed task, and `reminderTime` is left where it was. The write goes
+/// through the Outbox like any edit; the snooze mark brings the in-app reminder back then, the
+/// way iOS reschedules its notification on the device.
 pub(super) fn snooze_reminder(app: &App, task_id: &str, minutes: i64) -> Response {
     let when = crate::reminders::snooze_until(app.clock.now(), minutes);
     let changes = crate::services::TaskChanges {
-        reminder_time: Some(Some(when)),
+        due_date_time: Some(Some(when)),
+        is_all_day: Some(false),
         ..Default::default()
     };
     match app.context.tasks().update(task_id, &changes) {
-        Ok(task) => Response::ok(task),
+        Ok(task) => {
+            if let Err(error) = app
+                .store
+                .set_metadata(&snoozed_key(task_id), &date::format(when))
+            {
+                return Response::failed(error.into());
+            }
+            Response::ok(task)
+        }
         Err(error) => Response::failed(error.into()),
     }
 }

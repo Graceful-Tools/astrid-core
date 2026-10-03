@@ -515,32 +515,26 @@ pub(super) fn due_date_options(app: &App, task_id: &str) -> Response {
 
     let dates: Vec<serde_json::Value> = rows::due_picks::DATE_OPTIONS
         .iter()
-        .map(|option| match option.days_from_today {
-            None => serde_json::json!({
+        .map(|option| {
+            let days = option.days_from_today;
+            let picked = if task.is_all_day {
+                rows::due_picks::all_day_pick(days, now, offset)
+            } else {
+                // Keep the time of day: choosing a date must not silently discard a time the
+                // person already set.
+                rows::due_picks::timed_pick(
+                    days - rows::day_offset(anchor, task.is_all_day, now, offset),
+                    anchor,
+                    offset,
+                )
+            };
+            serde_json::json!({
                 "titleKey": option.title_key,
-                "dueDateTime": serde_json::Value::Null,
-                "isSelected": task.due_date_time.is_none(),
-            }),
-            Some(days) => {
-                let picked = if task.is_all_day {
-                    rows::due_picks::all_day_pick(days, now, offset)
-                } else {
-                    // Keep the time of day: choosing a date must not silently discard a time the
-                    // person already set.
-                    rows::due_picks::timed_pick(
-                        days - rows::day_offset(anchor, task.is_all_day, now, offset),
-                        anchor,
-                        offset,
-                    )
-                };
-                serde_json::json!({
-                    "titleKey": option.title_key,
-                    "dueDateTime": date::format(picked),
-                    "isSelected": task.due_date_time.is_some_and(|due| {
-                        rows::day_offset(due, task.is_all_day, now, offset) == days
-                    }),
-                })
-            }
+                "dueDateTime": date::format(picked),
+                "isSelected": task.due_date_time.is_some_and(|due| {
+                    rows::day_offset(due, task.is_all_day, now, offset) == days
+                }),
+            })
         })
         .collect();
 

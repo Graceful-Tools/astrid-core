@@ -13,7 +13,9 @@
 //! **An unrecognised filter value keeps everything.** These values are saved on the server and
 //! synced between clients, so a build from six months ago will see values it has never heard of.
 //! Treating an unknown value as "matches nothing" empties the list — the user's list, on their
-//! screen, for no reason they can see. Every `match` here therefore ends in "keep it".
+//! screen, for no reason they can see. Every `match` here therefore ends in "keep it" — except the
+//! completion filter, which reads an unknown value as `default` the way iOS does (open tasks plus
+//! recent completions, so still never an empty list; `docs/CONTRACTS.md` D22).
 //!
 //! The due-date filter has one gap in that rule, inherited rather than chosen: a task with no due
 //! date is decided before the filter is read, so an unrecognised value hides undated tasks while
@@ -48,8 +50,8 @@ pub fn filter_refs<'a>(
         .filter(|task| {
             // Completion first: it is the one that hides most of what it hides, and every other
             // filter is cheaper to skip than to run.
-            if task.completed
-                && !recently_completed::should_show_completed(
+            let shown = if task.completed {
+                recently_completed::should_show_completed(
                     Some(completion),
                     task.completed_at,
                     task.updated_at,
@@ -57,7 +59,10 @@ pub fn filter_refs<'a>(
                     now,
                     offset,
                 )
-            {
+            } else {
+                recently_completed::should_show_open(Some(completion))
+            };
+            if !shown {
                 return false;
             }
             matches_priority(task, list.filter_priority.as_deref())
@@ -388,29 +393,44 @@ mod tests {
         assert_eq!(ids(&filtered), vec!["open", "fresh"]);
     }
 
+    /// D22, resolved toward iOS (`RecentlyCompletedPresets.applyCompletionFilterWithWindow`):
+    /// `completed` is only finished tasks, `incomplete` only open ones, `all` everything, and
+    /// `default` — and `hide`, `show` or any value iOS does not know — open tasks plus what was
+    /// finished inside the window.
     #[test]
-    fn hide_and_show_do_what_they_say() {
-        let mut done = task("done");
-        done.completed = true;
-        done.completed_at = Some(at("2020-01-01T00:00:00Z"));
+    fn d22_completion_filter_reads_ios_values() {
+        let mut fresh = task("fresh");
+        fresh.completed = true;
+        fresh.completed_at = Some(at("2026-09-07T11:00:00Z"));
+        let mut stale = task("stale");
+        stale.completed = true;
+        stale.completed_at = Some(at("2020-01-01T00:00:00Z"));
+        let tasks = vec![task("open"), fresh, stale];
 
-        let hidden = filter_for_list(
-            std::slice::from_ref(&done),
-            &list(serde_json::json!({ "filterCompletion": "hide" })),
-            None,
-            now(),
-            utc(),
-        );
-        assert!(hidden.is_empty());
+        let shown = |value: &str| {
+            ids(&filter_for_list(
+                &tasks,
+                &list(serde_json::json!({ "filterCompletion": value })),
+                None,
+                now(),
+                utc(),
+            ))
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        };
 
-        let shown = filter_for_list(
-            std::slice::from_ref(&done),
-            &list(serde_json::json!({ "filterCompletion": "show" })),
-            None,
-            now(),
-            utc(),
-        );
-        assert_eq!(shown.len(), 1);
+        assert_eq!(shown("all"), vec!["open", "fresh", "stale"]);
+        assert_eq!(shown("completed"), vec!["fresh", "stale"]);
+        assert_eq!(shown("incomplete"), vec!["open"]);
+        assert_eq!(shown("default"), vec!["open", "fresh"]);
+        for read_as_default in ["hide", "show", "somethingLater"] {
+            assert_eq!(
+                shown(read_as_default),
+                vec!["open", "fresh"],
+                "{read_as_default} reads as default"
+            );
+        }
     }
 
     // ── The rule that keeps lists from emptying ──────────────────────────────────────────────

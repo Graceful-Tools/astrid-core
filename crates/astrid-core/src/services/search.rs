@@ -10,7 +10,8 @@
 //! reason.
 //!
 //! That also makes the matching rules honest about what they are: a substring match, case
-//! insensitive, over the title and the description. Not a ranked search, not a fuzzy one. Saying
+//! insensitive, over the title, the description and the assignee's name — iOS's list search
+//! (`TaskListView.applySearchFilter`), followed since 2026-10-03. Not a ranked search, not a fuzzy one. Saying
 //! so here means nobody has to read the implementation to find out that "buy milk" will not find
 //! "milk, buy".
 
@@ -98,16 +99,35 @@ pub fn search(
         .iter()
         .filter(|task| in_scope(task, scope))
         .filter(|task| structured_match(task, &parsed, context))
-        .filter(|task| {
-            needle.is_empty()
-                || task.title.to_lowercase().contains(&needle)
-                || task.description.to_lowercase().contains(&needle)
-        })
+        .filter(|task| needle.is_empty() || text_matches(task, &needle, context.users))
         .cloned()
         .collect();
 
     sort(&mut found, &needle);
     found
+}
+
+/// The free-text match: the title, the description, or the assignee's name — iOS's list search
+/// (`TaskListView.applySearchFilter`). The name is the task's own `assignee`, or the cached person
+/// its `assigneeId` names when the row carries only the id. Name or email, as iOS's `displayName`
+/// reads, but never its "Unknown User" placeholder: nobody searching "unknown" means that.
+fn text_matches(task: &Task, needle: &str, users: &[User]) -> bool {
+    if task.title.to_lowercase().contains(needle)
+        || task.description.to_lowercase().contains(needle)
+    {
+        return true;
+    }
+    let assignee = task.assignee.as_ref().or_else(|| {
+        let id = task.assignee_id.as_deref()?;
+        users.iter().find(|user| user.id == id)
+    });
+    assignee.is_some_and(|user| {
+        user.name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .or(user.email.as_deref())
+            .is_some_and(|name| name.to_lowercase().contains(needle))
+    })
 }
 
 /// Match `query` against `tasks` as plain text. What [`search`] does without a context — for the
@@ -120,10 +140,7 @@ pub fn matches(tasks: &[Task], query_text: &str, scope: &SearchScope) -> Vec<Tas
     let mut found: Vec<Task> = tasks
         .iter()
         .filter(|task| in_scope(task, scope))
-        .filter(|task| {
-            task.title.to_lowercase().contains(&needle)
-                || task.description.to_lowercase().contains(&needle)
-        })
+        .filter(|task| text_matches(task, &needle, &[]))
         .cloned()
         .collect();
     sort(&mut found, &needle);
@@ -322,6 +339,33 @@ mod tests {
         let found = matches(&[home, work], "buy", &scope);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "home");
+    }
+
+    /// iOS's list search (`TaskListView.applySearchFilter`) matches the title, the description
+    /// and the assignee's name. Followed here, for plain text and for the grammar's free text.
+    #[test]
+    fn search_matches_the_assignee_name_as_ios_does() {
+        let mut held = task("held", "Water the plants");
+        held.assignee_id = Some("u2".into());
+        let mut priya = User::new("u2");
+        priya.name = Some("Priya Raman".into());
+        held.assignee = Some(priya);
+        let tasks = vec![held, task("other", "Buy milk")];
+
+        let found = matches(&tasks, "priya", &SearchScope::everywhere());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "held");
+
+        let context = SearchContext {
+            lists: &[],
+            users: &[],
+            current_user_id: None,
+            now: date::parse("2026-09-07T12:00:00Z").expect("an instant"),
+            offset: FixedOffset::east_opt(0).expect("UTC"),
+        };
+        let found = search(&tasks, "raman", &SearchScope::everywhere(), &context);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "held");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! My Tasks: what one person is actually holding, wherever it lives.
 //!
-//! Ports `astrid-ios/Astrid Mac/App/MacMyTasks.swift` and the `MyTasksPreferences` model beside
-//! it. Not a list and not one of the virtual lists either: a virtual list is a saved set of
+//! Follows iOS's My Tasks (`TaskListView`, inline) and the `MyTasksPreferences` model; first
+//! ported from the Mac's `MacMyTasks.swift`. Not a list and not one of the virtual lists either: a virtual list is a saved set of
 //! filters that belongs to the account's list collection, and this is the view the app opens on.
 //!
 //! ## Why the preferences are shaped differently from a list's
@@ -13,9 +13,10 @@
 //!
 //! ## Scope is not a filter
 //!
-//! "Mine or nobody's" is what My Tasks *is*, not something the sheet can change. An unassigned
-//! task counts: it is the pile of things nobody has picked up, which is exactly what somebody
-//! opening this view is looking for.
+//! "Assigned to me" is what My Tasks *is*, not something the sheet can change — iOS's rule
+//! (`docs/CONTRACTS.md` D25, resolved toward iOS 2026-10-03). The Mac and this crate used to add
+//! unassigned tasks; iOS never did. For the same reason `filter_assignee` is carried for the
+//! round trip but never narrows anything: iOS does not read it.
 
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,8 @@ pub struct Preferences {
     /// Empty means every priority — see the module note.
     #[serde(default)]
     pub filter_priority: Vec<i64>,
-    /// Empty means everybody the scope already allows.
+    /// Carried so a write keeps what another client stored; never applied — iOS's My Tasks does
+    /// not read it, and its scope already is "assigned to me" (D25).
     #[serde(default)]
     pub filter_assignee: Vec<String>,
     #[serde(default = "all")]
@@ -105,30 +107,21 @@ pub fn filter<'a>(
                     .filter_priority
                     .contains(&task.priority.as_i64())
         })
-        .filter(|task| {
-            preferences.filter_assignee.is_empty()
-                || task
-                    .assignee_id
-                    .as_deref()
-                    .is_some_and(|id| preferences.filter_assignee.iter().any(|held| held == id))
-        })
         .collect()
 }
 
-/// Yours, or nobody's.
+/// Assigned to the reader — iOS's `task.assigneeId == currentUserId`.
 ///
-/// Signed out this is nobody's tasks rather than everybody's: showing every task in the account as
-/// if it were yours is the more alarming of the two failures, which is the rule the list filters
-/// follow too.
+/// Signed out, nothing is: iOS shows an empty My Tasks rather than everybody's tasks. The nested
+/// `assignee` stands in for a missing `assigneeId`, since some payloads carry only the relation.
 fn in_scope(task: &Task, current_user_id: Option<&str>) -> bool {
-    let assignee = task
-        .assignee_id
+    let Some(reader) = current_user_id else {
+        return false;
+    };
+    task.assignee_id
         .as_deref()
-        .or(task.assignee.as_ref().map(|user| user.id.as_str()));
-    match assignee {
-        None => true,
-        Some(assignee) => current_user_id == Some(assignee),
-    }
+        .or(task.assignee.as_ref().map(|user| user.id.as_str()))
+        == Some(reader)
 }
 
 #[cfg(test)]
@@ -150,31 +143,43 @@ mod tests {
         task
     }
 
-    /// The pile of things nobody has picked up is exactly what somebody opening this is looking
-    /// for, so an unassigned task belongs here.
+    /// D25, resolved toward iOS (`TaskListView`'s inline My Tasks: `assigneeId == currentUserId`):
+    /// only what is assigned to the reader. Unassigned tasks — even ones the reader made — are not
+    /// held by anybody, so they are not in My Tasks.
     #[test]
-    fn my_tasks_is_yours_and_nobodys() {
+    fn d25_my_tasks_is_assigned_to_the_reader_only() {
+        let mut made_by_me = task("made-by-me", None);
+        made_by_me.creator_id = Some("u1".into());
         let tasks = vec![
             task("mine", Some("u1")),
             task("nobodys", None),
+            made_by_me,
             task("theirs", Some("u2")),
         ];
 
         let held = filter(&tasks, Some("u1"), &Preferences::default(), now(), utc());
 
         let ids: Vec<&str> = held.iter().map(|task| task.id.as_str()).collect();
-        assert_eq!(ids, vec!["mine", "nobodys"]);
+        assert_eq!(ids, vec!["mine"]);
+        assert!(
+            filter(&tasks, None, &Preferences::default(), now(), utc()).is_empty(),
+            "signed out, nothing is assigned to the reader"
+        );
     }
 
-    /// Signed out, this is nobody's tasks rather than everybody's.
+    /// D25: iOS's My Tasks never reads `filterAssignee` — the scope already is "assigned to me" —
+    /// so a value left in the preferences by another client narrows nothing.
     #[test]
-    fn signed_out_it_holds_only_what_nobody_owns() {
-        let tasks = vec![task("mine", Some("u1")), task("nobodys", None)];
+    fn d25_my_tasks_ignores_filter_assignee() {
+        let tasks = vec![task("mine", Some("u1"))];
+        let preferences = Preferences {
+            filter_assignee: vec!["u2".into()],
+            ..Default::default()
+        };
 
-        let held = filter(&tasks, None, &Preferences::default(), now(), utc());
+        let held = filter(&tasks, Some("u1"), &preferences, now(), utc());
 
         assert_eq!(held.len(), 1);
-        assert_eq!(held[0].id, "nobodys");
     }
 
     /// The mistake the Mac's port calls out: empty is the default, so reading it as "match

@@ -7,6 +7,12 @@ divergences** — the things a generated fixture cannot tell you.
 A divergence listed here is not a Windows bug to fix locally. Fixing one means changing every
 client together, and the entry says which behaviour this crate currently follows and why.
 
+> **On disagreement, follow iOS** (Jon, 2026-10-03). Where this crate's behaviour differs from the
+> iOS app's, the crate changes to iOS's behaviour, and the web adopts it as it moves onto the core.
+> This overrides "web is canonical" for *disputed* behaviour only: a rule the clients agree on
+> still changes on web first, and the fixtures in `contracts/fixtures/` are still generated from
+> web and never hand-edited. Entries settled this way say "Resolved 2026-10-03 toward iOS".
+
 ---
 
 ## 1. Repeating-task rollover
@@ -14,6 +20,12 @@ client together, and the entry says which behaviour this crate currently follows
 Canonical: `astrid-web/types/repeating.ts` and `astrid-web/lib/repeating-task-handler.ts`.
 Apple: asks this crate (`rules` → `completion` / `nextOccurrence`) since 2026-09-28.
 Here: `astrid_core::repeating`.
+
+**Under the follow-iOS rule (2026-10-03), D1–D5 need no change:** the Apple apps already ask this
+crate for repeating math, so iOS's answer *is* this crate's answer. Where web still disagrees
+(D1's timed-task zone, D3's whose-midnight, D4's server-zone dependence), this crate's answer is
+the one web adopts when it moves onto the core. Where this crate reproduces web deliberately (D2,
+D5), iOS reproduces it too, so there is no iOS-vs-core disagreement to resolve.
 
 ### D1 — Whose calendar a step is taken on
 
@@ -536,16 +548,20 @@ for a completion made anywhere but the web.
 
 ### D22 — the Apple completion filter reads values this crate does not
 
-Apple's list filter (`RecentlyCompletedPresets.applyCompletionFilterWithWindow`) knows
-`completed` (only completed tasks) and `incomplete` (only open ones), and treats `hide` or any
-unknown value as `default`. This crate (`filters::recently_completed::should_show_completed`)
-knows only `hide` and `default`, and keeps everything for any other value. The pickers differ
-too: Apple offers default / all / completed / incomplete, this crate default / hide / all.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `filters::recently_completed::should_show_completed` / `should_show_open`
+now read iOS's values (`RecentlyCompletedPresets.applyCompletionFilterWithWindow`, which is also
+web's `shouldShowCompletedByFilter`): `completed` (only finished tasks), `incomplete` (only open
+ones), `all`, and `default` (open plus recent completions in the window) — with `hide`, `show`,
+absent and any unknown value read as `default`. The picker (`rows::filter_picks`, `COMPLETION`)
+offers iOS's four in iOS's order: default / all / completed / incomplete (new keys
+`filter.completion.completed` and `filter.completion.incomplete`; `filter.completion.hide` is
+gone). Tests: `d22_completion_filter_reads_ios_values`, `d22_completion_picker_offers_ios_choices`,
+`an_unrecognised_filter_mode_reads_as_default`.
 
-- **Where it bites:** a list saved on a Mac as "completed" shows everything on Windows; one saved
-  on Windows as "hide" shows the recent completions on Apple.
-- **To settle against the web** (`filterCompletion` in the web's list settings) before either side
-  moves.
+Previously: Apple knew `completed` / `incomplete` and read `hide` or unknown as `default`; this
+crate knew only `hide` and `default` and kept everything for any other value, so a list saved on a
+Mac as "completed" showed everything on Windows. Reading an unknown value as `default` still never
+empties a list: open tasks stay.
 
 ### D23 — a mention on the Mac is plain text
 
@@ -555,34 +571,71 @@ pill, no notification.
 
 ### D24 — snooze moves a different field, by different amounts
 
-Apple's snooze (`ReminderPresenter.snoozeTask`) moves `dueDateTime` and offers 15 minutes, a day
-and a week, while the notification action snoozes 60 minutes. This crate's `reminders` moves
-`reminderTime` and offers 10, 30, 60 and 1440 minutes. Snoozing a reminder should not move the
-task's due date; this crate is right about the field, and the choices are to be settled against
-the web's.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `SnoozeReminder` (`app::dispatch::reminders::snooze_reminder`) now does
+what `ReminderPresenter.snoozeTask` does: it writes `dueDateTime` = now + the snooze, as a timed
+task (`isAllDay: false`), and **leaves `reminderTime` untouched** — iOS never writes it when
+snoozing. The choices are iOS's: 15 minutes, a day, a week (`reminders::SNOOZE_CHOICES`, from
+`ReminderView`), and the notification action's hour is `reminders::NOTIFICATION_SNOOZE_MINUTES`.
+iOS reschedules its local notification for the snoozed time; the core's equivalent is a
+device-local snooze mark (cache metadata `reminder.snoozed.<id>`), so the in-app reminder comes
+back at the later of `reminderTime` and the mark (`reminders::reminder_at`). Tests:
+`d24_snooze_moves_the_due_date_as_ios_does`, `d24_a_snoozed_reminder_comes_back_at_the_snoozed_time`,
+`d24_snooze_choices_are_ios`, `a_snooze_mark_moves_the_reminder_on_this_device`.
+
+Previously this crate moved `reminderTime` by 10/30/60/1440 minutes — which the v1 task PUT
+ignores, so that snooze never reached the server; the due date does.
 
 ### D25 — My Tasks on iOS is only what is assigned to you
 
-iOS's My Tasks (`TaskListView`, inline) keeps tasks assigned to the reader. The Mac
-(`MacMyTasks.filter`) and this crate (`filters::my_tasks`) keep those **and unassigned tasks the
-reader created**, and this crate also applies the view's `filterAssignee`.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `filters::my_tasks::filter` keeps only tasks assigned to the reader (iOS's
+`task.assigneeId == currentUserId`; the nested `assignee` stands in for a missing id). Unassigned
+tasks — even ones the reader created — are out, and signed out it is empty. `filterAssignee` is
+carried in the preferences for the round trip but never applied, because iOS's My Tasks does not
+read it. Tests: `d25_my_tasks_is_assigned_to_the_reader_only`, `d25_my_tasks_ignores_filter_assignee`.
+The Mac (`MacMyTasks.filter`) still includes unassigned tasks it created; it should take this.
 
 ### D26 — Apple's due-date quick picks cannot clear a date, and pick local midnight
 
-`DueDateQuickPicks` offers four dates and no "No due date", and builds them in the local
-calendar. This crate's `rows::due_picks` leads with "No due date" and stores all-day picks as UTC
-midnight, as every all-day date is stored.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `rows::due_picks::DATE_OPTIONS` is iOS's four — Today, Tomorrow, In 3
+days, Next week — with no "No due date" row (`DueDateQuickPicks.dateOptions`), and
+`dueDateOptions` no longer returns a clearing row; clearing remains `dueDateTime: null` on an
+edit. Test: `d26_due_date_quick_picks_are_ios_four` (and the `dueDateOptions` dispatch tests).
+
+**Storage is unchanged, because iOS agrees with it.** iOS's all-day quick pick
+(`InlineDatePicker.setQuickDate`) takes the reader's local calendar day and writes it at UTC
+midnight, and `TaskService.updateTask` normalises any all-day date to UTC start of day — the same
+value `due_picks::all_day_pick` stores. Nothing needed flagging; the "local midnight" in this
+entry's title described the picker's arithmetic, not the stored value.
 
 ### D27 — priority labels are one step apart
 
-Apple labels 3/2/1/0 as Highest / High / Medium / Low; this crate as high / medium / low / none,
-which is the web's. The stored numbers agree; only the words differ.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). The priority filter picks (`rows::filter_picks`, `PRIORITY`) now label
+3/2/1/0 as Highest / High / Medium / Low, under the keys iOS's filter sheet resolves:
+`lists.highest_priority`, `lists.high_priority`, `lists.medium_priority`, `lists.low_priority`
+(iOS `Localizable.strings`: "!!! Highest", "!! High", "! Medium", "○ Low"). The stored numbers
+are unchanged. Test: `d27_priority_labels_are_ios_words`. A shell that resolved the old
+`priority.*` keys for these picks needs the four new ones. (The search grammar's
+`priority:high` = 3 is web's fixture-locked vocabulary and is untouched.)
 
 ### D28 — each Apple list picker applies half of "can a task be filed here"
 
-`rows::list_picks::is_destination` excludes virtual lists and board-status lists. iOS's
-`InlineListsPicker` excludes only virtual lists and the Mac's `MacListPicker` only status lists,
-so each offers a destination the other refuses.
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `rows::list_picks::is_destination` now refuses only virtual lists, as
+iOS's `InlineListsPicker` does; board-status lists and labels are offered. `ListService::destinations`
+asks the same function, so there is one rule. Tests: `d28_list_picker_excludes_virtual_lists_only`,
+`virtual_lists_are_not_offered_as_destinations`. The Mac's `MacListPicker` (excludes only status
+lists) should take this.
+
+### Subtask splice depth and list search — checked against iOS 2026-10-03
+
+- **Splice depth cap: no divergence.** iOS's private splice in `TaskListView.filteredTasks` and the
+  shared `SubtaskSplicing.swift` both stop following children at depth 10 (`depth < 10`), which is
+  `filters::subtasks::MAX_SPLICE_DEPTH`. Pinned by `subtask_splice_depth_cap_matches_ios`.
+- **Search: resolved toward iOS.** iOS's list search (`TaskListView.applySearchFilter`) matches the
+  title, the description and the assignee's name. `services::search` (`search` and `matches`) now
+  matches the assignee's name too — the task's `assignee`, or the cached person its `assigneeId`
+  names — but not iOS's "Unknown User" placeholder. The structured grammar (`parse::search`, locked
+  by the web-generated `search.json`) is untouched and still passes. Test:
+  `search_matches_the_assignee_name_as_ios_does`.
 
 ### D29 — Apple refused members of a public copy-only list
 

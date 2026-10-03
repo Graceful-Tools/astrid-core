@@ -42,18 +42,21 @@ pub struct FilterGroup {
 
 type Choices = &'static [(&'static str, &'static str)];
 
+/// iOS's choices, in iOS's order (`ListSortFiltersTab`, `MyTasksFilterSheet`; D22).
 const COMPLETION: Choices = &[
     ("default", "filter.completion.recent"),
-    ("hide", "filter.completion.hide"),
     ("all", "filter.completion.all"),
+    ("completed", "filter.completion.completed"),
+    ("incomplete", "filter.completion.incomplete"),
 ];
 
 const PRIORITY: Choices = &[
     ("all", "filter.any"),
-    ("3", "priority.high"),
-    ("2", "priority.medium"),
-    ("1", "priority.low"),
-    ("0", "priority.none"),
+    // iOS's words and keys (`Localizable.strings`): Highest / High / Medium / Low (D27).
+    ("3", "lists.highest_priority"),
+    ("2", "lists.high_priority"),
+    ("1", "lists.medium_priority"),
+    ("0", "lists.low_priority"),
 ];
 
 const DUE_DATE: Choices = &[
@@ -289,6 +292,45 @@ mod tests {
         assert_eq!(
             values("filterInLists"),
             vec!["dont_filter", "in_list", "not_in_list", "public_lists"]
+        );
+    }
+
+    /// D22, resolved toward iOS: the completion picker offers what iOS's list and My Tasks
+    /// sheets offer, in their order (`ListSortFiltersTab`, `MyTasksFilterSheet`).
+    #[test]
+    fn d22_completion_picker_offers_ios_choices() {
+        let groups = groups(&list());
+        let completion = groups
+            .iter()
+            .find(|group| group.field == "filterCompletion")
+            .expect("a group");
+        let values: Vec<&str> = completion.picks.iter().map(|pick| pick.value).collect();
+        assert_eq!(values, vec!["default", "all", "completed", "incomplete"]);
+    }
+
+    /// D27, resolved toward iOS: 3/2/1/0 read Highest / High / Medium / Low, under the keys iOS's
+    /// filter sheet resolves (`lists.highest_priority` and friends in `Localizable.strings`).
+    #[test]
+    fn d27_priority_labels_are_ios_words() {
+        let groups = groups(&list());
+        let priority = groups
+            .iter()
+            .find(|group| group.field == "filterPriority")
+            .expect("a group");
+        let picks: Vec<(&str, &str)> = priority
+            .picks
+            .iter()
+            .map(|pick| (pick.value, pick.title_key))
+            .collect();
+        assert_eq!(
+            picks,
+            vec![
+                ("all", "filter.any"),
+                ("3", "lists.highest_priority"),
+                ("2", "lists.high_priority"),
+                ("1", "lists.medium_priority"),
+                ("0", "lists.low_priority"),
+            ]
         );
     }
 
