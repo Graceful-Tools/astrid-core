@@ -87,6 +87,8 @@ crates/astrid-rules/src/
   rules.rs      the stateless door: JSON in, JSON out, synchronous (`rules::run_json`)
   envelope.rs   the `{ ok, value?, error? }` answer both doors share
 crates/astrid-rules/tests/   the fixture-locked contract tests
+crates/astrid-rules-wasm/    `rules::run_json` for the web, via wasm-bindgen; `scripts/build-wasm.sh
+                             <out>` writes the Node and browser packages astrid-web vendors
 crates/astrid-core/src/
   api/          the only place that speaks HTTP
   store/        the SQLite cache; the read path never waits on the network

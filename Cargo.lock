@@ -65,6 +65,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrid-rules-wasm"
+version = "0.1.0"
+dependencies = [
+ "astrid-rules",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
