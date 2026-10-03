@@ -731,7 +731,9 @@ windows are wanted on every client, they are added on iOS and here together, fro
   not followed: when *this* month lacks the Nth — 9 September, "since the 31st" — iOS builds 31
   September, which Foundation reads as 1 October, and steps back to **1 September**; web and this
   crate say 31 August, the date the setting names. That iOS answer is an accident of lenient date
-  building rather than a choice, and the fixture keeps web's answer for it.)
+  building rather than a choice, and the fixture keeps web's answer for it. **Decided 2026-10-03
+  (Jon): 31 August.** iOS was changed to match — `getRecentlyCompletedCutoff` clamps the day to
+  last month's length, `RecentlyCompletedWindowTests.testCutoff_sinceDayOfMonth_D36_*`.)
 - **An unreadable `since-date`.** Web's cutoff becomes an invalid date and hides every completed
   task; iOS (`?? now`) and this crate count from now, which only differs for a completion stamped
   in the future. Resolved toward iOS.
