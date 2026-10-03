@@ -293,8 +293,12 @@ client can produce would be worse than the gap.
 
 Canonical: `astrid-web`'s list view; shared on Apple by
 `astrid-ios/Astrid App/Core/Filters/ListTaskFiltering.swift`, which iOS and Mac both call. Here:
-[`astrid_core::filters`]. Not yet fixture-locked — the exporter cannot run web's list view — so it
-is a port with tests rather than a generated contract.
+[`astrid_core::filters`]. **Fixture-locked since 2026-10-03** by `contracts/fixtures/filters.json`
+(the due-date filter, the completion filter with every window kind, and the sort) and
+`manual-order.json`: the driver runs the pure functions web's list view calls
+(`hooks/useFilterState.ts` → `applyDateFilter`, `shouldShowCompletedByFilter`, `sortTasksForList`),
+since the hook itself cannot be imported. Where iOS and web disagree the core follows iOS and the
+cases sit in the fixture's `disputed` array under D7 and D33–D36.
 
 The governing rule on all three clients is that **an unrecognised filter value keeps everything**.
 These values are stored on the server and synced between clients, so a build from six months ago
@@ -303,23 +307,24 @@ list on their screen for no visible reason.
 
 ### D7 — an unrecognised due-date filter hides undated tasks
 
-Every client answers a task with **no due date** before it looks at the filter value:
+iOS answers a task with **no due date** before it looks at the filter value:
 
 ```
 guard let dueDateTime = task.dueDateTime else { return filter == "no_date" }
 ```
 
-So for a value none of them recognise, dated tasks are kept (the `default:` arm returns true) and
+So for a value it does not recognise, dated tasks are kept (the `default:` arm returns true) and
 undated ones are dropped. The rule holds for every other filter and fails for this one.
+
+**Measured 2026-10-03, web does not do this**: `applyDateFilter`'s `default` keeps every task,
+dated or not (`filters.json`, disputed under D7). Under the follow-iOS rule this crate keeps iOS's
+answer, so the paragraph below now describes an iOS-and-core behaviour that web does not share.
 
 - **Where it bites:** a client older than a due-date filter value the server has learned shows a
   list with every undated task missing. Undated tasks are the majority in most lists.
-- **This crate follows the existing behaviour**, reproduced deliberately with a test that says so
-  — a client that fixed it alone would show a different list from the other two, which is worse
-  than the bug.
-- **The fix is one line on each of three clients**: answer the undated case inside the `match`, so
-  an unknown filter falls through to "keep it" like everything else. Web first, then here, then
-  astrid-ios.
+- **This crate follows iOS**, reproduced deliberately with a test that says so.
+- **The fix is one line on iOS and here**: answer the undated case inside the `match`, so an
+  unknown filter falls through to "keep it" like everything else — which is what web already does.
 
 ### D8 — the two Apple clients order the assignee picker differently
 
@@ -673,3 +678,92 @@ refused cycle becomes a dead letter the person never sees, and searches its own 
 candidates. **Resolved 2026-09-28** as D31 was: an add or a removal is sent at once and a
 refusal fails the command; only a failed network journals it. The picker asks the server's search
 first and falls back to this cache offline.
+
+## Phase 0: what the new fixtures found (2026-10-03)
+
+Four rules the core had ported with no fixture behind them — markdown, filters and date windows,
+manual order, reminders — are now locked by web-generated fixtures (`contracts/README.md`). Each
+driver routes the cases where the core deliberately follows iOS to its fixture's `disputed` array,
+naming the entry below; the tests require each entry still to disagree with web somewhere, so an
+entry cannot outlive the divergence.
+
+Two drifts were plain bugs in the core and were fixed rather than recorded: **"Recently
+completed" (`completedAt`) sorted as auto here**, while iOS and web both lead with what was
+finished last (task c6e87fb8; `filters::sort_by_setting`) — the sort picker
+(`rows::filter_picks`) still does not offer it, which a shell adding it needs a string for; and
+four markdown corners listed under D38.
+
+### D33 — sort orders: the core's are iOS's
+
+**Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS); the core already answered
+this way. iOS (`sortTasksByListSetting`) and this crate differ from web's `sortTasksForList` in:
+
+| Order | Web | iOS / here |
+|---|---|---|
+| `priority` | priority only — a finished task can sit between open ones | completed sink, then priority, then due date |
+| `when` | reads the legacy `when` / `dueDate` fields, which v1 tasks do not carry, so it keeps the input order | due date (ties by priority), undated after, completed last |
+| `assignee`, `completed`, `incomplete` | sorts by them | not orders iOS has: read as auto |
+| `createdAt` | not an order web has: read as auto | newest first |
+| `manual`, tasks the arrangement does not name / nothing arranged | oldest first | newest first |
+
+`auto`, `completedAt`, an unknown order and an absent one agree and are fixture-locked. Web's
+`when` is the one worth fixing soonest: on web that sort currently does nothing.
+
+### D34 — a timed task due earlier today is overdue on web, not on iOS
+
+Web's `isTaskOverdue` compares instants for a timed task, so 9am today is overdue at 10:30. iOS's
+`applyListDueDateFilter` (and `filters::matches_due_date`) compares days: it is due today, and
+overdue tomorrow. **Resolved 2026-10-03 toward iOS.** (`filters::is_overdue`, used for row
+styling, compares instants like web — a separate rule, not part of the list filter.)
+
+### D35 — `tomorrow`, `this_calendar_week`, `this_calendar_month` exist only on web
+
+Web filters by them; iOS does not know them and, like any unknown value, keeps every dated task
+and drops undated ones (D7). **Resolved 2026-10-03 toward iOS** — the core does the same. If the
+windows are wanted on every client, they are added on iOS and here together, from web's
+`date-filter-utils.ts` (whose answers this fixture already records).
+
+### D36 — two edges of the recently-completed window
+
+- **"Since the Nth" when last month has no Nth.** On 9 March, "since the 31st": web's
+  `setMonth(-1)` then `setDate(31)` rolls on to **3 March**; iOS's `Calendar` arithmetic and this
+  crate clamp to **28 February**. Resolved 2026-10-03 toward iOS. (One more iOS corner, recorded
+  not followed: when *this* month lacks the Nth — 9 September, "since the 31st" — iOS builds 31
+  September, which Foundation reads as 1 October, and steps back to **1 September**; web and this
+  crate say 31 August, the date the setting names. That iOS answer is an accident of lenient date
+  building rather than a choice, and the fixture keeps web's answer for it.)
+- **An unreadable `since-date`.** Web's cutoff becomes an invalid date and hides every completed
+  task; iOS (`?? now`) and this crate count from now, which only differs for a completion stamped
+  in the future. Resolved toward iOS.
+
+### D37 — web caps a reminder at five snoozes
+
+`lib/reminder-snooze.ts` refuses a sixth snooze of one server reminder. iOS snoozes as often as
+asked (and, per D24, moves the due date rather than a queue row), and so does this crate. Both
+agree on when a snooze comes back — now plus the minutes, within the v1 route's 1..10080 — which
+`reminders.json` locks. Web's in-browser reminder manager decides nothing a client could share
+(its check loop is a stub), so `reminders::due_now` stays covered by its unit tests.
+
+### D38 — markdown: what `marked` + DOMPurify and this crate read differently
+
+The web renders HTML through `marked` and its sanitiser; this crate parses with pulldown-cmark
+into blocks, which the Apple apps draw (`CoreRules.markdown`) and Windows will. `markdown.json`
+compares at the level a reader sees — the web's sanitised HTML read back into blocks in a jsdom
+window (`contracts/drivers/markdown.mjs` says exactly how) — over 107 texts covering what the apps
+use. 103 agree. **Fixed here** on the way (they were bugs, not choices):
+
+- an address the browser cannot parse (`https://google.com]`, task 11cfaf6d's own description) was
+  a link here and is plain text on the page;
+- `http://www.` was upgraded to `https://` only for a bare host, not a typed link;
+- a reference inside a code span showed its private-use placeholder;
+- `<script>` / `<style>` content was shown as text;
+- an indented code block lacked the closing newline `marked` gives every block.
+
+**Kept, and disputed** (the core is what iOS draws, so it follows iOS):
+
+- **An ordered list's start number.** `3. three` is numbered 3 here; on the web it is 1, because
+  the sanitiser's attribute allowlist (`RICH_TEXT_ATTRS`) has no `start`. The fix is web's: add it.
+- **A reference inside code.** Web draws the pill inside the code span or block; this crate shows
+  the reference as typed, since code is literal.
+- **Inline HTML the web allowlists** (`<strong>`, `<em>`, `<del>`, `<code>`, `<br>`): web formats;
+  this crate reads all HTML as its text.

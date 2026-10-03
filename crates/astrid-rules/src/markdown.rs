@@ -273,6 +273,62 @@ fn safe_link(destination: &str) -> Option<String> {
     None
 }
 
+/// What the web's page does to an outbound address after `marked` has written it
+/// (`decorateExternalLinks` in `lib/markdown.ts`), so a reader here gets the same link:
+///
+/// - **`http://www.` becomes `https://www.`**, for a typed link as well as a bare one.
+/// - **An address the browser cannot parse is no link at all.** The web checks every outbound
+///   href with `new URL` and leaves an anchor with no address when it throws, which reads as
+///   plain text — `https://google.com]` from the description in task 11cfaf6d is one: `]` cannot
+///   be in a host. The check here is the WHATWG host rule, which is the part of `new URL` such a
+///   string fails.
+fn browser_href(href: String) -> Option<String> {
+    let lower = href.to_ascii_lowercase();
+    let href = if lower.starts_with("http://www.") {
+        format!("https://{}", &href["http://".len()..])
+    } else {
+        href
+    };
+    let lower = href.to_ascii_lowercase();
+    let rest = if let Some(rest) = lower.strip_prefix("https://") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("http://") {
+        rest
+    } else {
+        // mailto: and the app's own pages are not hosts to check.
+        return Some(href);
+    };
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or_default();
+    let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = if host_and_port.starts_with('[') {
+        // An IPv6 literal keeps its brackets; what follows may only be a port.
+        let end = host_and_port.find(']')?;
+        let port = &host_and_port[end + 1..];
+        let port_ok = port.is_empty()
+            || port
+                .strip_prefix(':')
+                .is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()));
+        return port_ok.then_some(href);
+    } else {
+        match host_and_port.split_once(':') {
+            Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
+            Some(_) => return None,
+            None => host_and_port,
+        }
+    };
+    const FORBIDDEN: &[char] = &[
+        ' ', '#', '%', '/', ':', '<', '>', '?', '@', '[', '\\', ']', '^', '|',
+    ];
+    if host.is_empty()
+        || host
+            .chars()
+            .any(|c| c.is_control() || FORBIDDEN.contains(&c))
+    {
+        return None;
+    }
+    Some(href)
+}
+
 /// Bare URLs in plain text, as GFM's autolink extension finds them.
 ///
 /// `https://…` and `http://…` from a word boundary, and `www.` hosts, which `marked` links as
@@ -389,18 +445,33 @@ fn email_at(rest: &str) -> Option<(usize, String)> {
     Some((length, format!("mailto:{}", &rest[..length])))
 }
 
-/// What is left of HTML the web would not allow: its text.
+/// What is left of HTML the web would not allow: its text — except inside `<script>` and
+/// `<style>`, which the web's sanitiser drops whole, content and all.
 fn strip_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
+    let mut rest = html;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        let from = &rest[open..];
+        let Some(close) = from.find('>') else {
+            // An unclosed `<` swallows the rest, as a tag would.
+            return out;
+        };
+        let tag = from[1..close].trim_start().to_ascii_lowercase();
+        rest = &from[close + 1..];
+        for element in ["script", "style"] {
+            let opens = tag.starts_with(element)
+                && !tag[element.len()..].starts_with(|c: char| c.is_ascii_alphanumeric());
+            if opens {
+                let end = format!("</{element}");
+                rest = match rest.to_ascii_lowercase().find(&end) {
+                    Some(at) => rest[at..].find('>').map_or("", |gt| &rest[at + gt + 1..]),
+                    None => "",
+                };
+            }
         }
     }
+    out.push_str(rest);
     out
 }
 
@@ -423,6 +494,8 @@ enum Frame {
     Code {
         language: Option<String>,
         text: String,
+        /// Fenced, or indented — `marked` trims their trailing newlines differently.
+        fenced: bool,
     },
     List {
         ordered: bool,
@@ -459,6 +532,9 @@ struct Builder {
     /// time stops where the parser stopped rather than where GFM says the address ends.
     /// Consecutive text is gathered and scanned once, when something else arrives.
     pending: String,
+    /// Inside an inline `<script>` or `<style>`, whose content the web's sanitiser drops along
+    /// with the tag — a page never shows it, so neither does this.
+    suppressed: usize,
 }
 
 impl Builder {
@@ -471,6 +547,7 @@ impl Builder {
             strike: 0,
             links: Vec::new(),
             pending: String::new(),
+            suppressed: 0,
         }
     }
 
@@ -543,6 +620,7 @@ impl Builder {
             }
             Tag::CodeBlock(kind) => {
                 self.close_implicit_paragraph();
+                let fenced = matches!(kind, CodeBlockKind::Fenced(_));
                 let language = match kind {
                     CodeBlockKind::Fenced(info) => {
                         let language = info.split_whitespace().next().unwrap_or("").to_string();
@@ -553,6 +631,7 @@ impl Builder {
                 self.stack.push(Frame::Code {
                     language,
                     text: String::new(),
+                    fenced,
                 });
             }
             Tag::List(start) => {
@@ -591,7 +670,9 @@ impl Builder {
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
-            Tag::Link { dest_url, .. } => self.links.push(safe_link(&dest_url)),
+            Tag::Link { dest_url, .. } => {
+                self.links.push(safe_link(&dest_url).and_then(browser_href))
+            }
             // Every `![…](…)` was taken out as a task reference before parsing, so an image here
             // is one with an empty label or id — drawn as its text, which is what is left of it.
             Tag::Image { .. } => self.links.push(None),
@@ -646,7 +727,27 @@ impl Builder {
                 }
             }
             Frame::Heading { level, inlines } => self.push_block(Block::Heading { level, inlines }),
-            Frame::Code { language, text } => self.push_block(Block::Code { language, text }),
+            Frame::Code {
+                language,
+                mut text,
+                fenced,
+            } => {
+                // `marked` ends every code block with exactly the one newline its renderer adds
+                // (`text.replace(/\n$/, '') + '\n'`), after its lexer has already dropped the
+                // newline before a closing fence — or, for an indented block, every trailing one.
+                let keep = if fenced {
+                    let once = text.strip_suffix('\n').unwrap_or(&text);
+                    once.strip_suffix('\n').unwrap_or(once).len()
+                } else {
+                    text.trim_end_matches('\n').len()
+                };
+                text.truncate(keep);
+                // An empty block stays empty.
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                self.push_block(Block::Code { language, text })
+            }
             Frame::List {
                 ordered,
                 start,
@@ -743,6 +844,9 @@ impl Builder {
     }
 
     fn text(&mut self, text: &str) {
+        if self.suppressed > 0 {
+            return;
+        }
         if matches!(self.stack.last(), Some(Frame::Code { .. })) {
             let restored = self.restore_sources(text);
             if let Some(Frame::Code { text: body, .. }) = self.stack.last_mut() {
@@ -762,11 +866,32 @@ impl Builder {
 
     fn code_span(&mut self, code: &str) {
         let mut inlines = std::mem::take(self.inlines());
-        self.push_runs(&mut inlines, code, true, None);
+        // A pill cannot be drawn inside code: the typed form comes back, as in a code block.
+        let restored = self.restore_sources(code);
+        self.push_runs(&mut inlines, &restored, true, None);
         *self.inlines() = inlines;
     }
 
     fn html(&mut self, html: &str) {
+        if !matches!(
+            self.stack.last(),
+            Some(Frame::Html(_)) | Some(Frame::Code { .. })
+        ) {
+            let tag = html.trim_start().to_ascii_lowercase();
+            if tag.starts_with("<script") || tag.starts_with("<style") {
+                self.suppressed += 1;
+                if !(tag.contains("</script") || tag.contains("</style")) {
+                    return;
+                }
+                self.suppressed -= 1;
+            } else if tag.starts_with("</script") || tag.starts_with("</style") {
+                self.suppressed = self.suppressed.saturating_sub(1);
+                return;
+            }
+            if self.suppressed > 0 {
+                return;
+            }
+        }
         match self.stack.last_mut() {
             Some(Frame::Html(body)) => body.push_str(html),
             Some(Frame::Code { text, .. }) => text.push_str(html),
@@ -823,7 +948,7 @@ impl Builder {
             return;
         }
         for (part, href) in split_autolinks(text) {
-            self.push_runs(inlines, &part, false, href);
+            self.push_runs(inlines, &part, false, href.and_then(browser_href));
         }
     }
 
@@ -953,9 +1078,10 @@ mod tests {
     }
 
     /// The description the task was filed with, rendered exactly as the web renders it: the
-    /// hashes stay (CommonMark wants a space after them), the emphasis takes, every newline is a
-    /// break, and the bare URL is a link — right up to the `]`, which GFM counts as part of it
-    /// (task 11cfaf6d).
+    /// hashes stay (CommonMark wants a space after them), the emphasis takes, and every newline is
+    /// a break (task 11cfaf6d). GFM reads the URL right up to the `]`, and the page then drops the
+    /// address because `]` cannot be in a host — so on the web it is text, not a link, and here
+    /// too (found by `tests/markdown_contract.rs`, which reads what the browser shows).
     #[test]
     fn the_reported_description_renders_as_the_web_renders_it_task_11cfaf6d() {
         let blocks = render("##title\n**bold**\n*italics*\n(link)[https://google.com]");
@@ -969,8 +1095,7 @@ mod tests {
                     Inline::LineBreak,
                     styled("italics", false, true),
                     Inline::LineBreak,
-                    plain("(link)["),
-                    linked("https://google.com]", "https://google.com]"),
+                    plain("(link)[https://google.com]"),
                 ]
             }]
         );
@@ -1243,6 +1368,80 @@ mod tests {
                 inlines: vec![plain("\nblock")]
             }]
         );
+    }
+
+    /// What the page does to an outbound address after `marked`: `http://www.` is upgraded on a
+    /// typed link too, and a host the browser cannot parse is no link (markdown contract).
+    #[test]
+    fn typed_links_are_upgraded_and_unparseable_hosts_are_text() {
+        assert_eq!(
+            render("[site](http://www.example.com/a)"),
+            vec![Block::Paragraph {
+                inlines: vec![linked("site", "https://www.example.com/a")]
+            }]
+        );
+        assert_eq!(
+            render("[bad](https://exa]mple.com/x)"),
+            vec![Block::Paragraph {
+                inlines: vec![plain("bad")]
+            }]
+        );
+        assert_eq!(
+            render("[local](http://localhost:3000/x)"),
+            vec![Block::Paragraph {
+                inlines: vec![linked("local", "http://localhost:3000/x")]
+            }]
+        );
+    }
+
+    /// A reference in a code span came out as its private-use sentinel; it is shown as typed,
+    /// as in a code block (markdown contract; D38 for why not as a pill).
+    #[test]
+    fn a_reference_in_a_code_span_is_shown_as_typed() {
+        assert_eq!(
+            render("`@[Ann](u1)`"),
+            vec![Block::Paragraph {
+                inlines: vec![Inline::Text {
+                    text: "@[Ann](u1)".into(),
+                    bold: false,
+                    italic: false,
+                    strike: false,
+                    code: true,
+                    link: None,
+                }]
+            }]
+        );
+    }
+
+    /// The web's sanitiser drops `<script>` and `<style>` with their content; so does this.
+    #[test]
+    fn script_and_style_content_is_never_shown() {
+        assert_eq!(render("<script>alert(1)</script>"), Vec::<Block>::new());
+        assert_eq!(
+            render("a <script>alert(1)</script> b"),
+            vec![Block::Paragraph {
+                inlines: vec![plain("a  b")]
+            }]
+        );
+        assert_eq!(
+            render("<style>p { color: red }</style>\n\nafter"),
+            vec![Block::Paragraph {
+                inlines: vec![plain("after")]
+            }]
+        );
+    }
+
+    /// `marked` ends a code block with one newline: an indented block gains it, trailing blank
+    /// lines go, and an empty fence stays empty.
+    #[test]
+    fn a_code_block_ends_with_one_newline_as_on_the_web() {
+        let text = |source: &str| match render(source).as_slice() {
+            [Block::Code { text, .. }] => text.clone(),
+            other => panic!("{source:?} rendered {other:?}"),
+        };
+        assert_eq!(text("    x = 1"), "x = 1\n");
+        assert_eq!(text("```\ncode\n\n```"), "code\n");
+        assert_eq!(text("```\n```"), "");
     }
 
     #[test]

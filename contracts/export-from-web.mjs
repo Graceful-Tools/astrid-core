@@ -162,6 +162,27 @@ function exportTaskIdentifiers() {
   return { $source: $comment, ...rest }
 }
 
+// The four rules the core had ported with no fixture behind them (Phase 0): each driver runs the
+// web's own functions and routes the cases the clients deliberately disagree on — the follow-iOS
+// rule — to a `disputed` array naming the docs/CONTRACTS.md entry (drivers/disputed.mjs).
+function exportManualOrder() {
+  return runDriver('manual-order.mjs', 'manual-order')
+}
+
+function exportFilters() {
+  return runDriver('filters.mjs', 'filters')
+}
+
+function exportReminders() {
+  return runDriver('reminders.mjs', 'reminders')
+}
+
+// Web renders HTML and the core renders blocks, so the driver reads web's HTML back into blocks
+// in a jsdom window — the browser's path through DOMPurify, which is what a reader sees.
+function exportMarkdown() {
+  return runDriver('markdown.mjs', 'markdown')
+}
+
 const EXPORTS = {
   'shortcuts.json': exportShortcuts,
   'repeating.json': exportRepeating,
@@ -172,6 +193,10 @@ const EXPORTS = {
   'search.json': exportSearch,
   'smart.json': exportSmart,
   'task-identifiers.json': exportTaskIdentifiers,
+  'manual-order.json': exportManualOrder,
+  'filters.json': exportFilters,
+  'reminders.json': exportReminders,
+  'markdown.json': exportMarkdown,
 }
 
 let failed = false
