@@ -1,0 +1,19 @@
+[package]
+name = "astrid-rules-wasm"
+description = "astrid-rules' stateless door (`rules::run_json`) as WebAssembly, for astrid-web."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+serde_json = { workspace = true }

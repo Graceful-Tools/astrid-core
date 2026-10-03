@@ -30,6 +30,8 @@ workflow.
 8. **`astrid-rules` stays pure.** No clock, disk, network or entropy in `crates/astrid-rules` —
    "now" and the zone are arguments. It is what the web loads as WebAssembly; CI builds it for
    `wasm32-unknown-unknown`, and a dependency that breaks that build belongs in `astrid-core`.
+   The web's binding is `crates/astrid-rules-wasm`; `scripts/build-wasm.sh <out>` builds it, and
+   astrid-web vendors the output at a pinned revision (its `packages/astrid-rules/REVISION`).
 9. **Nothing platform-specific lives here.** A platform need arrives through a trait in
    `astrid_core::platform`, implemented by the shell. The Windows C ABI is astrid-windows's
    `astrid-ffi`; Apple bindings belong to astrid-ios.

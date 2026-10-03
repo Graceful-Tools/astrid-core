@@ -78,6 +78,10 @@ jobs:
       - name: Build
         run: cargo build -p astrid-rules --target wasm32-unknown-unknown
 
+      # The binding astrid-web vendors (scripts/build-wasm.sh), in the profile it ships in.
+      - name: Build the web binding
+        run: cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm
+
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
 

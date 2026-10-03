@@ -13,7 +13,7 @@
 # See README.md for the rules that govern what may live where.
 [workspace]
 resolver = "2"
-members = ["crates/astrid-rules", "crates/astrid-core", "crates/xtask"]
+members = ["crates/astrid-rules", "crates/astrid-rules-wasm", "crates/astrid-core", "crates/xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -62,3 +62,12 @@ pulldown-cmark = { version = "0.13", default-features = false }
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# The WebAssembly build astrid-web vendors (`scripts/build-wasm.sh`). Size is what a browser
+# downloads, so it optimises for it, and a panic aborts rather than carrying the unwinder.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+panic = "abort"
+strip = true
