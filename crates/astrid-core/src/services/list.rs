@@ -356,18 +356,18 @@ impl ListService {
         entry
     }
 
-    /// The lists a task can be filed in.
+    /// The lists a task can be filed in: every list but a virtual one.
     ///
-    /// Not the same as the lists a person can navigate into: a virtual list ("Today", "Not in a
-    /// List") is somewhere to look and a board column is a state, and neither is somewhere a task
-    /// can live. Offering either as a destination produces a task that belongs to a view.
+    /// A virtual list ("Today", "Not in a List") is somewhere to look, not somewhere a task can
+    /// live. Board columns and labels are offered, as iOS's list picker offers them
+    /// (`docs/CONTRACTS.md` D28); the rule is `rows::list_picks::is_destination`.
     pub fn destinations(&self) -> Result<Vec<TaskList>> {
         Ok(self
             .context
             .store
             .lists()?
             .into_iter()
-            .filter(|list| list.is_domain_list() && !list.is_virtual.unwrap_or(false))
+            .filter(crate::rows::list_picks::is_destination)
             .collect())
     }
 
@@ -1034,10 +1034,10 @@ mod tests {
         assert_eq!(body["name"], "House");
     }
 
-    /// Board columns and virtual lists are not destinations. A picker that offered "Doing" would
-    /// be offering a state, and one that offered "Today" would be offering a view.
+    /// Virtual lists are not destinations: a picker that offered "Today" would be offering a view.
+    /// A board column is, as on iOS (D28).
     #[test]
-    fn status_rows_and_virtual_lists_are_not_offered_as_destinations() {
+    fn virtual_lists_are_not_offered_as_destinations() {
         let fixture = fixture();
         fixture
             .store
@@ -1054,7 +1054,9 @@ mod tests {
             .into_iter()
             .map(|list| list.id)
             .collect();
-        assert_eq!(destinations, vec!["l1"]);
+        assert!(destinations.contains(&"l1".to_string()));
+        assert!(destinations.contains(&"s1".to_string()));
+        assert!(!destinations.contains(&"v1".to_string()));
     }
 
     /// Favourites saved before ordering existed have no order at all. Falling back to the name

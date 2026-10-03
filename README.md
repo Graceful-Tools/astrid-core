@@ -5,7 +5,7 @@ offline SQLite cache, the Outbox write journal, sync, and every rule that must r
 web, Apple and Windows — repeating-task rollover, permissions, the keyboard scheme, search and
 smart-task parsing, the editing session, board columns, connections.
 
-**Web app and API (canonical for shared behaviour):** https://github.com/Graceful-Tools/astrid-web
+**Web app and API (canonical for shared behaviour, except where it disagrees with iOS — README rule 6):** https://github.com/Graceful-Tools/astrid-web
 **Windows app (first consumer):** https://github.com/Graceful-Tools/astrid-windows
 **iOS and Mac apps (consume it; see astrid-ios `docs/CORE_MIGRATION.md`):** https://github.com/Graceful-Tools/astrid-ios
 
@@ -36,9 +36,11 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 5. **Preserve offline behaviour.** Task, list, comment, chat, attachment and account-settings
    writes journal through the Outbox. A write that is online-only on purpose says so in its
    service's doc comment.
-6. **Shared behaviour changes on web first.** Anything covered by a fixture in
-   `contracts/fixtures/` is a cross-repo change: web, then regenerate, then here, then the
-   clients. The fixtures are generated, never hand-edited.
+6. **Shared behaviour changes on web first; on disagreement, follow iOS.** Anything covered by a
+   fixture in `contracts/fixtures/` is a cross-repo change: web, then regenerate, then here, then
+   the clients. The fixtures are generated, never hand-edited. Where this crate and the iOS app
+   disagree, this crate takes iOS's behaviour and web adopts it later (Jon, 2026-10-03; see
+   [docs/CONTRACTS.md](./docs/CONTRACTS.md)).
 7. **Port from Swift test-first.** The Swift tests are the specification: write the Rust tests
    red, port green, refactor. Do not improve behaviour while porting — a divergence found on the
    way goes in [docs/CONTRACTS.md](./docs/CONTRACTS.md), not into the code.

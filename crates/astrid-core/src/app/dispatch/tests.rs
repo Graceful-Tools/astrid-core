@@ -1153,15 +1153,13 @@ async fn the_quick_date_picks_carry_the_instants_they_mean() {
     let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": task_id })).await;
     let dates = options["value"]["dates"].as_array().expect("an array");
 
-    // Clearing comes first, and it is a choice like any other.
-    assert_eq!(dates[0]["titleKey"], "picker.no_due_date");
-    assert!(dates[0]["dueDateTime"].is_null());
-
-    assert_eq!(dates[1]["titleKey"], "picker.today");
-    assert_eq!(dates[1]["dueDateTime"], "2026-09-07T00:00:00Z");
-    assert_eq!(dates[1]["isSelected"], true, "it is due today");
-    assert_eq!(dates[2]["dueDateTime"], "2026-09-08T00:00:00Z");
-    assert_eq!(dates[4]["dueDateTime"], "2026-09-14T00:00:00Z");
+    // iOS's four, with no clearing row (D26).
+    assert_eq!(dates.len(), 4);
+    assert_eq!(dates[0]["titleKey"], "picker.today");
+    assert_eq!(dates[0]["dueDateTime"], "2026-09-07T00:00:00Z");
+    assert_eq!(dates[0]["isSelected"], true, "it is due today");
+    assert_eq!(dates[1]["dueDateTime"], "2026-09-08T00:00:00Z");
+    assert_eq!(dates[3]["dueDateTime"], "2026-09-14T00:00:00Z");
 }
 
 /// The tick goes on the row the task is actually set to, computed the same way the row label
@@ -1174,11 +1172,8 @@ async fn nothing_is_ticked_when_a_task_has_no_date() {
 
     let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": task_id })).await;
     let dates = options["value"]["dates"].as_array().expect("an array");
-    assert_eq!(
-        dates[0]["isSelected"], true,
-        "no due date is the selected choice"
-    );
-    assert!(dates[1..].iter().all(|date| date["isSelected"] == false));
+    // No date means no row is ticked: there is no "No due date" row to tick (D26).
+    assert!(dates.iter().all(|date| date["isSelected"] == false));
 }
 
 /// An all-day task has no time of day, so no time is ticked until one is chosen.
@@ -2193,7 +2188,15 @@ async fn auto_leaves_the_appearance_to_the_system() {
 #[tokio::test]
 async fn my_tasks_rows_answer_without_a_list_row_behind_them() {
     let app = app_with(StubTransport::new());
-    let made = call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+    // My Tasks is what is assigned to the reader (D25), so somebody has to be signed in.
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "assigneeId": "me" }),
+    )
+    .await;
     assert_eq!(made["ok"], true);
 
     let rows = call(
@@ -2250,14 +2253,18 @@ async fn my_tasks_filters_come_back_from_the_account() {
 #[tokio::test]
 async fn a_priority_filter_narrows_what_my_tasks_shows() {
     let app = app_with(StubTransport::new());
+    // My Tasks is what is assigned to the reader (D25), so somebody has to be signed in.
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
     call(
         &app,
-        json!({ "kind": "createTask", "title": "Buy milk", "priority": 1 }),
+        json!({ "kind": "createTask", "title": "Buy milk", "priority": 1, "assigneeId": "me" }),
     )
     .await;
     call(
         &app,
-        json!({ "kind": "createTask", "title": "Ring the dentist" }),
+        json!({ "kind": "createTask", "title": "Ring the dentist", "assigneeId": "me" }),
     )
     .await;
 
@@ -4655,6 +4662,96 @@ async fn a_reminder_is_offered_once_and_again_after_a_snooze() {
     .await;
     let snoozed = call(&app, json!({ "kind": "remindersDue" })).await;
     assert!(snoozed["value"]["reminders"]
+        .as_array()
+        .expect("a list")
+        .is_empty());
+}
+
+/// D24, resolved toward iOS (`ReminderPresenter.snoozeTask`): a snooze moves the task's due date
+/// to now plus the snooze, as a timed task, and leaves `reminderTime` exactly where it was.
+#[tokio::test]
+async fn d24_snooze_moves_the_due_date_as_ios_does() {
+    let app = app_with(StubTransport::new());
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Call the vet", "dueDateTime": "2026-09-08T00:00:00Z" }),
+    )
+    .await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    call(
+        &app,
+        json!({
+            "kind": "updateTask",
+            "taskId": id,
+            "changes": { "reminderTime": "2026-09-07T11:59:00Z" },
+        }),
+    )
+    .await;
+
+    let snoozed = call(
+        &app,
+        json!({ "kind": "snoozeReminder", "taskId": id, "minutes": 15 }),
+    )
+    .await;
+
+    assert_eq!(snoozed["value"]["dueDateTime"], "2026-09-07T12:15:00Z");
+    assert_eq!(snoozed["value"]["isAllDay"], false);
+    assert_eq!(snoozed["value"]["reminderTime"], "2026-09-07T11:59:00Z");
+}
+
+/// D24: iOS reschedules its own notification for the snoozed time on the device; the core's
+/// equivalent is that the in-app reminder comes back then — once — without moving `reminderTime`.
+#[tokio::test]
+async fn d24_a_snoozed_reminder_comes_back_at_the_snoozed_time() {
+    let clock = std::sync::Arc::new(crate::platform::FixedClock::parsed("2026-09-07T12:00:00Z"));
+    let app = App::with_parts(
+        &Config {
+            cache_path: ":memory:".into(),
+            base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
+        },
+        std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+        std::sync::Arc::new(StubTransport::new()),
+        clock.clone(),
+    )
+    .expect("starts");
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Call the vet" }),
+    )
+    .await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    call(
+        &app,
+        json!({
+            "kind": "updateTask",
+            "taskId": id,
+            "changes": { "reminderTime": "2026-09-07T11:59:00Z" },
+        }),
+    )
+    .await;
+    call(&app, json!({ "kind": "reminderShown", "taskId": id })).await;
+    call(
+        &app,
+        json!({ "kind": "snoozeReminder", "taskId": id, "minutes": 15 }),
+    )
+    .await;
+
+    let early = call(&app, json!({ "kind": "remindersDue" })).await;
+    assert!(early["value"]["reminders"]
+        .as_array()
+        .expect("a list")
+        .is_empty());
+
+    clock.advance(chrono::Duration::minutes(15));
+    let back = call(&app, json!({ "kind": "remindersDue" })).await;
+    let reminders = back["value"]["reminders"].as_array().expect("a list");
+    assert_eq!(reminders.len(), 1, "{back}");
+    assert_eq!(reminders[0]["taskId"], id.as_str());
+
+    call(&app, json!({ "kind": "reminderShown", "taskId": id })).await;
+    let shown = call(&app, json!({ "kind": "remindersDue" })).await;
+    assert!(shown["value"]["reminders"]
         .as_array()
         .expect("a list")
         .is_empty());

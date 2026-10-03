@@ -202,7 +202,8 @@ pub enum Command {
     ReminderShown {
         task_id: String,
     },
-    /// Move a reminder forward and let it be shown again when it arrives.
+    /// Snooze a reminder as iOS does: the task becomes due `minutes` from now (timed), its
+    /// `reminderTime` is left alone, and the reminder is shown again then (D24).
     SnoozeReminder {
         task_id: String,
         minutes: i64,

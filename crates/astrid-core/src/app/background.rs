@@ -175,20 +175,7 @@ pub async fn reminder_loop(
         let Ok(tasks) = app.store.tasks() else {
             continue;
         };
-        let now = app.clock.now();
-        let due = crate::reminders::due_now(&tasks, now, |id| {
-            let Some(task) = tasks.iter().find(|task| task.id == id) else {
-                return false;
-            };
-            let Some(at) = task.reminder_time else {
-                return false;
-            };
-            app.store
-                .metadata(&format!("reminder.shown.{id}"))
-                .ok()
-                .flatten()
-                .is_some_and(|stamp| stamp == at.to_rfc3339())
-        });
+        let due = super::dispatch::due_reminders(&app, &tasks);
         if !due.is_empty() {
             app.realtime()
                 .publish(crate::realtime::Change::RemindersDue);

@@ -44,12 +44,18 @@ fn app_with_tasks(count: usize) -> App {
     let list: astrid_core::model::TaskList =
         serde_json::from_value(json!({ "id": "l1", "name": "Everything" })).expect("a list");
     app.store().upsert_list(&list).expect("stores");
+    // Signed in, and holding every task: My Tasks is what is assigned to the reader (D25), so an
+    // account of unassigned tasks would measure an empty view.
+    app.store()
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
 
     let tasks: Vec<Task> = (0..count)
         .map(|index| Task {
             list_ids: Some(vec!["l1".into()]),
             due_date_time: date::parse("2026-09-08T09:00:00Z"),
             completed: index % 7 == 0,
+            assignee_id: Some("me".into()),
             description: format!("something about number {index}"),
             ..Task::new(format!("t{index}"), format!("Task number {index}"))
         })

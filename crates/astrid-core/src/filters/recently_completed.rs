@@ -98,8 +98,12 @@ pub fn is_recently_completed(
 
 /// Whether a completed task should be shown under a given filter mode.
 ///
-/// `default` applies the window; `show` and `all` always show; `hide` never does. An unrecognised
-/// mode shows — a filter value from a newer build must not blank out somebody's list.
+/// The values are iOS's (`RecentlyCompletedPresets.applyCompletionFilterWithWindow`, and the
+/// web's `shouldShowCompletedByFilter`): `all` and `completed` always show it, `incomplete` never
+/// does, and `default` applies the window. **Anything else reads as `default`** — `hide`, `show`,
+/// absent, or a value from a newer build — which is what iOS does (`docs/CONTRACTS.md` D22,
+/// resolved toward iOS 2026-10-03). Reading an unknown value as `default` still never blanks a
+/// list: open tasks and recent completions stay.
 pub fn should_show_completed(
     filter_mode: Option<&str>,
     completed_at: Option<DateTime<Utc>>,
@@ -109,10 +113,16 @@ pub fn should_show_completed(
     offset: FixedOffset,
 ) -> bool {
     match filter_mode {
-        Some("hide") => false,
-        Some("default") => is_recently_completed(completed_at, updated_at, window, now, offset),
-        _ => true,
+        Some("all") | Some("completed") => true,
+        Some("incomplete") => false,
+        _ => is_recently_completed(completed_at, updated_at, window, now, offset),
     }
+}
+
+/// Whether an open task should be shown under a given filter mode: always, except under
+/// `completed`, which is only finished tasks.
+pub fn should_show_open(filter_mode: Option<&str>) -> bool {
+    filter_mode != Some("completed")
 }
 
 fn midnight_local(date: chrono::NaiveDate, offset: FixedOffset) -> DateTime<Utc> {
@@ -281,24 +291,44 @@ mod tests {
         let now = at("2026-09-07T12:00:00Z");
         let old = Some(at("2026-01-01T12:00:00Z"));
         let show = |mode: Option<&str>| should_show_completed(mode, old, None, None, now, utc());
-        assert!(show(Some("show")));
         assert!(show(Some("all")));
-        assert!(show(None));
-        assert!(!show(Some("hide")));
+        assert!(show(Some("completed")));
+        assert!(!show(Some("incomplete")));
         assert!(!show(Some("default")), "old, so outside the window");
+        assert!(should_show_open(Some("default")));
+        assert!(should_show_open(Some("incomplete")));
+        assert!(!should_show_open(Some("completed")));
     }
 
-    /// A filter value from a newer build must not blank out somebody's list.
+    /// D22, resolved toward iOS: `hide`, `show`, absent and anything unknown read as `default` —
+    /// the window applies, so a recent completion shows and an old one does not.
     #[test]
-    fn an_unrecognised_filter_mode_shows_rather_than_hides() {
+    fn an_unrecognised_filter_mode_reads_as_default() {
         let now = at("2026-09-07T12:00:00Z");
-        assert!(should_show_completed(
-            Some("somethingLater"),
-            Some(at("2020-01-01T12:00:00Z")),
-            None,
-            None,
-            now,
-            utc()
-        ));
+        for mode in [None, Some("hide"), Some("show"), Some("somethingLater")] {
+            assert!(
+                !should_show_completed(
+                    mode,
+                    Some(at("2020-01-01T12:00:00Z")),
+                    None,
+                    None,
+                    now,
+                    utc()
+                ),
+                "{mode:?}: old"
+            );
+            assert!(
+                should_show_completed(
+                    mode,
+                    Some(at("2026-09-07T11:00:00Z")),
+                    None,
+                    None,
+                    now,
+                    utc()
+                ),
+                "{mode:?}: recent"
+            );
+            assert!(should_show_open(mode), "{mode:?}: open");
+        }
     }
 }

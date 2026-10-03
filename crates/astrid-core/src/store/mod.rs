@@ -540,6 +540,21 @@ impl Store {
         })
     }
 
+    /// Every metadata entry whose key starts with `prefix`, as `(key, value)`.
+    ///
+    /// For per-task marks read in one pass rather than one query per task — the reminder loop
+    /// reads the snooze marks this way on every tick.
+    pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        self.with(|connection| {
+            let mut statement = connection
+                .prepare("SELECT key, value FROM metadata WHERE substr(key, 1, length(?1)) = ?1")?;
+            let rows = statement
+                .query_map([prefix], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<std::result::Result<Vec<(String, String)>, _>>()?;
+            Ok(rows)
+        })
+    }
+
     /// Forget everything. Sign-out calls this: a cache that outlives its session is a cache that
     /// shows the previous user's tasks to the next one.
     /// Forget the account's rows but keep what it has not sent and how to sign in: the next sync

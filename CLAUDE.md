@@ -3,7 +3,7 @@
 *Local Claude Code CLI workflow for Astrid's shared Rust core.*
 
 **Repository:** https://github.com/Graceful-Tools/astrid-core
-**Web app + API (separate repo, canonical for shared behaviour):** https://github.com/Graceful-Tools/astrid-web
+**Web app + API (separate repo, canonical for shared behaviour unless it disagrees with iOS):** https://github.com/Graceful-Tools/astrid-web
 **Windows app (consumes this crate):** https://github.com/Graceful-Tools/astrid-windows
 **Apple apps (consume this crate through UniFFI, `astrid-ios/core`):** https://github.com/Graceful-Tools/astrid-ios
 
@@ -25,6 +25,8 @@ workflow.
 5. **Preserve offline behaviour.** Everything writes through the Outbox unless its service says why not.
 6. **Bug fixes are TDD:** RED regression test naming the task id, then green, then the gate.
 7. **Contracts are fixtures, not prose.** Web first, regenerate, then here, then the clients.
+   **On disagreement, follow iOS:** where this crate and iOS differ, the crate takes iOS's
+   behaviour (Jon, 2026-10-03; README rule 6).
 8. **Nothing platform-specific lives here.** A platform need arrives through a trait in
    `astrid_core::platform`, implemented by the shell. The Windows C ABI is astrid-windows's
    `astrid-ffi`; Apple bindings belong to astrid-ios.

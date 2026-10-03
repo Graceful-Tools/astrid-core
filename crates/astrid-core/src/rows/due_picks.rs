@@ -8,9 +8,13 @@
 //! platforms come to disagree about what "Next week" means. So they live in one place, with the
 //! arithmetic beside them, and this crate is the third client to read the same list.
 //!
-//! **The order is part of the contract.** The clearing choice comes first — "No due date" before
-//! "Today" — because it is a choice like any other rather than an escape hatch in a toolbar. That
-//! was decided deliberately on iOS; this is not the place to re-litigate it.
+//! **The set and order are iOS's** (`DueDateQuickPicks.dateOptions`): Today, Tomorrow, In 3 days,
+//! Next week — and no "No due date", which iOS does not offer among the quick picks
+//! (`docs/CONTRACTS.md` D26, resolved toward iOS 2026-10-03). Clearing a date is still a write the
+//! shell can make (`dueDateTime: null`); it is just not one of these rows.
+//!
+//! Storage is unchanged by that decision: iOS's `setQuickDate` writes the reader's calendar day at
+//! UTC midnight, exactly as [`all_day_pick`] does.
 //!
 //! Titles are keys, never words. The shell resolves them, the same way it resolves
 //! [`super::DueLabel`].
@@ -22,31 +26,27 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 pub struct DateOption {
     /// A resource key. Never a literal: these reach the screen on three platforms.
     pub title_key: &'static str,
-    /// Whole days from today. `None` is the clearing choice.
-    pub days_from_today: Option<i64>,
+    /// Whole days from today. 0 is today.
+    pub days_from_today: i64,
 }
 
-/// The choices, in order. Clearing first — see the module note.
-pub const DATE_OPTIONS: [DateOption; 5] = [
-    DateOption {
-        title_key: "picker.no_due_date",
-        days_from_today: None,
-    },
+/// The choices, in iOS's order — see the module note.
+pub const DATE_OPTIONS: [DateOption; 4] = [
     DateOption {
         title_key: "picker.today",
-        days_from_today: Some(0),
+        days_from_today: 0,
     },
     DateOption {
         title_key: "picker.tomorrow",
-        days_from_today: Some(1),
+        days_from_today: 1,
     },
     DateOption {
         title_key: "picker.in_3_days",
-        days_from_today: Some(3),
+        days_from_today: 3,
     },
     DateOption {
         title_key: "picker.next_week",
-        days_from_today: Some(7),
+        days_from_today: 7,
     },
 ];
 
@@ -219,22 +219,24 @@ mod tests {
         FixedOffset::east_opt(0).expect("UTC")
     }
 
-    /// The order is the contract, and clearing comes first. A change here is a change on three
-    /// clients.
+    /// D26, resolved toward iOS (`DueDateQuickPicks.dateOptions`): four dates and no clearing
+    /// choice. Storage is unchanged — iOS's `setQuickDate` also writes the reader's day at UTC
+    /// midnight.
     #[test]
-    fn the_choices_are_in_the_agreed_order_with_clearing_first() {
-        let keys: Vec<&str> = DATE_OPTIONS.iter().map(|option| option.title_key).collect();
+    fn d26_due_date_quick_picks_are_ios_four() {
+        let picks: Vec<(&str, i64)> = DATE_OPTIONS
+            .iter()
+            .map(|option| (option.title_key, option.days_from_today))
+            .collect();
         assert_eq!(
-            keys,
+            picks,
             vec![
-                "picker.no_due_date",
-                "picker.today",
-                "picker.tomorrow",
-                "picker.in_3_days",
-                "picker.next_week"
+                ("picker.today", 0),
+                ("picker.tomorrow", 1),
+                ("picker.in_3_days", 3),
+                ("picker.next_week", 7),
             ]
         );
-        assert_eq!(DATE_OPTIONS[0].days_from_today, None);
     }
 
     #[test]
