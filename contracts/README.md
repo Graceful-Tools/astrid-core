@@ -45,9 +45,9 @@ A driver runs with `TZ=UTC`. Web's custom repeat path uses local date methods, s
 on the machine's timezone (see `docs/CONTRACTS.md` D4); without pinning, the fixture would record
 whichever zone the person generating it happened to be in.
 
-Planned, as each module is ported (plan §3): repeating-task rollover, the list permission matrix,
-all-day date handling, the smart-task parser, wire shapes, the task leading control, and the
-editing-session machine.
+Still planned: all-day date handling, wire shapes, the task leading control — and, with no fixture
+yet although the core has a port, markdown, filters/date windows, manual order and reminders
+(the drift risks; see `docs/CONTRACTS.md`).
 
 ## Changing a contract
 
@@ -56,7 +56,7 @@ A contract change is a cross-repo change, always in this order:
 1. Change the canonical implementation in astrid-web, with its tests.
 2. Regenerate these fixtures.
 3. Update this crate until its tests pass again, then the clients that pin it.
-4. Mirror it into astrid-ios (iOS and Mac share that code).
+4. Bump astrid-ios's pinned revision (`core/Cargo.toml`); mirror only what Swift still owns.
 
 Deploy web first — the wire is the one thing every client shares.
 

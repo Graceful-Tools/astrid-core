@@ -337,18 +337,30 @@ pub fn has_pending(store: &Store) -> Result<bool> {
     })
 }
 
+/// The journal's counts by status. Counted in SQL off `outbox_by_status`: the Apple shells ask
+/// after every reload, and reading and parsing every row's payload just to count them was the
+/// cost of each ask.
 pub fn stats(store: &Store) -> Result<Stats> {
-    let entries = all(store)?;
-    let mut stats = Stats::default();
-    for entry in entries {
-        match entry.status {
-            Status::Pending => stats.pending += 1,
-            Status::Running => stats.running += 1,
-            Status::Completed => stats.completed += 1,
-            Status::FailedPermanent => stats.failed += 1,
+    store.transaction(|connection| {
+        let mut statement =
+            connection.prepare_cached("SELECT status, COUNT(*) FROM outbox GROUP BY status")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut stats = Stats::default();
+        for row in rows {
+            let (status, count) = row?;
+            let count = usize::try_from(count).unwrap_or(0);
+            // `from_wire`, so a status a newer build wrote counts the way `all` would read it.
+            match Status::from_wire(&status) {
+                Status::Pending => stats.pending += count,
+                Status::Running => stats.running += count,
+                Status::Completed => stats.completed += count,
+                Status::FailedPermanent => stats.failed += count,
+            }
         }
-    }
-    Ok(stats)
+        Ok(stats)
+    })
 }
 
 const COLUMNS: &str = "id, kind, payload, client_request_id, depends_on, temp_id, status, \
@@ -625,5 +637,39 @@ mod tests {
         assert_eq!(stats.pending, 1);
         assert_eq!(stats.failed, 1);
         assert!(stats.has_unsent_work());
+    }
+
+    #[test]
+    fn the_stats_count_every_status_and_read_an_unknown_one_as_pending() {
+        let store = Store::in_memory().expect("opens");
+        for id in ["p1", "p2", "done", "dead", "future"] {
+            enqueue(&store, &new_entry(id)).expect("enqueues");
+        }
+        mark_completed(&store, "done", None, t0()).expect("records");
+        mark_dead(&store, "dead", "403", t0()).expect("records");
+        store
+            .transaction(|connection| {
+                connection.execute(
+                    "UPDATE outbox SET status = 'paused' WHERE id = 'future'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .expect("writes");
+
+        let stats = stats(&store).expect("reads");
+        assert_eq!(
+            (stats.pending, stats.running, stats.completed, stats.failed),
+            (3, 0, 1, 1)
+        );
+        // The same answer the row-by-row read gives.
+        let by_rows = all(&store).expect("reads");
+        assert_eq!(
+            by_rows
+                .iter()
+                .filter(|e| e.status == Status::Pending)
+                .count(),
+            3
+        );
     }
 }

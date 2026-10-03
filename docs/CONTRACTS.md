@@ -12,7 +12,7 @@ client together, and the entry says which behaviour this crate currently follows
 ## 1. Repeating-task rollover
 
 Canonical: `astrid-web/types/repeating.ts` and `astrid-web/lib/repeating-task-handler.ts`.
-Apple: `astrid-ios/Astrid App/Utilities/RepeatingTaskHandler.swift`.
+Apple: asks this crate (`rules` → `completion` / `nextOccurrence`) since 2026-09-28.
 Here: `astrid_core::repeating`.
 
 ### D1 — Whose calendar a step is taken on
@@ -104,8 +104,8 @@ here alone would make the same task land on a different date depending on which 
 completed it in, which is worse than the inconsistency. It changes on web first, then everywhere.
 
 Evidence: the web half is **measured** — it is what `contracts/fixtures/repeating.json` records
-from running web's own calculator. The Apple column is **read** from
-`RepeatingTaskHandler.swift`, which uses `Calendar.date(byAdding:)`; Foundation clamps an invalid
+from running web's own calculator. The Apple column records the
+pre-2026-09-28 Swift calculator (`RepeatingTaskHandler.swift`, now a facade over this crate), which used `Calendar.date(byAdding:)`; Foundation clamps an invalid
 result to the last valid day. Worth confirming on a device before the cross-repo fix, since the
 point of that fix is to make three clients agree.
 
@@ -358,8 +358,8 @@ until the connection comes back.
 1. Change the canonical implementation in astrid-web, with tests.
 2. Teach `contracts/export-from-web.mjs` to export the cases, and regenerate.
 3. Port or update the Rust module until its tests pass against the new fixture.
-4. Mirror into astrid-ios, which covers both iOS and Mac.
-5. Add a row to the table in [ASTRID.md](./ASTRID.md) §2.
+4. Bump astrid-ios's pinned revision, which covers both iOS and Mac; mirror only what Swift still owns.
+5. Add a row to the contracts table in astrid-ios `ASTRID.md` §8.
 
 If the clients cannot be aligned in one change, write the divergence down here — with which
 behaviour this crate follows and what it would take to close it. An undocumented divergence becomes

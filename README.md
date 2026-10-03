@@ -7,13 +7,13 @@ smart-task parsing, the editing session, board columns, connections.
 
 **Web app and API (canonical for shared behaviour):** https://github.com/Graceful-Tools/astrid-web
 **Windows app (first consumer):** https://github.com/Graceful-Tools/astrid-windows
-**iOS and Mac apps (migrating):** https://github.com/Graceful-Tools/astrid-ios
+**iOS and Mac apps (consume it; see astrid-ios `docs/CORE_MIGRATION.md`):** https://github.com/Graceful-Tools/astrid-ios
 
 ## How it fits
 
 ```
 astrid-windows   app/Astrid.App (WinUI, C#)  ──  crates/astrid-ffi (C ABI)  ──┐
-astrid-ios       Astrid App / Astrid Mac (Swift)  ──  UniFFI bindings (spike)  ──┤──  astrid-core
+astrid-ios       Astrid App / Astrid Mac (Swift)  ──  UniFFI (astrid-ios/core) ──┤──  astrid-core
                                                                                  │
                                                         HTTPS /api/v1/*  ◄───────┘
                                                         astrid-web (astrid.cc)
@@ -28,11 +28,10 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 ## The rules
 
 1. **Backend writes go through a service** — never the API client from a shell or a worker.
-2. **Complete a task ONLY via `TaskService::complete_task`** — `update_task(completed: true)`
+2. **Complete a task ONLY via `TaskService::complete`** (or `complete_as`) — `update_task(completed: true)`
    skips repeat rollover.
-3. **Next-occurrence math lives ONLY in `astrid_core::repeating`** — mirror changes into
-   `astrid-web/types/repeating.ts` and `astrid-ios/.../RepeatingTaskHandler.swift` until the
-   Apple apps consume this crate.
+3. **Next-occurrence math lives ONLY in `astrid_core::repeating`** — a change starts in
+   `astrid-web/types/repeating.ts` (rule 6); the clients take it by bumping their pinned revision.
 4. **API paths are `/api/v1/...` only.** The request guard refuses anything else.
 5. **Preserve offline behaviour.** Task, list, comment, chat, attachment and account-settings
    writes journal through the Outbox. A write that is online-only on purpose says so in its
