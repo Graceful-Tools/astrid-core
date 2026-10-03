@@ -5,7 +5,7 @@
 **Repository:** https://github.com/Graceful-Tools/astrid-core
 **Web app + API (separate repo, canonical for shared behaviour):** https://github.com/Graceful-Tools/astrid-web
 **Windows app (consumes this crate):** https://github.com/Graceful-Tools/astrid-windows
-**Apple apps (migrating to this crate):** https://github.com/Graceful-Tools/astrid-ios
+**Apple apps (consume this crate through UniFFI, `astrid-ios/core`):** https://github.com/Graceful-Tools/astrid-ios
 
 ---
 
@@ -19,7 +19,7 @@ workflow.
 ### Critical rules (full detail in README.md)
 
 1. **Backend writes go through a service** — never the API client from a caller.
-2. **Complete a task ONLY via `TaskService::complete_task`.**
+2. **Complete a task ONLY via `TaskService::complete` (or `complete_as`).**
 3. **Next-occurrence math lives ONLY in `astrid_core::repeating`.**
 4. **API paths are `/api/v1/...` only.**
 5. **Preserve offline behaviour.** Everything writes through the Outbox unless its service says why not.
