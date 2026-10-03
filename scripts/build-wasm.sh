@@ -29,7 +29,7 @@ rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
 
 cd "$root"
 cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm
-wasm="$root/target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm"
+wasm="${CARGO_TARGET_DIR:-$root/target}/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm"
 
 rm -rf "$out/node" "$out/web"
 wasm-bindgen "$wasm" --out-dir "$out/node" --target nodejs
