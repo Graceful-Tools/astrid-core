@@ -343,10 +343,16 @@ fn with_request_id(body: &serde_json::Value, request_id: &str) -> serde_json::Va
 /// `list` as the server answered it, with this machine's membership changes that have not been
 /// sent yet laid over it, oldest first — so a roster refresh or a sync pass does not undo on
 /// screen a removal, a role change or an invitation still waiting for the network.
-pub(crate) fn with_pending_applied(store: &crate::store::Store, mut list: TaskList) -> TaskList {
+pub(crate) fn with_pending_applied(store: &crate::store::Store, list: TaskList) -> TaskList {
     let Ok(entries) = journal::all(store) else {
         return list;
     };
+    with_pending_from(&entries, list)
+}
+
+/// [`with_pending_applied`], against a journal already read — a sync pass reads it once, inside
+/// its transaction, rather than once per list.
+pub(crate) fn with_pending_from(entries: &[crate::outbox::Entry], mut list: TaskList) -> TaskList {
     for entry in entries.iter().filter(|entry| {
         is_member_kind(&entry.kind)
             && matches!(entry.status, Status::Pending | Status::Running)

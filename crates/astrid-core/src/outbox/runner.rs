@@ -14,7 +14,7 @@
 //! behind it within the same drain rather than on the next tick — which is what makes "type a
 //! task, edit it, watch it sync" feel like one operation instead of three.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -23,7 +23,7 @@ use crate::api::ApiClient;
 use crate::platform::Clock;
 use crate::store::{Result, Store};
 
-use super::entry::Entry;
+use super::entry::{kind, Entry};
 use super::handlers::{self, Outcome};
 use super::{journal, scheduler};
 
@@ -41,12 +41,144 @@ pub const CONCURRENCY_LIMIT: usize = 4;
 const MAX_PASSES: usize = 64;
 
 /// What a drain did, for logging and for the tests.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DrainReport {
     pub completed: usize,
     pub retried: usize,
     pub dead_lettered: usize,
     pub pruned: usize,
+    /// What the entries whose fate was settled — delivered or dead-lettered — touched.
+    pub delivered: Delivery,
+}
+
+/// What a drain's settled entries touched, so a shell re-reads those rows and nothing else
+/// (AITD-454).
+///
+/// Before this the delivery loop announced every delivery as "something moved, cannot say what",
+/// and the Apple shell answered that by reading every task in the cache — up to three times — and
+/// every open comment thread and chat channel, on every write. A delivery knows exactly what it
+/// wrote: the entry names it.
+///
+/// Ids are in the order first touched, without repeats. A create names both its temporary id and
+/// the server's, so a shell that drew the optimistic row can swap it for the real one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Delivery {
+    pub task_ids: Vec<String>,
+    pub list_ids: Vec<String>,
+    /// Tasks whose comment threads moved.
+    pub comment_task_ids: Vec<String>,
+    pub channel_ids: Vec<String>,
+    /// An entry settled whose kind this build cannot describe — one a newer build journalled.
+    /// The shell refreshes everything it shows, as it did for every delivery before.
+    pub undescribed: bool,
+}
+
+impl Delivery {
+    /// Whether anything settled that a shell should hear about.
+    pub fn is_empty(&self) -> bool {
+        self.task_ids.is_empty()
+            && self.list_ids.is_empty()
+            && self.comment_task_ids.is_empty()
+            && self.channel_ids.is_empty()
+            && !self.undescribed
+    }
+
+    /// Fold another delivery into this one.
+    pub fn absorb(&mut self, other: Delivery) {
+        for id in other.task_ids {
+            push_unique(&mut self.task_ids, id);
+        }
+        for id in other.list_ids {
+            push_unique(&mut self.list_ids, id);
+        }
+        for id in other.comment_task_ids {
+            push_unique(&mut self.comment_task_ids, id);
+        }
+        for id in other.channel_ids {
+            push_unique(&mut self.channel_ids, id);
+        }
+        self.undescribed |= other.undescribed;
+    }
+
+    /// Record what one settled entry touched. `result` is what its handler produced — the server
+    /// id a create was given — and `store` answers what the entry does not carry itself (the
+    /// thread an edited comment is in).
+    fn note(&mut self, store: &Store, entry: &Entry, result: Option<&BTreeMap<String, String>>) {
+        let field = |name: &str| {
+            entry
+                .payload
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        let produced = |name: &str| result.and_then(|result| result.get(name)).cloned();
+        let temp = entry.temp_id.clone();
+        match entry.kind.as_str() {
+            kind::CREATE_TASK
+            | kind::UPDATE_TASK
+            | kind::COMPLETE_TASK
+            | kind::DELETE_TASK
+            | kind::ADD_TASK_BLOCKER
+            | kind::REMOVE_TASK_BLOCKER => {
+                for id in [temp, field("taskId"), produced("taskId")]
+                    .into_iter()
+                    .flatten()
+                {
+                    push_unique(&mut self.task_ids, id);
+                }
+            }
+            kind::CREATE_LIST
+            | kind::UPDATE_LIST
+            | kind::DELETE_LIST
+            | kind::SET_MANUAL_ORDER
+            | kind::INVITE_TO_LIST
+            | kind::SET_MEMBER_ROLE
+            | kind::REMOVE_MEMBER
+            | kind::CANCEL_INVITATION
+            | kind::SET_INVITATION_ROLE => {
+                // An invitation's temporary id names the invitation, not the list.
+                let temp = match entry.kind.as_str() {
+                    kind::CREATE_LIST => temp,
+                    _ => None,
+                };
+                for id in [temp, field("listId"), produced("listId")]
+                    .into_iter()
+                    .flatten()
+                {
+                    push_unique(&mut self.list_ids, id);
+                }
+            }
+            kind::CREATE_COMMENT | kind::UPDATE_COMMENT | kind::DELETE_COMMENT => {
+                // A create names its task. An edit or delete journalled before the payload carried
+                // one is found through the cached comment; a deleted one is already gone from the
+                // thread on screen, so naming nothing there loses nothing.
+                let task_id = field("taskId").or_else(|| {
+                    field("commentId")
+                        .and_then(|id| store.comment(&id).ok().flatten())
+                        .map(|comment| comment.task_id)
+                });
+                if let Some(task_id) = task_id {
+                    let task_id = store.resolve_id(&task_id).unwrap_or(task_id);
+                    push_unique(&mut self.comment_task_ids, task_id);
+                }
+            }
+            kind::SEND_CHAT_MESSAGE => {
+                if let Some(channel_id) = field("channelId") {
+                    push_unique(&mut self.channel_ids, channel_id);
+                }
+            }
+            // Nothing on screen reads these back from the cache: the settings were merged when
+            // they were made, and an upload is announced by the comment or message carrying it.
+            kind::UPDATE_SETTINGS | kind::UPDATE_SMART_TASKS | kind::UPLOAD_ATTACHMENT => {}
+            _ => self.undescribed = true,
+        }
+    }
+}
+
+fn push_unique(ids: &mut Vec<String>, id: String) {
+    if !ids.contains(&id) {
+        ids.push(id);
+    }
 }
 
 impl DrainReport {
@@ -133,6 +265,7 @@ impl Runner {
             Outcome::Done(result) => {
                 journal::mark_completed(&self.store, &entry.id, result.as_ref(), now)?;
                 report.completed += 1;
+                report.delivered.note(&self.store, &entry, result.as_ref());
             }
             Outcome::Retry(reason) => {
                 let attempts = entry.attempts + 1;
@@ -144,6 +277,7 @@ impl Runner {
                         now,
                     )?;
                     report.dead_lettered += 1;
+                    report.delivered.note(&self.store, &entry, None);
                 } else {
                     journal::mark_retry(
                         &self.store,
@@ -170,6 +304,7 @@ impl Runner {
             Outcome::Dead(reason) => {
                 journal::mark_dead(&self.store, &entry.id, &reason, now)?;
                 report.dead_lettered += 1;
+                report.delivered.note(&self.store, &entry, None);
             }
         }
         Ok(())
@@ -193,6 +328,9 @@ impl Runner {
                 now,
             )?;
             report.dead_lettered += 1;
+            if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+                report.delivered.note(&self.store, entry, None);
+            }
         }
         Ok(())
     }
@@ -644,5 +782,112 @@ mod tests {
             .expect("present");
         assert_eq!(entry.status, crate::outbox::Status::Pending);
         assert_eq!(entry.attempts, 0);
+    }
+
+    /// AITD-454: each kind names what it touched, so the shell re-reads those rows alone.
+    #[tokio::test]
+    async fn aitd_454_a_drain_names_what_each_settled_entry_touched() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists/l1",
+                    200,
+                    serde_json::json!({ "list": { "id": "l1", "name": "Home" } }),
+                )
+                .push_json(
+                    "/api/v1/tasks/t1/comments",
+                    200,
+                    serde_json::json!({ "comment": { "id": "c-real", "taskId": "t1", "content": "hi" } }),
+                )
+                .push_json(
+                    "/api/v1/chat/channels/ch1/messages",
+                    200,
+                    serde_json::json!({ "message": { "id": "m-real", "channelId": "ch1", "content": "hi" } }),
+                )
+                .push_json("/api/v1/users/me/settings", 200, serde_json::json!({})),
+        );
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "list",
+                kind::UPDATE_LIST,
+                serde_json::json!({ "listId": "l1", "body": { "name": "Home" } }),
+                "crid-list",
+                t0(),
+            ),
+        );
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "comment",
+                kind::CREATE_COMMENT,
+                serde_json::json!({ "taskId": "t1", "body": { "content": "hi" } }),
+                "temp_c",
+                t0(),
+            )
+            .for_temp_id("temp_c"),
+        );
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "chat",
+                kind::SEND_CHAT_MESSAGE,
+                serde_json::json!({ "channelId": "ch1", "body": { "content": "hi" } }),
+                "temp_m",
+                t0(),
+            )
+            .for_temp_id("temp_m"),
+        );
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "settings",
+                kind::UPDATE_SETTINGS,
+                serde_json::json!({ "body": { "reminders": true } }),
+                "crid-settings",
+                t0(),
+            ),
+        );
+
+        let report = fixture.runner.drain().await.expect("drains");
+        assert_eq!(report.completed, 4, "{report:?}");
+        assert_eq!(
+            report.delivered,
+            Delivery {
+                list_ids: vec!["l1".into()],
+                comment_task_ids: vec!["t1".into()],
+                channel_ids: vec!["ch1".into()],
+                ..Default::default()
+            },
+            "no task named, nothing undescribed"
+        );
+    }
+
+    /// AITD-454: a write refused for good is settled too — its optimistic row has to be drawn
+    /// again — and an entry from a newer build cannot say what it touched, so it asks for
+    /// everything rather than nothing.
+    #[tokio::test]
+    async fn aitd_454_refused_and_unknown_entries_are_still_announced() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/tasks",
+            400,
+            serde_json::json!({ "error": "no" }),
+        ));
+        enqueue(&fixture.store, create_task("e1", "temp_1"));
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "future",
+                "somethingNewer",
+                serde_json::json!({}),
+                "crid-future",
+                t0(),
+            ),
+        );
+
+        let report = fixture.runner.drain().await.expect("drains");
+        assert_eq!(report.dead_lettered, 2, "{report:?}");
+        assert_eq!(report.delivered.task_ids, vec!["temp_1".to_string()]);
+        assert!(report.delivered.undescribed);
     }
 }

@@ -179,6 +179,17 @@ pub enum Change {
         task_ids: Vec<String>,
         list_ids: Vec<String>,
     },
+    /// The Outbox settled some writes — delivered, or refused for good — and these are what they
+    /// touched (AITD-454).
+    ///
+    /// Separate from [`Change::Synced`] because a delivery knows exactly what it wrote and a shell
+    /// should re-read that and nothing else: announced as an empty `Synced`, every write made the
+    /// Apple shell read every task, every open comment thread and every open chat channel. The
+    /// journal's counts ride along, so a "not synced yet" badge needs no second question.
+    Delivered {
+        touched: crate::outbox::Delivery,
+        outbox: crate::outbox::Stats,
+    },
     /// The inbox moved — a sync pass fetched it and it differs from what was cached. The web
     /// sends no live event for the inbox, so this is how the bell learns.
     Notifications,
@@ -207,6 +218,17 @@ impl Change {
             Change::NeedsSync => serde_json::json!({ "change": "needsSync" }),
             Change::Synced { task_ids, list_ids } => serde_json::json!({
                 "change": "synced", "taskIds": task_ids, "listIds": list_ids
+            }),
+            Change::Delivered { touched, outbox } => serde_json::json!({
+                "change": "delivered",
+                "taskIds": touched.task_ids,
+                "listIds": touched.list_ids,
+                "commentTaskIds": touched.comment_task_ids,
+                "channelIds": touched.channel_ids,
+                "undescribed": touched.undescribed,
+                "pending": outbox.pending,
+                "running": outbox.running,
+                "failed": outbox.failed,
             }),
             Change::Notifications => serde_json::json!({ "change": "notifications" }),
             Change::Stream { live } => serde_json::json!({ "change": "stream", "live": live }),

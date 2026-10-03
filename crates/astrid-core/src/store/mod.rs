@@ -145,14 +145,7 @@ impl Store {
     }
 
     pub fn task(&self, id: &str) -> Result<Option<Task>> {
-        self.with(|connection| {
-            let json: Option<String> = connection
-                .query_row("SELECT json FROM tasks WHERE id = ?1", [id], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-            json.map(|json| decode(&json)).transpose()
-        })
+        self.with(|connection| task_in(connection, id))
     }
 
     pub fn tasks(&self) -> Result<Vec<Task>> {
@@ -166,12 +159,7 @@ impl Store {
     /// The tasks made here that the server has not answered for yet — a range on the primary
     /// key, so a pass does not decode every task to find the few it wants.
     pub fn temp_tasks(&self) -> Result<Vec<Task>> {
-        self.with(|connection| {
-            let mut statement = connection
-                .prepare("SELECT json FROM tasks WHERE id >= 'temp_' AND id < 'temp`'")?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.map(|json| decode(&json?)).collect()
-        })
+        self.with(temp_tasks_in)
     }
 
     pub fn tasks_in_list(&self, list_id: &str) -> Result<Vec<Task>> {
@@ -219,12 +207,7 @@ impl Store {
     }
 
     pub fn delete_task(&self, id: &str) -> Result<()> {
-        self.with(|connection| {
-            connection.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
-            connection.execute("DELETE FROM task_lists_membership WHERE task_id = ?1", [id])?;
-            connection.execute("DELETE FROM comments WHERE task_id = ?1", [id])?;
-            Ok(())
-        })
+        self.with(|connection| delete_task_in(connection, id))
     }
 
     // ─── Lists ────────────────────────────────────────────────────────────────────────────────
@@ -243,14 +226,7 @@ impl Store {
     }
 
     pub fn list(&self, id: &str) -> Result<Option<TaskList>> {
-        self.with(|connection| {
-            let json: Option<String> = connection
-                .query_row("SELECT json FROM lists WHERE id = ?1", [id], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-            json.map(|json| decode(&json)).transpose()
-        })
+        self.with(|connection| list_in(connection, id))
     }
 
     pub fn lists(&self) -> Result<Vec<TaskList>> {
@@ -262,11 +238,7 @@ impl Store {
     }
 
     pub fn delete_list(&self, id: &str) -> Result<()> {
-        self.with(|connection| {
-            connection.execute("DELETE FROM lists WHERE id = ?1", [id])?;
-            connection.execute("DELETE FROM task_lists_membership WHERE list_id = ?1", [id])?;
-            Ok(())
-        })
+        self.with(|connection| delete_list_in(connection, id))
     }
 
     // ─── Everything else the cache holds ──────────────────────────────────────────────────────
@@ -486,14 +458,7 @@ impl Store {
         server_id: &str,
         now: DateTime<Utc>,
     ) -> Result<()> {
-        self.with(|connection| {
-            connection.execute(
-                "INSERT OR REPLACE INTO id_mappings (temp_id, server_id, created_at)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![temp_id, server_id, date::format(now)],
-            )?;
-            Ok(())
-        })
+        self.with(|connection| record_id_mapping_in(connection, temp_id, server_id, now))
     }
 
     /// The server id for a temporary one, if it has been delivered. Follows a chain, because a
@@ -633,16 +598,85 @@ fn read_summary(row: &rusqlite::Row<'_>) -> SqlResult<TaskSummary> {
     })
 }
 
-fn upsert_task_in(connection: &Connection, task: &Task) -> Result<()> {
-    connection.execute(
-        "INSERT OR REPLACE INTO tasks (
+// ─── The same, on a connection a caller already holds ─────────────────────────────────────────
+//
+// What a sync pass folds its rows in with, inside one `Store::transaction` (AITD-454): per-row
+// calls through `Store` each took the lock and auto-committed, a journal write per statement.
+// Statements are `prepare_cached`, so a pass of a thousand rows compiles each one once.
+
+pub(crate) fn task_in(connection: &Connection, id: &str) -> Result<Option<Task>> {
+    let json: Option<String> = connection
+        .prepare_cached("SELECT json FROM tasks WHERE id = ?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    json.map(|json| decode(&json)).transpose()
+}
+
+pub(crate) fn temp_tasks_in(connection: &Connection) -> Result<Vec<Task>> {
+    let mut statement =
+        connection.prepare_cached("SELECT json FROM tasks WHERE id >= 'temp_' AND id < 'temp`'")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    rows.map(|json| decode(&json?)).collect()
+}
+
+pub(crate) fn delete_task_in(connection: &Connection, id: &str) -> Result<()> {
+    connection
+        .prepare_cached("DELETE FROM tasks WHERE id = ?1")?
+        .execute([id])?;
+    connection
+        .prepare_cached("DELETE FROM task_lists_membership WHERE task_id = ?1")?
+        .execute([id])?;
+    connection
+        .prepare_cached("DELETE FROM comments WHERE task_id = ?1")?
+        .execute([id])?;
+    Ok(())
+}
+
+pub(crate) fn list_in(connection: &Connection, id: &str) -> Result<Option<TaskList>> {
+    let json: Option<String> = connection
+        .prepare_cached("SELECT json FROM lists WHERE id = ?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    json.map(|json| decode(&json)).transpose()
+}
+
+pub(crate) fn delete_list_in(connection: &Connection, id: &str) -> Result<()> {
+    connection
+        .prepare_cached("DELETE FROM lists WHERE id = ?1")?
+        .execute([id])?;
+    connection
+        .prepare_cached("DELETE FROM task_lists_membership WHERE list_id = ?1")?
+        .execute([id])?;
+    Ok(())
+}
+
+pub(crate) fn record_id_mapping_in(
+    connection: &Connection,
+    temp_id: &str,
+    server_id: &str,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    connection
+        .prepare_cached(
+            "INSERT OR REPLACE INTO id_mappings (temp_id, server_id, created_at)
+             VALUES (?1, ?2, ?3)",
+        )?
+        .execute(rusqlite::params![temp_id, server_id, date::format(now)])?;
+    Ok(())
+}
+
+pub(crate) fn upsert_task_in(connection: &Connection, task: &Task) -> Result<()> {
+    connection
+        .prepare_cached(
+            "INSERT OR REPLACE INTO tasks (
             id, title, completed, completed_at, due_date_time, is_all_day, priority, repeating,
             parent_task_id, assignee_id, creator_id, status_role, is_private, description,
             timer_duration, occurrence_count, comment_count, attachment_count,
             created_at, updated_at, json
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
                    ?18, ?19, ?20, ?21)",
-        rusqlite::params![
+        )?
+        .execute(rusqlite::params![
             task.id,
             task.title,
             task.completed as i64,
@@ -668,29 +702,29 @@ fn upsert_task_in(connection: &Connection, task: &Task) -> Result<()> {
             task.created_at.map(date::format),
             task.updated_at.map(date::format),
             encode(task)?,
-        ],
-    )?;
+        ])?;
 
-    connection.execute(
-        "DELETE FROM task_lists_membership WHERE task_id = ?1",
-        [&task.id],
+    connection
+        .prepare_cached("DELETE FROM task_lists_membership WHERE task_id = ?1")?
+        .execute([&task.id])?;
+    let mut member = connection.prepare_cached(
+        "INSERT OR IGNORE INTO task_lists_membership (task_id, list_id) VALUES (?1, ?2)",
     )?;
     for list_id in task.effective_list_ids() {
-        connection.execute(
-            "INSERT OR IGNORE INTO task_lists_membership (task_id, list_id) VALUES (?1, ?2)",
-            [&task.id, &list_id],
-        )?;
+        member.execute([&task.id, &list_id])?;
     }
     Ok(())
 }
 
-fn upsert_list_in(connection: &Connection, list: &TaskList) -> Result<()> {
-    connection.execute(
-        "INSERT OR REPLACE INTO lists (
+pub(crate) fn upsert_list_in(connection: &Connection, list: &TaskList) -> Result<()> {
+    connection
+        .prepare_cached(
+            "INSERT OR REPLACE INTO lists (
             id, name, color, privacy, owner_id, project_id, list_type, status_role, status_order,
             is_favorite, favorite_order, is_virtual, task_count, created_at, updated_at, json
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-        rusqlite::params![
+        )?
+        .execute(rusqlite::params![
             list.id,
             list.name,
             list.color,
@@ -711,8 +745,7 @@ fn upsert_list_in(connection: &Connection, list: &TaskList) -> Result<()> {
             list.created_at.map(date::format),
             list.updated_at.map(date::format),
             encode(list)?,
-        ],
-    )?;
+        ])?;
     Ok(())
 }
 

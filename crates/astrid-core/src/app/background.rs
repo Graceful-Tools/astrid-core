@@ -47,7 +47,7 @@ pub async fn sync_loop(
         if !app.auth.is_signed_in().await {
             continue;
         }
-        let report = app.sync.sync_in_background().await;
+        let mut report = app.sync.sync_in_background().await;
         tracing::debug!(
             fetched = report.fetched,
             skipped = report.skipped,
@@ -56,6 +56,9 @@ pub async fn sync_loop(
             tasks_deleted = report.tasks_deleted,
             "background sync"
         );
+        if let Some(delivered) = report.delivered.take() {
+            announce_delivery(&app, delivered);
+        }
         // The cache moved, so the screen has to. Without this the timer was a floor for the
         // cache and not for the person looking at it: a change that arrived while the stream was
         // down sat in SQLite until they happened to click something.
@@ -122,14 +125,33 @@ pub async fn outbox_loop(
                 // Only when a row's fate is settled. A retry that failed again changed nothing on
                 // screen, and announcing it would redraw the window on every backoff tick.
                 if report.completed > 0 || report.dead_lettered > 0 {
-                    app.realtime().publish(crate::realtime::Change::Synced {
-                        task_ids: Vec::new(),
-                        list_ids: Vec::new(),
-                    });
+                    announce_delivery(&app, report.delivered);
                 }
             }
             Err(error) => tracing::debug!(%error, "outbox delivery failed"),
         }
+    }
+}
+
+/// Tell the shell what a drain settled: the rows it touched, and the journal's counts with them
+/// (AITD-454). Named rather than "something moved", so a shell re-reads one task after an edit
+/// instead of every task, thread and channel it holds.
+pub(crate) fn announce_delivery(app: &App, touched: crate::outbox::Delivery) {
+    // An empty one still goes out — a settings write settled, which nothing on screen reads back
+    // — because the counts moved, and a shell showing them has to hear so.
+    match crate::outbox::journal::stats(&app.store) {
+        Ok(outbox) => app
+            .realtime()
+            .publish(crate::realtime::Change::Delivered { touched, outbox }),
+        // Counts it cannot give are not counts of zero: say what moved the old way, and the
+        // shell asks for itself.
+        Err(_) => app.realtime().publish(crate::realtime::Change::Delivered {
+            touched: crate::outbox::Delivery {
+                undescribed: true,
+                ..touched
+            },
+            outbox: crate::outbox::Stats::default(),
+        }),
     }
 }
 
@@ -448,7 +470,7 @@ mod tests {
         {
             let heard = heard.clone();
             app.realtime().on_change(move |change| {
-                if matches!(change, crate::realtime::Change::Synced { .. }) {
+                if matches!(change, crate::realtime::Change::Delivered { .. }) {
                     heard.fetch_add(1, Ordering::SeqCst);
                 }
             });
@@ -506,6 +528,136 @@ mod tests {
         running.store(false, Ordering::SeqCst);
         app.outbox_nudge().notify_one();
         let _ = looping.await;
+    }
+
+    /// AITD-454: a delivered edit names the task it wrote, and nothing else. Announced as an
+    /// empty `Synced` — "something moved, cannot say what" — every write made the Apple shell read
+    /// every task in the cache, every open comment thread and every open chat channel.
+    #[tokio::test(start_paused = true)]
+    async fn aitd_454_a_delivered_edit_names_its_task_rather_than_everything() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = StubTransport::new()
+            .push_json(
+                "/api/v1/tasks/t1",
+                200,
+                serde_json::json!({ "task": { "id": "t1", "title": "Buy oat milk" } }),
+            )
+            .fallback(Err(TransportError::Unreachable("done".into())));
+        let app = app_with(transport, secure);
+        app.store
+            .upsert_task(&crate::model::Task::new("t1", "Buy milk"))
+            .expect("stores");
+        let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |change| {
+                heard.lock().expect("lock").push(change.clone());
+            });
+        }
+
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let looping = {
+            let (app, running) = (app.clone(), running.clone());
+            tokio::spawn(outbox_loop(
+                app.clone(),
+                move || running.load(Ordering::SeqCst),
+                app.outbox_nudge().clone(),
+            ))
+        };
+        app.context
+            .tasks()
+            .update(
+                "t1",
+                &crate::services::TaskChanges {
+                    title: Some("Buy oat milk".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("journals");
+        app.outbox_nudge().notify_one();
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        running.store(false, Ordering::SeqCst);
+        app.outbox_nudge().notify_one();
+        let _ = looping.await;
+
+        let heard = heard.lock().expect("lock");
+        assert_eq!(
+            heard.as_slice(),
+            &[crate::realtime::Change::Delivered {
+                touched: crate::outbox::Delivery {
+                    task_ids: vec!["t1".into()],
+                    ..Default::default()
+                },
+                outbox: crate::outbox::Stats {
+                    completed: 1,
+                    ..Default::default()
+                },
+            }],
+            "one change, naming the one task"
+        );
+    }
+
+    /// AITD-454: a create names its temporary id and the server's, so the optimistic row can be
+    /// swapped for the real one without reading the rest.
+    #[tokio::test(start_paused = true)]
+    async fn aitd_454_a_delivered_create_names_its_temporary_and_real_ids() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = StubTransport::new()
+            .push_json(
+                "/api/v1/tasks",
+                200,
+                serde_json::json!({ "task": { "id": "t-real", "title": "Buy milk" } }),
+            )
+            .fallback(Err(TransportError::Unreachable("done".into())));
+        let app = app_with(transport, secure);
+        let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let heard = heard.clone();
+            app.realtime().on_change(move |change| {
+                heard.lock().expect("lock").push(change.clone());
+            });
+        }
+        let created = app
+            .context
+            .tasks()
+            .create(&crate::services::TaskDraft {
+                title: "Buy milk".into(),
+                ..Default::default()
+            })
+            .expect("journals");
+
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let looping = {
+            let (app, running) = (app.clone(), running.clone());
+            tokio::spawn(outbox_loop(
+                app.clone(),
+                move || running.load(Ordering::SeqCst),
+                app.outbox_nudge().clone(),
+            ))
+        };
+        app.outbox_nudge().notify_one();
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        running.store(false, Ordering::SeqCst);
+        app.outbox_nudge().notify_one();
+        let _ = looping.await;
+
+        let heard = heard.lock().expect("lock");
+        let [crate::realtime::Change::Delivered { touched, .. }] = heard.as_slice() else {
+            panic!("one delivery, heard {heard:?}");
+        };
+        assert_eq!(touched.task_ids, vec![created.id.clone(), "t-real".into()]);
+        assert!(touched.list_ids.is_empty() && touched.channel_ids.is_empty());
+        assert!(!touched.undescribed);
     }
 
     /// The timer is the floor for the screen, not only for the cache. A pass that brought

@@ -517,7 +517,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
 
         // ── The network ──────────────────────────────────────────────────────────────────────
         Command::Sync => {
-            let report = app.sync.sync().await;
+            let mut report = app.sync.sync().await;
+            // What its push step delivered is announced like any delivery; what it pulled in the
+            // caller reads from the answer, as it always has.
+            if let Some(delivered) = report.delivered.take() {
+                crate::app::background::announce_delivery(app, delivered);
+            }
             // The flags ride on a pass that reached the server: what this person may see can
             // change while the app is open, and a board that appears on the next pass beats one
             // that appears on the next launch. Best effort, like the projects.

@@ -28,4 +28,7 @@ uuid = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# `hooks` lets a test count commits: the sync merge is one transaction per phase, not one per row
+# (AITD-454), and only a commit hook can see the difference.
+rusqlite = { workspace = true, features = ["hooks"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
