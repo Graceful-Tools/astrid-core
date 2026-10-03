@@ -8,7 +8,7 @@
 //! Regenerate with `node contracts/export-from-web.mjs`; `cargo xtask check-contracts` fails when
 //! web has moved and this has not.
 
-use astrid_core::repeating::{
+use astrid_rules::repeating::{
     calculate_custom_next_occurrence, calculate_simple_next_occurrence,
     check_simple_pattern_end_condition, CustomRepeatingPattern, RepeatFrom, Repeating,
     SimplePatternEndCondition,

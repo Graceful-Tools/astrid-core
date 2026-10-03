@@ -8,7 +8,7 @@
 //! got any of those wrong would make a board that reads differently on the two clients, which
 //! nothing raises an error about. So the answers come from web.
 
-use astrid_core::board::{self, CustomState, ReorderDirection, StateErrorKind};
+use astrid_rules::board::{self, CustomState, ReorderDirection, StateErrorKind};
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/statuses.json");

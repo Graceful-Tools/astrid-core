@@ -1,0 +1,19 @@
+[package]
+name = "astrid-rules"
+description = "Astrid's pure, fixture-locked rules: models, repeating rollover, permissions, parsing, markdown, rows — no I/O, so it builds for every target astrid-core does and for wasm32-unknown-unknown."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Nothing here may read a clock, a disk, a socket or the OS's entropy: whatever a rule depends on
+# arrives as an argument. That is what lets the web run these rules as WebAssembly, and it is
+# checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
+# getrandom, uuid or iana-time-zone — and chrono without `clock`.
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+chrono-tz = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+pulldown-cmark = { workspace = true }

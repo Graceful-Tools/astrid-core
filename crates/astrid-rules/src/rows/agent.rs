@@ -19,9 +19,31 @@
 //! who runs it. The row carries the modes a control may offer, so the shell draws a chooser that
 //! can only ask for something the server will store — the same rule as web's `isModeSettableFor`.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::services::AgentMode;
+/// How one agent runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    /// Astrid runs it. Nothing to set up.
+    Api,
+    /// The account's own agent asks for work.
+    Polling,
+    /// The account's own agent is told about work.
+    Webhook,
+    /// It does not run.
+    Off,
+}
+
+impl AgentMode {
+    /// Whether this mode needs a credential of the account's own before it will do anything.
+    ///
+    /// The question a hub answers with "needs setup", and the reason it is here rather than in a
+    /// view: two platforms deciding it separately is two definitions of "ready".
+    pub fn needs_own_credential(self) -> bool {
+        matches!(self, AgentMode::Polling | AgentMode::Webhook)
+    }
+}
 
 /// One agent, and the ways it may be set to run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -15,11 +15,11 @@
 //! checked the key against the reader's projects, or that links an id the reader cannot open and
 //! leaves them at a 404, has not made a formatting mistake — it has invented a different rule.
 
-use astrid_core::identifier::{find_links, parse_identifier, LinkContext};
-use astrid_core::model::{Task, TaskList};
-use astrid_core::rows::detail::is_task_in_project;
-use astrid_core::rows::identifier::{offers_copy_identifier, shows_identifier};
-use astrid_core::rows::Surface;
+use astrid_rules::identifier::{find_links, parse_identifier, LinkContext};
+use astrid_rules::model::{Task, TaskList};
+use astrid_rules::rows::detail::is_task_in_project;
+use astrid_rules::rows::identifier::{offers_copy_identifier, shows_identifier};
+use astrid_rules::rows::Surface;
 use serde::Deserialize;
 use std::collections::HashMap;
 

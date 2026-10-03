@@ -10,8 +10,8 @@
 //! what dragging each card onto each column writes, and what a new card in each column is created
 //! with.
 
-use astrid_core::board::{self, BoardColumn, ColumnKind};
-use astrid_core::model::{Task, TaskList};
+use astrid_rules::board::{self, BoardColumn, ColumnKind};
+use astrid_rules::model::{Task, TaskList};
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/board.json");

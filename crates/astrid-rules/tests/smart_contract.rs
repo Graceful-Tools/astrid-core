@@ -6,8 +6,8 @@
 //! than an instant, because the web stamps the moment and this crate stores the day (CONTRACTS.md
 //! D12).
 
-use astrid_core::model::TaskList;
-use astrid_core::parse::smart::{self, Keywords};
+use astrid_rules::model::TaskList;
+use astrid_rules::parse::smart::{self, Keywords};
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/smart.json");
 

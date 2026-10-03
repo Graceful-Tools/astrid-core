@@ -1,6 +1,6 @@
 //! The stateless door: the pure contracts, answered synchronously.
 //!
-//! [`crate::app::App::run_json`] is the door to a running client — a cache, an Outbox, a network —
+//! `astrid_core::app::App::run_json` is the door to a running client — a cache, an Outbox, a network —
 //! and it is async because most of what goes through it waits on something. Some rules wait on
 //! nothing: what completing a task does, how a description renders, who may edit a list. A view
 //! asks those while it draws, and a shell that has to await a future to draw a row is a shell
@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use serde::Deserialize;
 
-use crate::app::{Failure, Response};
+use crate::envelope::{Failure, Response};
 use crate::model::{date, Task};
 
 /// One question for a pure rule.

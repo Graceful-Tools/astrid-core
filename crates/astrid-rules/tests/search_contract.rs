@@ -4,7 +4,7 @@
 //! set of queries — every alias, the quoting rule, the identifier shape, the unknown-key
 //! fallback. Each is parsed here and compared as JSON, field for field.
 
-use astrid_core::parse::search;
+use astrid_rules::parse::search;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/search.json");
 

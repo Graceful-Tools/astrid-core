@@ -18,28 +18,19 @@
 pub mod api;
 pub mod app;
 pub mod auth;
-pub mod board;
-pub mod editing;
 pub mod external;
-pub mod filters;
-pub mod identifier;
-pub mod keyboard;
-pub mod manual_order;
-pub mod markdown;
-pub mod model;
 pub mod outbox;
-pub mod palette;
-pub mod parse;
 pub mod paste;
-pub mod permissions;
 pub mod platform;
 pub mod realtime;
-pub mod reminders;
-pub mod repeating;
-pub mod rows;
-pub mod rules;
 pub mod services;
-pub mod smart_tasks;
 pub mod store;
 pub mod sync;
-pub mod theme;
+
+// The pure rules live in `astrid-rules`, which builds for WebAssembly too. They are re-exported
+// here at the paths they have always had, so `astrid_core::repeating`, `astrid_core::rules` and
+// the rest still name the same items for every client.
+pub use astrid_rules::{
+    board, editing, filters, identifier, keyboard, manual_order, markdown, model, palette, parse,
+    permissions, reminders, repeating, rows, rules, smart_tasks, theme,
+};

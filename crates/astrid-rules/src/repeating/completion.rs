@@ -1,6 +1,6 @@
 //! What completing a task does to it — the whole rule, as a value.
 //!
-//! [`crate::services::TaskService::complete`] applies it to the cache and the Outbox. A shell that
+//! `astrid_core::services::TaskService::complete` applies it to the cache and the Outbox. A shell that
 //! still keeps its own write path — the Apple apps, until they drive this crate's services — asks
 //! for it through [`crate::rules`] and applies the same answer to its own store. Either way there
 //! is one place that decides whether a completion rolls a series forward, ends it, or just sets
