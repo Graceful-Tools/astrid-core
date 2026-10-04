@@ -5607,3 +5607,47 @@ async fn an_attached_file_keeps_the_id_its_thumbnail_is_drawn_under() {
     assert_eq!(posted["value"]["secureFiles"][0]["mimeType"], "image/jpeg");
     let _ = std::fs::remove_file(path);
 }
+
+/// AITD-463: an Apple client hands its old UserDefaults sync ledger to the core in one command,
+/// and running it twice is harmless.
+#[tokio::test]
+async fn aitd_463_an_apple_ledger_imports_in_one_command() {
+    let app = app_with(StubTransport::new());
+    let command = json!({
+        "kind": "importExternalLedger",
+        "provider": "google_tasks",
+        "pending": [{ "remoteId": "p1", "containerId": "c1" }],
+        "tombstones": ["t1"],
+        "serverTombstones": ["s1"],
+        "excluded": ["x1"],
+        "links": [{ "taskId": "task-1", "remoteId": "r1", "containerId": "c1" }],
+    });
+    for _ in 0..2 {
+        let answered = call(&app, command.clone()).await;
+        assert_eq!(answered["ok"], true, "{answered}");
+    }
+
+    let store = &app.store;
+    use crate::external::ledger;
+    assert_eq!(
+        ledger::pending(store, "google"),
+        vec![("p1".to_string(), "c1".to_string())]
+    );
+    assert_eq!(
+        ledger::tombstoned(store, "google"),
+        vec!["t1".to_string(), "p1".to_string(), "s1".to_string()]
+    );
+    assert_eq!(ledger::excluded(store, "google"), vec!["x1".to_string()]);
+    assert_eq!(
+        ledger::twin(store, "google", "task-1"),
+        Some(("r1".to_string(), "c1".to_string()))
+    );
+
+    // Only the provider is required: every part may be absent.
+    let bare = call(
+        &app,
+        json!({ "kind": "importExternalLedger", "provider": "google_tasks" }),
+    )
+    .await;
+    assert_eq!(bare["ok"], true, "{bare}");
+}
