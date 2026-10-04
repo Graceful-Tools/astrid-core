@@ -19,9 +19,18 @@
 //! writes down the links it fetched ([`ledger::remember_links`]), a deletion reads them, and the
 //! next pass removes the twin and refuses to import the id again. See [`crate::external::ledger`].
 //!
-//! It acts on a remote deletion only when Google says so explicitly (`deleted`), never on
-//! absence from a page. A cursor pull is not a full listing, and deleting local tasks because a
-//! page did not mention them is how a dropped request wipes somebody's list.
+//! A remote deletion is acted on when Google says so explicitly (`deleted`), or when a twin is
+//! absent from a **complete** listing — never from a cursor page, a truncated listing or a failed
+//! one. Deleting local tasks because a page did not mention them is how a dropped request wipes
+//! somebody's list; see [`decisions::local_deletions`].
+//!
+//! ## Parity with Apple (AWTD2-56)
+//!
+//! The pass is `GoogleTasksSyncService.sync(link:)` and `syncMyTasks` from astrid-ios, in the same
+//! order and with the same rules: the two watermarks on each server link and last-write-wins,
+//! same-title adoption, no twin created without a complete listing, parents before children,
+//! completion drift repair, deletion by absence, the completed backfill, and a cursor committed
+//! only when every pulled item was dealt with.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -87,7 +96,7 @@ pub struct Container {
     pub name: String,
 }
 
-/// One remote item, as the proxy hands it over.
+/// One remote item, as the proxy hands it over (`GET api/v1/sync/google/tasks`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteItem {
@@ -105,30 +114,30 @@ struct RemoteItem {
     #[serde(default)]
     parent: Option<String>,
     /// Where the proxy actually puts deletion and nesting: strings under `metadata`
-    /// (`deleted: "1"`, `parent: "<google id>"` — `api/v1/sync/google/tasks`). The top-level
-    /// fields above are read too, for a proxy that ever sends them flat.
+    /// (`deleted: "1"`, `parent: "<google id>"`). The top-level fields above are read too, for a
+    /// proxy that ever sends them flat. Kept whole, because it is written back onto the link.
     #[serde(default)]
-    metadata: Option<RemoteMetadata>,
+    metadata: Option<serde_json::Value>,
     /// Google's completion time, when completed.
     #[serde(default)]
     completed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct RemoteMetadata {
+    /// Google's `updated` — what the pull watermark is compared against. Kept as sent, so the
+    /// watermark written back is exactly the stamp Google gave.
     #[serde(default)]
-    deleted: String,
-    #[serde(default)]
-    parent: String,
+    remote_updated_at: Option<String>,
 }
 
 impl RemoteItem {
+    fn meta(&self, key: &str) -> &str {
+        self.metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get(key))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+    }
+
     fn is_deleted(&self) -> bool {
-        self.deleted.unwrap_or(false)
-            || self
-                .metadata
-                .as_ref()
-                .is_some_and(|metadata| metadata.deleted == "1")
+        self.deleted.unwrap_or(false) || self.meta("deleted") == "1"
     }
 
     /// Google's own id of the parent item, when nested.
@@ -136,12 +145,11 @@ impl RemoteItem {
         self.parent
             .as_deref()
             .filter(|parent| !parent.is_empty())
-            .or_else(|| {
-                self.metadata
-                    .as_ref()
-                    .map(|metadata| metadata.parent.as_str())
-                    .filter(|parent| !parent.is_empty())
-            })
+            .or_else(|| Some(self.meta("parent")).filter(|parent| !parent.is_empty()))
+    }
+
+    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.remote_updated_at.as_deref().and_then(date::parse)
     }
 }
 
@@ -213,6 +221,8 @@ pub struct PassReport {
     pub pushed: usize,
     /// True when the page was cut short, so nothing may be inferred from absence.
     pub truncated: bool,
+    /// Completed remote items imported as completed tasks this pass.
+    pub backfilled: usize,
 }
 
 pub struct ExternalSyncService {
@@ -359,7 +369,25 @@ impl ExternalSyncService {
         Ok(links)
     }
 
+    /// Link a list to a container by hand.
+    ///
+    /// Which is a yes to that container, so it takes back an earlier "no" — on this device and on
+    /// the account — or the all-lists modes go on refusing a list somebody has since chosen.
+    /// (Apple `linkList`; AWTD2-56.)
     pub async fn link(
+        &self,
+        provider: Provider,
+        list_id: &str,
+        container_id: &str,
+    ) -> Result<serde_json::Value> {
+        let answer = self.create_link(provider, list_id, container_id).await?;
+        if provider == Provider::GoogleTasks {
+            self.clear_exclusion(container_id).await;
+        }
+        Ok(answer)
+    }
+
+    async fn create_link(
         &self,
         provider: Provider,
         list_id: &str,
@@ -376,6 +404,32 @@ impl ExternalSyncService {
         Ok(self.context.client.send(request).await?)
     }
 
+    /// Best effort: the link is made either way, and a setting that could not be written is put
+    /// right by the next manual link.
+    async fn clear_exclusion(&self, container_id: &str) {
+        let _ = ledger::include(&self.context.store, PROVIDER_KEY, container_id);
+        let Ok(settings) = self.auto_link_settings().await else {
+            return;
+        };
+        if !settings.excluded.iter().any(|id| id == container_id) {
+            return;
+        }
+        let rest: Vec<String> = settings
+            .excluded
+            .into_iter()
+            .filter(|id| id != container_id)
+            .collect();
+        let request = self
+            .context
+            .client
+            .patch(endpoints::INTEGRATIONS)
+            .value(json!({
+                "provider": Provider::GoogleTasks.wire(),
+                "metadata": { "excludedTasklists": rest.join(",") },
+            }));
+        let _ = self.context.client.send(request).await;
+    }
+
     pub async fn unlink(&self, provider: Provider, link_id: &str) -> Result<()> {
         let request = self
             .context
@@ -386,29 +440,24 @@ impl ExternalSyncService {
         Ok(())
     }
 
-    /// One Google pass over one link: remove what was deleted here, pull, then push.
-    ///
-    /// Deletions first. A pull that ran before them can re-import the very task somebody just
-    /// deleted — the tombstone stops that, but only if the pull is not racing the removal.
+    /// One Google pass over one link. See [`Self::run_pass`] for the order and why.
     pub async fn sync_google_link(&self, link: &ExternalLink) -> Result<PassReport> {
-        let removed = self.remove_deleted_twins(link).await?;
-        let mut report = self.pull(link).await?;
-        report.removed_remotely = removed;
-        report.pushed = self.push(link).await?;
-        Ok(report)
+        self.run_pass(Scope {
+            container_id: &link.remote_container_id,
+            link: Some(link),
+            placement: Placement::InList(link.astrid_list_id.clone()),
+            pulls: true,
+            pushes: true,
+        })
+        .await
     }
 
-    /// Remove the remote twins of tasks deleted on this machine.
+    /// Remove the remote twins of tasks deleted on this machine, addressed either by link or by
+    /// remote list — My Tasks has no link to name.
     ///
     /// A twin that is already gone counts as done: 404 and 410 both mean the work is finished, and
     /// retrying for ever because somebody deleted it over there too is not a failure worth keeping.
     /// Anything else is left pending, so a server having a bad minute does not lose the deletion.
-    async fn remove_deleted_twins(&self, link: &ExternalLink) -> Result<usize> {
-        self.remove_twins(&link.remote_container_id, &[("linkId", &link.id)])
-            .await
-    }
-
-    /// The same, addressed either by link or by remote list — My Tasks has no link to name.
     async fn remove_twins(&self, container_id: &str, address: &[(&str, &str)]) -> Result<usize> {
         let store = &self.context.store;
         let mut removed = 0;
@@ -664,7 +713,7 @@ impl ExternalSyncService {
                 continue;
             }
             match self
-                .link(Provider::GoogleTasks, &list_id, &action.tasklist_id)
+                .create_link(Provider::GoogleTasks, &list_id, &action.tasklist_id)
                 .await
             {
                 Ok(_) => report.linked += 1,
@@ -694,7 +743,7 @@ impl ExternalSyncService {
                 },
             };
             match self
-                .link(Provider::GoogleTasks, &action.list_id, &container_id)
+                .create_link(Provider::GoogleTasks, &action.list_id, &container_id)
                 .await
             {
                 Ok(_) => report.linked += 1,
@@ -735,203 +784,597 @@ impl ExternalSyncService {
             return Ok(PassReport::default());
         };
         let settings = self.auto_link_settings().await?;
-        let pulls = matches!(
-            settings.mode,
-            SyncMode::AllGoogleToAstrid | SyncMode::AllBidirectional
-        );
-        let pushes = matches!(
-            settings.mode,
-            SyncMode::AllAstridToGoogle | SyncMode::AllBidirectional
-        );
+        self.run_pass(Scope {
+            container_id: tasklist_id,
+            link: None,
+            placement: Placement::MyTasks(user_id),
+            pulls: matches!(
+                settings.mode,
+                SyncMode::AllGoogleToAstrid | SyncMode::AllBidirectional
+            ),
+            pushes: matches!(
+                settings.mode,
+                SyncMode::AllAstridToGoogle | SyncMode::AllBidirectional
+            ),
+        })
+        .await
+    }
 
+    // ── The pass ─────────────────────────────────────────────────────────────────────────────
+
+    /// One pass over one container, in Apple's order (`GoogleTasksSyncService.sync(link:)` and
+    /// `syncMyTasks`, AWTD2-56): remove what was deleted here, pull, push, then what only a
+    /// complete listing can show — completion drift, deletions by absence, completed history —
+    /// and last, for a linked list, commit the cursor.
+    async fn run_pass(&self, scope: Scope<'_>) -> Result<PassReport> {
+        let store = &self.context.store;
+        let container = scope.container_id;
+        let (address, address_value) = scope.address();
         let mut report = PassReport {
             removed_remotely: self
-                .remove_twins(tasklist_id, &[("tasklistId", tasklist_id)])
+                .remove_twins(container, &[(address, &address_value)])
                 .await?,
             ..Default::default()
         };
 
-        let request = self
-            .context
-            .client
-            .get(endpoints::GOOGLE_TASKS)
-            .query("tasklistId", Some(tasklist_id.to_string()));
-        let answer = self.context.client.send(request).await?;
-        let items: Vec<RemoteItem> = answer
-            .get("items")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .unwrap_or_default()
-            .unwrap_or_default();
-        report.pulled = items.len();
-        report.truncated = answer
-            .get("truncated")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
+        let mut links = self.task_links(container).await?;
+        let tombstoned = ledger::tombstoned(store, PROVIDER_KEY);
+        report.linked += self.heal_links(container, &mut links, &tombstoned).await;
 
-        let task_links = self.task_links(tasklist_id).await?;
-        if pulls {
-            let tombstoned = ledger::tombstoned(&self.context.store, PROVIDER_KEY);
-            for item in &items {
-                let linked_task_id = task_links.get(&item.remote_id).cloned().or_else(|| {
-                    ledger::local_task_for(&self.context.store, PROVIDER_KEY, &item.remote_id)
-                });
-                let local = linked_task_id
-                    .as_deref()
-                    .and_then(|id| self.context.store.task(id).ok().flatten());
-                match decisions::pull_outcome(
-                    item.is_deleted(),
-                    linked_task_id.is_some(),
-                    local.is_some(),
-                    tombstoned.contains(&item.remote_id),
-                ) {
-                    PullOutcome::DeleteLocalTwin => {
-                        // Tombstoned first, so the local delete's own capture sees a twin that is
-                        // already gone rather than queueing its removal.
-                        ledger::record_tombstone(
-                            &self.context.store,
-                            PROVIDER_KEY,
-                            &item.remote_id,
-                        )?;
-                        if let Some(task) = &local {
-                            self.context.tasks().delete(&task.id)?;
-                            report.deleted_locally += 1;
-                        }
-                    }
-                    PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
-                    PullOutcome::Apply => {
-                        // A completed item with nothing here is history, not work: importing it made
-                        // an open task of it (Apple's "imported-open flood").
-                        if item.completed && local.is_none() {
-                            continue;
-                        }
-                        let task = self.apply(
-                            item,
-                            tasklist_id,
-                            &Placement::MyTasks(user_id.clone()),
-                            local,
-                            &task_links,
-                        )?;
-                        report.applied += 1;
-                        ledger::remember_links(
-                            &self.context.store,
-                            PROVIDER_KEY,
-                            tasklist_id,
-                            [(task.id.clone(), item.remote_id.clone())],
-                        )?;
-                        // Whenever the server's map lacks it — see the linked-list pass below.
-                        if !task_links.contains_key(&item.remote_id)
-                            && self
-                                .record_task_link(&task.id, &item.remote_id, tasklist_id)
-                                .await
-                        {
-                            report.linked += 1;
-                        }
-                    }
-                }
+        // ── Pull ──
+        let pulled = match scope.link {
+            // The cursor is committed after the pass has been applied, so a client killed halfway
+            // re-pulls rather than skipping what it never wrote down.
+            Some(link) => {
+                self.listing(&[("linkId", &link.id), ("deferCursor", "1")])
+                    .await?
+            }
+            // My Tasks has no link row and so no cursor: its pull is the complete listing.
+            None => self.listing(&[("tasklistId", container)]).await?,
+        };
+        report.pulled = pulled.items.len();
+        report.truncated = pulled.truncated;
+        let mut complete = Complete {
+            listing: scope.link.is_none().then(|| pulled.clone()),
+            tried: scope.link.is_none(),
+        };
+
+        // A cursor is an acknowledgement, not a best effort: one pulled item that could not be
+        // applied and linked keeps the whole window replayable. (Apple `SyncPassAcknowledgement`.)
+        let mut acknowledged = true;
+        if scope.pulls {
+            acknowledged = self
+                .pull_items(&scope, &pulled.items, &mut links, &tombstoned, &mut report)
+                .await?;
+        }
+
+        // The links an absent item may delete: those that existed before the push. A twin the push
+        // creates is absent from a listing fetched before it, and must not read as deleted.
+        let mut deletable: Vec<decisions::Link> = links
+            .in_container(container)
+            .map(|link| decisions::Link {
+                task_id: link.task_id.clone(),
+                remote_id: link.remote_id.clone(),
+            })
+            .collect();
+
+        // ── Push ──
+        let mut pushed_remote_ids = std::collections::HashSet::new();
+        if scope.pushes {
+            let pulled_by_remote: std::collections::HashMap<&str, &RemoteItem> = pulled
+                .items
+                .iter()
+                .map(|item| (item.remote_id.as_str(), item))
+                .collect();
+            report.pushed = self
+                .push_tasks(
+                    &scope,
+                    &mut links,
+                    &pulled_by_remote,
+                    &mut complete,
+                    &tombstoned,
+                    &mut pushed_remote_ids,
+                    &mut report,
+                )
+                .await?;
+            if let Placement::MyTasks(user_id) = &scope.placement {
+                let retired = self
+                    .retire_my_tasks_twins(container, user_id, &mut links)
+                    .await?;
+                deletable.retain(|link| !retired.contains(&link.remote_id));
             }
         }
 
-        if pushes {
-            report.pushed = self
-                .push_my_tasks(tasklist_id, &user_id, &task_links)
-                .await?;
+        // ── What only a complete listing can show ──
+        if scope.pulls {
+            if scope.link.is_some() {
+                // Throttled: a linked list's complete listing is fetched for deletions at most
+                // every five minutes when the push did not need one. Only a complete one counts.
+                let key = format!("external.fullPull.{container}");
+                let now = self.context.clock.now();
+                let last = store.metadata(&key)?.and_then(|stamp| date::parse(&stamp));
+                if !complete.tried && decisions::full_pull_due(last, now) {
+                    complete.listing = self.complete_listing(&scope).await;
+                    complete.tried = true;
+                }
+                if complete
+                    .listing
+                    .as_ref()
+                    .is_some_and(|listing| !listing.truncated)
+                {
+                    store.set_metadata(&key, &date::format(now))?;
+                }
+            }
+            if let Some(listing) = &complete.listing {
+                report.applied += self
+                    .repair_drift(container, listing, &mut links, &pushed_remote_ids)
+                    .await;
+                report.deleted_locally += self.delete_absent(listing, &deletable)?;
+                report.backfilled += self
+                    .backfill(&scope, listing, &mut links, &tombstoned)
+                    .await?;
+            }
+        }
+
+        // ── The cursor ── only when the page was whole and every item was dealt with.
+        if let Some(link) = scope.link {
+            if acknowledged && !pulled.truncated {
+                if let Some(cursor) = pulled.cursor.as_deref().filter(|cursor| !cursor.is_empty()) {
+                    let request = self
+                        .context
+                        .client
+                        .post(endpoints::GOOGLE_TASKS)
+                        .value(json!({
+                            "action": "commitCursor",
+                            "linkId": link.id,
+                            "cursor": cursor,
+                        }));
+                    self.context.client.send(request).await?;
+                }
+            }
         }
         Ok(report)
     }
 
-    /// Send the unlisted tasks assigned to you, and close out the twins of tasks that have left.
-    async fn push_my_tasks(
+    /// One page of Google's items, as the proxy hands them over.
+    async fn listing(&self, query: &[(&str, &str)]) -> Result<Listing> {
+        let mut request = self.context.client.get(endpoints::GOOGLE_TASKS);
+        for (name, value) in query {
+            request = request.query(name, Some((*value).to_string()));
+        }
+        let answer = self.context.client.send(request).await?;
+        // Item by item: one this build cannot read makes the listing incomplete, not empty. Read
+        // as empty, every link in the list would look deleted.
+        let raw = answer.get("items").and_then(|value| value.as_array());
+        let mut whole = raw.is_some();
+        let items = raw
+            .into_iter()
+            .flatten()
+            .filter_map(|item| match serde_json::from_value(item.clone()) {
+                Ok(item) => Some(item),
+                Err(_) => {
+                    whole = false;
+                    None
+                }
+            })
+            .collect();
+        Ok(Listing {
+            items,
+            // Only an explicit "no" is trusted. A listing that does not say whether it was cut
+            // short is treated as cut short, because absence from it proves nothing either way.
+            truncated: !whole
+                || answer
+                    .get("truncated")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true),
+            cursor: answer
+                .get("cursor")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        })
+    }
+
+    /// A linked list's complete listing (`full=1`, cursor-free), or `None` when it could not be
+    /// had — which is "unknown", never "empty".
+    async fn complete_listing(&self, scope: &Scope<'_>) -> Option<Listing> {
+        let (address, value) = scope.address();
+        self.listing(&[(address, &value), ("full", "1")]).await.ok()
+    }
+
+    /// Apply one pull's items. Answers whether every one was dealt with, for the cursor.
+    async fn pull_items(
         &self,
-        tasklist_id: &str,
-        user_id: &str,
-        task_links: &std::collections::HashMap<String, String>,
+        scope: &Scope<'_>,
+        items: &[RemoteItem],
+        links: &mut LinkMap,
+        tombstoned: &[String],
+        report: &mut PassReport,
+    ) -> Result<bool> {
+        let store = &self.context.store;
+        let container = scope.container_id;
+        let mut acknowledged = true;
+        // Parents before children, so a subtask created this pass finds its parent's fresh link.
+        let ordered = decisions::parents_first(
+            items,
+            |item| item.remote_id.clone(),
+            |item| decisions::parent_key(container, item.raw_parent()),
+        );
+        // Same-title adoption: a local task with no twin, the only one of its title, is the
+        // item's twin rather than a reason to make a second. (Apple's adopt-candidates.)
+        let mut adoptable = decisions::TitleIndex::new(
+            store
+                .tasks()?
+                .into_iter()
+                .filter(|task| {
+                    scope.holds(task)
+                        && !crate::model::is_temp_id(&task.id)
+                        && !links.by_task.contains_key(&task.id)
+                        && ledger::twin(store, PROVIDER_KEY, &task.id).is_none()
+                })
+                .map(|task| (task.id, task.title)),
+        );
+
+        for item in &ordered {
+            let server_link = links.by_remote.get(&item.remote_id).cloned();
+            // The server's map first, then this device's own. A task pulled while offline is not
+            // on the server's map yet, and without the local answer the next pass would pull the
+            // same item in a second time.
+            let linked_task_id = server_link
+                .as_ref()
+                .map(|link| link.task_id.clone())
+                .or_else(|| ledger::local_task_for(store, PROVIDER_KEY, &item.remote_id));
+            let local = linked_task_id
+                .as_deref()
+                .and_then(|id| store.task(id).ok().flatten());
+
+            match decisions::pull_outcome(
+                item.is_deleted(),
+                linked_task_id.is_some(),
+                local.is_some(),
+                tombstoned.contains(&item.remote_id),
+            ) {
+                PullOutcome::DeleteLocalTwin => {
+                    // Tombstoned first, not pushed back: the deletion came from over there, and
+                    // echoing it would be this device deleting an item that is already gone.
+                    ledger::record_tombstone(store, PROVIDER_KEY, &item.remote_id)?;
+                    // Through the task service, journalled: removed from the cache alone, the
+                    // task came back with the next pull from astrid-web.
+                    if let Some(task) = &local {
+                        self.context.tasks().delete(&task.id)?;
+                        links.remove_remote(&item.remote_id);
+                        report.deleted_locally += 1;
+                    }
+                }
+                PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
+                PullOutcome::Apply => match local {
+                    Some(task) => {
+                        let remote_updated = item.updated_at();
+                        if let Some(link) = &server_link {
+                            // Our own echo, or older than what we last saw.
+                            if !decisions::should_apply_remote(
+                                remote_updated,
+                                link.remote_updated_at,
+                            ) {
+                                continue;
+                            }
+                        }
+                        // Last write wins: a Google change that lost the race to an edit made
+                        // here must not clobber it — the push carries the local state out instead.
+                        let local_unchanged = server_link.as_ref().is_some_and(|link| {
+                            !decisions::should_push_local(task.updated_at, link.astrid_updated_at)
+                        });
+                        let (task, agreed_at) =
+                            if decisions::remote_wins(remote_updated, task.updated_at)
+                                || local_unchanged
+                            {
+                                let (task, changed) =
+                                    self.apply_remote(item, container, task, links)?;
+                                if changed {
+                                    report.applied += 1;
+                                }
+                                let at = task.updated_at;
+                                (task, at)
+                            } else if server_link.is_some() {
+                                continue;
+                            } else {
+                                // Known only here: nothing applied, but the server still lacks the
+                                // link. Written without a local watermark, so the newer local
+                                // state is still pushed rather than taken as agreed.
+                                (task, None)
+                            };
+                        let written = self
+                            .write_link(links, &task.id, item, container, agreed_at)
+                            .await;
+                        if !written {
+                            acknowledged = false;
+                        } else if server_link.is_none() {
+                            report.linked += 1;
+                        }
+                    }
+                    // Linked to a task this machine does not hold — not loaded yet, or deleted
+                    // here and not yet on the server. Making one would be the duplicate; the
+                    // window is kept so the item is seen again once the task is.
+                    None if linked_task_id.is_some() => acknowledged = false,
+                    None => {
+                        // A completed item with nothing here is history, not work: importing it
+                        // made an open task of it (Apple's "imported-open flood"). The backfill
+                        // brings it in as completed.
+                        if item.completed {
+                            continue;
+                        }
+                        let task = match adoptable
+                            .take_unique(&item.title)
+                            .and_then(|id| store.task(&id).ok().flatten())
+                        {
+                            Some(adopted) => adopted,
+                            None => self.create_from(item, container, &scope.placement, links)?,
+                        };
+                        report.applied += 1;
+                        // Written down here as well as on the server: this is what a second pass
+                        // reads when the first one's task has not reached astrid-web yet.
+                        ledger::remember_links(
+                            store,
+                            PROVIDER_KEY,
+                            container,
+                            [(task.id.clone(), item.remote_id.clone())],
+                        )?;
+                        if self
+                            .write_link(links, &task.id, item, container, task.updated_at)
+                            .await
+                        {
+                            report.linked += 1;
+                        } else {
+                            acknowledged = false;
+                        }
+                    }
+                },
+            }
+        }
+        Ok(acknowledged)
+    }
+
+    /// Send what changed here: patch known twins, adopt or create the rest.
+    #[allow(clippy::too_many_arguments)]
+    async fn push_tasks(
+        &self,
+        scope: &Scope<'_>,
+        links: &mut LinkMap,
+        pulled: &std::collections::HashMap<&str, &RemoteItem>,
+        complete: &mut Complete,
+        tombstoned: &[String],
+        pushed_remote_ids: &mut std::collections::HashSet<String>,
+        report: &mut PassReport,
     ) -> Result<usize> {
-        let key = format!("external.pushed.myTasks.{tasklist_id}");
-        let since = self
+        let container = scope.container_id;
+        let zone = self.context.clock.time_zone();
+        let mut held: Vec<Task> = self
             .context
             .store
-            .metadata(&key)?
-            .and_then(|stamp| date::parse(&stamp));
-        let now = self.context.clock.now();
-        let mut retry = PushRetry::load(&self.context.store, &key);
-        let by_task: std::collections::HashMap<&String, &String> = task_links
-            .iter()
-            .map(|(remote, task)| (task, remote))
+            .tasks()?
+            .into_iter()
+            // A task that has never reached astrid-web has a temporary id, and linking a twin to
+            // it would attach the twin to something about to be given a different id.
+            .filter(|task| scope.holds(task) && !crate::model::is_temp_id(&task.id))
             .collect();
-
-        let held = self.context.store.tasks()?;
-        let mine = |task: &Task| {
-            task.list_ids.as_ref().is_none_or(|lists| lists.is_empty())
-                && task.assignee_id.as_deref() == Some(user_id)
-        };
+        // Parents before children, so a new subtask's parent already has its twin.
+        held.sort_by_key(|task| task.parent_task_id.is_some());
 
         let mut pushed = 0;
-        for task in held.iter().filter(|task| mine(task)) {
-            if crate::model::is_temp_id(&task.id) {
-                continue;
-            }
-            let changed = match (since, task.updated_at) {
-                (Some(since), Some(updated)) => updated > since,
-                _ => true,
-            } || retry.due(&task.id);
-            if !changed {
-                continue;
-            }
-            let known = by_task.get(&task.id).copied();
-            // A completed task with no twin is history: My Tasks mirrors what is to be done, and
-            // making twins for it pushed the whole completed history into the default list.
-            if known.is_none() && task.completed {
-                continue;
-            }
-            let request = self
-                .context
-                .client
-                .post(endpoints::GOOGLE_TASKS)
-                .value(json!({
-                    "tasklistId": tasklist_id,
-                    "title": task.title,
-                    "notes": task.description,
-                    "dueDate": task.due_date_time.map(|due| decisions::push_due(
-                        due,
-                        task.is_all_day,
-                        self.context.clock.time_zone(),
-                    )),
-                    "completed": task.completed,
-                    "remoteId": known,
-                }));
-            // One failure is that task's, not the list's: it is tried again next pass, and the
-            // rest still go. A `?` here stopped the list at its first 404 on every pass.
-            let answer = match self.context.client.send(request).await {
-                Ok(answer) => {
-                    retry.done(&task.id);
-                    answer
-                }
-                Err(error) => {
-                    tracing::debug!(task = %task.id, %error, "push failed; retried next pass");
-                    retry.failed(&task.id);
+        for task in &held {
+            let due = task
+                .due_date_time
+                .map(|due| decisions::push_due(due, task.is_all_day, zone));
+            if let Some(link) = links.for_task(&task.id).cloned() {
+                // A link filed under another container is that container's pass's to push.
+                if !decisions::may_push(&link.container_id, container) {
                     continue;
                 }
-            };
-            pushed += 1;
-            if known.is_none() {
-                if let Some(remote_id) = answer.get("remoteId").and_then(|value| value.as_str()) {
-                    self.record_task_link(&task.id, remote_id, tasklist_id)
+                if !decisions::should_push_local(task.updated_at, link.astrid_updated_at) {
+                    continue;
+                }
+                // An unchanged PATCH still moves Google's stamp, which comes back as a change.
+                // Move the watermark instead.
+                let snapshot = pulled.get(link.remote_id.as_str()).copied().or_else(|| {
+                    complete.listing.as_ref().and_then(|listing| {
+                        listing
+                            .items
+                            .iter()
+                            .find(|item| item.remote_id == link.remote_id)
+                    })
+                });
+                if snapshot.is_some_and(|remote| same_content(remote, task, due.as_deref())) {
+                    self.record_task_link(
+                        &task.id,
+                        &link.remote_id,
+                        container,
+                        task.updated_at,
+                        link.remote_updated_at.map(date::format).as_deref(),
+                        None,
+                    )
+                    .await;
+                    continue;
+                }
+                // One failure is that task's, not the list's: its watermark does not move, so it
+                // is tried again next pass, and the rest still go.
+                match self
+                    .send_push(scope, task, due, Some(&link.remote_id), None)
+                    .await
+                {
+                    Ok((_, remote_updated)) => {
+                        self.record_task_link(
+                            &task.id,
+                            &link.remote_id,
+                            container,
+                            task.updated_at,
+                            remote_updated.as_deref(),
+                            None,
+                        )
                         .await;
+                        links.insert(TaskLink {
+                            task_id: task.id.clone(),
+                            remote_id: link.remote_id.clone(),
+                            container_id: container.to_string(),
+                            astrid_updated_at: task.updated_at,
+                            remote_updated_at: remote_updated.as_deref().and_then(date::parse),
+                        });
+                        pushed_remote_ids.insert(link.remote_id.clone());
+                        pushed += 1;
+                    }
+                    Err(error) => {
+                        tracing::debug!(task = %task.id, %error, "push failed; retried next pass")
+                    }
+                }
+                continue;
+            }
+
+            // A completed task with no twin is history: My Tasks mirrors what is to be done, and
+            // making twins for it pushed the whole completed history into the default list.
+            if matches!(scope.placement, Placement::MyTasks(_)) && task.completed {
+                continue;
+            }
+            if !complete.tried {
+                complete.listing = self.complete_listing(scope).await;
+                complete.tried = true;
+            }
+            // Before creating a twin, an unlinked remote item of the same title in the complete
+            // listing is adopted instead. Not a deleted one: linking to it would have the next
+            // absence pass delete this task. (docs/CONTRACTS.md D39.)
+            let candidate = complete.listing.as_ref().and_then(|listing| {
+                listing
+                    .items
+                    .iter()
+                    .find(|item| {
+                        item.title == task.title
+                            && !item.is_deleted()
+                            && !links.by_remote.contains_key(&item.remote_id)
+                            && !tombstoned.contains(&item.remote_id)
+                    })
+                    .cloned()
+            });
+            if let Some(candidate) = candidate {
+                if self
+                    .write_link(links, &task.id, &candidate, container, task.updated_at)
+                    .await
+                {
+                    report.linked += 1;
+                }
+                continue;
+            }
+            // The twin may be past the end of a truncated listing, and a failed one is unknown,
+            // not empty. Known twins are patched above; none is created on a guess.
+            let truncated = complete
+                .listing
+                .as_ref()
+                .is_none_or(|listing| listing.truncated);
+            if !decisions::may_create_remote(complete.listing.is_some(), truncated, false) {
+                continue;
+            }
+            let parent_remote_id = task
+                .parent_task_id
+                .as_ref()
+                .and_then(|parent| links.by_task.get(parent))
+                .cloned();
+            match self
+                .send_push(scope, task, due, None, parent_remote_id.as_deref())
+                .await
+            {
+                Ok((remote_id, remote_updated)) if !remote_id.is_empty() => {
+                    pushed += 1;
+                    ledger::remember_links(
+                        &self.context.store,
+                        PROVIDER_KEY,
+                        container,
+                        [(task.id.clone(), remote_id.clone())],
+                    )?;
+                    // A create has made a twin only this response knows about. Writing the link
+                    // down is what stops the next pass making a second one.
+                    if self
+                        .record_task_link(
+                            &task.id,
+                            &remote_id,
+                            container,
+                            task.updated_at,
+                            remote_updated.as_deref(),
+                            None,
+                        )
+                        .await
+                    {
+                        report.linked += 1;
+                    }
+                    links.insert(TaskLink {
+                        task_id: task.id.clone(),
+                        remote_id,
+                        container_id: container.to_string(),
+                        astrid_updated_at: task.updated_at,
+                        remote_updated_at: remote_updated.as_deref().and_then(date::parse),
+                    });
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::debug!(task = %task.id, %error, "push failed; retried next pass")
                 }
             }
         }
+        Ok(pushed)
+    }
 
-        // A task that has LEFT My Tasks — it gained a list, or lost the assignment that put it
-        // here — still has a twin in the default list, which then acts as a second home for
-        // something that already has one. Close it out. A deleted task is not this: that goes
-        // through the ledger.
-        for (remote_id, task_id) in task_links {
-            let Some(task) = self.context.store.task(task_id).ok().flatten() else {
+    /// One push: a patch when the twin is known, a create (under its parent's twin) when not.
+    /// Answers with the twin's id and Google's new stamp.
+    async fn send_push(
+        &self,
+        scope: &Scope<'_>,
+        task: &Task,
+        due: Option<String>,
+        remote_id: Option<&str>,
+        parent_remote_id: Option<&str>,
+    ) -> Result<(String, Option<String>)> {
+        let (address, value) = scope.address();
+        let mut body = serde_json::Map::new();
+        body.insert(address.to_string(), json!(value));
+        body.insert("title".into(), json!(task.title));
+        body.insert("notes".into(), json!(task.description));
+        body.insert("dueDate".into(), json!(due));
+        body.insert("completed".into(), json!(task.completed));
+        body.insert("remoteId".into(), json!(remote_id));
+        if let Some(parent) = parent_remote_id {
+            body.insert("parentRemoteId".into(), json!(parent));
+        }
+        let request = self
+            .context
+            .client
+            .post(endpoints::GOOGLE_TASKS)
+            .value(serde_json::Value::Object(body));
+        let answer = self.context.client.send(request).await?;
+        let remote_id = answer
+            .get("remoteId")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .or_else(|| remote_id.map(str::to_string))
+            .unwrap_or_default();
+        let updated = answer
+            .get("remoteUpdatedAt")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        Ok((remote_id, updated))
+    }
+
+    /// A task that has LEFT My Tasks — it gained a list, or lost the assignment that put it
+    /// here — still has a twin in the default list, which then acts as a second home for
+    /// something that already has one. Close it out. A deleted task is not this: that goes
+    /// through the ledger. Answers with the remote ids retired.
+    async fn retire_my_tasks_twins(
+        &self,
+        tasklist_id: &str,
+        user_id: &str,
+        links: &mut LinkMap,
+    ) -> Result<Vec<String>> {
+        let mut retired = Vec::new();
+        let candidates: Vec<TaskLink> = links.in_container(tasklist_id).cloned().collect();
+        for link in candidates {
+            let Some(task) = self.context.store.task(&link.task_id).ok().flatten() else {
                 continue;
             };
-            if mine(&task) {
+            if is_my_task(&task, user_id) {
                 continue;
             }
             let request = self
@@ -939,7 +1382,7 @@ impl ExternalSyncService {
                 .client
                 .delete(endpoints::GOOGLE_TASKS)
                 .query("tasklistId", Some(tasklist_id.to_string()))
-                .query("remoteId", Some(remote_id.clone()));
+                .query("remoteId", Some(link.remote_id.clone()));
             match self.context.client.send(request).await {
                 Ok(_) => {}
                 Err(crate::api::ApiError::Http { status, .. })
@@ -948,147 +1391,246 @@ impl ExternalSyncService {
                 // still there.
                 Err(_) => continue,
             }
-            ledger::record_tombstone(&self.context.store, PROVIDER_KEY, remote_id)?;
-            ledger::forget_link(&self.context.store, PROVIDER_KEY, task_id)?;
+            ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &link.remote_id)?;
+            ledger::forget_link(&self.context.store, PROVIDER_KEY, &link.task_id)?;
+            links.remove_remote(&link.remote_id);
+            retired.push(link.remote_id);
         }
-
-        self.context.store.set_metadata(&key, &date::format(now))?;
-        retry.save(&self.context.store, &key)?;
-        Ok(pushed)
+        Ok(retired)
     }
 
-    /// Bring in what changed on the other side.
-    async fn pull(&self, link: &ExternalLink) -> Result<PassReport> {
-        let request = self
-            .context
-            .client
-            .get(endpoints::GOOGLE_TASKS)
-            .query("linkId", Some(link.id.clone()))
-            // The cursor is committed after the pass has been applied, so a client killed halfway
-            // re-pulls rather than skipping what it never wrote down.
-            .query("deferCursor", Some("1".to_string()));
-        let answer = self.context.client.send(request).await?;
-
-        let truncated = answer
-            .get("truncated")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-        let items: Vec<RemoteItem> = answer
-            .get("items")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .unwrap_or_default()
-            .unwrap_or_default();
-
-        let mut report = PassReport {
-            pulled: items.len(),
-            truncated,
-            ..Default::default()
-        };
-
-        let task_links = self.task_links(&link.remote_container_id).await?;
-        let tombstoned = ledger::tombstoned(&self.context.store, PROVIDER_KEY);
-        for item in &items {
-            // The server's map first, then this device's own. A task pulled while offline is
-            // not on the server's map yet, and without the local answer the next pass would pull
-            // the same item in a second time.
-            let linked_task_id = task_links.get(&item.remote_id).cloned().or_else(|| {
-                ledger::local_task_for(&self.context.store, PROVIDER_KEY, &item.remote_id)
-            });
-            let local = linked_task_id
-                .as_deref()
-                .and_then(|id| self.context.store.task(id).ok().flatten());
-
-            let outcome = decisions::pull_outcome(
-                item.is_deleted(),
-                linked_task_id.is_some(),
-                local.is_some(),
-                tombstoned.contains(&item.remote_id),
-            );
-            match outcome {
-                PullOutcome::DeleteLocalTwin => {
-                    // Tombstoned first, not pushed back: the deletion came from over there, and
-                    // echoing it would be this device deleting an item that is already gone.
-                    ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &item.remote_id)?;
-                    // Through the task service, journalled: removed from the cache alone, the
-                    // task came back with the next pull from astrid-web.
-                    if let Some(task) = &local {
-                        self.context.tasks().delete(&task.id)?;
-                        report.deleted_locally += 1;
-                    }
-                }
-                PullOutcome::IgnoreDeletion | PullOutcome::SkipResurrection => {}
-                PullOutcome::Apply => {
-                    // A completed item with nothing here is history, not work: importing it made
-                    // an open task of it (Apple's "imported-open flood").
-                    if item.completed && local.is_none() {
-                        continue;
-                    }
-                    let task = self.apply(
-                        item,
-                        &link.remote_container_id,
-                        &Placement::InList(link.astrid_list_id.clone()),
-                        local,
-                        &task_links,
-                    )?;
-                    report.applied += 1;
-                    // Written down here as well as on the server: this is what a second pass reads
-                    // when the first one's task has not reached astrid-web yet.
-                    ledger::remember_links(
-                        &self.context.store,
-                        PROVIDER_KEY,
-                        &link.remote_container_id,
-                        [(task.id.clone(), item.remote_id.clone())],
-                    )?;
-                    // Whenever the server's map lacks it — not only when the item is new here. A
-                    // task pulled while its create was still in the journal is matched through this
-                    // device's own note next pass, and if the server is never told, every other
-                    // device makes a second twin. An existing server link is not re-sent.
-                    if !task_links.contains_key(&item.remote_id)
-                        && self
-                            .record_task_link(&task.id, &item.remote_id, &link.remote_container_id)
-                            .await
-                    {
-                        report.linked += 1;
-                    }
-                }
-            }
-        }
-
-        // Only now, and only when the page was whole: the cursor is a promise that everything
-        // before it has been dealt with.
-        if !truncated {
-            if let Some(cursor) = answer.get("cursor").and_then(|value| value.as_str()) {
-                let request = self
-                    .context
-                    .client
-                    .post(endpoints::GOOGLE_TASKS)
-                    .value(json!({
-                        "action": "commitCursor",
-                        "linkId": link.id,
-                        "cursor": cursor,
-                    }));
-                self.context.client.send(request).await?;
-            }
-        }
-        Ok(report)
-    }
-
-    /// The remote-id → task-id map the server keeps for one container.
-    async fn task_links(
+    /// Completion drift: a linked pair whose completion disagrees, where the local task has not
+    /// changed since the last pass, takes Google's. Old items never re-enter a cursor window, so
+    /// without this one botched pass leaves the drift for ever. A pair pushed this pass has a
+    /// stale snapshot here and is skipped. (Apple's drift repair, `CompletionDriftPolicy`.)
+    async fn repair_drift(
         &self,
-        container_id: &str,
-    ) -> Result<std::collections::HashMap<String, String>> {
+        container: &str,
+        listing: &Listing,
+        links: &mut LinkMap,
+        pushed_remote_ids: &std::collections::HashSet<String>,
+    ) -> usize {
+        let mut repaired = 0;
+        for item in listing.items.iter().filter(|item| !item.is_deleted()) {
+            if pushed_remote_ids.contains(&item.remote_id) {
+                continue;
+            }
+            let Some(link) = links.by_remote.get(&item.remote_id).cloned() else {
+                continue;
+            };
+            let Some(task) = self.context.store.task(&link.task_id).ok().flatten() else {
+                continue;
+            };
+            let local_unchanged =
+                !decisions::should_push_local(task.updated_at, link.astrid_updated_at);
+            if !decisions::should_adopt_remote_completion(
+                item.completed,
+                task.completed,
+                task.completed_at,
+                local_unchanged,
+                task.is_repeating(),
+            ) {
+                continue;
+            }
+            let origin = crate::services::task::Origin {
+                at: item.completed_at.as_deref().and_then(date::parse),
+                source: Some("google".to_string()),
+            };
+            let Ok(done) = self.context.tasks().complete_as(
+                &task.id,
+                item.completed,
+                Some(&task),
+                None,
+                &origin,
+            ) else {
+                continue;
+            };
+            repaired += 1;
+            // The repair is Google's own state; watermarked, so it is not pushed back as an edit.
+            self.write_link(links, &done.id, item, container, done.updated_at)
+                .await;
+        }
+        repaired
+    }
+
+    /// Deletions by absence: a twin missing from a COMPLETE listing was deleted over there, and
+    /// its local task goes.
+    ///
+    /// Delete, not detach: a Google id is scoped to its task list and Google models a move as a
+    /// delete and an insert, so there is no same-task-elsewhere to preserve. The one mass-delete
+    /// risk — incomplete data — is [`decisions::local_deletions`]'s: a truncated listing deletes
+    /// nothing, and a failed one never gets here. (Apple's decision note on the same pass.)
+    fn delete_absent(&self, listing: &Listing, deletable: &[decisions::Link]) -> Result<usize> {
+        let present: Vec<String> = listing
+            .items
+            .iter()
+            .filter(|item| !item.is_deleted())
+            .map(|item| item.remote_id.clone())
+            .collect();
+        let mut deleted = 0;
+        for link in decisions::local_deletions(deletable, Some(&present), listing.truncated, &[]) {
+            if self.context.store.task(&link.task_id)?.is_none() {
+                continue;
+            }
+            // Tombstoned first, so the delete's own capture sees a twin already gone rather than
+            // queueing its removal — and the pull never brings it back.
+            ledger::record_tombstone(&self.context.store, PROVIDER_KEY, &link.remote_id)?;
+            self.context.tasks().delete(&link.task_id)?;
+            deleted += 1;
+        }
+        Ok(deleted)
+    }
+
+    /// Completed history, imported gradually as completed tasks: newest first, a budget a pass,
+    /// never ahead of the live items. A completed local task of the same unambiguous title is
+    /// adopted rather than duplicated — a pass that made it but could not link it. (Apple's
+    /// completed backfill and `BackfillAdoptionIndex`.)
+    async fn backfill(
+        &self,
+        scope: &Scope<'_>,
+        listing: &Listing,
+        links: &mut LinkMap,
+        tombstoned: &[String],
+    ) -> Result<usize> {
+        let store = &self.context.store;
+        let container = scope.container_id;
+        let noted: std::collections::HashSet<String> =
+            ledger::links_in(store, PROVIDER_KEY, container)
+                .into_iter()
+                .map(|(_, remote_id)| remote_id)
+                .collect();
+        let candidates: Vec<decisions::BackfillCandidate> = listing
+            .items
+            .iter()
+            .map(|item| decisions::BackfillCandidate {
+                remote_id: item.remote_id.clone(),
+                completed: item.completed,
+                deleted: item.is_deleted(),
+                updated_at: item.remote_updated_at.clone().unwrap_or_default(),
+            })
+            .collect();
+        let chosen: Vec<String> = decisions::backfill_selection(
+            &candidates,
+            |remote_id| links.by_remote.contains_key(remote_id) || noted.contains(remote_id),
+            tombstoned,
+            decisions::BACKFILL_BUDGET,
+        )
+        .into_iter()
+        .map(|candidate| candidate.remote_id.clone())
+        .collect();
+        if chosen.is_empty() {
+            return Ok(0);
+        }
+
+        let mut adoptable = decisions::TitleIndex::new(
+            store
+                .tasks()?
+                .into_iter()
+                .filter(|task| {
+                    scope.holds(task)
+                        && task.completed
+                        && !crate::model::is_temp_id(&task.id)
+                        && !links.by_task.contains_key(&task.id)
+                })
+                .map(|task| (task.id, task.title)),
+        );
+        let mut imported = 0;
+        for remote_id in chosen {
+            let Some(item) = listing
+                .items
+                .iter()
+                .find(|item| item.remote_id == remote_id)
+            else {
+                continue;
+            };
+            let task = match adoptable
+                .take_unique(&item.title)
+                .and_then(|id| store.task(&id).ok().flatten())
+            {
+                Some(adopted) => adopted,
+                None => {
+                    let created = self.create_from(item, container, &scope.placement, links)?;
+                    let origin = crate::services::task::Origin {
+                        at: item
+                            .completed_at
+                            .as_deref()
+                            .and_then(date::parse)
+                            .or_else(|| item.updated_at()),
+                        source: Some("google".to_string()),
+                    };
+                    self.context.tasks().complete_as(
+                        &created.id,
+                        true,
+                        Some(&created),
+                        None,
+                        &origin,
+                    )?
+                }
+            };
+            ledger::remember_links(
+                store,
+                PROVIDER_KEY,
+                container,
+                [(task.id.clone(), item.remote_id.clone())],
+            )?;
+            self.write_link(links, &task.id, item, container, task.updated_at)
+                .await;
+            imported += 1;
+        }
+        Ok(imported)
+    }
+
+    /// The links this device noted and the server lacks, written up now that their tasks have
+    /// reached astrid-web. A task pulled or backfilled while its create was still in the journal
+    /// could not be linked then; its item may never come back into a cursor window, and every
+    /// other device would make a second twin of it.
+    async fn heal_links(
+        &self,
+        container: &str,
+        links: &mut LinkMap,
+        tombstoned: &[String],
+    ) -> usize {
+        let mut healed = 0;
+        for (task_id, remote_id) in ledger::links_in(&self.context.store, PROVIDER_KEY, container) {
+            if crate::model::is_temp_id(&task_id)
+                || links.by_remote.contains_key(&remote_id)
+                || links.by_task.contains_key(&task_id)
+                || tombstoned.contains(&remote_id)
+                || self.context.store.task(&task_id).ok().flatten().is_none()
+            {
+                continue;
+            }
+            // No watermarks: nothing here says when either side last agreed, and claiming they
+            // did would swallow an edit.
+            if self
+                .record_task_link(&task_id, &remote_id, container, None, None, None)
+                .await
+            {
+                healed += 1;
+                links.insert(TaskLink {
+                    task_id,
+                    remote_id,
+                    container_id: container.to_string(),
+                    astrid_updated_at: None,
+                    remote_updated_at: None,
+                });
+            }
+        }
+        healed
+    }
+
+    /// The links the server keeps for one container, watermarks included.
+    async fn task_links(&self, container_id: &str) -> Result<LinkMap> {
         let request = self
             .context
             .client
             .get(endpoints::GOOGLE_TASK_LINKS)
             .query("containerId", Some(container_id.to_string()));
         let answer = self.context.client.send(request).await?;
-        let mut map = std::collections::HashMap::new();
-        // `{ links: [{ astridTaskId, remoteId, … }] }` is what the route answers
-        // (`api/v1/sync/google/task-links`); the other spellings are kept for an older proxy.
+        let mut map = LinkMap::default();
+        // `{ links: [{ astridTaskId, remoteId, remoteContainerId, astridUpdatedAt,
+        // remoteUpdatedAt, … }] }` is what the route answers (`api/v1/sync/google/task-links`);
+        // the other spellings are kept for an older proxy.
         for link in answer
             .get("links")
             .or_else(|| answer.get("taskLinks"))
@@ -1096,14 +1638,28 @@ impl ExternalSyncService {
             .into_iter()
             .flatten()
         {
-            if let (Some(remote), Some(task)) = (
-                link.get("remoteId").and_then(|value| value.as_str()),
-                link.get("astridTaskId")
-                    .or_else(|| link.get("taskId"))
-                    .and_then(|value| value.as_str()),
-            ) {
-                map.insert(remote.to_string(), task.to_string());
-            }
+            let text = |key: &str| link.get(key).and_then(|value| value.as_str());
+            let (Some(remote), Some(task)) = (
+                text("remoteId"),
+                text("astridTaskId").or_else(|| text("taskId")),
+            ) else {
+                continue;
+            };
+            map.insert(TaskLink {
+                task_id: task.to_string(),
+                remote_id: remote.to_string(),
+                // The row's own container; else the one a `container:task` remote id names.
+                container_id: text("remoteContainerId")
+                    .map(str::to_string)
+                    .or_else(|| {
+                        remote
+                            .split_once(':')
+                            .map(|(container, _)| container.to_string())
+                    })
+                    .unwrap_or_else(|| container_id.to_string()),
+                astrid_updated_at: text("astridUpdatedAt").and_then(date::parse),
+                remote_updated_at: text("remoteUpdatedAt").and_then(date::parse),
+            });
         }
         // Written down for the delete-time capture: a deletion cannot ask the server which remote
         // item a task was, so a pass has to have said so first.
@@ -1111,63 +1667,66 @@ impl ExternalSyncService {
             &self.context.store,
             PROVIDER_KEY,
             container_id,
-            map.iter()
-                .map(|(remote, task)| (task.clone(), remote.clone())),
+            map.in_container(container_id)
+                .map(|link| (link.task_id.clone(), link.remote_id.clone())),
         )?;
         Ok(map)
     }
 
-    /// Write one pulled item, and answer with the local task it became.
-    ///
-    /// Through the task service, not straight into the cache. A pulled task has to reach
-    /// astrid-web — it is an Astrid task now, and one that existed only in this machine's cache
-    /// would be invisible on the web, absent on the phone, and gone at the next sign-out.
-    fn apply(
+    /// Make a local task of one pulled item. Through the task service, not straight into the
+    /// cache: a pulled task has to reach astrid-web — it is an Astrid task now, and one that
+    /// existed only in this machine's cache would be invisible on the web, absent on the phone,
+    /// and gone at the next sign-out.
+    fn create_from(
         &self,
         item: &RemoteItem,
         container_id: &str,
         placement: &Placement,
-        local: Option<Task>,
-        task_links: &std::collections::HashMap<String, String>,
+        links: &LinkMap,
     ) -> Result<Task> {
-        let tasks = self.context.tasks();
-        // Nesting, when the parent is a task we hold. The key is scoped to the container because
-        // Google reuses short task ids between lists — see `external::decisions::parent_key`.
-        let parent = decisions::parent_key(container_id, item.raw_parent())
-            .and_then(|key| task_links.get(&key).cloned());
+        let mut draft = crate::services::TaskDraft::new(item.title.clone());
+        draft.description = item.notes.clone().unwrap_or_default();
+        match placement {
+            // The link's list, so a pulled task appears where somebody expects it — and the
+            // person's, as the Apple apps make it: a task from their own Google list is theirs.
+            Placement::InList(list_id) => {
+                draft.list_ids = vec![list_id.clone()];
+                draft.assignee_id = self.context.account().current_user_id().ok().flatten();
+            }
+            // My Tasks is not a list: it is "assigned to me, in no list", so that is what a task
+            // pulled from the default remote list has to become.
+            Placement::MyTasks(user_id) => draft.assignee_id = Some(user_id.clone()),
+        }
         // Google Tasks has no time of day, so a due date is a calendar day — which is exactly what
         // an all-day task is here.
-        let due = item.due_date.as_deref().and_then(date::parse);
+        draft.due_date_time = item.due_date.as_deref().and_then(date::parse);
+        draft.is_all_day = draft.due_date_time.is_some();
+        draft.parent_task_id = parent_of(item, container_id, links);
+        self.context.tasks().create(&draft)
+    }
 
-        let Some(task) = local else {
-            let mut draft = crate::services::TaskDraft::new(item.title.clone());
-            draft.description = item.notes.clone().unwrap_or_default();
-            match placement {
-                // The link's list, so a pulled task appears where somebody expects it — and the
-                // person's, as the Apple apps make it: a task from their own Google list is theirs.
-                Placement::InList(list_id) => {
-                    draft.list_ids = vec![list_id.clone()];
-                    draft.assignee_id = self.context.account().current_user_id().ok().flatten();
-                }
-                // My Tasks is not a list: it is "assigned to me, in no list", so that is what a
-                // task pulled from the default remote list has to become.
-                Placement::MyTasks(user_id) => draft.assignee_id = Some(user_id.clone()),
-            }
-            draft.due_date_time = due;
-            draft.is_all_day = due.is_some();
-            draft.parent_task_id = parent;
-            return tasks.create(&draft);
-        };
-
+    /// Bring one pulled item's changes onto its local twin. Answers with the task, and whether
+    /// anything changed.
+    fn apply_remote(
+        &self,
+        item: &RemoteItem,
+        container_id: &str,
+        task: Task,
+        links: &LinkMap,
+    ) -> Result<(Task, bool)> {
+        let tasks = self.context.tasks();
+        let parent = parent_of(item, container_id, links);
         let mut changes = crate::services::TaskChanges::default();
         if task.title != item.title {
             changes.title = Some(item.title.clone());
         }
-        if let Some(notes) = &item.notes {
-            if &task.description != notes {
-                changes.description = Some(notes.clone());
-            }
+        // Google leaves `notes` out when there are none, so absent is empty — as on Apple. Safe
+        // now that last-write-wins guards the call: a pending local edit never gets here.
+        let notes = item.notes.clone().unwrap_or_default();
+        if task.description != notes {
+            changes.description = Some(notes);
         }
+        let due = item.due_date.as_deref().and_then(date::parse);
         if let Some(adopted) = decisions::adopted_due(due, task.due_date_time, task.is_all_day) {
             changes.due_date_time = Some(Some(adopted));
             changes.is_all_day = Some(true);
@@ -1177,11 +1736,13 @@ impl ExternalSyncService {
         if parent.is_some() && task.parent_task_id != parent {
             changes.parent_task_id = Some(parent);
         }
-        let task = if changes == crate::services::TaskChanges::default() {
-            task
-        } else {
+        let mut changed = changes != crate::services::TaskChanges::default();
+        let task = if changed {
             tasks.update(&task.id, &changes)?
+        } else {
+            task
         };
+        // Unchanged-here is already established by the caller's last-write-wins guard.
         if decisions::should_adopt_remote_completion(
             item.completed,
             task.completed,
@@ -1196,20 +1757,65 @@ impl ExternalSyncService {
                 at: item.completed_at.as_deref().and_then(date::parse),
                 source: Some("google".to_string()),
             };
-            return tasks.complete_as(&task.id, item.completed, Some(&task), None, &origin);
+            changed = true;
+            return Ok((
+                tasks.complete_as(&task.id, item.completed, Some(&task), None, &origin)?,
+                changed,
+            ));
         }
-        Ok(task)
+        Ok((task, changed))
     }
 
-    /// Tell the server which remote item a task mirrors.
+    /// Link a task to a pulled or listed item, watermarked with both sides' stamps, in the pass's
+    /// map and on the server. Answers whether the server took it.
+    async fn write_link(
+        &self,
+        links: &mut LinkMap,
+        task_id: &str,
+        item: &RemoteItem,
+        container_id: &str,
+        astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> bool {
+        let task_id = self
+            .context
+            .store
+            .resolve_id(task_id)
+            .unwrap_or_else(|_| task_id.to_string());
+        links.insert(TaskLink {
+            task_id: task_id.clone(),
+            remote_id: item.remote_id.clone(),
+            container_id: container_id.to_string(),
+            astrid_updated_at,
+            remote_updated_at: item.updated_at(),
+        });
+        self.record_task_link(
+            &task_id,
+            &item.remote_id,
+            container_id,
+            astrid_updated_at,
+            item.remote_updated_at.as_deref(),
+            item.metadata.as_ref(),
+        )
+        .await
+    }
+
+    /// Tell the server which remote item a task mirrors, and the watermarks both sides agreed at.
     ///
     /// Without this the link exists nowhere: the next pass reads an empty map, sees a task with no
     /// remote twin, and creates a second one over there — every pass, for ever.
     ///
     /// A task still carrying a temporary id is skipped rather than sent: the link row is a foreign
-    /// key onto the task, and the server rejects an id it has never seen. The next pass, once the
+    /// key onto the task, and the server rejects an id it has never seen. A later pass, once the
     /// Outbox has been through, does it.
-    async fn record_task_link(&self, task_id: &str, remote_id: &str, container_id: &str) -> bool {
+    async fn record_task_link(
+        &self,
+        task_id: &str,
+        remote_id: &str,
+        container_id: &str,
+        astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+        remote_updated_at: Option<&str>,
+        metadata: Option<&serde_json::Value>,
+    ) -> bool {
         let task_id = self
             .context
             .store
@@ -1218,144 +1824,148 @@ impl ExternalSyncService {
         if crate::model::is_temp_id(&task_id) {
             return false;
         }
+        let mut body = json!({
+            "astridTaskId": task_id,
+            "remoteId": remote_id,
+            "remoteContainerId": container_id,
+        });
+        // Absent rather than null when unknown: the route leaves a stamp it is not sent alone.
+        if let Some(at) = astrid_updated_at {
+            body["astridUpdatedAt"] = json!(date::format(at));
+        }
+        if let Some(at) = remote_updated_at {
+            body["remoteUpdatedAt"] = json!(at);
+        }
+        if let Some(metadata) = metadata {
+            body["metadata"] = metadata.clone();
+        }
         let request = self
             .context
             .client
             .put(endpoints::GOOGLE_TASK_LINKS)
-            .value(json!({
-                "astridTaskId": task_id,
-                "remoteId": remote_id,
-                "remoteContainerId": container_id,
-            }));
+            .value(body);
         self.context.client.send(request).await.is_ok()
     }
+}
 
-    /// Send what changed here since the last pass.
-    ///
-    /// "Changed" is `updated_at` against a stamp kept per link. A task that has never reached
-    /// astrid-web is skipped: its id is temporary, and linking a remote twin to it would attach
-    /// the twin to something about to be given a different id.
-    async fn push(&self, link: &ExternalLink) -> Result<usize> {
-        let key = format!("external.pushed.{}", link.id);
-        let since = self
-            .context
-            .store
-            .metadata(&key)?
-            .and_then(|stamp| date::parse(&stamp));
-        let now = self.context.clock.now();
-        let mut retry = PushRetry::load(&self.context.store, &key);
+/// What one pass covers: a linked list, or My Tasks against the default remote list.
+struct Scope<'a> {
+    container_id: &'a str,
+    /// The link, for a linked list: its id addresses every request, and it has a cursor.
+    link: Option<&'a ExternalLink>,
+    placement: Placement,
+    pulls: bool,
+    pushes: bool,
+}
 
-        let task_links = self.task_links(&link.remote_container_id).await?;
-        let by_task: std::collections::HashMap<&String, &String> = task_links
-            .iter()
-            .map(|(remote, task)| (task, remote))
-            .collect();
+impl Scope<'_> {
+    /// How the proxy is told which container: by link, or — My Tasks has no link — by task list.
+    fn address(&self) -> (&'static str, String) {
+        match self.link {
+            Some(link) => ("linkId", link.id.clone()),
+            None => ("tasklistId", self.container_id.to_string()),
+        }
+    }
 
-        let tasks = self.context.store.tasks_in_list(&link.astrid_list_id)?;
-        let mut pushed = 0;
-        for task in &tasks {
-            if crate::model::is_temp_id(&task.id) {
-                continue;
-            }
-            let changed = match (since, task.updated_at) {
-                (Some(since), Some(updated)) => updated > since,
-                // Never pushed before, or a task with no stamp: send it once.
-                _ => true,
-            } || retry.due(&task.id);
-            if !changed {
-                continue;
-            }
+    /// Whether a local task belongs to what this pass mirrors.
+    fn holds(&self, task: &Task) -> bool {
+        match &self.placement {
+            Placement::InList(list_id) => task
+                .list_ids
+                .as_ref()
+                .is_some_and(|lists| lists.contains(list_id)),
+            Placement::MyTasks(user_id) => is_my_task(task, user_id),
+        }
+    }
+}
 
-            let known = by_task.get(&task.id).copied();
-            let request = self
-                .context
-                .client
-                .post(endpoints::GOOGLE_TASKS)
-                .value(json!({
-                    "linkId": link.id,
-                    "title": task.title,
-                    "notes": task.description,
-                    "dueDate": task.due_date_time.map(|due| decisions::push_due(
-                        due,
-                        task.is_all_day,
-                        self.context.clock.time_zone(),
-                    )),
-                    "completed": task.completed,
-                    "remoteId": known,
-                }));
-            // One failure is that task's, not the list's: it is tried again next pass, and the
-            // rest still go. A `?` here stopped the list at its first 404 on every pass.
-            let answer = match self.context.client.send(request).await {
-                Ok(answer) => {
-                    retry.done(&task.id);
-                    answer
-                }
-                Err(error) => {
-                    tracing::debug!(task = %task.id, %error, "push failed; retried next pass");
-                    retry.failed(&task.id);
-                    continue;
-                }
-            };
-            pushed += 1;
+/// My Tasks: unlisted, and assigned to you.
+fn is_my_task(task: &Task, user_id: &str) -> bool {
+    task.list_ids.as_ref().is_none_or(|lists| lists.is_empty())
+        && task.assignee_id.as_deref() == Some(user_id)
+}
 
-            // A create has made a remote twin that only this response knows about. Writing the
-            // link down is what stops the next pass making a second one — and a third, and one
-            // every five minutes after that.
-            if known.is_none() {
-                if let Some(remote_id) = answer.get("remoteId").and_then(|value| value.as_str()) {
-                    self.record_task_link(&task.id, remote_id, &link.remote_container_id)
-                        .await;
-                }
+/// One answer from the proxy's listing.
+#[derive(Debug, Clone)]
+struct Listing {
+    items: Vec<RemoteItem>,
+    truncated: bool,
+    cursor: Option<String>,
+}
+
+/// The complete listing, fetched at most once a pass and only when something needs it.
+struct Complete {
+    listing: Option<Listing>,
+    tried: bool,
+}
+
+/// One task link as the server holds it, with the two watermarks the Apple apps write on it:
+/// `astridUpdatedAt` guards the push, `remoteUpdatedAt` the pull.
+#[derive(Debug, Clone)]
+struct TaskLink {
+    task_id: String,
+    remote_id: String,
+    container_id: String,
+    astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// The pass's view of the links, kept current as it writes new ones.
+#[derive(Debug, Default)]
+struct LinkMap {
+    by_remote: std::collections::HashMap<String, TaskLink>,
+    /// Task id → remote id.
+    by_task: std::collections::HashMap<String, String>,
+}
+
+impl LinkMap {
+    fn insert(&mut self, link: TaskLink) {
+        if let Some(previous) = self.by_task.get(&link.task_id).cloned() {
+            if previous != link.remote_id {
+                self.by_remote.remove(&previous);
             }
         }
+        if let Some(previous) = self.by_remote.get(&link.remote_id) {
+            if previous.task_id != link.task_id {
+                self.by_task.remove(&previous.task_id);
+            }
+        }
+        self.by_task
+            .insert(link.task_id.clone(), link.remote_id.clone());
+        self.by_remote.insert(link.remote_id.clone(), link);
+    }
 
-        self.context.store.set_metadata(&key, &date::format(now))?;
-        retry.save(&self.context.store, &key)?;
-        Ok(pushed)
+    fn remove_remote(&mut self, remote_id: &str) {
+        if let Some(link) = self.by_remote.remove(remote_id) {
+            self.by_task.remove(&link.task_id);
+        }
+    }
+
+    fn for_task(&self, task_id: &str) -> Option<&TaskLink> {
+        self.by_remote.get(self.by_task.get(task_id)?)
+    }
+
+    fn in_container<'a>(&'a self, container_id: &'a str) -> impl Iterator<Item = &'a TaskLink> {
+        self.by_remote
+            .values()
+            .filter(move |link| link.container_id == container_id)
     }
 }
 
-/// Tasks whose push failed, tried again on the next pass whatever their stamp says — so a pass
-/// can move its stamp forward without dropping them, and a task that fails for ever does not hold
-/// every other one back.
-struct PushRetry {
-    ids: std::collections::BTreeSet<String>,
+/// The local parent of a pulled subtask, when it is a task we hold. The key is scoped to the
+/// container because Google reuses short task ids between lists — see `decisions::parent_key`.
+fn parent_of(item: &RemoteItem, container_id: &str, links: &LinkMap) -> Option<String> {
+    let key = decisions::parent_key(container_id, item.raw_parent())?;
+    links.by_remote.get(&key).map(|link| link.task_id.clone())
 }
 
-impl PushRetry {
-    fn key(pass_key: &str) -> String {
-        format!("{pass_key}.retry")
-    }
-
-    fn load(store: &crate::store::Store, pass_key: &str) -> Self {
-        let ids = store
-            .metadata(&Self::key(pass_key))
-            .ok()
-            .flatten()
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
-        PushRetry { ids }
-    }
-
-    fn due(&self, task_id: &str) -> bool {
-        self.ids.contains(task_id)
-    }
-
-    fn failed(&mut self, task_id: &str) {
-        self.ids.insert(task_id.to_string());
-    }
-
-    fn done(&mut self, task_id: &str) {
-        self.ids.remove(task_id);
-    }
-
-    fn save(&self, store: &crate::store::Store, pass_key: &str) -> Result<()> {
-        store.set_metadata(
-            &Self::key(pass_key),
-            &serde_json::to_string(&self.ids).unwrap_or_default(),
-        )?;
-        Ok(())
-    }
+/// Whether a remote item already says what the local task says, so a patch would change nothing
+/// but Google's stamp.
+fn same_content(remote: &RemoteItem, task: &Task, due: Option<&str>) -> bool {
+    remote.title == task.title
+        && remote.notes.as_deref().unwrap_or_default() == task.description
+        && remote.completed == task.completed
+        && remote.due_date.as_deref().and_then(date::parse) == due.and_then(date::parse)
 }
 
 #[cfg(test)]
@@ -1500,8 +2110,14 @@ mod tests {
                 // The pull: nothing to bring in.
                 .push_json("google/tasks", 200, json!({ "items": [] }))
                 .push_json("google/task-links", 200, json!({ "links": [] }))
-                // The push, and the link that follows it.
+                // The push: the complete listing that proves no twin exists (AWTD2-56), the
+                // create, and the link that follows it.
                 .push_json("google/task-links", 200, json!({ "links": [] }))
+                .push_json(
+                    "google/tasks",
+                    200,
+                    json!({ "items": [], "cursor": null, "truncated": false }),
+                )
                 .push_json(
                     "google/tasks",
                     200,
@@ -2129,34 +2745,6 @@ mod tests {
         );
     }
 
-    /// One task failing to push is that task's problem: the rest of the list still goes, and the
-    /// failed one is tried again next pass even though the stamp moved on.
-    #[tokio::test]
-    async fn one_failed_push_does_not_stop_the_list_and_is_retried() {
-        let fixture = fixture_with(
-            StubTransport::new()
-                .push_json("google/task-links", 200, json!({ "links": [] }))
-                .push_json("google/tasks", 500, json!({ "error": "boom" }))
-                .push_json("google/tasks", 200, json!({ "remoteId": "tasklist-1:r2" }))
-                .fallback(Ok(crate::api::HttpResponse {
-                    status: 200,
-                    headers: vec![("content-type".into(), "application/json".into())],
-                    body: b"{}".to_vec(),
-                })),
-        );
-        let link = link();
-        for (id, title) in [("t1", "First"), ("t2", "Second")] {
-            let mut task = crate::model::Task::new(id, title);
-            task.list_ids = Some(vec![link.astrid_list_id.clone()]);
-            fixture.store.upsert_task(&task).expect("stores");
-        }
-
-        let pushed = fixture.service.push(&link).await.expect("a pass");
-        assert_eq!(pushed, 1, "the second task still went");
-        let retry = PushRetry::load(&fixture.store, &format!("external.pushed.{}", link.id));
-        assert_eq!(retry.ids.len(), 1, "and the failed one is remembered");
-    }
-
     /// A task pulled before its create had reached astrid-web is matched through this device's own
     /// note on the next pass — and must then be linked on the server too, or every other device
     /// makes a second twin of it.
@@ -2203,5 +2791,941 @@ mod tests {
                     .is_some_and(|body| String::from_utf8_lossy(body).contains("t-real"))
         });
         assert!(linked, "the server was told which task mirrors r1");
+    }
+}
+
+/// AWTD2-56 — the Google pass at parity with Apple's `GoogleTasksSyncService`.
+///
+/// Against a stateful fake of astrid-web's proxy (`api/v1/sync/google/{tasks,task-links}`), so a
+/// test asserts what a pass leaves behind — on this machine and over there — rather than the order
+/// it happened to ask in.
+#[cfg(test)]
+mod awtd2_56 {
+    use super::*;
+
+    use crate::api::{ApiClient, HttpRequest, HttpResponse, HttpTransport, Method, TransportError};
+    use crate::model::date;
+    use crate::platform::{FixedClock, MemorySecureStore};
+    use crate::store::Store;
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
+
+    const NOW: &str = "2026-09-07T12:00:00Z";
+    const CONTAINER: &str = "tasklist-1";
+
+    /// What the proxy holds: Google's items for one task list, and the server's link rows.
+    #[derive(Default)]
+    struct Proxy {
+        /// Proxy-shaped items (`remoteId`, `title`, `metadata`, …).
+        items: Vec<Value>,
+        /// What a cursor pull answers with, when it is not everything.
+        window: Option<Vec<Value>>,
+        links: Vec<Value>,
+        /// The complete listing (`full=1`) says it was cut short.
+        full_truncated: bool,
+        /// The complete listing fails.
+        full_fails: bool,
+        /// Titles whose push Google refuses.
+        refuse: Vec<String>,
+        next_id: u32,
+        sync_mode: String,
+        excluded: String,
+    }
+
+    struct FakeProxy {
+        state: Mutex<Proxy>,
+        sent: Mutex<Vec<HttpRequest>>,
+    }
+
+    fn ok(body: Value) -> std::result::Result<HttpResponse, TransportError> {
+        status(200, body)
+    }
+
+    fn status(code: u16, body: Value) -> std::result::Result<HttpResponse, TransportError> {
+        Ok(HttpResponse {
+            status: code,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: body.to_string().into_bytes(),
+        })
+    }
+
+    #[async_trait]
+    impl HttpTransport for FakeProxy {
+        async fn send(
+            &self,
+            request: HttpRequest,
+        ) -> std::result::Result<HttpResponse, TransportError> {
+            self.sent.lock().expect("lock").push(request.clone());
+            let body: Value = request
+                .body
+                .as_deref()
+                .and_then(|body| serde_json::from_slice(body).ok())
+                .unwrap_or(Value::Null);
+            let mut proxy = self.state.lock().expect("lock");
+            let url = request.url.as_str();
+            if url.contains("/api/v1/integrations") {
+                return ok(json!({ "integrations": [{
+                    "provider": "GOOGLE_TASKS",
+                    "metadata": {
+                        "googleSyncMode": proxy.sync_mode,
+                        "excludedTasklists": proxy.excluded,
+                    },
+                }] }));
+            }
+            if url.contains("google/task-links") {
+                return match request.method {
+                    Method::Get => ok(json!({ "links": proxy.links })),
+                    Method::Put => {
+                        let task_id = body["astridTaskId"].clone();
+                        proxy.links.retain(|link| link["astridTaskId"] != task_id);
+                        proxy.links.push(json!({
+                            "astridTaskId": task_id,
+                            "remoteId": body["remoteId"],
+                            "remoteContainerId": body["remoteContainerId"],
+                            "astridUpdatedAt": body["astridUpdatedAt"],
+                            "remoteUpdatedAt": body["remoteUpdatedAt"],
+                        }));
+                        ok(json!({ "link": {} }))
+                    }
+                    _ => ok(json!({})),
+                };
+            }
+            if url.contains("google/tasks") {
+                match request.method {
+                    Method::Get if url.contains("full=1") => {
+                        if proxy.full_fails {
+                            return status(502, json!({ "error": "Google error" }));
+                        }
+                        return ok(json!({
+                            "items": proxy.items,
+                            "cursor": null,
+                            "truncated": proxy.full_truncated,
+                        }));
+                    }
+                    Method::Get => {
+                        let items = proxy.window.clone().unwrap_or_else(|| proxy.items.clone());
+                        return ok(
+                            json!({ "items": items, "cursor": "c-next", "truncated": false }),
+                        );
+                    }
+                    Method::Post if body["action"] == "commitCursor" => {
+                        return ok(json!({ "ok": true }))
+                    }
+                    Method::Post => {
+                        let title = body["title"].as_str().unwrap_or_default().to_string();
+                        if proxy.refuse.contains(&title) {
+                            return status(404, json!({ "error": "Google error" }));
+                        }
+                        let stamp = "2026-09-07T12:00:05.000Z";
+                        let completed = body["completed"].as_bool().unwrap_or(false);
+                        if let Some(remote_id) = body["remoteId"].as_str() {
+                            let Some(item) = proxy
+                                .items
+                                .iter_mut()
+                                .find(|item| item["remoteId"] == remote_id)
+                            else {
+                                return status(404, json!({ "error": "Google error" }));
+                            };
+                            item["title"] = json!(title);
+                            item["notes"] = body["notes"].clone();
+                            item["completed"] = json!(completed);
+                            item["remoteUpdatedAt"] = json!(stamp);
+                            return ok(json!({ "remoteId": remote_id, "remoteUpdatedAt": stamp }));
+                        }
+                        proxy.next_id += 1;
+                        let remote_id = format!("{CONTAINER}:new{}", proxy.next_id);
+                        let parent = body["parentRemoteId"]
+                            .as_str()
+                            .and_then(|parent| parent.split(':').next_back())
+                            .unwrap_or_default()
+                            .to_string();
+                        proxy.items.push(json!({
+                            "remoteId": remote_id,
+                            "title": title,
+                            "notes": body["notes"],
+                            "completed": completed,
+                            "remoteUpdatedAt": stamp,
+                            "metadata": { "parent": parent, "deleted": "" },
+                        }));
+                        return ok(json!({ "remoteId": remote_id, "remoteUpdatedAt": stamp }));
+                    }
+                    Method::Delete => {
+                        let remote = url
+                            .split("remoteId=")
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+                        let remote = remote.replace("%3A", ":");
+                        proxy
+                            .items
+                            .retain(|item| item["remoteId"] != remote.as_str());
+                        return ok(json!({ "success": true }));
+                    }
+                    _ => {}
+                }
+            }
+            ok(json!({}))
+        }
+    }
+
+    struct Pass {
+        service: ExternalSyncService,
+        store: Arc<Store>,
+        proxy: Arc<FakeProxy>,
+    }
+
+    impl Pass {
+        fn new(proxy: Proxy) -> Self {
+            let proxy = Arc::new(FakeProxy {
+                state: Mutex::new(proxy),
+                sent: Mutex::new(Vec::new()),
+            });
+            let store = Arc::new(Store::in_memory().expect("opens"));
+            let context = Context::new(
+                Arc::new(ApiClient::new(
+                    "https://astrid.cc",
+                    proxy.clone(),
+                    Arc::new(MemorySecureStore::new()),
+                )),
+                store.clone(),
+                Arc::new(FixedClock::at(date::parse(NOW).expect("an instant"))),
+            );
+            let mut user = crate::model::User::new("u1");
+            user.name = Some("Ada".into());
+            store
+                .set_metadata(
+                    "account.current-user",
+                    &serde_json::to_string(&user).expect("encodes"),
+                )
+                .expect("writes");
+            Pass {
+                service: context.external(),
+                store,
+                proxy,
+            }
+        }
+
+        async fn run(&self) -> PassReport {
+            self.service
+                .sync_google_link(&ExternalLink {
+                    id: "link-1".into(),
+                    astrid_list_id: "l1".into(),
+                    remote_container_id: CONTAINER.into(),
+                    cursor: None,
+                })
+                .await
+                .expect("a pass")
+        }
+
+        fn task(&self, id: &str) -> Option<Task> {
+            self.store.task(id).expect("reads")
+        }
+
+        fn titled(&self, title: &str) -> Vec<Task> {
+            self.store
+                .tasks()
+                .expect("reads")
+                .into_iter()
+                .filter(|task| task.title == title)
+                .collect()
+        }
+
+        fn sent(&self, method: Method, fragment: &str) -> Vec<Value> {
+            self.proxy
+                .sent
+                .lock()
+                .expect("lock")
+                .iter()
+                .filter(|request| request.method == method && request.url.contains(fragment))
+                .map(|request| {
+                    request
+                        .body
+                        .as_deref()
+                        .and_then(|body| serde_json::from_slice(body).ok())
+                        .unwrap_or(Value::Null)
+                })
+                .collect()
+        }
+
+        /// Pushes to Google: creates and patches, not cursor commits.
+        fn pushes(&self) -> Vec<Value> {
+            self.sent(Method::Post, "google/tasks")
+                .into_iter()
+                .filter(|body| body["action"].is_null())
+                .collect()
+        }
+
+        fn remote(&self, remote_id: &str) -> Option<Value> {
+            let proxy = self.proxy.state.lock().expect("lock");
+            proxy
+                .items
+                .iter()
+                .find(|item| item["remoteId"] == remote_id)
+                .cloned()
+        }
+
+        fn server_link(&self, task_id: &str) -> Option<Value> {
+            let proxy = self.proxy.state.lock().expect("lock");
+            proxy
+                .links
+                .iter()
+                .find(|link| link["astridTaskId"] == task_id)
+                .cloned()
+        }
+    }
+
+    fn item(id: &str, title: &str, updated: &str) -> Value {
+        json!({
+            "remoteId": format!("{CONTAINER}:{id}"),
+            "title": title,
+            "notes": null,
+            "completed": false,
+            "dueDate": null,
+            "completedAt": null,
+            "remoteUpdatedAt": updated,
+            "metadata": { "googleTaskId": id, "parent": "", "position": "", "deleted": "" },
+        })
+    }
+
+    fn link_row(task: &str, remote: &str, astrid_at: &str, remote_at: &str) -> Value {
+        json!({
+            "astridTaskId": task,
+            "remoteId": format!("{CONTAINER}:{remote}"),
+            "remoteContainerId": CONTAINER,
+            "astridUpdatedAt": astrid_at,
+            "remoteUpdatedAt": remote_at,
+        })
+    }
+
+    /// A task in the linked list, with a server id and a stamp.
+    fn listed(id: &str, title: &str, updated: &str) -> Task {
+        let mut task = Task::new(id, title);
+        task.list_ids = Some(vec!["l1".into()]);
+        task.updated_at = date::parse(updated);
+        task
+    }
+
+    // ── Last write wins ─────────────────────────────────────────────────────────────────────
+
+    /// AWTD2-56: an edit made here and not yet mirrored is newer than Google's change, so the pull
+    /// must leave it alone — and the push carries it out. The old pass overwrote it.
+    #[tokio::test]
+    async fn awtd2_56_a_pull_does_not_overwrite_a_fresher_local_edit() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Google's title", "2026-09-07T11:30:00.000Z")],
+            links: vec![link_row(
+                "t1",
+                "r1",
+                "2026-09-07T11:00:00.000Z",
+                "2026-09-07T11:00:00.000Z",
+            )],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "My edit", "2026-09-07T11:45:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert_eq!(pass.task("t1").expect("kept").title, "My edit");
+        assert_eq!(
+            pass.remote("tasklist-1:r1").expect("there")["title"],
+            "My edit",
+            "and the local edit went out"
+        );
+    }
+
+    /// AWTD2-56: the other half — a Google change newer than anything here is taken.
+    #[tokio::test]
+    async fn awtd2_56_a_newer_remote_change_is_taken() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Google's title", "2026-09-07T11:50:00.000Z")],
+            links: vec![link_row(
+                "t1",
+                "r1",
+                "2026-09-07T11:00:00.000Z",
+                "2026-09-07T11:00:00.000Z",
+            )],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Old title", "2026-09-07T11:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.applied, 1);
+        assert_eq!(pass.task("t1").expect("kept").title, "Google's title");
+        let link = pass.server_link("t1").expect("linked");
+        assert_eq!(
+            link["remoteUpdatedAt"], "2026-09-07T11:50:00.000Z",
+            "the pull watermark moved, so the change is not applied twice"
+        );
+        assert!(
+            link["astridUpdatedAt"].is_string(),
+            "and the local one, so the change is not echoed back"
+        );
+        assert!(
+            pass.pushes().is_empty(),
+            "nothing was echoed back: {:?}",
+            pass.pushes()
+        );
+    }
+
+    /// AWTD2-56: an item at its own watermark is our echo; nothing applies and nothing is sent.
+    #[tokio::test]
+    async fn awtd2_56_an_echo_is_neither_applied_nor_sent_back() {
+        let stamp = "2026-09-07T11:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Same", stamp)],
+            links: vec![link_row("t1", "r1", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Same", "2026-09-07T11:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.applied, 0);
+        assert!(pass.pushes().is_empty());
+    }
+
+    /// AWTD2-56: a twin known only to this device, whose local edit is newer than Google's, is
+    /// linked on the server without claiming the two sides agree — so the edit still goes out.
+    #[tokio::test]
+    async fn awtd2_56_a_twin_known_only_here_still_sends_its_newer_edit() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Google's title", "2026-09-07T11:30:00.000Z")],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "My edit", "2026-09-07T11:45:00Z"))
+            .expect("writes");
+        ledger::remember_links(
+            &pass.store,
+            PROVIDER_KEY,
+            CONTAINER,
+            [("t1".to_string(), "tasklist-1:r1".to_string())],
+        )
+        .expect("remembers");
+        pass.run().await;
+
+        assert_eq!(pass.task("t1").expect("kept").title, "My edit");
+        assert_eq!(
+            pass.remote("tasklist-1:r1").expect("there")["title"],
+            "My edit"
+        );
+    }
+
+    // ── Duplicates ──────────────────────────────────────────────────────────────────────────
+
+    /// AWTD2-56: a link whose task this machine does not hold (not loaded yet, or deleted here and
+    /// not yet on the server) is not an invitation to make a second task.
+    #[tokio::test]
+    async fn awtd2_56_a_linked_item_whose_task_is_missing_here_is_not_imported_again() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-07T11:30:00.000Z")],
+            links: vec![link_row(
+                "t-elsewhere",
+                "r1",
+                "2026-09-07T11:00:00.000Z",
+                "2026-09-07T11:00:00.000Z",
+            )],
+            ..Default::default()
+        });
+
+        pass.run().await;
+
+        assert!(pass.titled("Buy milk").is_empty(), "no second task");
+    }
+
+    /// AWTD2-56: the first pass over a list somebody already keeps on both sides adopts the local
+    /// task of the same title rather than making a second one.
+    #[tokio::test]
+    async fn awtd2_56_a_pulled_item_adopts_the_one_local_task_of_its_title() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-07T11:30:00.000Z")],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert_eq!(pass.titled("Buy milk").len(), 1, "adopted, not duplicated");
+        assert_eq!(
+            pass.server_link("t1").expect("linked")["remoteId"],
+            "tasklist-1:r1"
+        );
+        assert!(
+            pass.pushes().is_empty(),
+            "and no twin was made for it either"
+        );
+    }
+
+    /// AWTD2-56: two local tasks of that title is a guess, and a guess is not adopted.
+    #[tokio::test]
+    async fn awtd2_56_an_ambiguous_title_is_not_adopted() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-07T11:30:00.000Z")],
+            ..Default::default()
+        });
+        for id in ["t1", "t2"] {
+            pass.store
+                .upsert_task(&listed(id, "Buy milk", "2026-09-07T10:00:00Z"))
+                .expect("writes");
+        }
+
+        pass.run().await;
+
+        for id in ["t1", "t2"] {
+            assert_ne!(
+                pass.server_link(id).map(|link| link["remoteId"].clone()),
+                Some(json!("tasklist-1:r1")),
+                "{id} was not guessed at"
+            );
+        }
+    }
+
+    /// AWTD2-56: before creating a twin, the push looks through the complete listing for an
+    /// unlinked one of the same title — an item outside this pass's cursor window included.
+    #[tokio::test]
+    async fn awtd2_56_a_push_adopts_an_unlinked_remote_item_of_the_same_title() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-01T00:00:00.000Z")],
+            window: Some(Vec::new()),
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert!(
+            pass.pushes().is_empty(),
+            "no twin made: {:?}",
+            pass.pushes()
+        );
+        assert_eq!(
+            pass.server_link("t1").expect("linked")["remoteId"],
+            "tasklist-1:r1"
+        );
+    }
+
+    /// AWTD2-56: a deleted Google item is not a twin to adopt — linking to it would have the next
+    /// absence pass delete the local task. (Apple adopts it; see docs/CONTRACTS.md D39.)
+    #[tokio::test]
+    async fn awtd2_56_a_deleted_remote_item_is_not_adopted() {
+        let mut deleted = item("r1", "Buy milk", "2026-09-01T00:00:00.000Z");
+        deleted["metadata"]["deleted"] = json!("1");
+        let pass = Pass::new(Proxy {
+            items: vec![deleted],
+            window: Some(Vec::new()),
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert_ne!(
+            pass.server_link("t1").expect("linked")["remoteId"],
+            "tasklist-1:r1"
+        );
+        assert!(pass.task("t1").is_some(), "and the task is still here");
+    }
+
+    /// AWTD2-56: when the complete listing was cut short, the twin may simply be past its end —
+    /// so known twins are patched and none is created.
+    #[tokio::test]
+    async fn awtd2_56_no_twin_is_created_when_the_listing_was_truncated() {
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            full_truncated: true,
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert!(pass.pushes().is_empty(), "{:?}", pass.pushes());
+        assert_eq!(report.pushed, 0);
+    }
+
+    /// AWTD2-56: nor when the listing could not be had at all — unknown is not empty.
+    #[tokio::test]
+    async fn awtd2_56_no_twin_is_created_when_the_listing_failed() {
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            full_fails: true,
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert!(pass.pushes().is_empty(), "{:?}", pass.pushes());
+    }
+
+    /// AWTD2-56: a subtask is created under its parent's twin, not at the top level, so the round
+    /// trip keeps it nested.
+    #[tokio::test]
+    async fn awtd2_56_a_new_subtask_is_created_under_its_parents_twin() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            items: vec![item("p", "Parent", stamp)],
+            window: Some(Vec::new()),
+            links: vec![link_row("parent", "p", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("parent", "Parent", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+        let mut child = listed("child", "Child", "2026-09-07T10:00:00Z");
+        child.parent_task_id = Some("parent".into());
+        pass.store.upsert_task(&child).expect("writes");
+
+        pass.run().await;
+
+        let created = pass
+            .pushes()
+            .into_iter()
+            .find(|body| body["title"] == "Child")
+            .expect("the child was pushed");
+        assert_eq!(created["parentRemoteId"], "tasklist-1:p");
+    }
+
+    /// AWTD2-56: a link the server files under another container is that container's pass's to
+    /// push. Patching it from here addresses the wrong task list.
+    #[tokio::test]
+    async fn awtd2_56_a_link_from_another_container_is_not_pushed_here() {
+        let pass = Pass::new(Proxy {
+            links: vec![json!({
+                "astridTaskId": "t1",
+                "remoteId": "other-list:r1",
+                "remoteContainerId": "other-list",
+                "astridUpdatedAt": null,
+                "remoteUpdatedAt": null,
+            })],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert!(
+            !pass
+                .pushes()
+                .iter()
+                .any(|body| body["remoteId"] == "other-list:r1"),
+            "{:?}",
+            pass.pushes()
+        );
+    }
+
+    /// AWTD2-56: a failed push is not watermarked, so it is tried again next pass without any
+    /// stamp of its own; the rest of the list still goes.
+    #[tokio::test]
+    async fn awtd2_56_a_failed_push_is_retried_and_does_not_stop_the_list() {
+        let pass = Pass::new(Proxy {
+            refuse: vec!["First".into()],
+            ..Default::default()
+        });
+        for (id, title) in [("t1", "First"), ("t2", "Second")] {
+            pass.store
+                .upsert_task(&listed(id, title, "2026-09-07T10:00:00Z"))
+                .expect("writes");
+        }
+
+        let report = pass.run().await;
+        assert_eq!(report.pushed, 1, "the second task still went");
+
+        pass.proxy.state.lock().expect("lock").refuse.clear();
+        let report = pass.run().await;
+        assert_eq!(report.pushed, 1, "and the first went on the next pass");
+        assert!(pass.server_link("t1").is_some());
+    }
+
+    // ── What only a complete listing can show ───────────────────────────────────────────────
+
+    /// AWTD2-56: a pair whose completion drifted (a botched pass, an item outside every cursor
+    /// window since) is repaired from the complete listing when the local task is untouched.
+    #[tokio::test]
+    async fn awtd2_56_completion_drift_is_repaired_from_the_complete_listing() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let mut done = item("r1", "Buy milk", stamp);
+        done["completed"] = json!(true);
+        done["completedAt"] = json!("2026-09-06T08:00:00.000Z");
+        let pass = Pass::new(Proxy {
+            items: vec![done],
+            window: Some(Vec::new()),
+            links: vec![link_row("t1", "r1", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        let task = pass.task("t1").expect("kept");
+        assert!(task.completed, "the drift was repaired");
+        assert_eq!(task.completed_at, date::parse("2026-09-06T08:00:00Z"));
+    }
+
+    /// AWTD2-56: an item gone from a complete listing was deleted over there (Google models a move
+    /// as delete and insert), so its local twin goes — through the service, and tombstoned.
+    #[tokio::test]
+    async fn awtd2_56_a_twin_absent_from_a_complete_listing_is_deleted_here() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            items: vec![item("r2", "Keep", stamp)],
+            window: Some(Vec::new()),
+            links: vec![
+                link_row("t1", "r1", stamp, stamp),
+                link_row("t2", "r2", stamp, stamp),
+            ],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Gone", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+        pass.store
+            .upsert_task(&listed("t2", "Keep", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.deleted_locally, 1);
+        assert!(pass.task("t1").is_none());
+        assert!(pass.task("t2").is_some());
+        assert!(
+            ledger::tombstoned(&pass.store, PROVIDER_KEY).contains(&"tasklist-1:r1".to_string())
+        );
+        assert!(
+            crate::outbox::journal::all(&pass.store)
+                .expect("reads")
+                .iter()
+                .any(|entry| entry.kind == crate::outbox::kind::DELETE_TASK),
+            "the deletion reaches astrid-web"
+        );
+    }
+
+    /// AWTD2-56: a twin the push has just made is absent from the listing fetched before it, and
+    /// that absence must not read as a deletion.
+    #[tokio::test]
+    async fn awtd2_56_a_twin_made_this_pass_is_not_deleted_by_its_absence() {
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.pushed, 1);
+        assert_eq!(report.deleted_locally, 0);
+        assert!(pass.task("t1").is_some());
+    }
+
+    /// AWTD2-56: the complete listing is fetched for deletions at most every five minutes when
+    /// nothing else in the pass needs it.
+    #[tokio::test]
+    async fn awtd2_56_the_complete_listing_is_not_fetched_every_pass() {
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            ..Default::default()
+        });
+
+        pass.run().await;
+        pass.run().await;
+
+        let full = pass
+            .proxy
+            .sent
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|request| request.url.contains("full=1"))
+            .count();
+        assert_eq!(
+            full, 1,
+            "the second pass, a moment later, did not fetch it again"
+        );
+    }
+
+    /// AWTD2-56: a truncated listing proves nothing about absence. Nothing is deleted.
+    #[tokio::test]
+    async fn awtd2_56_a_truncated_listing_deletes_nothing() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            full_truncated: true,
+            links: vec![link_row("t1", "r1", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Still here", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.deleted_locally, 0);
+        assert!(pass.task("t1").is_some());
+    }
+
+    /// AWTD2-56: one item this build cannot read makes the listing incomplete, not empty. Read as
+    /// empty, every linked task in the list would be deleted for being absent from it.
+    #[tokio::test]
+    async fn awtd2_56_an_unreadable_listing_deletes_nothing() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Still here", stamp), json!({ "title": "no id" })],
+            window: Some(Vec::new()),
+            links: vec![link_row("t1", "r1", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Still here", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+        pass.store
+            .upsert_task(&listed("t2", "Unlinked", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        let report = pass.run().await;
+
+        assert_eq!(report.deleted_locally, 0);
+        assert!(pass.task("t1").is_some());
+        assert!(
+            !pass.pushes().iter().any(|body| body["title"] == "Unlinked"),
+            "and an incomplete listing creates no twin either"
+        );
+    }
+
+    /// AWTD2-56: a failed listing proves nothing either.
+    #[tokio::test]
+    async fn awtd2_56_a_failed_listing_deletes_nothing() {
+        let stamp = "2026-09-07T10:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            window: Some(Vec::new()),
+            full_fails: true,
+            links: vec![link_row("t1", "r1", stamp, stamp)],
+            ..Default::default()
+        });
+        pass.store
+            .upsert_task(&listed("t1", "Still here", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert!(pass.task("t1").is_some());
+    }
+
+    /// AWTD2-56: completed history comes in as completed tasks — with Google's completion time —
+    /// never as open ones, and once.
+    #[tokio::test]
+    async fn awtd2_56_completed_history_is_backfilled_as_completed_and_once() {
+        let mut done = item("r1", "Filed taxes", "2026-09-01T00:00:00.000Z");
+        done["completed"] = json!(true);
+        done["completedAt"] = json!("2026-08-31T09:00:00.000Z");
+        let pass = Pass::new(Proxy {
+            items: vec![done],
+            ..Default::default()
+        });
+
+        let report = pass.run().await;
+        pass.run().await;
+
+        let imported = pass.titled("Filed taxes");
+        assert_eq!(imported.len(), 1, "once, not once a pass");
+        assert!(imported[0].completed, "completed, not open");
+        assert_eq!(
+            imported[0].completed_at,
+            date::parse("2026-08-31T09:00:00Z")
+        );
+        assert_eq!(report.backfilled, 1);
+    }
+
+    // ── The cursor ──────────────────────────────────────────────────────────────────────────
+
+    /// AWTD2-56: a pulled item that could not be linked on the server (its task has not reached
+    /// astrid-web yet) keeps the cursor where it was, so the window is pulled again and the link
+    /// written then — instead of the item never being seen again.
+    #[tokio::test]
+    async fn awtd2_56_the_cursor_waits_for_every_pulled_item_to_be_linked() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-07T11:30:00.000Z")],
+            ..Default::default()
+        });
+
+        pass.run().await;
+
+        assert!(
+            !pass
+                .sent(Method::Post, "google/tasks")
+                .iter()
+                .any(|body| body["action"] == "commitCursor"),
+            "not committed while the task's create is still in the journal"
+        );
+    }
+
+    // ── My Tasks runs the same pass ─────────────────────────────────────────────────────────
+
+    /// AWTD2-56: My Tasks adopts by title too, among the unlisted tasks assigned to you.
+    #[tokio::test]
+    async fn awtd2_56_my_tasks_adopts_the_one_local_task_of_its_title() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Ring the dentist", "2026-09-07T11:30:00.000Z")],
+            sync_mode: "all_bidirectional".into(),
+            ..Default::default()
+        });
+        let mut mine = Task::new("t1", "Ring the dentist");
+        mine.assignee_id = Some("u1".into());
+        mine.updated_at = date::parse("2026-09-07T10:00:00Z");
+        pass.store.upsert_task(&mine).expect("writes");
+
+        pass.service.sync_my_tasks(CONTAINER).await.expect("a pass");
+
+        assert_eq!(pass.titled("Ring the dentist").len(), 1);
+        assert!(pass.server_link("t1").is_some());
+        assert!(pass.pushes().is_empty(), "{:?}", pass.pushes());
+    }
+
+    // ── Linking by hand ─────────────────────────────────────────────────────────────────────
+
+    /// AWTD2-56: linking a list by hand takes back an earlier "no" — here and on the account — or
+    /// the all-lists modes go on refusing a list somebody has since chosen.
+    #[tokio::test]
+    async fn awtd2_56_linking_by_hand_clears_the_exclusion() {
+        let pass = Pass::new(Proxy {
+            excluded: "c1,c2".into(),
+            ..Default::default()
+        });
+        ledger::exclude(&pass.store, PROVIDER_KEY, "c1").expect("excludes");
+
+        pass.service
+            .link(Provider::GoogleTasks, "l1", "c1")
+            .await
+            .expect("links");
+
+        assert!(!ledger::excluded(&pass.store, PROVIDER_KEY).contains(&"c1".to_string()));
+        let patched = pass.sent(Method::Patch, "/api/v1/integrations");
+        assert_eq!(
+            patched.last().expect("the account was told")["metadata"]["excludedTasklists"],
+            "c2"
+        );
     }
 }
