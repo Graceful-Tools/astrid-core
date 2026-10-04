@@ -324,13 +324,16 @@ fn normalized_role(membership: &ListMembership) -> Option<String> {
 ///
 /// 1. ownership (`owner_id` or the `owner` relation);
 /// 2. an admin list membership, then the legacy `admins` array;
-/// 3. any other list membership, then the legacy `members` array;
+/// 3. any other list membership, then the legacy `members` array — raised to admin when the
+///    project makes this person an admin;
 /// 4. the project — its owner (as admin), its members, and the status-list cascade;
 /// 5. the public viewer fallback.
 ///
-/// List-level answers come before the project's, so a plain list member who also owns the project
-/// stays a member — that is what web answers, and the fixture records it. Any real role beats the
-/// viewer fallback, which is what stops a collaborator on a public list being made read-only.
+/// So the higher of the list role and the project role wins: a plain list member who owns or
+/// administers the project is an **admin** of the list (Jon, 2026-10-04; until then list
+/// membership was consulted first and such a person stayed a member). Never the owner. Any real
+/// role beats the viewer fallback, which is what stops a collaborator on a public list being made
+/// read-only.
 pub fn role_in_list(user_id: &str, list: &ListAccess) -> Option<ListRole> {
     if list.owner_id == user_id || list.owner.as_ref().is_some_and(|o| o.id == user_id) {
         return Some(ListRole::Owner);
@@ -345,13 +348,22 @@ pub fn role_in_list(user_id: &str, list: &ListAccess) -> Option<ListRole> {
         return Some(ListRole::Admin);
     }
 
+    let from_project = project_role(user_id, list);
+
     // Presence is membership. Deliberately not a match on "member": an unrecognised or empty role
     // still means this person was added to this list.
+    //
+    // The higher of this and the project role wins (Jon, 2026-10-04): a plain list member who
+    // owns or administers the project is an admin of the list. Admin is the ceiling — the project
+    // never makes anyone a list's owner (see `project_role`).
     if membership.is_some() || names(list.members.as_ref(), user_id) {
-        return Some(ListRole::Member);
+        return Some(match from_project {
+            Some(ListRole::Admin) => ListRole::Admin,
+            _ => ListRole::Member,
+        });
     }
 
-    if let Some(role) = project_role(user_id, list) {
+    if let Some(role) = from_project {
         return Some(role);
     }
 
@@ -512,6 +524,20 @@ mod tests {
             ..ProjectAccess::default()
         });
         assert_eq!(role_in_list("me", &l), Some(ListRole::Admin));
+        assert!(!can_delete_list("me", &l));
+    }
+
+    /// Jon, 2026-10-04: a plain list member who owns the project is an admin of the list — the
+    /// higher role wins — and still never its owner.
+    #[test]
+    fn a_project_owner_outranks_their_own_plain_list_membership() {
+        let mut l = list("PRIVATE", None, vec![membership("me", Some("member"))]);
+        l.project = Some(ProjectAccess {
+            owner_id: Some("me".into()),
+            ..ProjectAccess::default()
+        });
+        assert_eq!(role_in_list("me", &l), Some(ListRole::Admin));
+        assert!(can_manage_members("me", &l));
         assert!(!can_delete_list("me", &l));
     }
 

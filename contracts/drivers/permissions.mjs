@@ -276,18 +276,36 @@ const CASES = [
     name: 'a list admin who is only a project member stays an admin',
     list: list({ members: [member(USER.id, 'admin')], project: project({ members: [projectMember(USER.id, 'member')] }) }),
   },
+  // The HIGHER of the list role and the project role wins (Jon, 2026-10-04). Until then list
+  // membership was consulted first, so the three cases below were all "member".
   {
-    name: 'a plain list member who is a project admin stays a member',
-    // List membership is consulted first, whatever the project says. Recorded as web runs it.
+    name: 'a plain list member who is a project admin is an admin of the list',
     list: list({ members: [member(USER.id, 'member')], project: project({ members: [projectMember(USER.id, 'admin')] }) }),
   },
   {
-    name: 'a plain list member who owns the project stays a member',
+    name: 'a plain list member who owns the project is an admin of the list, never its owner',
     list: list({ members: [member(USER.id, 'member')], project: project({ ownerId: USER.id }) }),
   },
   {
-    name: 'a legacy-array member who owns the project stays a member',
+    name: 'a legacy-array member who owns the project is an admin of the list',
     list: list({ legacyMembers: [ref(USER.id)], project: project({ ownerId: USER.id }) }),
+  },
+  {
+    name: 'a plain list member with an UPPERCASE role who is a project ADMIN is an admin',
+    list: list({ members: [member(USER.id, 'MEMBER')], project: project({ members: [projectMember(USER.id, 'ADMIN')] }) }),
+  },
+  {
+    name: 'a plain list member who is a plain project member stays a member',
+    list: list({ members: [member(USER.id, 'member')], project: project({ members: [projectMember(USER.id, 'member')] }) }),
+  },
+  {
+    name: 'a plain list member who owns the project, on a public collaborative list, is an admin',
+    // Admin, not the narrower authorship rule a member gets on a collaborative list.
+    list: list({ privacy: 'PUBLIC', publicListType: 'collaborative', members: [member(USER.id, 'member')], project: project({ ownerId: USER.id }) }),
+  },
+  {
+    name: 'status list: a plain member of it who administers the project is an admin',
+    list: list({ listType: 'status', members: [member(USER.id, 'member')], project: project({ members: [projectMember(USER.id, 'admin')], lists: [sibling('domain-1', USER.id)] }) }),
   },
   {
     name: 'project with no owner and no members grants nothing',
