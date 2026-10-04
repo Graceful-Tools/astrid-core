@@ -1273,10 +1273,21 @@ async fn search_answers_with_rows_over_the_cache() {
     assert!(found["value"]["rows"][0]["leading"].is_object());
 }
 
-/// Results are flat: one indented under a parent that did not match reads as a hierarchy that
-/// is not there.
+/// AITD-459: iOS searches from the first character; only an empty query finds nothing.
 #[tokio::test]
-async fn search_results_are_not_indented() {
+async fn aitd459_search_starts_at_one_character_as_ios_does() {
+    let app = app_with(StubTransport::new());
+    call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
+
+    let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
+    assert_eq!(found["value"]["total"], 1);
+    let none = call(&app, json!({ "kind": "searchTasks", "query": "" })).await;
+    assert_eq!(none["value"]["total"], 0);
+}
+
+/// AITD-459: the command answers as iOS's search — a subtask is not a result of its own.
+#[tokio::test]
+async fn aitd459_search_leaves_subtasks_out_as_ios_does() {
     let app = app_with(StubTransport::new());
     let parent = call(
         &app,
@@ -1289,18 +1300,15 @@ async fn search_results_are_not_indented() {
         json!({ "kind": "createTask", "title": "Book flights", "parentTaskId": parent_id }),
     )
     .await;
+    call(
+        &app,
+        json!({ "kind": "createTask", "title": "Flights home" }),
+    )
+    .await;
 
     let found = call(&app, json!({ "kind": "searchTasks", "query": "flights" })).await;
-    assert_eq!(found["value"]["rows"][0]["depth"], 0);
-}
-
-#[tokio::test]
-async fn a_search_too_short_to_mean_anything_finds_nothing() {
-    let app = app_with(StubTransport::new());
-    call(&app, json!({ "kind": "createTask", "title": "Buy milk" })).await;
-
-    let found = call(&app, json!({ "kind": "searchTasks", "query": "b" })).await;
-    assert_eq!(found["value"]["total"], 0);
+    assert_eq!(found["value"]["total"], 1);
+    assert_eq!(found["value"]["rows"][0]["title"], "Flights home");
 }
 
 /// An app whose conversation the test can read back.

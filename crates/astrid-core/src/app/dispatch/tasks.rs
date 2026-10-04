@@ -580,15 +580,16 @@ pub(super) fn search_tasks(
         Ok(tasks) => tasks,
         Err(error) => return Response::failed(error.into()),
     };
+    // Absent is iOS's default completion filter, not "everything" (AITD-459).
     let scope = crate::services::search::SearchScope {
         list_id,
-        include_completed: include_completed.unwrap_or(true),
+        include_completed,
     };
     let lists = app.store.lists().unwrap_or_default();
     // Everyone the query might name by handle, and everyone the rows might draw.
     let users = app.store.users().unwrap_or_default();
     let current_user_id = app.context.account().current_user_id().ok().flatten();
-    let found = crate::services::search::search(
+    let found = crate::services::search::search_tasks(
         &tasks,
         query,
         &scope,
@@ -1067,7 +1068,7 @@ fn cache_search(
             // A completed task can still be a blocker — a chip draws one struck through — so the
             // picker offers them. Excluding them would make "why can I not find it" the first
             // thing anybody asks.
-            include_completed: true,
+            include_completed: Some(true),
         },
         &crate::services::search::SearchContext {
             lists,
