@@ -47,3 +47,23 @@ fn every_query_parses_as_web_parses_it() {
         assert_eq!(search::priority_to_number(word), *number, "priority {word}");
     }
 }
+
+/// The rules door (`searchParse`) — what astrid-web's server calls through WebAssembly — answers
+/// every fixture query exactly as web does: the parse field for field, and `isEmpty` beside it.
+#[test]
+fn the_rules_door_answers_every_query_as_web_does() {
+    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).expect("the fixture parses");
+    let queries = fixture["queries"].as_array().expect("queries");
+    assert!(queries.len() >= 30);
+
+    for case in queries {
+        let request = serde_json::json!({ "kind": "searchParse", "query": case["query"] });
+        let reply: serde_json::Value =
+            serde_json::from_str(&astrid_rules::rules::run_json(&request.to_string()))
+                .expect("the door answers JSON");
+        assert_eq!(reply["ok"], true, "query {}", case["query"]);
+        let mut expected = case["parsed"].clone();
+        expected["isEmpty"] = case["isEmpty"].clone();
+        assert_eq!(reply["value"], expected, "query {}", case["query"]);
+    }
+}

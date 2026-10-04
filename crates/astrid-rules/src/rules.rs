@@ -17,7 +17,7 @@
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Failure, Response};
 use crate::model::{date, Task};
@@ -87,8 +87,21 @@ pub enum Rule {
         locale: Option<String>,
         today: chrono::NaiveDate,
     },
+    /// What a search box asks for — `assignee:me priority:high overdue rollover` as a structured
+    /// filter plus the free text — see [`crate::parse::search`]. Answers the parse in the web's
+    /// field names with `isEmpty` beside it: whether the query asks for anything at all.
+    SearchParse { query: String },
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
     RenderMarkdown { text: String },
+}
+
+/// The answer to [`Rule::SearchParse`]: the parse, and whether it asks for anything.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchParse {
+    #[serde(flatten)]
+    pub query: crate::parse::search::SearchQuery,
+    pub is_empty: bool,
 }
 
 /// Answer one rule.
@@ -154,6 +167,11 @@ pub fn run(rule: Rule) -> Response {
             crate::parse::smart::Keywords::for_locale(locale.as_deref().unwrap_or("en")),
             today,
         )),
+        Rule::SearchParse { query } => {
+            let query = crate::parse::search::parse(&query);
+            let is_empty = query.is_empty();
+            Response::ok(SearchParse { query, is_empty })
+        }
         Rule::RenderMarkdown { text } => Response::ok(crate::markdown::render(&text)),
     }
 }
@@ -283,6 +301,30 @@ mod tests {
         }));
         assert_eq!(reply["value"]["role"], serde_json::Value::Null);
         assert_eq!(reply["value"]["canView"], false);
+    }
+
+    #[test]
+    fn a_search_box_query_parses_to_its_filter_and_text() {
+        let reply = answer(json!({
+            "kind": "searchParse",
+            "query": "assignee:@sam priority:urgent list:\"Bugs and Polish\" overdue AST-142"
+        }));
+        assert_eq!(reply["ok"], true);
+        let value = &reply["value"];
+        assert_eq!(value["text"], "overdue");
+        assert_eq!(value["assignee"], "sam");
+        assert_eq!(value["priorities"], json!(["high"]));
+        assert_eq!(value["listNames"], json!(["Bugs and Polish"]));
+        assert_eq!(value["identifier"], "AST-142");
+        assert_eq!(value["due"], serde_json::Value::Null);
+        assert_eq!(value["isEmpty"], false);
+    }
+
+    #[test]
+    fn an_empty_search_asks_for_nothing() {
+        let reply = answer(json!({ "kind": "searchParse", "query": "   " }));
+        assert_eq!(reply["value"]["text"], "");
+        assert_eq!(reply["value"]["isEmpty"], true);
     }
 
     #[test]
