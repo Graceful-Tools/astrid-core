@@ -176,6 +176,21 @@ pub fn exclude(store: &Store, provider: &str, container_id: &str) -> Result<()> 
     write(store, &key, &ids)
 }
 
+/// Take back a "no": somebody linked this remote list by hand, which is a yes.
+///
+/// Without it a list deleted once stays excluded for ever, and an all-lists mode keeps refusing a
+/// list somebody has since linked on purpose. (Apple `linkList`; AWTD2-56.)
+pub fn include(store: &Store, provider: &str, container_id: &str) -> Result<()> {
+    let key = excluded_key(provider);
+    let mut ids = read(store, &key);
+    let before = ids.len();
+    ids.retain(|id| id.as_str() != Some(container_id));
+    if ids.len() == before {
+        return Ok(());
+    }
+    write(store, &key, &ids)
+}
+
 /// Every remote list this device has said no to.
 pub fn excluded(store: &Store, provider: &str) -> Vec<String> {
     read(store, &excluded_key(provider))
@@ -255,6 +270,22 @@ pub fn local_task_for(store: &Store, provider: &str, remote_id: &str) -> Option<
     store.task(&resolved).ok().flatten().map(|task| task.id)
 }
 
+/// Every link this device has noted for one container, as `(local task id, remote id)`, the task
+/// id resolved past a temporary one — the links a pass may owe the server. (AWTD2-56.)
+pub fn links_in(store: &Store, provider: &str, container_id: &str) -> Vec<(String, String)> {
+    let suffix = format!("/{container_id}");
+    read_cache(store, provider)
+        .iter()
+        .filter_map(|(task_id, entry)| {
+            let remote_id = entry.as_str()?.strip_suffix(&suffix)?;
+            let resolved = store
+                .resolve_id(task_id)
+                .unwrap_or_else(|_| task_id.to_string());
+            Some((resolved, remote_id.to_string()))
+        })
+        .collect()
+}
+
 /// Drop one task's link, once its deletion has been written down.
 pub fn forget_link(store: &Store, provider: &str, task_id: &str) -> Result<()> {
     let mut cache = read_cache(store, provider);
@@ -273,6 +304,41 @@ mod tests {
 
     fn store() -> Store {
         Store::in_memory().expect("opens")
+    }
+
+    /// AWTD2-56: linking a list by hand takes back an earlier "no" to it.
+    #[test]
+    fn awtd2_56_a_container_can_be_included_again() {
+        let store = store();
+        exclude(&store, "google", "c1").expect("excludes");
+        exclude(&store, "google", "c2").expect("excludes");
+        include(&store, "google", "c1").expect("includes");
+        assert_eq!(excluded(&store, "google"), vec!["c2".to_string()]);
+        include(&store, "google", "never").expect("a no-op");
+    }
+
+    /// AWTD2-56: one container's noted links, and only that container's.
+    #[test]
+    fn awtd2_56_a_containers_noted_links_are_listed() {
+        let store = store();
+        remember_links(
+            &store,
+            "google",
+            "c1",
+            [("t1".to_string(), "c1:r1".to_string())],
+        )
+        .expect("remembers");
+        remember_links(
+            &store,
+            "google",
+            "c2",
+            [("t2".to_string(), "c2:r2".to_string())],
+        )
+        .expect("remembers");
+        assert_eq!(
+            links_in(&store, "google", "c1"),
+            vec![("t1".to_string(), "c1:r1".to_string())]
+        );
     }
 
     /// The cache is what makes a delete-time capture possible: deleting is local, offline and

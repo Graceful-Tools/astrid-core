@@ -769,3 +769,19 @@ use. 103 agree. **Fixed here** on the way (they were bugs, not choices):
   the reference as typed, since code is literal.
 - **Inline HTML the web allowlists** (`<strong>`, `<em>`, `<del>`, `<code>`, `<br>`): web formats;
   this crate reads all HTML as its text.
+
+### D39 — Google Tasks: a deleted remote item is never adopted by title
+
+Both passes (Apple's `GoogleTasksSyncService`, this crate's `services::external`, AWTD2-56) adopt
+an unlinked Google item of the same title before creating a twin for a local task. Apple searches
+the complete listing as the proxy returns it, which includes **deleted** items
+(`showDeleted=true`, `metadata.deleted: "1"`). Adopting one links the local task to a deleted
+twin, and the next pass's absence deletion — which treats a deleted item as absent — deletes the
+local task. Somebody who once deleted "Buy milk" in Google loses the "Buy milk" they add here.
+
+**Fixed here, not followed:** this is a data-loss bug, not disputed behaviour. The crate skips
+deleted and tombstoned items when adopting (test:
+`awtd2_56_a_deleted_remote_item_is_not_adopted`). iOS should add the same guard to both adopt
+sites in `GoogleTasksSyncService` (the linked-list push and the My Tasks push) until it moves onto
+this pass.
+
