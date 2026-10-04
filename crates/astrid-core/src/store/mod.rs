@@ -174,6 +174,17 @@ impl Store {
         })
     }
 
+    /// Every cached task that has a parent — what a list splices under its rows. On the parent
+    /// index, so a list does not decode the whole account to find a handful of subtasks.
+    pub fn subtasks(&self) -> Result<Vec<Task>> {
+        self.with(|connection| {
+            let mut statement =
+                connection.prepare("SELECT json FROM tasks WHERE parent_task_id IS NOT NULL")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
     /// The list view's read: columns only, no JSON.
     pub fn summaries_in_list(&self, list_id: &str) -> Result<Vec<TaskSummary>> {
         self.with(|connection| {
