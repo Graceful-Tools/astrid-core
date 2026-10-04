@@ -29,7 +29,7 @@ rather than going unnoticed at runtime.
 | `filters.json` | `lib/date-filter-utils.ts`, `lib/recently-completed-window.ts`, `lib/task-sort.ts`, as `hooks/useFilterState.ts` calls them — **executed** under a pinned clock: ten due-date filters by 28 tasks, the four completion modes over every window kind at three clocks, and eleven sort orders; 569 cases, 127 disputed (D7, D33–D36) | `astrid_core::filters` |
 | `manual-order.json` | `lib/list-manual-order.ts` (`sanitizeManualOrder`) and the "manual" sort of `lib/task-sort.ts` — **executed**: 11 reconciliations and 5 arrangements drawn; 14 cases, 2 disputed (D33) | `astrid_core::manual_order`, `filters::sort_by_setting` |
 | `reminders.json` | `lib/reminder-snooze.ts`, **executed** against an in-memory reminder queue under a moving clock, plus the v1 snooze route's accepted range (read from its schema): 9 cases, 1 disputed (D37) | `astrid_core::reminders` |
-| `markdown.json` | `lib/markdown.ts` (`renderMarkdownWithLinks`) — **executed** in a jsdom window, so through DOMPurify as a page is, and the HTML read back into the core's blocks (the driver documents how): 107 texts — GFM, breaks, links and autolinks, references, task ids, HTML; 103 cases, 4 disputed (D38) | `astrid_core::markdown` |
+| `markdown.json` | `lib/markdown.ts` (`renderMarkdownWithLinks`) — **executed** in a jsdom window, so through DOMPurify as a page is, and the HTML read back into the core's blocks (the driver documents how): 130 texts: GFM, breaks, links and autolinks, references, task ids, HTML, and 23 `xss-*` sanitisation cases. 130 cases, none disputed: web adopted D38 (AWTD-1064) | `astrid_core::markdown` |
 
 ## Two kinds of export
 

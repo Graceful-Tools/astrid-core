@@ -834,8 +834,8 @@ agree on when a snooze comes back — now plus the minutes, within the v1 route'
 The web renders HTML through `marked` and its sanitiser; this crate parses with pulldown-cmark
 into blocks, which the Apple apps draw (`CoreRules.markdown`) and Windows will. `markdown.json`
 compares at the level a reader sees — the web's sanitised HTML read back into blocks in a jsdom
-window (`contracts/drivers/markdown.mjs` says exactly how) — over 107 texts covering what the apps
-use. 103 agree. **Fixed here** on the way (they were bugs, not choices):
+window (`contracts/drivers/markdown.mjs` says exactly how). Over 107 texts covering what the apps
+use, 103 agreed at first (130 texts, all agreeing, since AWTD-1064). **Fixed here** on the way (they were bugs, not choices):
 
 - an address the browser cannot parse (`https://google.com]`, task 11cfaf6d's own description) was
   a link here and is plain text on the page;
@@ -844,7 +844,16 @@ use. 103 agree. **Fixed here** on the way (they were bugs, not choices):
 - `<script>` / `<style>` content was shown as text;
 - an indented code block lacked the closing newline `marked` gives every block.
 
-**Kept, and disputed** (the core is what iOS draws, so it follows iOS):
+**Resolved 2026-10-03 toward iOS; web adopted all three in AWTD-1064.** astrid-web's renderer
+(`lib/markdown.ts`, still `marked` + DOMPurify in the browser, held to this crate by
+`tests/lib/core-rules-markdown-parity.test.ts`) now keeps an ordered list's `start`, leaves a
+reference inside code as typed, and reads typed HTML as its text. `markdown.json` has no disputed
+cases, and 23 `xss-*` cases were added. The web's parity test checks their blocks against this
+crate and the HTML against the sanitiser's allowlist. The rules door's `renderMarkdown` takes the
+reader's `identifiers` (project keys) so a task id links through it as through
+`render_with_identifiers`.
+
+What was disputed (the core is what iOS draws, so it followed iOS):
 
 - **An ordered list's start number.** `3. three` is numbered 3 here; on the web it is 1, because
   the sanitiser's attribute allowlist (`RICH_TEXT_ATTRS`) has no `start`. The fix is web's: add it.
