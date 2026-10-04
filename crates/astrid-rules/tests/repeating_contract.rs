@@ -7,6 +7,10 @@
 //!
 //! Regenerate with `node contracts/export-from-web.mjs`; `cargo xtask check-contracts` fails when
 //! web has moved and this has not.
+//!
+//! `completions` and `zonedProgressions` go through the rules door itself (`nextOccurrence`, the
+//! request astrid-web's server sends since AWTD-1063) and carry the person's zone: web adopted this
+//! crate's answers for D1, D3 and D4 on 2026-10-03, so those cases are no longer disputed.
 
 use astrid_rules::repeating::{
     calculate_custom_next_occurrence, calculate_simple_next_occurrence,
@@ -25,6 +29,37 @@ struct Fixture {
     simple_end_conditions: Vec<EndConditionCase>,
     custom: Vec<CustomCase>,
     custom_progressions: Vec<ProgressionCase>,
+    completions: Vec<CompletionCase>,
+    zoned_progressions: Vec<ZonedProgressionCase>,
+}
+
+/// One `nextOccurrence` request, as web's server sends it, and web's answer.
+#[derive(Deserialize)]
+struct CompletionCase {
+    name: String,
+    request: serde_json::Map<String, serde_json::Value>,
+    answer: Answer,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct Answer {
+    next_due_date: Option<DateTime<Utc>>,
+    should_terminate: bool,
+    new_occurrence_count: i32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ZonedProgressionCase {
+    name: String,
+    repeating: String,
+    pattern: Option<serde_json::Value>,
+    start: String,
+    time_zone: String,
+    is_all_day: bool,
+    steps: usize,
+    dates: Vec<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -179,6 +214,68 @@ fn custom_progressions_match_web() {
         assert_eq!(
             dates, case.dates,
             "progression diverged from web: {}",
+            case.name
+        );
+    }
+}
+
+/// Ask the rules door, as astrid-web's server does.
+fn next_occurrence(mut request: serde_json::Map<String, serde_json::Value>) -> Answer {
+    request.insert("kind".into(), "nextOccurrence".into());
+    let reply: serde_json::Value = serde_json::from_str(&astrid_rules::rules::run_json(
+        &serde_json::Value::Object(request).to_string(),
+    ))
+    .expect("the door answers JSON");
+    assert_eq!(reply["ok"], true, "the door refused: {reply}");
+    serde_json::from_value(reply["value"].clone()).expect("a next occurrence")
+}
+
+#[test]
+fn completions_through_the_rules_door_match_web() {
+    let cases = fixture().completions;
+    assert!(cases.len() >= 40, "the completions section shrank");
+    for case in cases {
+        assert_eq!(
+            next_occurrence(case.request),
+            case.answer,
+            "nextOccurrence diverged from web: {}",
+            case.name
+        );
+    }
+}
+
+/// Several completions in a row on the person's calendar, through a daylight-saving change.
+#[test]
+fn zoned_progressions_match_web() {
+    for case in fixture().zoned_progressions {
+        let mut dates = Vec::new();
+        let mut current = case.start.clone();
+        let mut occurrences = 0;
+        for _ in 0..case.steps {
+            let request = serde_json::json!({
+                "repeating": case.repeating,
+                "pattern": case.pattern,
+                "currentDueDate": current,
+                "completion": current,
+                "repeatFrom": "DUE_DATE",
+                "occurrenceCount": occurrences,
+                "timeZone": case.time_zone,
+                "isAllDay": case.is_all_day,
+            });
+            let serde_json::Value::Object(request) = request else {
+                unreachable!()
+            };
+            let answer = next_occurrence(request);
+            let Some(next) = answer.next_due_date else {
+                break;
+            };
+            dates.push(next);
+            current = next.to_rfc3339();
+            occurrences = answer.new_occurrence_count;
+        }
+        assert_eq!(
+            dates, case.dates,
+            "zoned progression diverged from web: {}",
             case.name
         );
     }

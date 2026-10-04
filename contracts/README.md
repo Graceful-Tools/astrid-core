@@ -18,7 +18,7 @@ rather than going unnoticed at runtime.
 | Fixture | Canonical source | Consumed by |
 |---|---|---|
 | `shortcuts.json` | `hooks/useKeyboardShortcuts.ts` — the `KEYBOARD_SHORTCUTS` table plus the `if (selectedTask)` guard read from the dispatch switch | `astrid_core::keyboard` |
-| `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded | `astrid_core::repeating` |
+| `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded; `completions` (43) and `zonedProgressions` (4) are whole `nextOccurrence` requests with the person's zone, what astrid-web's server sends (AWTD-1063) | `astrid_core::repeating`, and the rules door's `nextOccurrence` |
 | `permissions.json` | `lib/list-permissions.ts` — **executed**: a case matrix run through web's own rules — including the server-only project, status-list and legacy-array branches — recording all eight predicates per case | `astrid_core::permissions` |
 | `board.json` | `lib/project-status.ts` — **executed**: three board configurations by eight cards, recording which column each card is in, what every move writes, and what a new card carries | `astrid_core::board` |
 | `statuses.json` | `lib/project-custom-states.ts` — **executed**: add, rename, reorder and remove over four boards, recording the role each add mints, every refusal and its message, and the exact array stored afterwards | `astrid_core::board` (the writers) |
@@ -51,9 +51,9 @@ import and would hang the export) and the `@prisma/client` package. One driver s
 working fake: `reminders.mjs` runs `lib/reminder-snooze.ts` against an in-memory reminder queue
 (`stubs/prisma-reminder-queue.mjs`) that answers only the two calls the rule makes.
 
-A driver runs with `TZ=UTC`. Web's custom repeat path uses local date methods, so its results depend
-on the machine's timezone (see `docs/CONTRACTS.md` D4); without pinning, the fixture would record
-whichever zone the person generating it happened to be in.
+A driver runs with `TZ=UTC`. Web's custom repeat path used local date methods, so its results
+depended on the machine's timezone (`docs/CONTRACTS.md` D4, closed by AWTD-1063: the zone is now in
+the request). The pin stays for the other drivers, which still read the machine's clock.
 
 Still planned: all-day date handling, wire shapes, the task leading control, and the My Tasks scope
 (web's lives inside the `useFilterState` hook and cannot be run; D25 records the difference).
