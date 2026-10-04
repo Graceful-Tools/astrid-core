@@ -29,7 +29,22 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             surface,
             offset,
             limit,
-        } => rows_for_list(app, &list_id, display_mode, surface, offset, limit),
+            inputs,
+        } => rows_for_list(
+            app,
+            &list_id,
+            RowsWindow {
+                display_mode,
+                surface,
+                offset,
+                limit,
+            },
+            *inputs,
+        ),
+        Command::ListCounts {
+            lists,
+            current_user_id,
+        } => list_counts(app, &lists, current_user_id),
         Command::Tasks { ids } => {
             let store = &app.store;
             let found = match ids {
@@ -181,7 +196,18 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             list_id,
             include_completed,
             limit,
-        } => search_tasks(app, &query, list_id, include_completed, limit),
+            subtask_display,
+            show_subtasks,
+        } => search_tasks(
+            app,
+            &query,
+            crate::services::search::SearchScope {
+                list_id,
+                include_completed,
+            },
+            limit,
+            subtask_display.map(|display| (display, show_subtasks)),
+        ),
         Command::Board { list_id, limit } => board(app, &list_id, limit),
         Command::MoveTaskToColumn {
             task_id,
@@ -1251,3 +1277,6 @@ use tasks::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod rows_as_ios_tests;

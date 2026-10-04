@@ -65,6 +65,18 @@ pub enum Command {
         /// list of forty and the wrong one for a list of ten thousand.
         #[serde(default)]
         limit: Option<usize>,
+        /// What the shell holds that the cache may not, each winning over the cached one when
+        /// given (AITD-460). See [`RowsInputs`].
+        #[serde(flatten)]
+        inputs: Box<RowsInputs>,
+    },
+    /// How many tasks each list's saved filters keep — the sidebar's number for a saved filter
+    /// (AITD-460). Sourced as `rowsForList` sources: every cached task for a virtual list, its
+    /// members for a real one. Subtasks count, because they are tasks the filters kept.
+    ListCounts {
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        current_user_id: Option<String>,
     },
     /// One task in full, for the detail view.
     Task {
@@ -164,6 +176,14 @@ pub enum Command {
         include_completed: Option<bool>,
         #[serde(default)]
         limit: Option<usize>,
+        /// Splice each result's subtasks in under it, as iOS's list draws search results
+        /// (AITD-460): given, with the account's display mode, the subtasks follow the default
+        /// completion window. Absent, the results are flat — the Mac's search, and web's.
+        #[serde(default)]
+        subtask_display: Option<String>,
+        /// The open list's own subtask setting, which iOS's search splice also honours.
+        #[serde(default)]
+        show_subtasks: Option<bool>,
     },
     /// The board a list belongs to: its columns, and the cards in each.
     ///
@@ -1416,4 +1436,40 @@ mod tests {
         assert_eq!(Command::surface(Some("boardCard")), Surface::BoardCard);
         assert_eq!(Command::surface(Some("detail")), Surface::Detail);
     }
+}
+
+/// What a shell can tell `rowsForList` that the cache may not know yet (AITD-460).
+///
+/// The Apple apps keep some of a list's inputs ahead of the cache: they sign in themselves, write
+/// My Tasks' filters to the account 300 ms after the last change, and show public lists the reader
+/// is not a member of, whose tasks never enter the cache. Each value given here is used instead of
+/// the cached one, so the rows answer for what the shell is showing rather than what it last wrote.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowsInputs {
+    /// The list itself: one the cache does not hold (a public list the reader is not in), or a
+    /// shape with no row behind it (iOS's everything view: every task, the default completion
+    /// window, the priority sort).
+    #[serde(default)]
+    pub list: Option<crate::model::TaskList>,
+    /// The tasks to draw from instead of the cache's — that public list's, fetched on demand.
+    #[serde(default)]
+    pub tasks: Option<Vec<crate::model::Task>>,
+    /// Who is signed in, as the shell knows it.
+    #[serde(default)]
+    pub current_user_id: Option<String>,
+    /// My Tasks' filters as the shell holds them.
+    #[serde(default)]
+    pub my_tasks: Option<crate::filters::my_tasks::Preferences>,
+    /// The account's subtask display (`indented` / `under_parent`).
+    #[serde(default)]
+    pub subtask_display: Option<String>,
+    /// A sort chosen on this device for a view that has no list row to save one on — the Mac's
+    /// sort menu over My Tasks. Wins over the list's and the account's.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    /// Answer with the ids in order (`ids`) instead of projected rows: for a shell that draws its
+    /// own rows from tasks it already holds, the projection is work nobody reads.
+    #[serde(default)]
+    pub ids_only: bool,
 }

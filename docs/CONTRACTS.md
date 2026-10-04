@@ -826,3 +826,51 @@ deleted and tombstoned items when adopting (test:
 sites in `GoogleTasksSyncService` (the linked-list push and the My Tasks push) until it moves onto
 this pass.
 
+
+### D40 — a list that has never been given a sort: iOS arranges it by hand, web sorts it auto
+
+`sortBy` is nullable on the server, and most lists never set it. iOS draws such a list as
+`manual` (`TaskListView`: `selectedList.sortBy ?? "manual"`), which with nothing arranged is newest
+first; web (`list.sortBy || "auto"`), the Mac and this crate read the absence as `auto`.
+**Resolved 2026-10-03 toward iOS** (AITD-460): `rowsForList` reads an absent sort as `manual`, and
+answers `sortBy: "manual"` for it. `filters::sort_by_setting` itself is unchanged — `None` there is
+still auto, so the fixture's rule for an absent order stands; the list's absence is decided before
+it. The Mac draws through `rowsForList` and moves with it. Test:
+`aitd460_a_list_with_no_sort_is_newest_first_as_on_ios`.
+
+### D41 — which subtasks a list splices, and from where
+
+iOS (`TaskListView.computeFilteredTasks`, the shared `spliceSubtasks`) splices a parent's
+subtasks from **every task it holds**, showing each by the view's **completion filter alone** — a
+list filtered to priority 3 still shows a priority-0 subtask under a priority-3 parent: the
+filters chose which tasks lead a row, not which of their parts are listed. This crate spliced
+only from the list's own members, and only the subtasks that passed every filter, so a subtask
+never filed in its parent's list, or of another priority, assignee or due date, vanished. The Mac
+showed completed subtasks only under `all` / `completed`. **Resolved 2026-10-03 toward iOS**
+(AITD-460): `rowsForList` splices from every cached subtask (`Store::subtasks`) by
+`filters::shown_by_completion`. iOS also splices search results' subtasks under them: `searchTasks`
+does so when asked (`subtaskDisplay`, `showSubtasks`); unasked it stays flat, as the Mac and web
+draw search. Tests: `aitd460_a_subtask_shows_by_the_completion_filter_alone`,
+`aitd460_a_subtask_outside_the_list_is_spliced_under_its_parent`,
+`aitd460_search_splices_subtasks_when_asked`.
+
+### D42 — ties in a sort fall in iOS's store order
+
+Every list sort is stable, so tasks it cannot tell apart — the same priority and no due date under
+`priority`, two subtasks made in the same second — keep the order they were read in. iOS reads its
+store in `TaskOrdering` order (due date, undated last; then newest created; then id); this crate
+read the cache in storage order, and ordered tied subtasks by id. **Resolved 2026-10-03 toward
+iOS** (AITD-460): `rowsForList` and `searchTasks` read in `filters::display_order` first, and the
+splice orders children by creation alone, stably. Test: `aitd460_ties_fall_in_ios_store_order`.
+
+### What a shell may tell `rowsForList` (AITD-460)
+
+Not a divergence, but the reason the Apple apps can draw from it without moving a pixel: some of a
+list's inputs live in the shell ahead of the cache — the signed-in user (the apps sign in
+themselves), My Tasks' filters (written to the account 300 ms after the last change), the
+account's subtask display, a sort chosen on one device for a view with no list row (the Mac's sort
+menu over My Tasks), and a public list the reader is not in, whose tasks never enter the cache.
+`rowsForList` takes each (`RowsInputs`: `currentUserId`, `myTasks`, `subtaskDisplay`, `sortBy`,
+`list`, `tasks`) and uses it over the cached one; `idsOnly` answers the ordered ids without
+projecting rows, and `matched` counts what the filters kept, subtasks included. `listCounts`
+answers that count for many lists in one read — the sidebar's saved-filter badges.

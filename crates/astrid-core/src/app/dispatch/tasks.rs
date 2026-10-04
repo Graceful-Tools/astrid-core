@@ -569,26 +569,27 @@ pub(super) fn due_date_options(app: &App, task_id: &str) -> Response {
 /// Rows, because a result list is a list: it draws the same way, needs the same due labels and the
 /// same leading control, and returning raw tasks would leave the shell to project them — which is
 /// the one thing it is not allowed to do.
+/// `splice`: the account's subtask display and the open list's subtask setting, when the shell
+/// draws subtasks under its results (iOS, AITD-460).
 pub(super) fn search_tasks(
     app: &App,
     query: &str,
-    list_id: Option<String>,
-    include_completed: Option<bool>,
+    scope: crate::services::search::SearchScope,
     limit: Option<usize>,
+    splice: Option<(String, Option<bool>)>,
 ) -> Response {
-    let tasks = match app.store.tasks() {
+    let mut tasks = match app.store.tasks() {
         Ok(tasks) => tasks,
         Err(error) => return Response::failed(error.into()),
     };
-    // Absent is iOS's default completion filter, not "everything" (AITD-459).
-    let scope = crate::services::search::SearchScope {
-        list_id,
-        include_completed,
-    };
+    // iOS's store order, so results the sort cannot tell apart fall as they do on iOS (AITD-460).
+    tasks.sort_by(filters::display_order);
     let lists = app.store.lists().unwrap_or_default();
     // Everyone the query might name by handle, and everyone the rows might draw.
     let users = app.store.users().unwrap_or_default();
     let current_user_id = app.context.account().current_user_id().ok().flatten();
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
     let found = crate::services::search::search_tasks(
         &tasks,
         query,
@@ -597,10 +598,27 @@ pub(super) fn search_tasks(
             lists: &lists,
             users: &users,
             current_user_id: current_user_id.as_deref(),
-            now: app.clock.now(),
-            offset: app.clock.utc_offset(),
+            now,
+            offset,
         },
     );
+
+    // iOS draws a result's subtasks under it, by the completion filter a list shows by default
+    // (`TaskListView.computeFilteredTasks`): the search chose the parents, not their parts.
+    let indented = splice.as_ref().is_some_and(|(display, show_subtasks)| {
+        filters::subtasks::should_splice(*show_subtasks, Some(display))
+    });
+    let default_view = crate::model::TaskList::new("", "");
+    let subtasks: Vec<crate::model::Task> = tasks
+        .iter()
+        .filter(|task| indented && task.parent_task_id.is_some())
+        .cloned()
+        .collect();
+    let found: Vec<&crate::model::Task> =
+        filters::subtasks::splice_refs(&found, &subtasks, indented, |task| {
+            filters::shown_by_completion(task, &default_view, now, offset)
+        });
+
     let total = found.len();
     let window = &found[..limit.unwrap_or(total).min(total)];
 
@@ -611,8 +629,8 @@ pub(super) fn search_tasks(
         current_user_id: current_user_id.as_deref(),
         display_mode: rows::DisplayMode::List,
         surface: rows::Surface::ListRow,
-        now: app.clock.now(),
-        offset: app.clock.utc_offset(),
+        now,
+        offset,
         lists: &lists,
         users: &users,
         // Results are flat. A search result indented under a parent that did not match reads as a

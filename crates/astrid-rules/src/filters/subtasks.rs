@@ -93,14 +93,14 @@ pub fn splice_refs<'a, T: std::borrow::Borrow<Task>>(
     }
 
     // Children of one parent are ordered oldest first — the order they were added in, which is the
-    // order somebody breaking a task down expects to read them back in.
+    // order somebody breaking a task down expects to read them back in. Stable, so two made in the
+    // same instant keep the order `all_tasks` came in — iOS's `spliceSubtasks` sorts its store (in
+    // [`super::display_order`]) the same way, and a tie broken differently is a row that swaps
+    // places between the phone and the desktop (AITD-460).
     for children in by_parent.values_mut() {
         children.sort_by_key(|task| {
-            (
-                task.created_at
-                    .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC),
-                task.id.clone(),
-            )
+            task.created_at
+                .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC)
         });
     }
 

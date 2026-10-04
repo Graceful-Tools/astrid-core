@@ -42,27 +42,12 @@ pub fn filter_refs<'a>(
     now: DateTime<Utc>,
     offset: FixedOffset,
 ) -> Vec<&'a Task> {
-    let completion = list.filter_completion.as_deref().unwrap_or("default");
-    let window = list.recently_completed_window.as_ref();
-
     tasks
         .iter()
         .filter(|task| {
             // Completion first: it is the one that hides most of what it hides, and every other
             // filter is cheaper to skip than to run.
-            let shown = if task.completed {
-                recently_completed::should_show_completed(
-                    Some(completion),
-                    task.completed_at,
-                    task.updated_at,
-                    window,
-                    now,
-                    offset,
-                )
-            } else {
-                recently_completed::should_show_open(Some(completion))
-            };
-            if !shown {
+            if !shown_by_completion(task, list, now, offset) {
                 return false;
             }
             matches_priority(task, list.filter_priority.as_deref())
@@ -73,6 +58,45 @@ pub fn filter_refs<'a>(
                 && matches_in_lists(task, list.filter_in_lists.as_deref())
         })
         .collect()
+}
+
+/// Whether `list`'s completion filter — with its recently-completed window — keeps `task`.
+///
+/// The one filter a spliced subtask obeys (AITD-460). iOS draws a parent's subtasks by the
+/// completion setting of the view they sit in and nothing else, so a subtask of a different
+/// priority, assignee or due date than the list's filters ask for still shows under a parent that
+/// passed them: the filters choose which tasks lead a row, not which of their parts are listed.
+pub fn shown_by_completion(
+    task: &Task,
+    list: &TaskList,
+    now: DateTime<Utc>,
+    offset: FixedOffset,
+) -> bool {
+    let completion = list.filter_completion.as_deref().unwrap_or("default");
+    if task.completed {
+        recently_completed::should_show_completed(
+            Some(completion),
+            task.completed_at,
+            task.updated_at,
+            list.recently_completed_window.as_ref(),
+            now,
+            offset,
+        )
+    } else {
+        recently_completed::should_show_open(Some(completion))
+    }
+}
+
+/// The order every list draws from before its own sort: due date (undated last), then newest
+/// created, then id — iOS's `TaskOrdering`, the order its task store is kept in (AITD-460).
+///
+/// Not a sort anybody picks. It decides ties: every list sort is stable, so two tasks a sort
+/// cannot tell apart — the same priority and no due date under "priority", say — keep this order,
+/// and a cache read in storage order would put them differently on every client.
+pub fn display_order(a: &Task, b: &Task) -> std::cmp::Ordering {
+    due_date_order(a, b)
+        .then_with(|| created_at_of(b).cmp(&created_at_of(a)))
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 /// The same, owned. One clone of everything that passed.
