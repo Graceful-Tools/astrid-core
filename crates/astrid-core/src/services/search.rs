@@ -20,11 +20,11 @@ use chrono::{DateTime, FixedOffset, Utc};
 use crate::model::{Task, TaskList, User};
 use crate::parse::search::{self as query, SearchQuery};
 
-/// How many characters before searching is worth doing.
+/// How many characters before a *picker's* search is worth doing — the blocker picker's, which asks
+/// the server first and so follows the server's threshold (`server_search`, CONTRACTS D18).
 ///
-/// One character matches most of an account and tells the reader nothing; two is where the results
-/// start to mean something. Matches the Apple client so a person moving between them does not have
-/// to learn a different threshold.
+/// The search a person types into the app's search box ([`search_tasks`]) has no threshold: iOS
+/// searches from the first character (AITD-459, resolved toward iOS 2026-10-03).
 pub const MINIMUM_QUERY_LENGTH: usize = 2;
 
 /// What to search within.
@@ -32,18 +32,110 @@ pub const MINIMUM_QUERY_LENGTH: usize = 2;
 pub struct SearchScope {
     /// Only tasks in this list, when set.
     pub list_id: Option<String>,
-    /// Whether finished tasks count. On by default: "what did I call that thing I did last week?"
-    /// is one of the questions search exists to answer.
-    pub include_completed: bool,
+    /// Whether finished tasks count: `Some(true)` all of them, `Some(false)` none. `None` is iOS's
+    /// default for [`search_tasks`] — a list's default completion filter: open tasks, and tasks
+    /// completed inside the recently-completed window (AITD-459). The picker paths
+    /// ([`search`], [`matches`]) read `None` as all.
+    pub include_completed: Option<bool>,
 }
 
 impl SearchScope {
     pub fn everywhere() -> Self {
         SearchScope {
             list_id: None,
-            include_completed: true,
+            include_completed: Some(true),
         }
     }
+}
+
+/// The app's search box — iOS's `TaskSearch.results`, which both Apple apps drew, followed
+/// exactly (AITD-459; CONTRACTS "Search", resolved toward iOS 2026-10-03):
+///
+/// - **The query is one phrase, as typed**: lowercased, not trimmed or split, a substring of the
+///   title, the description or the assignee's name. Only an empty query finds nothing; one
+///   character is a search.
+/// - **Top-level tasks only**: a subtask shows under its parent, not as a result of its own.
+/// - **Completed work as a list shows it by default** (`scope.include_completed == None`): open
+///   tasks and those completed inside the 24-hour window.
+/// - **Highest priority first** — a list's `priority` sort: open before done, then priority, then
+///   due date; ties keep the cache's order.
+///
+/// The web's grammar is a superset kept on top: a bare identifier is a direct hit, and a query
+/// with filters in it (`is:open milk`) applies them, with the rest of the query as the phrase.
+pub fn search_tasks(
+    tasks: &[Task],
+    query_text: &str,
+    scope: &SearchScope,
+    context: &SearchContext<'_>,
+) -> Vec<Task> {
+    if query_text.is_empty() {
+        return Vec::new();
+    }
+    let parsed = query::parse(query_text);
+    if let Some(identifier) = &parsed.identifier {
+        return tasks
+            .iter()
+            .filter(|task| {
+                task.identifier
+                    .as_deref()
+                    .is_some_and(|own| own.eq_ignore_ascii_case(identifier))
+            })
+            .cloned()
+            .collect();
+    }
+    // A plain query is iOS's phrase exactly as typed — spaces, quotes and all. Only a query that
+    // used the grammar is read through it.
+    let needle = if has_filters(&parsed) {
+        parsed.text.to_lowercase()
+    } else {
+        query_text.to_lowercase()
+    };
+
+    let mut found: Vec<Task> = tasks
+        .iter()
+        .filter(|task| task.parent_task_id.is_none())
+        .filter(|task| in_list(task, scope))
+        .filter(|task| shows_completed(task, scope, context))
+        .filter(|task| structured_match(task, &parsed, context))
+        .filter(|task| needle.is_empty() || text_matches(task, &needle, context.users))
+        .cloned()
+        .collect();
+    crate::filters::sort_by_setting(&mut found, Some("priority"), None);
+    found
+}
+
+fn has_filters(parsed: &SearchQuery) -> bool {
+    parsed.assignee.is_some()
+        || parsed.due.is_some()
+        || parsed.state.is_some()
+        || !parsed.list_names.is_empty()
+        || !parsed.label_names.is_empty()
+        || !parsed.priorities.is_empty()
+        || !parsed.statuses.is_empty()
+}
+
+/// iOS's `applyCompletionFilterWithWindow(filter: "default", window: nil)` for `None`.
+fn shows_completed(task: &Task, scope: &SearchScope, context: &SearchContext<'_>) -> bool {
+    if !task.completed {
+        return true;
+    }
+    match scope.include_completed {
+        Some(include) => include,
+        None => crate::filters::recently_completed::is_recently_completed(
+            task.completed_at,
+            task.updated_at,
+            None,
+            context.now,
+            context.offset,
+        ),
+    }
+}
+
+fn in_list(task: &Task, scope: &SearchScope) -> bool {
+    scope
+        .list_id
+        .as_ref()
+        .is_none_or(|list_id| task.effective_list_ids().iter().any(|id| id == list_id))
 }
 
 /// What the structured half of a query is resolved against.
@@ -84,14 +176,7 @@ pub fn search(
             .collect();
     }
     let needle = parsed.text.to_lowercase();
-    let filtered = parsed.assignee.is_some()
-        || parsed.due.is_some()
-        || parsed.state.is_some()
-        || !parsed.list_names.is_empty()
-        || !parsed.label_names.is_empty()
-        || !parsed.priorities.is_empty()
-        || !parsed.statuses.is_empty();
-    if !filtered && needle.chars().count() < MINIMUM_QUERY_LENGTH {
+    if !has_filters(&parsed) && needle.chars().count() < MINIMUM_QUERY_LENGTH {
         return Vec::new();
     }
 
@@ -148,15 +233,10 @@ pub fn matches(tasks: &[Task], query_text: &str, scope: &SearchScope) -> Vec<Tas
 }
 
 fn in_scope(task: &Task, scope: &SearchScope) -> bool {
-    if !scope.include_completed && task.completed {
+    if scope.include_completed == Some(false) && task.completed {
         return false;
     }
-    if let Some(list_id) = &scope.list_id {
-        if !task.effective_list_ids().iter().any(|id| id == list_id) {
-            return false;
-        }
-    }
-    true
+    in_list(task, scope)
 }
 
 /// A title match before a description match, then open before done, then most recently touched.
@@ -269,7 +349,7 @@ fn structured_match(task: &Task, parsed: &SearchQuery, context: &SearchContext<'
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::date;
+    use crate::model::{date, Priority};
 
     fn task(id: &str, title: &str) -> Task {
         Task::new(id, title)
@@ -320,7 +400,7 @@ mod tests {
         done.completed = true;
         let scope = SearchScope {
             list_id: None,
-            include_completed: false,
+            include_completed: Some(false),
         };
         assert!(matches(&[done], "buy", &scope).is_empty());
     }
@@ -334,7 +414,7 @@ mod tests {
 
         let scope = SearchScope {
             list_id: Some("l1".into()),
-            include_completed: true,
+            include_completed: Some(true),
         };
         let found = matches(&[home, work], "buy", &scope);
         assert_eq!(found.len(), 1);
@@ -378,5 +458,133 @@ mod tests {
         let results = matches(&[older, newer], "buy", &SearchScope::everywhere());
         let found: Vec<&str> = results.iter().map(|task| task.id.as_str()).collect();
         assert_eq!(found, vec!["newer", "older"]);
+    }
+
+    // ── AITD-459: `search_tasks` answers as iOS's `TaskSearch.results` does ──────────────────
+
+    fn context_at(now: &str) -> SearchContext<'static> {
+        SearchContext {
+            lists: &[],
+            users: &[],
+            current_user_id: None,
+            now: date::parse(now).expect("an instant"),
+            offset: FixedOffset::east_opt(0).expect("UTC"),
+        }
+    }
+
+    fn ids(found: &[Task]) -> Vec<&str> {
+        found.iter().map(|task| task.id.as_str()).collect()
+    }
+
+    const NOW: &str = "2026-10-03T12:00:00Z";
+
+    /// iOS searches from the first character; only an empty query finds nothing.
+    #[test]
+    fn aitd459_one_character_is_a_search() {
+        let tasks = vec![task("t1", "Buy milk"), task("t2", "Call Ann")];
+        let context = context_at(NOW);
+        let scope = SearchScope::default();
+        assert_eq!(
+            ids(&search_tasks(&tasks, "b", &scope, &context)),
+            vec!["t1"]
+        );
+        assert!(search_tasks(&tasks, "", &scope, &context).is_empty());
+    }
+
+    /// The query is one phrase, as typed: not each word anywhere, and not trimmed.
+    #[test]
+    fn aitd459_the_query_is_one_phrase_as_typed() {
+        let tasks = vec![task("1", "Buy milk and bread"), task("2", "Buy milk")];
+        let context = context_at(NOW);
+        let scope = SearchScope::default();
+        assert!(search_tasks(&tasks, "buy bread", &scope, &context).is_empty());
+        assert_eq!(
+            ids(&search_tasks(&tasks, "milk and", &scope, &context)),
+            vec!["1"]
+        );
+        assert_eq!(
+            ids(&search_tasks(&tasks, "milk ", &scope, &context)),
+            vec!["1"]
+        );
+        assert_eq!(
+            ids(&search_tasks(&tasks, "MILK", &scope, &context)).len(),
+            2
+        );
+    }
+
+    /// Completed work is hidden as a list hides it by default: open tasks, and tasks completed
+    /// inside the recently-completed window (24 hours).
+    #[test]
+    fn aitd459_completed_work_follows_the_default_window() {
+        let mut long_done = task("long", "milk");
+        long_done.completed = true;
+        long_done.completed_at = date::parse("2026-09-03T12:00:00Z");
+        let mut just_done = task("just", "milk");
+        just_done.completed = true;
+        just_done.completed_at = date::parse("2026-10-03T09:00:00Z");
+        let tasks = vec![long_done, just_done, task("open", "milk")];
+        let context = context_at(NOW);
+
+        let found = search_tasks(&tasks, "milk", &SearchScope::default(), &context);
+        assert_eq!(ids(&found), vec!["open", "just"]);
+
+        let everything = SearchScope {
+            include_completed: Some(true),
+            ..SearchScope::default()
+        };
+        assert_eq!(search_tasks(&tasks, "milk", &everything, &context).len(), 3);
+        let open_only = SearchScope {
+            include_completed: Some(false),
+            ..SearchScope::default()
+        };
+        assert_eq!(
+            ids(&search_tasks(&tasks, "milk", &open_only, &context)),
+            vec!["open"]
+        );
+    }
+
+    /// Top-level tasks only: a subtask shows under its parent, not as a result of its own.
+    #[test]
+    fn aitd459_subtasks_are_not_results() {
+        let mut sub = task("sub", "milk");
+        sub.parent_task_id = Some("parent".into());
+        let tasks = vec![sub, task("top", "milk")];
+        let found = search_tasks(&tasks, "milk", &SearchScope::default(), &context_at(NOW));
+        assert_eq!(ids(&found), vec!["top"]);
+    }
+
+    /// Highest priority first (a list's "priority" sort), open before done, then due date —
+    /// not title-match-first or newest-first.
+    #[test]
+    fn aitd459_results_sort_by_priority() {
+        let mut low = task("low", "milk");
+        low.priority = Priority::Low;
+        let mut high = task("high", "notes about it");
+        high.description = "milk".into();
+        high.priority = Priority::High;
+        high.updated_at = date::parse("2026-01-01T00:00:00Z");
+        let mut done = task("done", "milk");
+        done.priority = Priority::High;
+        done.completed = true;
+        done.completed_at = date::parse("2026-10-03T11:00:00Z");
+        let tasks = vec![done, low, high];
+        let found = search_tasks(&tasks, "milk", &SearchScope::default(), &context_at(NOW));
+        assert_eq!(ids(&found), vec!["high", "low", "done"]);
+    }
+
+    /// The grammar stays a superset: filters still apply beside the phrase.
+    #[test]
+    fn aitd459_the_grammar_still_filters() {
+        let mut done = task("done", "milk");
+        done.completed = true;
+        done.completed_at = date::parse("2026-10-03T11:00:00Z");
+        let tasks = vec![done, task("open", "milk")];
+        let found = search_tasks(
+            &tasks,
+            "is:open milk",
+            &SearchScope::default(),
+            &context_at(NOW),
+        );
+        assert_eq!(ids(&found), vec!["open"]);
     }
 }

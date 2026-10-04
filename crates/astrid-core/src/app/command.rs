@@ -152,6 +152,10 @@ pub enum Command {
     /// Over the cache, which is where every client searches: there is no server search endpoint,
     /// and the Apple service's "online" path reads the same cached array its offline path does.
     /// So this is instant, works on a train, and is the same set of rules everywhere.
+    ///
+    /// The rules are iOS's search box (`services::search::search_tasks`, AITD-459): one phrase as
+    /// typed, from the first character, top-level tasks, completed work as a list shows it by
+    /// default unless `includeCompleted` says otherwise, highest priority first.
     SearchTasks {
         query: String,
         #[serde(default)]

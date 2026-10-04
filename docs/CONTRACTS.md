@@ -668,6 +668,20 @@ lists) should take this.
   names — but not iOS's "Unknown User" placeholder. The structured grammar (`parse::search`, locked
   by the web-generated `search.json`) is untouched and still passes. Test:
   `search_matches_the_assignee_name_as_ios_does`.
+- **Search box: now iOS's `TaskSearch.results` exactly (AITD-459, resolved toward iOS
+  2026-10-03).** `Command::SearchTasks` answers through `services::search::search_tasks`, which
+  differed from iOS four ways and now does not: it searched from **two** characters (iOS: one —
+  only an empty query is nothing); it **included completed** tasks (iOS: a list's default
+  completion filter — open, and completed inside the 24-hour window; an absent `includeCompleted`
+  now means that, `true` everything, `false` open only); it **included subtasks** (iOS: top-level
+  only); it sorted **title match, then open, then recency** (iOS: the `priority` list sort). A
+  plain query is also iOS's phrase **as typed** — not trimmed, split or unquoted; only a query that
+  uses the grammar is read through it. Kept as a superset of iOS: the web's grammar (`is:open`,
+  `assignee:me`, …) and a bare identifier as a direct hit. One deliberate difference stays: the
+  assignee name never matches iOS's "Unknown User" placeholder. The blocker picker's cache search
+  (`services::search::search`, D18) is unchanged — two characters, completed included. The Apple
+  apps search through this command and their Swift `TaskSearch` is deleted. Tests: `aitd459_*` in
+  `services::search` and `app::dispatch::tests`.
 
 ### D29 — Apple refused members of a public copy-only list
 
