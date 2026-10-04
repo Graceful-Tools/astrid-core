@@ -167,7 +167,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             task_id,
             display_mode,
         } => task_detail(app, &task_id, display_mode),
-        Command::DueDateOptions { task_id } => due_date_options(app, &task_id),
+        Command::DueDateOptions { task_id, draft } => {
+            due_date_options(app, task_id.as_deref(), draft)
+        }
         Command::DueDateOnDay { task_id, day } => due_date_on_day(app, &task_id, &day),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
@@ -208,7 +210,24 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             limit,
             subtask_display.map(|display| (display, show_subtasks)),
         ),
-        Command::Board { list_id, limit } => board(app, &list_id, limit),
+        Command::Board {
+            list_id,
+            project_id,
+            limit,
+            ids_only,
+        } => board(
+            app,
+            list_id.as_deref(),
+            project_id.as_deref(),
+            limit,
+            ids_only,
+        ),
+        Command::DropBoardCard {
+            task_id,
+            column_id,
+            list_id,
+            index,
+        } => drop_board_card(app, &task_id, &column_id, &list_id, index),
         Command::MoveTaskToColumn {
             task_id,
             column_id,
@@ -219,7 +238,22 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
         Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
         Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
-        Command::AssigneeOptions { task_id } => assignee_options(app, &task_id),
+        Command::AssigneeOptions {
+            task_id,
+            list_ids,
+            discovered,
+            agents,
+            current_user,
+        } => assignee_options(
+            app,
+            AssigneeInputs {
+                task_id: task_id.as_deref(),
+                list_ids,
+                discovered: &discovered,
+                agents,
+                current_user,
+            },
+        ),
         Command::QuickAddDefaults {
             list_id,
             assignee_id,
@@ -384,7 +418,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::SetTaskLists { task_id, list_ids } => {
             answer(app.context.tasks().set_lists(&task_id, list_ids))
         }
-        Command::ListPicks { task_id, query } => list_picks(app, &task_id, &query),
+        Command::ListPicks {
+            task_id,
+            query,
+            list_ids,
+            as_toggles,
+        } => list_picks(app, task_id.as_deref(), list_ids, &query, as_toggles),
         Command::AddTaskToList { task_id, list_id } => change_task_lists(app, &task_id, |ids| {
             if !ids.contains(&list_id) {
                 ids.push(list_id.clone());
@@ -1280,3 +1319,9 @@ mod tests;
 
 #[cfg(test)]
 mod rows_as_ios_tests;
+
+#[cfg(test)]
+mod board_as_ios_tests;
+
+#[cfg(test)]
+mod pickers_as_ios_tests;

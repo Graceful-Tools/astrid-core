@@ -43,6 +43,10 @@ pub struct AssigneeOption {
     pub image: Option<String>,
     pub is_current_user: bool,
     pub is_agent: bool,
+    /// The person's record as the pools hold it, for a shell that draws its own avatar from a
+    /// user (the Apple apps). `None` for the unassigned row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
 }
 
 impl AssigneeOption {
@@ -55,6 +59,7 @@ impl AssigneeOption {
             image: None,
             is_current_user: false,
             is_agent: false,
+            user: None,
         }
     }
 
@@ -68,6 +73,7 @@ impl AssigneeOption {
             image: user.image.clone(),
             is_current_user: current_user_id == Some(user.id.as_str()),
             is_agent: user.is_agent(),
+            user: Some(user.clone()),
         }
     }
 }
@@ -90,36 +96,55 @@ pub struct AssigneeSources<'a> {
 }
 
 /// Build the picker's rows: unassigned, then agents, then you, then everyone else by name.
+///
+/// iOS's rule (`AssigneeOptions.build`, AITD-461 — `docs/CONTRACTS.md` D47), on disagreement:
+///
+/// - a list member whose user never hydrated is left out — there is nobody to draw;
+/// - you are offered whenever the task's lists name nobody, not only when no list resolves
+///   (AITD-413: a cached list that knows nobody, offline, left the picker empty);
+/// - names sort as written (`name`, else email), capitals before lower case, the id breaking ties;
+/// - who holds the task now is offered only when a caller passes [`AssigneeSources::current_assignee`]
+///   — the task pickers do not, as iOS's do not.
 pub fn options(sources: &AssigneeSources<'_>) -> Vec<AssigneeOption> {
     let mut people: Vec<User> = Vec::new();
     let mut note = |user: &User| match people.iter_mut().find(|held| held.id == user.id) {
         // The richest record wins: a hydrated member beats the bare id a board card carries.
-        Some(held) if held.name.is_none() => *held = user.clone(),
+        Some(held) if held.name.is_none() && user.name.is_some() => *held = user.clone(),
         Some(_) => {}
         None => people.push(user.clone()),
     };
 
-    let task_lists: Vec<&TaskList> = sources
+    let mut from_lists = false;
+    for list in sources
         .lists
         .iter()
         .filter(|list| sources.task_list_ids.contains(&list.id))
-        .collect();
-    for list in &task_lists {
+    {
         if let Some(owner) = &list.owner {
             note(owner);
+            from_lists = true;
         }
-        for member in list.list_members.iter().flatten() {
-            match &member.user {
-                Some(user) => note(user),
-                // A member whose user never hydrated is still a person, never a raw id on screen:
-                // a minimal record still renders initials and still resolves a cached photo.
-                None => note(&User::new(&member.user_id)),
-            }
+        for user in list
+            .list_members
+            .iter()
+            .flatten()
+            .filter_map(|member| member.user.as_ref())
+        {
+            note(user);
+            from_lists = true;
         }
     }
 
     for user in sources.discovered {
         note(user);
+    }
+    // A task whose lists name nobody — "My Tasks", a board card whose lists this screen has not
+    // loaded, or a list cached before its roster was — still has to offer you, or the picker
+    // comes up empty.
+    if !from_lists {
+        if let Some(me) = sources.current_user {
+            note(me);
+        }
     }
     for agent in sources.agents {
         note(agent);
@@ -127,31 +152,30 @@ pub fn options(sources: &AssigneeSources<'_>) -> Vec<AssigneeOption> {
     if let Some(assignee) = sources.current_assignee {
         note(assignee);
     }
-    // A task with no resolvable lists — "My Tasks", or a board card whose lists this screen has
-    // not loaded — still has to offer you, or the picker comes up empty.
-    if task_lists.is_empty() {
-        if let Some(me) = sources.current_user {
-            note(me);
-        }
-    }
 
     let current_user_id = sources.current_user.map(|user| user.id.as_str());
-    let mut rows: Vec<AssigneeOption> = people
-        .iter()
-        .map(|user| AssigneeOption::person(user, current_user_id))
-        .collect();
-    rows.sort_by(|a, b| {
-        let name = |option: &AssigneeOption| option.name.clone().unwrap_or_default().to_lowercase();
-        b.is_agent
-            .cmp(&a.is_agent)
-            .then_with(|| b.is_current_user.cmp(&a.is_current_user))
-            .then_with(|| name(a).cmp(&name(b)))
+    let sort_name = |user: &User| -> String {
+        user.name
+            .clone()
+            .or_else(|| user.email.clone())
+            .unwrap_or_default()
+    };
+    people.sort_by(|a, b| {
+        let mine = |user: &User| current_user_id == Some(user.id.as_str());
+        b.is_agent()
+            .cmp(&a.is_agent())
+            .then_with(|| mine(b).cmp(&mine(a)))
+            .then_with(|| sort_name(a).cmp(&sort_name(b)))
             // Id as the tiebreaker, so the order is stable rather than the order they arrived in.
-            .then_with(|| a.user_id.cmp(&b.user_id))
+            .then_with(|| a.id.cmp(&b.id))
     });
 
     let mut all = vec![AssigneeOption::unassigned()];
-    all.append(&mut rows);
+    all.extend(
+        people
+            .iter()
+            .map(|user| AssigneeOption::person(user, current_user_id)),
+    );
     all
 }
 
@@ -323,20 +347,26 @@ mod tests {
         assert_eq!(ids(&found).iter().filter(|id| **id == "dana").count(), 1);
     }
 
-    /// Someone assigned from outside this list — added by email, a member of another list — must
-    /// still appear, or the picker cannot show who holds the task.
+    /// D47 (iOS): who holds the task is offered only when the caller passes them — the task
+    /// pickers do not. A caller that does (quick-add's preview) still gets them.
     #[test]
-    fn the_current_assignee_appears_even_when_they_are_not_a_member() {
+    fn aitd461_the_current_assignee_is_offered_only_when_passed() {
         let outsider = user("outsider", "Outside Person");
         let lists = vec![list("l", None, &[user("u1", "Adam")])];
         let list_ids = vec!["l".to_string()];
-        let found = options(&AssigneeSources {
+        let without = options(&AssigneeSources {
+            lists: &lists,
+            task_list_ids: &list_ids,
+            ..Default::default()
+        });
+        assert!(!ids(&without).contains(&"outsider"));
+        let with = options(&AssigneeSources {
             lists: &lists,
             task_list_ids: &list_ids,
             current_assignee: Some(&outsider),
             ..Default::default()
         });
-        assert!(ids(&found).contains(&"outsider"));
+        assert!(ids(&with).contains(&"outsider"));
     }
 
     #[test]
@@ -353,10 +383,10 @@ mod tests {
         assert_eq!(ids(&found), vec!["u1"]);
     }
 
-    /// A member whose user record never hydrated is still a person. The Mac put the raw id on
-    /// screen as if it were somebody's name.
+    /// D47 (iOS): a member whose user record never hydrated is left out — there is nobody to
+    /// draw, and never a raw id.
     #[test]
-    fn an_unhydrated_member_is_never_labelled_with_a_raw_id() {
+    fn aitd461_an_unhydrated_member_is_left_out() {
         let raw = "8f14e45f-ceea-467a-9f8b-2d3c7f9a1b2c";
         let lists = vec![TaskList {
             list_members: Some(vec![member("l", raw, None)]),
@@ -368,9 +398,36 @@ mod tests {
             task_list_ids: &list_ids,
             ..Default::default()
         });
-        let person = &found[1];
-        assert_ne!(person.name.as_deref(), Some(raw));
-        assert!(!person.initials.is_empty());
+        assert!(!ids(&found).contains(&raw));
+    }
+
+    /// D47 (iOS AITD-413): a list that resolves but names nobody — offline, cached before its
+    /// roster was — still offers you.
+    #[test]
+    fn aitd461_a_list_that_knows_nobody_still_offers_you() {
+        let me = user("me", "Jon");
+        let lists = vec![TaskList::new("l", "List")];
+        let list_ids = vec!["l".to_string()];
+        let found = options(&AssigneeSources {
+            lists: &lists,
+            task_list_ids: &list_ids,
+            current_user: Some(&me),
+            ..Default::default()
+        });
+        assert_eq!(ids(&found), vec!["me"]);
+    }
+
+    /// D47 (iOS): names sort as written — capitals before lower case.
+    #[test]
+    fn aitd461_names_sort_as_written() {
+        let lists = vec![list("l", None, &[user("a", "amy"), user("z", "Zoe")])];
+        let list_ids = vec!["l".to_string()];
+        let found = options(&AssigneeSources {
+            lists: &lists,
+            task_list_ids: &list_ids,
+            ..Default::default()
+        });
+        assert_eq!(ids(&found), vec!["z", "a"]);
     }
 
     /// A hydrated record beats a bare one for the same person, whichever order they arrive in.

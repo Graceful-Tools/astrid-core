@@ -925,3 +925,115 @@ menu over My Tasks), and a public list the reader is not in, whose tasks never e
 `list`, `tasks`) and uses it over the cached one; `idsOnly` answers the ordered ids without
 projecting rows, and `matched` counts what the filters kept, subtasks included. `listCounts`
 answers that count for many lists in one read — the sidebar's saved-filter badges.
+
+## The board and the pickers, checked against iOS (AITD-461, 2026-10-03)
+
+The Apple apps drew the board and filled their pickers from Swift copies (`ProjectStatus.swift`,
+`ProjectStateMove`, `MacBoardMove`, `AssigneeOptions`, `DueDateQuickPicks`, the list pickers'
+filters). Those were run against this crate before they were deleted; every difference below was
+**resolved toward iOS** (Jon, 2026-10-03: on disagreement follow iOS), and the Mac now draws
+through the same commands.
+
+### D43 — which cards a board column holds, and in what order
+
+iOS drew a column from the project's **top-level** tasks, in the opened list's **manual order**
+(cards the order never named last, in its store order), with **Done holding recent work only**: the
+opened list's completion filter and recently-completed window (`boardColumnTasksSorted`). This crate
+drew every domain task, subtasks included, in cache order, every finished task forever, and at
+most 50 cards a column. **Resolved toward iOS**: `board` answers through `board_cards::cards` and
+`board_cards::column_cards`. Done reads the filter as iOS's board does — absent or `default` is the
+window, `show` / `all` (and anything else) everything, `hide` nothing — and times a card by
+`updatedAt`, never `completedAt`, because iOS hands its window no completion time
+(`board_cards::done_shows`; not the list view's D22 reading). `idsOnly` answers every card's id;
+rows still come 50 a column unless `limit` says otherwise — a transport window for a shell that
+draws the core's rows, not a limit on the board. A shell that has the project but no list of it may
+ask by `projectId`. Tests: `aitd461_cards_are_top_level_in_the_manual_order_and_uncapped`,
+`aitd461_done_holds_what_the_window_lets_through`, `aitd461_a_board_can_be_asked_for_by_project`,
+`board_cards::tests`.
+
+A drop is `dropBoardCard`: the move, then the card's new place in the opened list's manual order
+(just above the card it was dropped on, or after the column's last card) with the list's sort set
+to manual — what iOS's drop wrote (`resolveBoardReorder` + `updateListOnServer`). Unlike a move, a
+drop onto the card's own column rearranges it. iOS placed the card against its column computed
+without the board's custom states and with subtasks counted; the slot it was given is the one the
+board drew, so this places it against the drawn column. Test:
+`aitd461_a_drop_writes_the_move_and_the_manual_order`.
+
+### D44 — a cached status row names its default column
+
+iOS (`getProjectBoardColumns`) named a default column by a rename stored on the board, else by a
+`listType: "status"` row it still had cached for that role, else by the default; the row's
+`statusDescription` (or description) was the column's. This crate never read the rows. **Resolved
+toward iOS**: `board_cards::columns_with_rows`, for the board and the status menu. Only the name
+and description — the id is the role whatever is cached. Legacy Inbox and Done rows are ignored;
+when two rows claim a role the last in iOS's order (`statusOrder`, then name) wins. Test:
+`aitd461_a_cached_status_row_names_its_default_column`.
+
+### D45 — a move to the card's own column, and leaving Done
+
+iOS (`planProjectColumnMove`) did nothing when a card was moved to the column it was in, and
+leaving Done **un-completed first**, then set the column; this crate wrote an edit of nothing, and
+un-completed last. **Resolved toward iOS** for `moveTaskToColumn` and `setTaskStatus`; going to
+Done still sets the column first, then completes through the completion service. Tests:
+`aitd461_a_move_to_its_own_column_writes_nothing`, `aitd461_leaving_done_uncompletes_first`,
+`aitd461_going_to_done_moves_then_completes`.
+
+### D46 — the status menu never offers Done
+
+iOS's state picker (`ProjectStatePicker`, task 7574067b) left Done out: it sits beside an explicit
+Complete, and the chip was the copy of that action that never said it would finish the task.
+`taskStatusOptions` offered it. **Resolved toward iOS**: the columns leave Done out; `current`
+still names Done for a finished task. Test: `aitd461_the_status_menu_has_no_done`. A shell that
+drew a Done chip from this answer loses it.
+
+### D47 — who the assignee picker offers
+
+Five differences from iOS's `AssigneeOptions.build`, all **resolved toward iOS** in
+`rows::assignee::options`:
+
+1. A list member whose user never hydrated is left out (this crate offered a minimal record).
+2. You are offered whenever the task's lists name nobody — a list cached before its roster was,
+   offline (AITD-413) — not only when no list resolves.
+3. Names sort as written (`name`, else email; capitals before lower case), not lower-cased.
+4. Who holds the task now is offered only when a caller passes `current_assignee`. The pickers'
+   `assigneeOptions` no longer does, as iOS's picker never did; quick-add's preview still does.
+5. A shell's own inputs win: `assigneeOptions` takes `listIds`, `discovered` (people its search
+   found), `agents` and `currentUser`, and needs no `taskId` — a task not created yet can be asked
+   about. Each option carries the person's `user` record for a shell that draws its own avatar.
+
+The unassigned row stays first: both Apple pickers draw one there. Tests: `rows::assignee`'s
+`aitd461_*`, `aitd461_assignee_options_take_the_editors_inputs`. The Mac's own builder offered
+unhydrated members and the current assignee; it follows iOS now.
+
+### D48 — a quick date pick is an all-day date, and a time pick stays on the task's day
+
+iOS's date picker (`InlineDatePicker.setQuickDate`, saved through `updateTask(when:)`) writes the
+reader's calendar day at UTC midnight and makes the task all-day — a timed task picked onto
+"Tomorrow" loses its time. This crate kept the time of day and anchored on the task's date; the
+Mac kept the time too. **Resolved toward iOS**: each `dueDateOptions` date carries the all-day
+instant and `isAllDay: true`. The all-day storage contract is unchanged (UTC midnight). A time pick
+on an all-day task now lands on the task's calendar date — this crate read the local day of its UTC
+midnight, the day before west of UTC, where iOS combined the hour with the UTC date. An editor's
+unsaved date travels as `draft`. Tests: `aitd461_a_date_pick_is_an_all_day_date`,
+`aitd461_a_time_pick_stays_on_an_all_day_tasks_date`. This supersedes D26's note that only the
+all-day pick's storage matched.
+
+### D49 — the repeat presets carry iOS's keys
+
+`rows::repeat` named the presets `repeat.never` … `repeat.custom`, keys iOS's `Localizable.strings`
+lacks; iOS names them `repeating.one_time_only`, `repeating.daily` … `repeating.custom`
+(`Task.Repeating.displayName`, translated in twelve languages). **Resolved toward iOS**: the presets
+and a simple repeat's one-part summary use iOS's keys. A custom pattern's parts keep their
+`repeat.*` keys — iOS words that sentence in Swift (`CustomRepeatSummary`, English only) and has no
+keys for its fragments. Windows resolves these keys from its own resources and must rename the six
+when it takes this revision. Test: `aitd461_the_presets_are_named_with_ios_keys`.
+
+### D50 — the list picker is a checklist
+
+iOS's `InlineListsPicker` offers every list a task can be filed in, its own marked, in the
+sidebar's order (`ListOrdering`: favourites, then name), matched anywhere without regard to case,
+with no cap and no "create"; this crate's `listPicks` left the task's own lists out, sorted by name,
+capped at ten and offered a create. **Resolved toward iOS** as a mode: `listPicks` with `asToggles`
+answers `ListToggles`; without it, the editor shape Windows draws is unchanged. An editor's unsaved
+lists travel as `listIds`. iOS matched with the locale's case folding; this crate lower-cases. Test:
+`aitd461_list_picks_as_toggles`.

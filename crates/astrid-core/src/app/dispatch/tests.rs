@@ -3950,7 +3950,8 @@ async fn the_action_menu_closes_as_wont_do_and_sets_status_like_the_board_task_0
         .iter()
         .map(|column| column["name"].as_str().expect("a name"))
         .collect();
-    assert_eq!(names, ["Inbox", "Ready", "Doing", "Waiting", "Done"]);
+    // Never Done: the menu sits beside Complete, which is what finishing is (AITD-461, D46).
+    assert_eq!(names, ["Inbox", "Ready", "Doing", "Waiting"]);
     assert_eq!(options["value"]["current"], "__virtual_inbox__");
     assert_eq!(options["value"]["columns"][0]["isCurrent"], true);
 
@@ -4788,7 +4789,7 @@ async fn repeat_options_describe_the_current_repeat() {
 
     let offered = call(&app, json!({ "kind": "repeatOptions", "taskId": id })).await;
     assert_eq!(offered["value"]["presets"][0]["value"], "never");
-    assert_eq!(offered["value"]["summary"][0]["key"], "repeat.weekly");
+    assert_eq!(offered["value"]["summary"][0]["key"], "repeating.weekly");
     let selected = offered["value"]["presets"]
         .as_array()
         .expect("presets")
@@ -4819,7 +4820,10 @@ async fn the_detail_screen_describes_the_repeat_the_same_way() {
     .await;
 
     let detail = call(&app, json!({ "kind": "taskDetail", "taskId": id })).await;
-    assert_eq!(detail["value"]["repeatSummary"][0]["key"], "repeat.daily");
+    assert_eq!(
+        detail["value"]["repeatSummary"][0]["key"],
+        "repeating.daily"
+    );
 }
 
 /// The picker offers unassigned first and knows which row is the current one, so the shell

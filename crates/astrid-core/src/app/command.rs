@@ -117,8 +117,15 @@ pub enum Command {
         /// The calendar day the reader clicked, as `YYYY-MM-DD`.
         day: String,
     },
+    ///
+    /// A date pick is the reader's calendar day as an all-day date, at UTC midnight, whatever the
+    /// task held — iOS's quick date (AITD-461, `docs/CONTRACTS.md` D48). An editor holding a date
+    /// the cache has not got yet (unsaved, or a task not created yet) sends it as `draft`.
     DueDateOptions {
-        task_id: String,
+        #[serde(default)]
+        task_id: Option<String>,
+        #[serde(default)]
+        draft: Option<DueDraft>,
     },
     /// A task's comments.
     Comments {
@@ -189,11 +196,39 @@ pub enum Command {
     ///
     /// Answers with rows, so a card draws like a row — see [`crate::board`] for why a column id is
     /// a role rather than a list id.
+    ///
+    /// The cards are iOS's (AITD-461, `docs/CONTRACTS.md` D43): top-level tasks only, in the
+    /// opened list's manual order, with Done holding recent work as that list's completion filter
+    /// and window say. Every card comes back unless `limit` asks for a window.
     Board {
-        list_id: String,
+        /// The list the board was opened from: its project is the board, and its manual order
+        /// and Done window arrange the cards.
+        #[serde(default)]
+        list_id: Option<String>,
+        /// The board itself, for a shell that knows the project but holds no list of it yet.
+        /// The opened list's project wins when both are given.
+        #[serde(default)]
+        project_id: Option<String>,
         /// How many cards to carry per column. The count comes back whole.
         #[serde(default)]
         limit: Option<usize>,
+        /// Each column's card ids rather than rows — for a shell that draws its own copies.
+        #[serde(default)]
+        ids_only: bool,
+    },
+    /// Drop a card at a slot in a column (AITD-461): the move a drag makes, plus the card's new
+    /// place in the opened list's manual order — what iOS's board drop writes.
+    ///
+    /// Unlike [`Command::MoveTaskToColumn`], a drop onto the card's own column is not a no-op:
+    /// it is how a column is rearranged.
+    DropBoardCard {
+        task_id: String,
+        column_id: String,
+        /// The list the board was opened from, whose manual order the drop rearranges.
+        list_id: String,
+        /// The slot among the column's cards as the board drew them: 0 is the top, the column's
+        /// length the bottom.
+        index: usize,
     },
     /// Move a card to a column.
     MoveTaskToColumn {
@@ -246,8 +281,27 @@ pub enum Command {
     /// One rule for every surface: the detail pane, the row picker and later the board all ask
     /// this. On iOS the picker built the list inline, and the board could not offer an AI agent
     /// at all — see [`crate::rows::assignee`].
+    ///
+    /// A shell may hold the inputs ahead of the cache (AITD-461): an editor's unsaved lists, a
+    /// task not created yet, people its search found, the agents it keeps. Each one given wins
+    /// over what the cache would say.
     AssigneeOptions {
-        task_id: String,
+        /// The task, when it exists. Its lists and current assignee come from the cache unless
+        /// `listIds` says otherwise.
+        #[serde(default)]
+        task_id: Option<String>,
+        /// The lists the task is in, as the editor holds them.
+        #[serde(default)]
+        list_ids: Option<Vec<String>>,
+        /// People found some other way — a scoped search, someone just added by email.
+        #[serde(default)]
+        discovered: Vec<crate::model::User>,
+        /// The account's agents as the shell keeps them; the cached ones when absent.
+        #[serde(default)]
+        agents: Option<Vec<crate::model::User>>,
+        /// Who is signed in, as the shell knows them; the account's record when absent.
+        #[serde(default)]
+        current_user: Option<crate::model::User>,
     },
     /// What quick-add's leading control shows before anything is typed, and who it may offer
     /// (task 8aa5732c).
@@ -474,10 +528,20 @@ pub enum Command {
     },
     /// The lists a task can be put in, for the detail's list editor (task d3f3b111): the ones it
     /// is in, the ones that match what was typed, and whether to offer creating what was typed.
+    ///
+    /// `asToggles` asks for the Apple pickers' shape (AITD-461, `docs/CONTRACTS.md` D50): every list
+    /// a task can be filed in — the ones it is in too, marked selected — in the sidebar's order
+    /// (favourites first, then by name), filtered by what was typed, with no cap and no create. An
+    /// editor holding unsaved lists sends them as `listIds`; a task not created yet has no `taskId`.
     ListPicks {
-        task_id: String,
+        #[serde(default)]
+        task_id: Option<String>,
         #[serde(default)]
         query: String,
+        #[serde(default)]
+        list_ids: Option<Vec<String>>,
+        #[serde(default)]
+        as_toggles: bool,
     },
     AddTaskToList {
         task_id: String,
@@ -1353,6 +1417,16 @@ pub fn kinds() -> std::collections::BTreeSet<String> {
         kinds.len()
     );
     kinds
+}
+
+/// The due date an editor holds, ahead of the cache (AITD-461).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DueDraft {
+    #[serde(default, with = "crate::model::date::optional")]
+    pub due_date_time: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub is_all_day: bool,
 }
 
 #[cfg(test)]

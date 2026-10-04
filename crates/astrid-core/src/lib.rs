@@ -31,6 +31,6 @@ pub mod sync;
 // here at the paths they have always had, so `astrid_core::repeating`, `astrid_core::rules` and
 // the rest still name the same items for every client.
 pub use astrid_rules::{
-    board, editing, filters, identifier, keyboard, manual_order, markdown, model, palette, parse,
-    permissions, reminders, repeating, rows, rules, smart_tasks, theme,
+    board, board_cards, editing, filters, identifier, keyboard, manual_order, markdown, model,
+    palette, parse, permissions, reminders, repeating, rows, rules, smart_tasks, theme,
 };
