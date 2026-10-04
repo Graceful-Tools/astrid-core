@@ -260,6 +260,21 @@ mod tests {
         assert_eq!(reply["value"]["canDelete"], false);
     }
 
+    /// AWTD-1061: the server sends the project; the core resolves the role from it.
+    #[test]
+    fn list_access_reads_the_project_when_the_server_sends_it() {
+        let reply = answer(json!({
+            "kind": "listAccess",
+            "list": { "ownerId": "owner", "privacy": "PRIVATE", "listType": "status",
+                      "project": { "ownerId": "boss", "members": [],
+                                   "lists": [{ "id": "d", "listMembers": [{ "userId": "u2" }] }] } },
+            "userId": "u2"
+        }));
+        assert_eq!(reply["value"]["role"], "member");
+        assert_eq!(reply["value"]["canEditTasks"], true);
+        assert_eq!(reply["value"]["canManage"], false);
+    }
+
     #[test]
     fn nobody_signed_in_has_no_access() {
         let reply = answer(json!({
