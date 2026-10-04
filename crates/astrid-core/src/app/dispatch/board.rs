@@ -4,10 +4,9 @@
 
 use super::*;
 
-/// How many cards a column carries across the boundary unless the shell asks for more.
-///
-/// A column is read top-down and the count comes back whole, so a hundred-card Done column crosses
-/// as the handful anybody is looking at — the same reason `rowsForList` sends a window.
+/// How many cards a column carries as rows unless the shell asks for more. The count comes back
+/// whole, and an `idsOnly` answer carries every id: a window is a transport choice for a shell
+/// that draws the core's rows (Windows), never a limit on what the board holds (D43).
 pub(super) const BOARD_COLUMN_LIMIT: usize = 50;
 
 /// The board a list belongs to.
@@ -16,35 +15,74 @@ pub(super) const BOARD_COLUMN_LIMIT: usize = 50;
 /// the same converters in the shell. The surface is `BoardCard`, which is what makes the leading
 /// control open the assignee picker rather than complete the task — tapping a face on a card is
 /// how you reassign it, and completing from a board is the Done column.
-pub(super) fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response {
+///
+/// The cards are the ones iOS draws, in iOS's order (AITD-461, D43): top-level tasks only, the
+/// opened list's manual order, and Done holding what that list's completion filter and window
+/// let through. `ids_only` answers each column's ids instead of rows — every one of them unless
+/// `limit` asks for a window, as iOS draws every card; rows come [`BOARD_COLUMN_LIMIT`] at a time.
+pub(super) fn board(
+    app: &App,
+    list_id: Option<&str>,
+    project_id: Option<&str>,
+    limit: Option<usize>,
+    ids_only: bool,
+) -> Response {
     let lists = app.store.lists().unwrap_or_default();
-    let Some(opened) = lists.iter().find(|list| list.id == list_id) else {
-        return Response::failed(Failure::not_found("list", list_id));
+    let opened = match list_id {
+        Some(id) => match lists.iter().find(|list| list.id == id) {
+            Some(list) => Some(list),
+            None => return Response::failed(Failure::not_found("list", id)),
+        },
+        None => None,
     };
     // A list with no project has no board. Not an error — the shell asks before it knows.
-    let Some(project_id) = opened.project_id.clone() else {
+    let Some(project_id) = opened
+        .and_then(|list| list.project_id.clone())
+        .or_else(|| project_id.map(str::to_string))
+    else {
         return Response::ok(serde_json::json!({
             "projectId": serde_json::Value::Null,
             "columns": [],
         }));
     };
 
-    let project = app
-        .store
-        .projects()
-        .unwrap_or_default()
-        .into_iter()
-        .find(|project| project.id == project_id);
-    let columns = crate::board::columns(
-        project
-            .as_ref()
-            .and_then(|project| project.custom_states.as_ref()),
-    );
-
+    let columns = board_columns_with_rows(app, Some(&project_id), &lists);
     let tasks = app.store.tasks().unwrap_or_default();
     // Borrowed, like the row pipeline: a board of ten thousand cards has no use for a second copy
     // of itself every time somebody moves one.
-    let cards: Vec<&crate::model::Task> = crate::board::domain_tasks(&tasks, &lists, &project_id);
+    let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
+    let arrangement = crate::board_cards::BoardList::of(opened);
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
+    let held: Vec<Vec<&crate::model::Task>> = columns
+        .iter()
+        .map(|column| {
+            crate::board_cards::column_cards(&cards, column, &columns, arrangement, now, offset)
+        })
+        .collect();
+
+    if ids_only {
+        let drawn: Vec<serde_json::Value> = columns
+            .iter()
+            .zip(&held)
+            .map(|(column, held)| {
+                let window = &held[..limit.unwrap_or(usize::MAX).min(held.len())];
+                serde_json::json!({
+                    "id": column.id,
+                    "name": column.name,
+                    "description": column.description,
+                    "kind": column.kind,
+                    "total": held.len(),
+                    "ids": window.iter().map(|task| task.id.as_str()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        return Response::ok(serde_json::json!({
+            "projectId": project_id,
+            "listId": opened.map(|list| list.id.as_str()),
+            "columns": drawn,
+        }));
+    }
 
     let users: Vec<crate::model::User> = cards
         .iter()
@@ -58,8 +96,8 @@ pub(super) fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response 
         current_user_id: current_user_id.as_deref(),
         display_mode: rows::DisplayMode::List,
         surface: rows::Surface::BoardCard,
-        now: app.clock.now(),
-        offset: app.clock.utc_offset(),
+        now,
+        offset,
         lists: &lists,
         users: &users,
         // Cards are flat. A card indented under a parent in another column would be indented
@@ -68,16 +106,11 @@ pub(super) fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response 
         subtask_counts: &counts,
     };
 
-    let limit = limit.unwrap_or(BOARD_COLUMN_LIMIT);
     let drawn: Vec<serde_json::Value> = columns
         .iter()
-        .map(|column| {
-            let held: Vec<&crate::model::Task> = cards
-                .iter()
-                .copied()
-                .filter(|card| crate::board::column_for(card, &columns) == column.id)
-                .collect();
-            let window = &held[..limit.min(held.len())];
+        .zip(&held)
+        .map(|(column, held)| {
+            let window = &held[..limit.unwrap_or(BOARD_COLUMN_LIMIT).min(held.len())];
             serde_json::json!({
                 "id": column.id,
                 "name": column.name,
@@ -91,6 +124,7 @@ pub(super) fn board(app: &App, list_id: &str, limit: Option<usize>) -> Response 
 
     Response::ok(serde_json::json!({
         "projectId": project_id,
+        "listId": opened.map(|list| list.id.as_str()),
         "columns": drawn,
     }))
 }
@@ -192,6 +226,28 @@ pub(super) fn board_columns(app: &App, project_id: Option<&str>) -> Vec<crate::b
     )
 }
 
+/// A project's columns as iOS names them — a cached status row may name a default (AITD-461,
+/// D44). What the board and the status menu show; a move only needs the ids, which are the same.
+pub(super) fn board_columns_with_rows(
+    app: &App,
+    project_id: Option<&str>,
+    lists: &[crate::model::TaskList],
+) -> Vec<crate::board::BoardColumn> {
+    let project = project_id.and_then(|id| {
+        app.store
+            .projects()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|project| project.id == id)
+    });
+    crate::board_cards::columns_with_rows(
+        project
+            .as_ref()
+            .and_then(|project| project.custom_states.as_ref()),
+        lists,
+    )
+}
+
 /// The columns a task's own menu can put it in (task 016ce981).
 ///
 /// The detail has no board open, so the project comes from the task's own lists; a task in no
@@ -201,11 +257,15 @@ pub(super) fn task_columns(app: &App, task: &crate::model::Task) -> Vec<crate::b
     let lists = app.store.lists().unwrap_or_default();
     // The task's own board, never the selected list's — see `rows::detail::project_id_for_task`.
     let project_id = rows::detail::project_id_for_task(task, &lists);
-    board_columns(app, project_id.as_deref())
+    board_columns_with_rows(app, project_id.as_deref(), &lists)
 }
 
 /// Which columns the menu offers, and which one is lit. `board::column_for` decides the latter, so
 /// the lit row and the card's column on the board are one answer (task 016ce981).
+///
+/// Never Done (AITD-461, D46, iOS task 7574067b): the menu sits beside an explicit Complete, and
+/// offering Done as a state too gave the same action twice — the chip the one that never said it
+/// would finish the task. A finished task lights nothing; `current` still says Done.
 pub(super) fn task_status_options(app: &App, task_id: &str) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
@@ -216,7 +276,7 @@ pub(super) fn task_status_options(app: &App, task_id: &str) -> Response {
     let current = crate::board::column_for(&task, &columns);
     Response::ok(serde_json::json!({
         "current": current,
-        "columns": columns.iter().map(|column| serde_json::json!({
+        "columns": columns.iter().filter(|column| column.kind != crate::board::ColumnKind::Done).map(|column| serde_json::json!({
             "id": column.id,
             "name": column.name,
             "kind": column.kind,
@@ -252,7 +312,21 @@ pub(super) fn move_to_column(
         return Response::failed(Failure::bad_request("that column is not on this board"));
     };
 
+    // Already there: nothing to write (AITD-461, D45). A card nudged and released inside its own
+    // column, or the lit chip tapped again, used to send an edit of nothing.
+    if crate::board::column_for(task, columns) == target.id {
+        return Response::ok(task.clone());
+    }
+
     let moved = crate::board::resolve_move(task, target, lists);
+
+    // Leaving Done un-completes FIRST, then moves (AITD-461, D45) — iOS's order: the task is open
+    // before it is given its new column, so nothing reads a finished task in a status column.
+    if task.completed && !moved.completed {
+        if let Err(error) = app.context.tasks().complete(task_id, false, None, None) {
+            return Response::failed(error.into());
+        }
+    }
 
     // The memberships first: a completion that also has to shed a stale status membership should
     // shed it whichever way the write is ordered, and doing it here keeps one path for it.
@@ -274,16 +348,96 @@ pub(super) fn move_to_column(
         return Response::failed(error.into());
     }
 
-    if moved.completed != task.completed {
-        return answer(
-            app.context
-                .tasks()
-                .complete(task_id, moved.completed, None, None),
-        );
+    if moved.completed && !task.completed {
+        return answer(app.context.tasks().complete(task_id, true, None, None));
     }
     match app.context.tasks().task(task_id) {
         Ok(Some(task)) => Response::ok(task),
         Ok(None) => Response::failed(Failure::not_found("task", task_id)),
         Err(error) => Response::failed(error.into()),
     }
+}
+
+/// Drop a card at a slot in a column (AITD-461): what iOS's board writes on a drop.
+///
+/// A completion change first, through the completion service (a repeating card dropped on Done
+/// rolls forward); then the card's lists and role; then the opened list's manual order with the
+/// card at the slot it was dropped on, and the list's sort set to manual so the order shows.
+/// A drop onto the card's own column still rearranges it — that is what a drop there is for.
+pub(super) fn drop_board_card(
+    app: &App,
+    task_id: &str,
+    column_id: &str,
+    list_id: &str,
+    index: usize,
+) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let lists = app.store.lists().unwrap_or_default();
+    let Some(opened) = lists.iter().find(|list| list.id == list_id) else {
+        return Response::failed(Failure::not_found("list", list_id));
+    };
+    let Some(project_id) = opened.project_id.clone() else {
+        return Response::failed(Failure::bad_request("that list has no board"));
+    };
+    let columns = board_columns(app, Some(&project_id));
+    let Some(target) = columns.iter().find(|column| column.id == column_id) else {
+        return Response::failed(Failure::bad_request("that column is not on this board"));
+    };
+
+    let tasks = app.store.tasks().unwrap_or_default();
+    let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
+    let placed = crate::board_cards::reorder(
+        &task,
+        target,
+        index,
+        &columns,
+        &cards,
+        &lists,
+        crate::board_cards::BoardList::of(Some(opened)),
+        app.clock.now(),
+        app.clock.utc_offset(),
+    );
+    let moved = &placed.column_move;
+
+    if moved.completed != task.completed {
+        if let Err(error) = app
+            .context
+            .tasks()
+            .complete(task_id, moved.completed, None, None)
+        {
+            return Response::failed(error.into());
+        }
+    }
+    if moved.list_ids != task.effective_list_ids() {
+        if let Err(error) = app
+            .context
+            .tasks()
+            .set_lists(task_id, moved.list_ids.clone())
+        {
+            return Response::failed(error.into());
+        }
+    }
+    let changes = crate::services::TaskChanges {
+        status_role: Some(moved.status_role.clone()),
+        ..Default::default()
+    };
+    let task = match app.context.tasks().update(task_id, &changes) {
+        Ok(task) => task,
+        Err(error) => return Response::failed(error.into()),
+    };
+
+    let list_changes = crate::services::ListChanges {
+        manual_sort_order: Some(placed.manual_order.clone()),
+        sort_by: (opened.sort_by.as_deref() != Some("manual")).then(|| Some("manual".to_string())),
+        ..Default::default()
+    };
+    let list = match app.context.lists().update(list_id, &list_changes) {
+        Ok(list) => list,
+        Err(error) => return Response::failed(error.into()),
+    };
+    Response::ok(serde_json::json!({ "task": task, "list": list }))
 }

@@ -501,54 +501,70 @@ pub(super) fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
     }))
 }
 
-pub(super) fn due_date_options(app: &App, task_id: &str) -> Response {
-    let task = match app.context.tasks().task(task_id) {
-        Ok(Some(task)) => task,
-        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
-        Err(error) => return Response::failed(error.into()),
+/// The quick date and time picks for a task, or for the date an editor holds (`draft`).
+///
+/// A date pick is iOS's (D48): the reader's calendar day, `n` days on, as an all-day date at UTC
+/// midnight — a timed task picked onto "Tomorrow" becomes all-day tomorrow, as iOS's date picker
+/// writes it. A time pick is that hour on the task's own day: an all-day task's calendar date
+/// (never the local reading of its UTC midnight, which is the day before west of UTC), a timed
+/// task's local day, or today when there is no date.
+pub(super) fn due_date_options(
+    app: &App,
+    task_id: Option<&str>,
+    draft: Option<crate::app::command::DueDraft>,
+) -> Response {
+    let (due, is_all_day) = match (draft, task_id) {
+        (Some(draft), _) => (draft.due_date_time, draft.is_all_day),
+        (None, Some(task_id)) => match app.context.tasks().task(task_id) {
+            Ok(Some(task)) => (task.due_date_time, task.is_all_day),
+            Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+            Err(error) => return Response::failed(error.into()),
+        },
+        (None, None) => (None, false),
     };
 
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
-    // A task with no date yet is being given one from today, so the picks are anchored on now.
-    let anchor = task.due_date_time.unwrap_or(now);
 
     let dates: Vec<serde_json::Value> = rows::due_picks::DATE_OPTIONS
         .iter()
         .map(|option| {
             let days = option.days_from_today;
-            let picked = if task.is_all_day {
-                rows::due_picks::all_day_pick(days, now, offset)
-            } else {
-                // Keep the time of day: choosing a date must not silently discard a time the
-                // person already set.
-                rows::due_picks::timed_pick(
-                    days - rows::day_offset(anchor, task.is_all_day, now, offset),
-                    anchor,
-                    offset,
-                )
-            };
             serde_json::json!({
                 "titleKey": option.title_key,
-                "dueDateTime": date::format(picked),
-                "isSelected": task.due_date_time.is_some_and(|due| {
-                    rows::day_offset(due, task.is_all_day, now, offset) == days
+                "daysFromToday": days,
+                "dueDateTime": date::format(rows::due_picks::all_day_pick(days, now, offset)),
+                "isAllDay": true,
+                "isSelected": due.is_some_and(|due| {
+                    rows::day_offset(due, is_all_day, now, offset) == days
                 }),
             })
         })
         .collect();
 
+    // The hour goes on the task's own day.
+    let day_anchor = match due {
+        Some(due) if is_all_day => {
+            let day = date::all_day_date(due);
+            day.and_hms_opt(12, 0, 0)
+                .and_then(|noon| noon.and_local_timezone(offset).single())
+                .map(|at| at.with_timezone(&chrono::Utc))
+                .unwrap_or(due)
+        }
+        Some(due) => due,
+        None => now,
+    };
     let times: Vec<serde_json::Value> = rows::due_picks::TIME_OPTIONS
         .iter()
         .map(|option| {
-            let picked = rows::due_picks::with_hour(option.hour, anchor, offset);
+            let picked = rows::due_picks::with_hour(option.hour, day_anchor, offset);
             serde_json::json!({
                 "titleKey": option.title_key,
                 "hour": option.hour,
                 "dueDateTime": date::format(picked),
                 // An all-day task has no time, so nothing is selected until one is chosen.
-                "isSelected": !task.is_all_day
-                    && task.due_date_time.is_some_and(|due| {
+                "isSelected": !is_all_day
+                    && due.is_some_and(|due| {
                         due.with_timezone(&offset).format("%H").to_string()
                             == format!("{:02}", option.hour)
                     }),
@@ -557,8 +573,8 @@ pub(super) fn due_date_options(app: &App, task_id: &str) -> Response {
         .collect();
 
     Response::ok(serde_json::json!({
-        "isAllDay": task.is_all_day,
-        "dueDateTime": task.due_date_time.map(date::format),
+        "isAllDay": is_all_day,
+        "dueDateTime": due.map(date::format),
         "dates": dates,
         "times": times,
     }))
@@ -765,18 +781,27 @@ pub(super) fn repeat_options(app: &App, task_id: &str) -> Response {
 
 /// What the detail's list editor shows for a task (task d3f3b111). The rules are
 /// `rows::list_picks`; this only finds the task and hands over every list.
-pub(super) fn list_picks(app: &App, task_id: &str, query: &str) -> Response {
-    let task = match app.context.tasks().task(task_id) {
-        Ok(Some(task)) => task,
-        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
-        Err(error) => return Response::failed(error.into()),
+pub(super) fn list_picks(
+    app: &App,
+    task_id: Option<&str>,
+    list_ids: Option<Vec<String>>,
+    query: &str,
+    as_toggles: bool,
+) -> Response {
+    let selected = match (list_ids, task_id) {
+        (Some(ids), _) => ids,
+        (None, Some(task_id)) => match app.context.tasks().task(task_id) {
+            Ok(Some(task)) => task.effective_list_ids(),
+            Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+            Err(error) => return Response::failed(error.into()),
+        },
+        (None, None) => Vec::new(),
     };
     let lists = app.store.lists().unwrap_or_default();
-    Response::ok(rows::list_picks::picks(
-        &task.effective_list_ids(),
-        &lists,
-        query,
-    ))
+    if as_toggles {
+        return Response::ok(rows::list_picks::toggles(&selected, &lists, query));
+    }
+    Response::ok(rows::list_picks::picks(&selected, &lists, query))
 }
 
 /// Change which lists a task is in, by editing the set it has. One write through the task
@@ -831,42 +856,55 @@ pub(super) fn create_list_for_task(app: &App, task_id: &str, name: &str) -> Resp
     }
 }
 
-pub(super) fn assignee_options(app: &App, task_id: &str) -> Response {
-    let task = match app.context.tasks().task(task_id) {
-        Ok(Some(task)) => task,
-        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
-        Err(error) => return Response::failed(error.into()),
+/// What a shell may hold ahead of the cache when it asks who a task can be assigned to.
+pub(super) struct AssigneeInputs<'a> {
+    pub task_id: Option<&'a str>,
+    pub list_ids: Option<Vec<String>>,
+    pub discovered: &'a [crate::model::User],
+    pub agents: Option<Vec<crate::model::User>>,
+    pub current_user: Option<crate::model::User>,
+}
+
+/// Who a task can be assigned to, in the order the picker shows them — iOS's rule (D47). The
+/// shell's own inputs win over the cache's; see [`Command::AssigneeOptions`].
+pub(super) fn assignee_options(app: &App, inputs: AssigneeInputs<'_>) -> Response {
+    let task = match inputs.task_id {
+        Some(task_id) => match app.context.tasks().task(task_id) {
+            Ok(Some(task)) => Some(task),
+            Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+            Err(error) => return Response::failed(error.into()),
+        },
+        None => None,
     };
 
     let lists = app.store.lists().unwrap_or_default();
-    let known = app.store.users().unwrap_or_default();
-    let agents: Vec<crate::model::User> = known
-        .iter()
-        .filter(|user| user.is_agent())
-        .cloned()
-        .collect();
-
-    let current_user = app.context.account().current_user().ok().flatten();
-    // The task's own assignee record is the last resort, and never wins over the id: a stale
-    // embedded record is how the previous person stays on screen (task 42013da7).
-    let assignee = crate::rows::assignee::resolve(
-        task.assignee_id.as_deref(),
-        &[known.as_slice()],
-        task.assignee.as_ref(),
-    );
-
-    let list_ids = task.effective_list_ids();
+    let agents: Vec<crate::model::User> = inputs.agents.unwrap_or_else(|| {
+        app.store
+            .users()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|user| user.is_agent())
+            .collect()
+    });
+    let current_user = inputs
+        .current_user
+        .or_else(|| app.context.account().current_user().ok().flatten());
+    let list_ids = inputs.list_ids.unwrap_or_else(|| {
+        task.as_ref()
+            .map(|task| task.effective_list_ids())
+            .unwrap_or_default()
+    });
     let options = crate::rows::assignee::options(&crate::rows::assignee::AssigneeSources {
         lists: &lists,
         task_list_ids: &list_ids,
+        discovered: inputs.discovered,
         agents: &agents,
-        current_assignee: assignee.as_ref(),
         current_user: current_user.as_ref(),
         ..Default::default()
     });
 
     Response::ok(serde_json::json!({
-        "assigneeId": task.assignee_id,
+        "assigneeId": task.as_ref().and_then(|task| task.assignee_id.clone()),
         "options": options,
     }))
 }

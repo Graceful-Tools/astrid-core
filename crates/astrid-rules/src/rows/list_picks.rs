@@ -128,6 +128,63 @@ pub fn picks(task_list_ids: &[String], lists: &[TaskList], query: &str) -> ListP
     }
 }
 
+/// One row of the Apple pickers: a list, and whether the task is in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListToggle {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub is_selected: bool,
+}
+
+/// What the Apple pickers show (AITD-461, `docs/CONTRACTS.md` D50 — iOS's `InlineListsPicker`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListToggles {
+    /// The lists the task is in, as chips, in the order below.
+    pub selected: Vec<ListToggle>,
+    /// Every list it can be filed in that matches the search, selected ones included.
+    pub options: Vec<ListToggle>,
+}
+
+/// iOS's list picker: a checklist rather than a set of suggestions.
+///
+/// Every destination ([`is_destination`]) is a row, the task's own lists among them marked
+/// selected, so one tap files or unfiles. In the sidebar's order — favourites first, then by name
+/// without regard to case (iOS's `ListOrdering`), the id breaking ties. What was typed is matched
+/// as typed, without regard to case, anywhere in the name. No cap and no "create": neither Apple
+/// picker offers one.
+pub fn toggles(task_list_ids: &[String], lists: &[TaskList], query: &str) -> ListToggles {
+    let mut ordered: Vec<&TaskList> = lists.iter().filter(|list| is_destination(list)).collect();
+    ordered.sort_by(|a, b| {
+        let favourite = |list: &TaskList| list.is_favorite.unwrap_or(false);
+        favourite(b)
+            .cmp(&favourite(a))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let toggle = |list: &TaskList| ListToggle {
+        id: list.id.clone(),
+        name: list.name.clone(),
+        color: list.display_color().to_string(),
+        is_selected: task_list_ids.contains(&list.id),
+    };
+    let needle = query.to_lowercase();
+    ListToggles {
+        selected: ordered
+            .iter()
+            .filter(|list| task_list_ids.contains(&list.id))
+            .map(|list| toggle(list))
+            .collect(),
+        options: ordered
+            .iter()
+            .filter(|list| needle.is_empty() || list.name.to_lowercase().contains(&needle))
+            .map(|list| toggle(list))
+            .collect(),
+    }
+}
+
 /// The privacy a list created from a task's editor gets: PUBLIC over SHARED over PRIVATE,
 /// from the lists the task is already in — the web's `handleCreateNewList`.
 pub fn privacy_for_new_list<'a>(selected: impl IntoIterator<Item = &'a TaskList>) -> Privacy {

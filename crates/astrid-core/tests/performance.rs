@@ -177,6 +177,28 @@ async fn a_board_of_ten_thousand_cards_is_fast() {
         elapsed < BUDGET,
         "a board of {TASKS} cards took {elapsed:?}"
     );
+
+    // Every card's id, as the Apple boards ask (AITD-461), arranged by a manual order naming
+    // them all.
+    let order: Vec<String> = (0..TASKS).rev().map(|index| format!("t{index}")).collect();
+    let list: astrid_core::model::TaskList = serde_json::from_value(
+        json!({ "id": "l1", "name": "Everything", "projectId": "p1", "manualSortOrder": order }),
+    )
+    .expect("a list");
+    app.store().upsert_list(&list).expect("stores");
+    let (elapsed, answer) = time(
+        &app,
+        json!({ "kind": "board", "listId": "l1", "idsOnly": true }),
+    )
+    .await;
+    let inbox = answer["value"]["columns"][0]["ids"]
+        .as_array()
+        .expect("ids");
+    assert_eq!(inbox.first().and_then(|id| id.as_str()), Some("t9999"));
+    assert!(
+        elapsed < BUDGET,
+        "every id of a board of {TASKS} cards took {elapsed:?}"
+    );
 }
 
 /// Completing one task out of ten thousand must not cost the account.

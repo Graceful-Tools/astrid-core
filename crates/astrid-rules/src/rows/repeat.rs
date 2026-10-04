@@ -67,13 +67,17 @@ pub struct RepeatPreset {
 
 /// The presets, in the order the picker shows them. "Never" first: clearing a repeat is a choice
 /// like any other rather than an escape hatch, the same decision the date picks made.
+///
+/// The keys are iOS's (`Task.Repeating.displayName`, AITD-461 — `docs/CONTRACTS.md` D49): its
+/// `Localizable.strings` already carries them in twelve languages, and "One time only" rather than
+/// "Never" is iOS's word for not repeating (42013da7).
 const PRESETS: [(&str, &str); 6] = [
-    ("never", "repeat.never"),
-    ("daily", "repeat.daily"),
-    ("weekly", "repeat.weekly"),
-    ("monthly", "repeat.monthly"),
-    ("yearly", "repeat.yearly"),
-    ("custom", "repeat.custom"),
+    ("never", "repeating.one_time_only"),
+    ("daily", "repeating.daily"),
+    ("weekly", "repeating.weekly"),
+    ("monthly", "repeating.monthly"),
+    ("yearly", "repeating.yearly"),
+    ("custom", "repeating.custom"),
 ];
 
 pub fn presets(selected: Option<Repeating>) -> Vec<RepeatPreset> {
@@ -114,10 +118,10 @@ pub fn summary(
     let repeating = repeating.unwrap_or(Repeating::Never);
     let mut parts = match repeating {
         Repeating::Never => return Vec::new(),
-        Repeating::Daily => vec![SummaryPart::key("repeat.daily")],
-        Repeating::Weekly => vec![SummaryPart::key("repeat.weekly")],
-        Repeating::Monthly => vec![SummaryPart::key("repeat.monthly")],
-        Repeating::Yearly => vec![SummaryPart::key("repeat.yearly")],
+        Repeating::Daily => vec![SummaryPart::key("repeating.daily")],
+        Repeating::Weekly => vec![SummaryPart::key("repeating.weekly")],
+        Repeating::Monthly => vec![SummaryPart::key("repeating.monthly")],
+        Repeating::Yearly => vec![SummaryPart::key("repeating.yearly")],
         Repeating::Custom => custom_parts(pattern.unwrap_or(&CustomRepeatingPattern::default())),
     };
 
@@ -210,6 +214,26 @@ mod tests {
         parts.iter().map(|part| part.key).collect()
     }
 
+    /// D49 (AITD-461): the presets carry iOS's keys, which its strings file already translates.
+    #[test]
+    fn aitd461_the_presets_are_named_with_ios_keys() {
+        let keys: Vec<&str> = presets(None)
+            .iter()
+            .map(|preset| preset.title_key)
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                "repeating.one_time_only",
+                "repeating.daily",
+                "repeating.weekly",
+                "repeating.monthly",
+                "repeating.yearly",
+                "repeating.custom",
+            ]
+        );
+    }
+
     #[test]
     fn a_task_that_does_not_repeat_has_nothing_to_say() {
         assert!(summary(None, None, None).is_empty());
@@ -220,7 +244,7 @@ mod tests {
     fn a_preset_describes_itself_in_one_part() {
         assert_eq!(
             keys(&summary(Some(Repeating::Weekly), None, None)),
-            vec!["repeat.weekly"]
+            vec!["repeating.weekly"]
         );
     }
 
@@ -234,7 +258,7 @@ mod tests {
                 None,
                 Some(RepeatFromMode::CompletionDate)
             )),
-            vec!["repeat.daily"]
+            vec!["repeating.daily"]
         );
         assert_eq!(
             keys(&summary(
@@ -242,7 +266,7 @@ mod tests {
                 None,
                 Some(RepeatFromMode::DueDate)
             )),
-            vec!["repeat.daily", "repeat.from_due_date"]
+            vec!["repeating.daily", "repeat.from_due_date"]
         );
     }
 

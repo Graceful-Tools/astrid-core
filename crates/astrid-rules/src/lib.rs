@@ -13,6 +13,7 @@
 //! its old path (`astrid_core::repeating`, `astrid_core::rules`, …).
 
 pub mod board;
+pub mod board_cards;
 pub mod editing;
 pub mod envelope;
 pub mod filters;
