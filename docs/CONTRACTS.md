@@ -280,10 +280,28 @@ a client receives from `/api/v1/lists`:
 takes optional `listType`, `project { ownerId, members[], lists[].listMembers[] }`, `admins` and
 `members`, and `contracts/fixtures/permissions.json` locks every branch and its precedence as web
 runs it — list ownership, then an admin membership, then `admins`, then any membership, then
-`members`, then the project, then the public viewer fallback. One consequence of that order is
-worth knowing: a plain list member who owns or administers the project stays a **member** of that
-list. That is web's answer, so it is the fixture's. astrid-web's server is the caller that sends
-these fields: its list permissions decide through this crate with the project loaded.
+`members`, then the project, then the public viewer fallback. astrid-web's server is the caller
+that sends these fields: its list permissions decide through this crate with the project loaded.
+
+**Where a list role and a project role meet, the higher one wins** (Jon, 2026-10-04). A plain
+list member — a `listMembers` row of any non-admin role, or the legacy `members` array — who owns
+or administers the project is an **admin** of the list. The project's ceiling is admin, never
+owner, so that person still cannot delete a list somebody else owns. A plain project member gains
+nothing over a plain list membership, and a list owner or list admin is never lowered.
+
+| On the list | On the project | Role on the list |
+|---|---|---|
+| owner | anything | owner |
+| admin (row or `admins`) | anything | admin |
+| plain member (row or `members`) | owner | **admin** (was member until 2026-10-04) |
+| plain member (row or `members`) | admin | **admin** (was member until 2026-10-04) |
+| plain member (row or `members`) | member, or status-list cascade | member |
+| none | owner or admin | admin |
+| none | member, or status-list cascade | member |
+
+Until that decision the list membership was consulted first and its answer returned, so such a
+person was only a **member** of the list; web and this crate changed together and the fixture
+records the new answer.
 
 **A client still cannot.** The fields are not on the wire, so a list reached purely through
 project membership arrives with the user in none of its `listMembers`, and a client computing a
