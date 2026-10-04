@@ -229,10 +229,321 @@ pub fn push_due(
     crate::model::date::format(midnight)
 }
 
+// ── Watermarks: echo suppression and last-write-wins ───────────────────────────────────────────
+//
+// Ported from Apple's `SyncSuppression` (AWTD2-56). Every task link on the server carries two
+// stamps: `remoteUpdatedAt` guards the pull, `astridUpdatedAt` guards the push. A wrong comparison
+// here is either an echo loop or a silently dropped edit, so the comparisons are kept here, tested,
+// and in one place.
+//
+// Compared to the millisecond, because that is what the wire carries: a stamp read back from the
+// server has lost the sub-millisecond part of the instant this machine wrote, and a nanosecond
+// comparison would read every task as changed since its own watermark — a push on every pass.
+
+fn millis(at: DateTime<Utc>) -> i64 {
+    at.timestamp_millis()
+}
+
+/// PULL: apply a remote change only if it is strictly newer than the remote watermark written at
+/// the last push or pull. A missing stamp on either side cannot prove an echo — apply.
+pub fn should_apply_remote(
+    remote_updated_at: Option<DateTime<Utc>>,
+    watermark: Option<DateTime<Utc>>,
+) -> bool {
+    match (remote_updated_at, watermark) {
+        (Some(remote), Some(watermark)) => millis(remote) > millis(watermark),
+        _ => true,
+    }
+}
+
+/// CONFLICT: a pulled change that passed the echo watermark can still race a fresher local edit —
+/// one still sitting in the Outbox. Last write wins: the remote applies only when it is provably
+/// newer than the local task. An unprovable remote stamp never clobbers local state, and a tie
+/// keeps local.
+pub fn remote_wins(
+    remote_updated_at: Option<DateTime<Utc>>,
+    local_updated_at: Option<DateTime<Utc>>,
+) -> bool {
+    match (remote_updated_at, local_updated_at) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(remote), Some(local)) => millis(remote) > millis(local),
+    }
+}
+
+/// PUSH: send a local change only if it is strictly newer than the local watermark written when
+/// the task was last pushed or pulled. Its negation is "unchanged since the last pass", which is
+/// what [`should_adopt_remote_completion`] and the pull's last-write-wins both need.
+pub fn should_push_local(
+    local_updated_at: Option<DateTime<Utc>>,
+    watermark: Option<DateTime<Utc>>,
+) -> bool {
+    match (local_updated_at, watermark) {
+        (Some(local), Some(watermark)) => millis(local) > millis(watermark),
+        _ => true,
+    }
+}
+
+/// Whether a remote twin may be created for a local task with none.
+///
+/// Only when a complete remote listing proves no twin exists. A failed listing and a truncated one
+/// both mean "unknown", never "empty" — the twin may simply be past the end of the page, and
+/// creating then is the duplicate. (Apple `SyncAdoptionSafety.mayCreateRemote`.)
+pub fn may_create_remote(
+    full_listing_available: bool,
+    listing_truncated: bool,
+    matching_twin_exists: bool,
+) -> bool {
+    full_listing_available && !listing_truncated && !matching_twin_exists
+}
+
+/// Order pulled items so a parent is applied before its children, and a child created in the same
+/// pass can resolve its parent's fresh link. Anything cyclic or unresolvable is appended at the
+/// end — created top-level rather than dropped. (Apple `SyncPullOrdering.parentsFirst`.)
+pub fn parents_first<T: Clone>(
+    items: &[T],
+    id: impl Fn(&T) -> String,
+    parent_id: impl Fn(&T) -> Option<String>,
+) -> Vec<T> {
+    let mut remaining: Vec<T> = items.to_vec();
+    let mut remaining_ids: std::collections::HashSet<String> = items.iter().map(&id).collect();
+    let mut ordered = Vec::with_capacity(items.len());
+    while !remaining.is_empty() {
+        let (ready, waiting): (Vec<T>, Vec<T>) = remaining.into_iter().partition(|item| {
+            parent_id(item)
+                .is_none_or(|parent| parent.is_empty() || !remaining_ids.contains(&parent))
+        });
+        if ready.is_empty() {
+            ordered.extend(waiting);
+            break;
+        }
+        for item in &ready {
+            remaining_ids.remove(&id(item));
+        }
+        ordered.extend(ready);
+        remaining = waiting;
+    }
+    ordered
+}
+
+/// How often a linked list's complete listing is fetched for absence deletion when nothing else in
+/// the pass needed one. (Apple `FullPullThrottle`, 300 seconds.)
+pub const FULL_PULL_INTERVAL_SECS: i64 = 300;
+
+/// Whether the throttled complete listing is due. Only a successful, complete listing moves the
+/// stamp, at the call site.
+pub fn full_pull_due(last_success: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    last_success.is_none_or(|last| (now - last).num_seconds() >= FULL_PULL_INTERVAL_SECS)
+}
+
+/// How many completed remote items one pass imports. Completed history trickles in; it must never
+/// delay the live items. (Apple `CompletedBackfill`, budget 20.)
+pub const BACKFILL_BUDGET: usize = 20;
+
+/// A remote item, as the completed backfill sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackfillCandidate {
+    pub remote_id: String,
+    pub completed: bool,
+    pub deleted: bool,
+    /// RFC 3339, which sorts as text.
+    pub updated_at: String,
+}
+
+/// The completed remote items to import this pass, newest first: completed, not deleted, not
+/// already linked, not deleted here. (Apple `CompletedBackfill.select`.)
+pub fn backfill_selection<'a>(
+    items: &'a [BackfillCandidate],
+    is_linked: impl Fn(&str) -> bool,
+    tombstoned: &[String],
+    budget: usize,
+) -> Vec<&'a BackfillCandidate> {
+    let mut chosen: Vec<&BackfillCandidate> = items
+        .iter()
+        .filter(|item| {
+            item.completed
+                && !item.deleted
+                && !is_linked(&item.remote_id)
+                && !tombstoned.contains(&item.remote_id)
+        })
+        .collect();
+    chosen.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    chosen.truncate(budget);
+    chosen
+}
+
+/// Local tasks a pulled item may adopt by title instead of making a second one.
+///
+/// Only an unambiguous title adopts: two local tasks called "Buy milk" and one remote one is a
+/// guess, and a guess that links the wrong pair is worse than a duplicate somebody can delete. A
+/// task adopted once is consumed, so one local task never answers for two remote items in a pass.
+/// (Apple's same-title adoption and `BackfillAdoptionIndex`.)
+#[derive(Debug, Default)]
+pub struct TitleIndex {
+    by_title: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl TitleIndex {
+    /// `(task id, title)` for every task that may be adopted.
+    pub fn new(candidates: impl IntoIterator<Item = (String, String)>) -> Self {
+        let mut by_title: std::collections::HashMap<String, Vec<String>> = Default::default();
+        for (task_id, title) in candidates {
+            by_title.entry(title).or_default().push(task_id);
+        }
+        TitleIndex { by_title }
+    }
+
+    /// The one task with this title, consumed — or `None` when there is none or more than one.
+    pub fn take_unique(&mut self, title: &str) -> Option<String> {
+        match self.by_title.get(title) {
+            Some(ids) if ids.len() == 1 => self.by_title.remove(title)?.pop(),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::date;
+
+    // ── AWTD2-56: the watermark rules, ported with Apple's `SyncProviderLogicTests` ──────────
+
+    fn at(text: &str) -> Option<DateTime<Utc>> {
+        date::parse(text)
+    }
+
+    /// AWTD2-56: a pull applies only what is newer than the watermark; equal is our own echo.
+    #[test]
+    fn awtd2_56_a_pull_skips_its_own_echo() {
+        let t0 = at("2026-09-07T12:00:00Z");
+        let t1 = at("2026-09-07T12:00:01Z");
+        assert!(should_apply_remote(t1, t0));
+        assert!(
+            !should_apply_remote(t0, t0),
+            "equal is the echo of our write"
+        );
+        assert!(!should_apply_remote(t0, t1), "older is stale");
+        assert!(should_apply_remote(None, t0));
+        assert!(should_apply_remote(t0, None));
+    }
+
+    /// AWTD2-56: a push sends only what changed since the watermark.
+    #[test]
+    fn awtd2_56_a_push_sends_only_what_changed_since_the_watermark() {
+        let t0 = at("2026-09-07T12:00:00Z");
+        let t1 = at("2026-09-07T12:00:01Z");
+        assert!(should_push_local(t1, t0));
+        assert!(!should_push_local(t0, t0));
+        assert!(!should_push_local(t0, t1));
+        assert!(should_push_local(None, t0));
+        assert!(should_push_local(t0, None));
+    }
+
+    /// AWTD2-56: the wire carries milliseconds, so a stamp read back from the server equals the
+    /// instant written even when that instant had nanoseconds.
+    #[test]
+    fn awtd2_56_watermarks_compare_at_the_precision_the_wire_carries() {
+        let written = at("2026-09-07T12:00:00.123Z")
+            .map(|at| at + chrono::Duration::nanoseconds(456_789))
+            .expect("an instant");
+        let read_back = date::parse(&date::format(written));
+        assert!(!should_push_local(Some(written), read_back));
+        assert!(!should_apply_remote(Some(written), read_back));
+    }
+
+    /// AWTD2-56: last write wins, and an unprovable or tied remote never clobbers local.
+    #[test]
+    fn awtd2_56_a_stale_remote_never_clobbers_a_fresher_local_edit() {
+        let t0 = at("2026-09-07T12:00:00Z");
+        let t1 = at("2026-09-07T12:00:01Z");
+        assert!(remote_wins(t1, t0));
+        assert!(!remote_wins(t0, t1));
+        assert!(!remote_wins(t0, t0), "a tie keeps local");
+        assert!(!remote_wins(None, t0));
+        assert!(remote_wins(t0, None));
+    }
+
+    /// AWTD2-56: creating a twin needs a complete listing that proves there is none.
+    #[test]
+    fn awtd2_56_a_twin_is_created_only_after_a_complete_listing() {
+        assert!(may_create_remote(true, false, false));
+        assert!(!may_create_remote(false, false, false), "failed listing");
+        assert!(!may_create_remote(true, true, false), "truncated listing");
+        assert!(!may_create_remote(true, false, true), "a twin exists");
+    }
+
+    /// AWTD2-56: parents before children, whatever order Google lists them in; a cycle is kept.
+    #[test]
+    fn awtd2_56_parents_are_applied_before_their_children() {
+        let items = vec![
+            ("child", Some("parent")),
+            ("parent", None),
+            ("orphan", Some("gone")),
+        ];
+        let ordered = parents_first(
+            &items,
+            |item| item.0.to_string(),
+            |item| item.1.map(str::to_string),
+        );
+        let names: Vec<&str> = ordered.iter().map(|item| item.0).collect();
+        assert_eq!(names, vec!["parent", "orphan", "child"]);
+
+        let cycle = vec![("a", Some("b")), ("b", Some("a"))];
+        assert_eq!(
+            parents_first(&cycle, |i| i.0.to_string(), |i| i.1.map(str::to_string)).len(),
+            2,
+            "a cycle is emitted, not dropped"
+        );
+    }
+
+    #[test]
+    fn awtd2_56_the_complete_listing_is_throttled() {
+        let t0 = at("2026-09-07T12:00:00Z").expect("an instant");
+        assert!(full_pull_due(None, t0));
+        assert!(full_pull_due(Some(t0), t0 + chrono::Duration::seconds(300)));
+        assert!(!full_pull_due(
+            Some(t0),
+            t0 + chrono::Duration::seconds(299)
+        ));
+    }
+
+    /// AWTD2-56: completed history comes in newest first, under a budget, never twice.
+    #[test]
+    fn awtd2_56_backfill_takes_completed_unlinked_items_newest_first() {
+        let item = |id: &str, completed: bool, deleted: bool, at: &str| BackfillCandidate {
+            remote_id: id.into(),
+            completed,
+            deleted,
+            updated_at: at.into(),
+        };
+        let items = vec![
+            item("b", true, false, "2026-09-01T00:00:00Z"),
+            item("a", true, false, "2026-09-03T00:00:00Z"),
+            item("open", false, false, "2026-09-04T00:00:00Z"),
+            item("gone", true, true, "2026-09-04T00:00:00Z"),
+            item("c", true, false, "2026-09-02T00:00:00Z"),
+            item("linked", true, false, "2026-09-05T00:00:00Z"),
+            item("dead", true, false, "2026-09-05T00:00:00Z"),
+        ];
+        let chosen = backfill_selection(&items, |id| id == "linked", &["dead".to_string()], 2);
+        let ids: Vec<&str> = chosen.iter().map(|item| item.remote_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "c"]);
+    }
+
+    /// AWTD2-56: adoption by title only when unambiguous, and only once.
+    #[test]
+    fn awtd2_56_only_an_unambiguous_title_is_adopted_and_only_once() {
+        let mut index = TitleIndex::new([
+            ("a".to_string(), "One".to_string()),
+            ("b".to_string(), "Same".to_string()),
+            ("c".to_string(), "Same".to_string()),
+        ]);
+        assert_eq!(index.take_unique("One").as_deref(), Some("a"));
+        assert_eq!(index.take_unique("One"), None, "consumed");
+        assert_eq!(index.take_unique("Same"), None, "ambiguous");
+        assert_eq!(index.take_unique("Missing"), None);
+    }
 
     fn link(task: &str, remote: &str) -> Link {
         Link {
