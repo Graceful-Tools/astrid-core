@@ -64,7 +64,8 @@ impl Provider {
         }
     }
 
-    fn slug(self) -> &'static str {
+    /// The name this crate's own records key it by — the ledger's `google`.
+    pub(crate) fn slug(self) -> &'static str {
         match self {
             Provider::GoogleTasks => "google",
             Provider::GitHub => "github",

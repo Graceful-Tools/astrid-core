@@ -772,6 +772,29 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         suffix: Option<String>,
     },
+    /// Merge a sync ledger built by another store — an Apple client's old UserDefaults, on its
+    /// way onto this crate — into the core's, in one transaction (AITD-463).
+    ///
+    /// Merged, never replaced, so running it twice is harmless. Lists are oldest first: that is
+    /// the order the tombstone caps (500 own, 5000 server) evict in. Every part may be absent.
+    ImportExternalLedger {
+        provider: crate::services::Provider,
+        /// Remote twins still to remove. Each is also tombstoned, as `record_deletion` does.
+        #[serde(default)]
+        pending: Vec<crate::external::ledger::PendingDeletion>,
+        /// This machine's own deletions.
+        #[serde(default)]
+        tombstones: Vec<String>,
+        /// The deletions the server reported.
+        #[serde(default)]
+        server_tombstones: Vec<String>,
+        /// Remote lists auto-linking must never offer again.
+        #[serde(default)]
+        excluded: Vec<String>,
+        /// Local task → remote twin, so a later deletion knows what to remove.
+        #[serde(default)]
+        links: Vec<crate::external::ledger::KnownLink>,
+    },
     /// Run one Google pass over every linked list.
     ///
     /// GitHub needs no equivalent: a cron on the server does that one, so a list linked here syncs

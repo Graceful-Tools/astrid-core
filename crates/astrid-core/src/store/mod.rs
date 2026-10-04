@@ -495,6 +495,43 @@ impl Store {
         })
     }
 
+    /// Read `keys`, let `work` change them, and write back what changed — all in one transaction.
+    ///
+    /// For a write that spans several entries and must land whole or not at all: a migration
+    /// that fails half way is retried from the start, not resumed from wherever it stopped.
+    pub fn update_metadata(
+        &self,
+        keys: &[String],
+        work: impl FnOnce(&mut std::collections::HashMap<String, Option<String>>),
+    ) -> Result<()> {
+        self.transaction(|connection| {
+            let mut values = std::collections::HashMap::new();
+            for key in keys {
+                let value: Option<String> = connection
+                    .query_row("SELECT value FROM metadata WHERE key = ?1", [key], |row| {
+                        row.get(0)
+                    })
+                    .optional()?;
+                values.insert(key.clone(), value);
+            }
+            let before = values.clone();
+            work(&mut values);
+            for (key, value) in &values {
+                if before.get(key) == Some(value) {
+                    continue;
+                }
+                match value {
+                    Some(value) => connection.execute(
+                        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                        [key.as_str(), value.as_str()],
+                    )?,
+                    None => connection.execute("DELETE FROM metadata WHERE key = ?1", [key])?,
+                };
+            }
+            Ok(())
+        })
+    }
+
     pub fn metadata(&self, key: &str) -> Result<Option<String>> {
         self.with(|connection| {
             Ok(connection

@@ -804,6 +804,27 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .set_auto_link_mode(mode, suffix.as_deref())
                 .await,
         ),
+        Command::ImportExternalLedger {
+            provider,
+            pending,
+            tombstones,
+            server_tombstones,
+            excluded,
+            links,
+        } => answer_done(
+            crate::external::ledger::import(
+                &app.store,
+                provider.slug(),
+                &crate::external::ledger::LedgerImport {
+                    pending,
+                    tombstones,
+                    server_tombstones,
+                    excluded,
+                    links,
+                },
+            )
+            .map_err(Into::into),
+        ),
         Command::SyncExternal => sync_external(app).await,
         Command::HasSeenTour => Response::ok(serde_json::json!({
             "seen": app
