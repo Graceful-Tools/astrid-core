@@ -9,10 +9,12 @@
 //!   list?" — and renders the answer. A `role == "admin"` written in XAML is the shape of bug where
 //!   a control appears for someone who cannot use it, which is exactly what happened on Mac before
 //!   `ListPermissions.swift` existed (task da56d096).
-//! - **This answers what the client can see.** Web additionally derives a role from the list's
-//!   project and from two legacy denormalised arrays. Those fields are not on the wire shape a
-//!   client receives, so a client cannot reach those branches — see `docs/CONTRACTS.md` §5 for what
-//!   that costs and who has to fix it.
+//! - **It answers from whatever the caller can see.** Web also derives a role from the list's
+//!   project (its owner, its members, and — for a board's status lists — membership of a sibling
+//!   list) and from two legacy denormalised arrays, `admins` and `members`. Those are optional
+//!   inputs here: astrid-web's server loads them and decides through this crate (AWTD-1061). They
+//!   are not on the wire shape a client receives, so a client that sends none of them gets the
+//!   answers it always got — see `docs/CONTRACTS.md` §5 for what that still costs a client.
 //!
 //! The server decides for real on every request. These functions decide what to *offer*, and being
 //! wrong in either direction is a bug: too generous and the user gets a 403 from a button we drew,
@@ -26,6 +28,9 @@ use serde::{Deserialize, Serialize};
 /// because roles are free text that has been written inconsistently, while privacy is a database
 /// enum that has only ever been uppercase.
 const PRIVACY_PUBLIC: &str = "PUBLIC";
+
+/// The `listType` of a board's status list (a column). Compared exactly, as web compares it.
+const LIST_TYPE_STATUS: &str = "status";
 
 /// Public lists whose viewers may add tasks. Any other value, including absent, behaves as
 /// `copy_only`.
@@ -81,6 +86,58 @@ pub struct ListAccess {
     pub public_list_type: Option<String>,
     #[serde(default)]
     pub list_members: Vec<ListMembership>,
+    /// `"status"` for a board's status list, which alone inherits access from its siblings (see
+    /// [`ProjectAccess::lists`]). Anything else, or absent, is an ordinary list.
+    #[serde(default)]
+    pub list_type: Option<String>,
+    /// Legacy denormalised admins. Server-only: no client receives it. Grants admin, after an
+    /// admin membership and before a plain one.
+    #[serde(default)]
+    pub admins: Option<Vec<UserRef>>,
+    /// Legacy denormalised members, the sibling of `admins`. Grants member, after list membership.
+    #[serde(default)]
+    pub members: Option<Vec<UserRef>>,
+    /// The project the list belongs to, with the membership that cascades from it. Server-only.
+    /// Absent means the caller did not load it, which can only ever under-grant.
+    #[serde(default)]
+    pub project: Option<ProjectAccess>,
+}
+
+/// The part of a list's project that decides access to the list — what astrid-web's
+/// `PROJECT_ACCESS_INCLUDE` loads.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAccess {
+    #[serde(default)]
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub members: Option<Vec<ProjectMembership>>,
+    /// The project's lists with their members. Read only for a status list: a member of any list
+    /// on the board may work its columns (astrid-web task 142e4dd9).
+    #[serde(default)]
+    pub lists: Option<Vec<ProjectList>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMembership {
+    pub user_id: String,
+    /// Optional for the same reason as [`ListMembership::role`]: membership is presence.
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectList {
+    #[serde(default)]
+    pub list_members: Option<Vec<ProjectListMember>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectListMember {
+    pub user_id: String,
 }
 
 fn private() -> String {
@@ -133,6 +190,9 @@ impl Access {
 ///
 /// Built here rather than by the caller so no code path can construct one that leaves out
 /// `list_members` and quietly resolves every collaborator to no access.
+///
+/// The model is the client's wire shape, which carries no project or legacy arrays, so those stay
+/// absent; `list_type` is carried because the model has it, and alone it changes nothing.
 pub fn access_of(list: &crate::model::TaskList) -> ListAccess {
     use crate::model::Privacy;
     ListAccess {
@@ -162,6 +222,10 @@ pub fn access_of(list: &crate::model::TaskList) -> ListAccess {
                 }),
             })
             .collect(),
+        list_type: list.list_type.clone(),
+        admins: None,
+        members: None,
+        project: None,
     }
 }
 
@@ -185,6 +249,63 @@ impl ListAccess {
             .iter()
             .find(|m| m.user_id == user_id || m.user.as_ref().is_some_and(|u| u.id == user_id))
     }
+
+    fn is_status_list(&self) -> bool {
+        self.list_type.as_deref() == Some(LIST_TYPE_STATUS)
+    }
+}
+
+fn names(refs: Option<&Vec<UserRef>>, user_id: &str) -> bool {
+    refs.is_some_and(|refs| refs.iter().any(|r| r.id == user_id))
+}
+
+/// The role a user derives from the list's project, or `None`.
+///
+/// The project owner is deliberately an **admin** here, never the owner: owner is the one role
+/// that may delete a list, and owning the project must not grant the power to delete a list
+/// somebody else owns and merely attached to it.
+fn project_role(user_id: &str, list: &ListAccess) -> Option<ListRole> {
+    let project = list.project.as_ref()?;
+
+    if project.owner_id.as_deref() == Some(user_id) {
+        return Some(ListRole::Admin);
+    }
+
+    if let Some(membership) = project
+        .members
+        .iter()
+        .flatten()
+        .find(|m| m.user_id == user_id)
+    {
+        // Same casing tolerance as list membership.
+        let is_admin = membership
+            .role
+            .as_ref()
+            .is_some_and(|role| role.to_lowercase() == "admin");
+        return Some(if is_admin {
+            ListRole::Admin
+        } else {
+            ListRole::Member
+        });
+    }
+
+    // A board's status lists are its shared vocabulary: anyone who can work a list on the board
+    // must be able to use its columns (astrid-web task 142e4dd9). Status lists only — applying it
+    // to ordinary lists would mean sharing one list in a project silently shares its siblings.
+    if list.is_status_list() {
+        let in_sibling = project.lists.iter().flatten().any(|sibling| {
+            sibling
+                .list_members
+                .iter()
+                .flatten()
+                .any(|m| m.user_id == user_id)
+        });
+        if in_sibling {
+            return Some(ListRole::Member);
+        }
+    }
+
+    None
 }
 
 /// Role strings are lowercased before they decide anything.
@@ -199,21 +320,39 @@ fn normalized_role(membership: &ListMembership) -> Option<String> {
 
 /// The user's role on this list, or `None` for no access.
 ///
-/// Precedence is the contract, not an implementation detail: ownership beats an admin membership,
-/// an admin membership beats a plain one, and any membership beats the public viewer fallback. The
-/// last of those is what stops a real collaborator on a public list being downgraded to read-only.
+/// Precedence is the contract, not an implementation detail, and it is web's, step for step:
+///
+/// 1. ownership (`owner_id` or the `owner` relation);
+/// 2. an admin list membership, then the legacy `admins` array;
+/// 3. any other list membership, then the legacy `members` array;
+/// 4. the project — its owner (as admin), its members, and the status-list cascade;
+/// 5. the public viewer fallback.
+///
+/// List-level answers come before the project's, so a plain list member who also owns the project
+/// stays a member — that is what web answers, and the fixture records it. Any real role beats the
+/// viewer fallback, which is what stops a collaborator on a public list being made read-only.
 pub fn role_in_list(user_id: &str, list: &ListAccess) -> Option<ListRole> {
     if list.owner_id == user_id || list.owner.as_ref().is_some_and(|o| o.id == user_id) {
         return Some(ListRole::Owner);
     }
 
-    if let Some(membership) = list.membership_of(user_id) {
-        if normalized_role(membership).as_deref() == Some("admin") {
-            return Some(ListRole::Admin);
-        }
-        // Presence is membership. Deliberately not a match on "member": an unrecognised or empty
-        // role still means this person was added to this list.
+    let membership = list.membership_of(user_id);
+    if membership.is_some_and(|m| normalized_role(m).as_deref() == Some("admin")) {
+        return Some(ListRole::Admin);
+    }
+
+    if names(list.admins.as_ref(), user_id) {
+        return Some(ListRole::Admin);
+    }
+
+    // Presence is membership. Deliberately not a match on "member": an unrecognised or empty role
+    // still means this person was added to this list.
+    if membership.is_some() || names(list.members.as_ref(), user_id) {
         return Some(ListRole::Member);
+    }
+
+    if let Some(role) = project_role(user_id, list) {
+        return Some(role);
     }
 
     if list.is_public() {
@@ -314,6 +453,10 @@ mod tests {
             privacy: privacy.into(),
             public_list_type: public_type.map(str::to_string),
             list_members: members,
+            list_type: None,
+            admins: None,
+            members: None,
+            project: None,
         }
     }
 
@@ -358,6 +501,35 @@ mod tests {
         // to editing by strangers.
         let l = list("PUBLIC", Some("colaborative"), vec![]);
         assert!(!can_edit_tasks("me", &l));
+    }
+
+    /// AWTD-1061: owning the project must not let you delete a list somebody else owns.
+    #[test]
+    fn the_project_owner_is_an_admin_never_the_owner() {
+        let mut l = list("PRIVATE", None, vec![]);
+        l.project = Some(ProjectAccess {
+            owner_id: Some("me".into()),
+            ..ProjectAccess::default()
+        });
+        assert_eq!(role_in_list("me", &l), Some(ListRole::Admin));
+        assert!(!can_delete_list("me", &l));
+    }
+
+    /// AWTD-1061: sibling membership reaches a board's status lists and nothing else.
+    #[test]
+    fn sibling_membership_cascades_to_status_lists_only() {
+        let mut l = list("PRIVATE", None, vec![]);
+        l.project = Some(ProjectAccess {
+            lists: Some(vec![ProjectList {
+                list_members: Some(vec![ProjectListMember {
+                    user_id: "me".into(),
+                }]),
+            }]),
+            ..ProjectAccess::default()
+        });
+        assert_eq!(role_in_list("me", &l), None);
+        l.list_type = Some("status".into());
+        assert_eq!(role_in_list("me", &l), Some(ListRole::Member));
     }
 
     #[test]

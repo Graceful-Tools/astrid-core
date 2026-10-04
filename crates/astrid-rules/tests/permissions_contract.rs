@@ -7,9 +7,10 @@
 //! explain it. Neither shows up in a unit test written from the same misunderstanding as the
 //! implementation, which is why the answers here come from web rather than from me.
 //!
-//! What the fixture deliberately omits, and why, is in `contracts/drivers/permissions.mjs` and
-//! `docs/CONTRACTS.md` §5: web also derives a role from the list's project and from two legacy
-//! arrays, none of which exist on the wire shape a client receives.
+//! The fixture includes the server-only inputs — the list's project (owner, members, and the
+//! status-list cascade through sibling lists) and the legacy `admins` / `members` arrays — because
+//! astrid-web's server decides through this crate with them loaded (AWTD-1061). A client never
+//! sends them; `docs/CONTRACTS.md` §5 says what that still costs a client.
 
 use astrid_rules::permissions::{
     can_delete_list, can_edit_task, can_edit_tasks, can_manage_list, can_manage_members,
@@ -35,6 +36,12 @@ struct Case {
     expected: Expected,
 }
 
+impl Case {
+    fn is_server_only(&self) -> bool {
+        self.list.project.is_some() || self.list.admins.is_some() || self.list.members.is_some()
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Expected {
@@ -48,6 +55,9 @@ struct Expected {
     can_manage_members: bool,
     can_delete_list: bool,
 }
+
+/// Removes one server-only input from a list, to show that input was what granted the role.
+type Strip = fn(&mut ListAccess);
 
 fn fixture() -> Fixture {
     serde_json::from_str(FIXTURE).expect("permissions fixture parses")
@@ -151,6 +161,29 @@ fn the_fixture_still_covers_the_branches_that_matter() {
         assert!(
             roles.contains(&expected),
             "fixture no longer covers role {expected:?}"
+        );
+    }
+
+    // The server-only branches (AWTD-1061). Each must be the thing granting the role somewhere, or
+    // the core could ignore that input and still pass.
+    let without = |case: &Case, strip: fn(&mut ListAccess)| {
+        let mut list = case.list.clone();
+        strip(&mut list);
+        role_in_list(&f.user_id, &list)
+    };
+    let branches: [(&str, Strip); 4] = [
+        ("legacy admins", |l| l.admins = None),
+        ("legacy members", |l| l.members = None),
+        ("project", |l| l.project = None),
+        ("status-list cascade", |l| l.list_type = None),
+    ];
+    for (branch, strip) in branches {
+        assert!(
+            f.cases
+                .iter()
+                .filter(|c| c.is_server_only())
+                .any(|c| c.expected.role.is_some() && without(c, strip) != c.expected.role),
+            "fixture no longer covers a role granted by the {branch} branch"
         );
     }
 

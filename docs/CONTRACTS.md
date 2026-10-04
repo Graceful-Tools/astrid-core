@@ -272,20 +272,29 @@ a client receives from `/api/v1/lists`:
 
 | Source | Fields it needs |
 |---|---|
-| Project owner or project member (cascades to every list in the project) | `project.ownerId`, `project.members` |
+| Project owner (as **admin**, never owner) or project member (cascades to every list in the project) | `project.ownerId`, `project.members` |
 | Sibling membership on a **status** list (a board column) | `project.lists[].listMembers`, `listType` |
 | Legacy denormalised `admins` / `members` arrays | `admins`, `members` |
 
-So a list reached purely through project membership arrives with the user in none of its
-`listMembers`, and every client computing a role locally sees **no access at all** — for a list the
-server was happy to return. The visible effect is a list that renders as read-only, or whose
-controls are all disabled, for someone who is a full collaborator on the board.
+**This crate now resolves all three when it is given them** (AWTD-1061, 2026-10-03): `ListAccess`
+takes optional `listType`, `project { ownerId, members[], lists[].listMembers[] }`, `admins` and
+`members`, and `contracts/fixtures/permissions.json` locks every branch and its precedence as web
+runs it — list ownership, then an admin membership, then `admins`, then any membership, then
+`members`, then the project, then the public viewer fallback. One consequence of that order is
+worth knowing: a plain list member who owns or administers the project stays a **member** of that
+list. That is web's answer, so it is the fixture's. astrid-web's server is the caller that sends
+these fields: its list permissions decide through this crate with the project loaded.
 
-This is not something a client can fix. Either `/api/v1/lists` gains a resolved `role` field for the
-requesting user — the cleaner answer, since the server has already done the work to decide the list
-is visible — or the project relations join the payload. Until then this crate answers only what the
-wire shape can support, which is why the fixture does not contain those cases: locking in answers no
-client can produce would be worse than the gap.
+**A client still cannot.** The fields are not on the wire, so a list reached purely through
+project membership arrives with the user in none of its `listMembers`, and a client computing a
+role locally sees **no access at all** — for a list the server was happy to return. The visible
+effect is a list that renders as read-only, or whose controls are all disabled, for someone who is
+a full collaborator on the board. A client that sends none of the new fields gets exactly the
+answers it got before.
+
+Closing that is a wire change, not a rules change: either `/api/v1/lists` gains a resolved `role`
+for the requesting user — the cleaner answer, since the server has already decided the list is
+visible — or the project relations join the payload, which this crate can now read as-is.
 
 ---
 
