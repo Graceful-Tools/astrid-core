@@ -92,7 +92,26 @@ pub enum Rule {
     /// field names with `isEmpty` beside it: whether the query asks for anything at all.
     SearchParse { query: String },
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
-    RenderMarkdown { text: String },
+    /// With `identifiers` (the reader's project keys), task ids in the prose link as well —
+    /// [`crate::markdown::render_with_identifiers`]; without it nothing links, as on the web.
+    RenderMarkdown {
+        text: String,
+        #[serde(default)]
+        identifiers: Option<Identifiers>,
+    },
+}
+
+/// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
+/// web's names (`lib/task-identifier-links.ts`, `IdentifierLinkContext`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Identifiers {
+    #[serde(default)]
+    pub project_key: Option<String>,
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub hidden: Vec<String>,
 }
 
 /// The answer to [`Rule::SearchParse`]: the parse, and whether it asks for anything.
@@ -172,7 +191,21 @@ pub fn run(rule: Rule) -> Response {
             let is_empty = query.is_empty();
             Response::ok(SearchParse { query, is_empty })
         }
-        Rule::RenderMarkdown { text } => Response::ok(crate::markdown::render(&text)),
+        Rule::RenderMarkdown { text, identifiers } => Response::ok(match identifiers {
+            Some(Identifiers {
+                project_key,
+                keys,
+                hidden,
+            }) => crate::markdown::render_with_identifiers(
+                &text,
+                &crate::identifier::LinkContext {
+                    project_key,
+                    keys,
+                    hidden,
+                },
+            ),
+            None => crate::markdown::render(&text),
+        }),
     }
 }
 
@@ -347,6 +380,26 @@ mod tests {
         assert_eq!(reply["ok"], true);
         assert_eq!(reply["value"][0]["kind"], "paragraph");
         assert_eq!(reply["value"][0]["inlines"][0]["bold"], true);
+    }
+
+    /// AWTD-1064: a task id links only with the reader's context, as `render_with_identifiers`.
+    #[test]
+    fn markdown_links_task_ids_with_the_readers_context() {
+        let reply = answer(json!({
+            "kind": "renderMarkdown",
+            "text": "Fixed by AWTD-12",
+            "identifiers": { "projectKey": "AWTD", "keys": ["AWTD"], "hidden": [] }
+        }));
+        assert_eq!(reply["ok"], true);
+        let inlines = &reply["value"][0]["inlines"];
+        assert_eq!(inlines[1]["text"], "AWTD-12");
+        assert_eq!(inlines[1]["link"], "https://astrid.cc/t/AWTD-12");
+
+        let without = answer(json!({ "kind": "renderMarkdown", "text": "Fixed by AWTD-12" }));
+        assert_eq!(
+            without["value"][0]["inlines"][0]["text"],
+            "Fixed by AWTD-12"
+        );
     }
 
     #[test]

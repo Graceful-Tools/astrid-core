@@ -1352,6 +1352,59 @@
       ]
     },
     {
+      "id": "ordered-start",
+      "text": "3. three\n4. four",
+      "context": null,
+      "html": "<ol start=\"3\">\n<li>three</li>\n<li>four</li>\n</ol>\n",
+      "blocks": [
+        {
+          "kind": "list",
+          "ordered": true,
+          "start": 3,
+          "items": [
+            {
+              "checked": null,
+              "blocks": [
+                {
+                  "kind": "paragraph",
+                  "inlines": [
+                    {
+                      "kind": "text",
+                      "text": "three",
+                      "bold": false,
+                      "italic": false,
+                      "strike": false,
+                      "code": false,
+                      "link": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "checked": null,
+              "blocks": [
+                {
+                  "kind": "paragraph",
+                  "inlines": [
+                    {
+                      "kind": "text",
+                      "text": "four",
+                      "bold": false,
+                      "italic": false,
+                      "strike": false,
+                      "code": false,
+                      "link": null
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "nested-list",
       "text": "- outer\n  - inner\n- next",
       "context": null,
@@ -2889,6 +2942,41 @@
       ]
     },
     {
+      "id": "reference-in-code-span",
+      "text": "`@[Ann](u1)`",
+      "context": null,
+      "html": "<p><code>@[Ann](u1)</code></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "@[Ann](u1)",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": true,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reference-in-code-block",
+      "text": "```\n@[Ann](u1)\n```",
+      "context": null,
+      "html": "<pre><code>@[Ann](u1)\n</code></pre>\n",
+      "blocks": [
+        {
+          "kind": "code",
+          "language": null,
+          "text": "@[Ann](u1)\n"
+        }
+      ]
+    },
+    {
       "id": "reference-label-markdown",
       "text": "@[*Ann*](u1)",
       "context": null,
@@ -3052,6 +3140,28 @@
       "blocks": []
     },
     {
+      "id": "html-inline-allowed",
+      "text": "a <strong>strong</strong> word",
+      "context": null,
+      "html": "<p>a strong word</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "a strong word",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "html-inline-disallowed",
       "text": "a <b>bold</b> word",
       "context": null,
@@ -3186,6 +3296,453 @@
               "code": false,
               "link": null
             }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-link-javascript-upper",
+      "text": "[x](JAVASCRIPT:alert(1))",
+      "context": null,
+      "html": "<p><a>x</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-link-javascript-entity",
+      "text": "[x](javascript&#58;alert(1))",
+      "context": null,
+      "html": "<p><a>x</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-link-data",
+      "text": "[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)",
+      "context": null,
+      "html": "<p><a>x</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-link-vbscript",
+      "text": "[x](vbscript:msgbox(1))",
+      "context": null,
+      "html": "<p><a>x</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-autolink-javascript",
+      "text": "<javascript:alert(1)>",
+      "context": null,
+      "html": "<p><a>javascript:alert(1)</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "javascript:alert(1)",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-link-title-quote",
+      "text": "[x](https://example.com \"a\\\" onmouseover=\\\"alert(1)\")",
+      "context": null,
+      "html": "<p><a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\" class=\"text-blue-600 dark:text-blue-400 hover:underline\">x</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": "https://example.com"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-anchor-javascript",
+      "text": "<a href=\"javascript:alert(1)\">x</a>",
+      "context": null,
+      "html": "<p>x</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-anchor-onclick",
+      "text": "see <a href=\"https://example.com\" onclick=\"alert(1)\">x</a>",
+      "context": null,
+      "html": "<p>see x</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "see x",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-iframe",
+      "text": "<iframe src=\"https://evil.example\"></iframe>",
+      "context": null,
+      "html": "",
+      "blocks": []
+    },
+    {
+      "id": "xss-html-svg-onload",
+      "text": "a <svg onload=\"alert(1)\"><circle/></svg> b",
+      "context": null,
+      "html": "<p>a  b</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "a  b",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-img-bare",
+      "text": "<img src=x onerror=alert(1)>",
+      "context": null,
+      "html": "",
+      "blocks": []
+    },
+    {
+      "id": "xss-html-form",
+      "text": "<form action=\"https://evil.example\"><input type=\"submit\" value=\"go\"></form>",
+      "context": null,
+      "html": "",
+      "blocks": []
+    },
+    {
+      "id": "xss-html-style-attr",
+      "text": "<p style=\"background:url(javascript:alert(1))\">styled</p>",
+      "context": null,
+      "html": "styled",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "styled",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-object-embed",
+      "text": "<object data=\"x\"></object><embed src=\"x\">",
+      "context": null,
+      "html": "<p></p>\n",
+      "blocks": []
+    },
+    {
+      "id": "xss-html-meta-refresh",
+      "text": "<meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\">",
+      "context": null,
+      "html": "",
+      "blocks": []
+    },
+    {
+      "id": "xss-html-input",
+      "text": "a <input type=\"checkbox\" checked> typed box",
+      "context": null,
+      "html": "<p>a  typed box</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "a  typed box",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-mention-label-quote",
+      "text": "@[x\" onmouseover=\"alert(1)](u1)",
+      "context": null,
+      "html": "<p><a href=\"/u/u1\" class=\"bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded font-medium no-underline hover:underline\">@x\" onmouseover=\"alert(1)</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "reference",
+              "reference": "user",
+              "label": "x\" onmouseover=\"alert(1)",
+              "id": "u1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-mention-id-quote",
+      "text": "@[Ann](u1\" onclick=\"alert(1))",
+      "context": null,
+      "html": "<p><a href=\"/u/u1%22%20onclick%3D%22alert(1\" class=\"bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded font-medium no-underline hover:underline\">@Ann</a>)</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "reference",
+              "reference": "user",
+              "label": "Ann",
+              "id": "u1\" onclick=\"alert(1"
+            },
+            {
+              "kind": "text",
+              "text": ")",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-task-id-javascript",
+      "text": "![Plan](javascript:alert(1))",
+      "context": null,
+      "html": "<p><a href=\"/?task=javascript%3Aalert(1\" class=\"bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1 rounded font-medium no-underline hover:underline\">!Plan</a>)</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "reference",
+              "reference": "task",
+              "label": "Plan",
+              "id": "javascript:alert(1"
+            },
+            {
+              "kind": "text",
+              "text": ")",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-list-label-script",
+      "text": "#[<script>alert(1)</script>](l1)",
+      "context": null,
+      "html": "<p><a href=\"/lists/l1\" class=\"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-1 rounded font-medium no-underline hover:underline\">#&lt;script&gt;alert(1)&lt;/script&gt;</a></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "reference",
+              "reference": "list",
+              "label": "<script>alert(1)</script>",
+              "id": "l1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-entity-script",
+      "text": "&lt;script&gt;alert(1)&lt;/script&gt;",
+      "context": null,
+      "html": "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "<script>alert(1)</script>",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": false,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-code-span-html",
+      "text": "`<img src=x onerror=alert(1)>`",
+      "context": null,
+      "html": "<p><code>&lt;img src=x onerror=alert(1)&gt;</code></p>\n",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "inlines": [
+            {
+              "kind": "text",
+              "text": "<img src=x onerror=alert(1)>",
+              "bold": false,
+              "italic": false,
+              "strike": false,
+              "code": true,
+              "link": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xss-html-in-table",
+      "text": "| a |\n|---|\n| <img src=x onerror=alert(1)> |",
+      "context": null,
+      "html": "<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n<tbody><tr>\n<td></td>\n</tr>\n</tbody></table>\n",
+      "blocks": [
+        {
+          "kind": "table",
+          "alignments": [
+            "none"
+          ],
+          "header": [
+            [
+              {
+                "kind": "text",
+                "text": "a",
+                "bold": false,
+                "italic": false,
+                "strike": false,
+                "code": false,
+                "link": null
+              }
+            ]
+          ],
+          "rows": [
+            [
+              []
+            ]
           ]
         }
       ]
@@ -3442,141 +3999,6 @@
       ]
     }
   ],
-  "disputed": [
-    {
-      "entry": "D38",
-      "id": "ordered-start",
-      "text": "3. three\n4. four",
-      "context": null,
-      "html": "<ol>\n<li>three</li>\n<li>four</li>\n</ol>\n",
-      "blocks": [
-        {
-          "kind": "list",
-          "ordered": true,
-          "start": 1,
-          "items": [
-            {
-              "checked": null,
-              "blocks": [
-                {
-                  "kind": "paragraph",
-                  "inlines": [
-                    {
-                      "kind": "text",
-                      "text": "three",
-                      "bold": false,
-                      "italic": false,
-                      "strike": false,
-                      "code": false,
-                      "link": null
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "checked": null,
-              "blocks": [
-                {
-                  "kind": "paragraph",
-                  "inlines": [
-                    {
-                      "kind": "text",
-                      "text": "four",
-                      "bold": false,
-                      "italic": false,
-                      "strike": false,
-                      "code": false,
-                      "link": null
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "entry": "D38",
-      "id": "reference-in-code-span",
-      "text": "`@[Ann](u1)`",
-      "context": null,
-      "html": "<p><code><a href=\"/u/u1\" class=\"bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded font-medium no-underline hover:underline\">@Ann</a></code></p>\n",
-      "blocks": [
-        {
-          "kind": "paragraph",
-          "inlines": [
-            {
-              "kind": "reference",
-              "reference": "user",
-              "label": "Ann",
-              "id": "u1"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "entry": "D38",
-      "id": "reference-in-code-block",
-      "text": "```\n@[Ann](u1)\n```",
-      "context": null,
-      "html": "<pre><code><a href=\"/u/u1\" class=\"bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded font-medium no-underline hover:underline\">@Ann</a>\n</code></pre>\n",
-      "blocks": [
-        {
-          "kind": "code",
-          "language": null,
-          "text": "@Ann\n"
-        }
-      ]
-    },
-    {
-      "entry": "D38",
-      "id": "html-inline-allowed",
-      "text": "a <strong>strong</strong> word",
-      "context": null,
-      "html": "<p>a <strong>strong</strong> word</p>\n",
-      "blocks": [
-        {
-          "kind": "paragraph",
-          "inlines": [
-            {
-              "kind": "text",
-              "text": "a ",
-              "bold": false,
-              "italic": false,
-              "strike": false,
-              "code": false,
-              "link": null
-            },
-            {
-              "kind": "text",
-              "text": "strong",
-              "bold": true,
-              "italic": false,
-              "strike": false,
-              "code": false,
-              "link": null
-            },
-            {
-              "kind": "text",
-              "text": " word",
-              "bold": false,
-              "italic": false,
-              "strike": false,
-              "code": false,
-              "link": null
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "disputes": [
-    {
-      "entry": "D38",
-      "why": "markdown: an ordered list's start number, a reference inside code, and inline HTML tags the web allowlists"
-    }
-  ]
+  "disputed": [],
+  "disputes": []
 }

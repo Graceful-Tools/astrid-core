@@ -26,8 +26,9 @@
 //     checkbox, the newline that closes a raw-HTML block, and an empty <p> (all DOMPurify
 //     leaves of an image).
 //
-// Divergences found this way are recorded in docs/CONTRACTS.md (D38) and their cases routed to
-// `disputed` by ./disputed.mjs.
+// Divergences found this way are recorded in docs/CONTRACTS.md (D38). astrid-web adopted this
+// crate's reading of all of them (AWTD-1064), and its own copy of this reader
+// (scripts/contract-fixtures/markdown-blocks.mjs) holds its renderer to this crate in a parity test.
 //
 // Usage: node contracts/drivers/markdown.mjs <path-to-astrid-web>
 
@@ -348,6 +349,32 @@ const CASES = [
   ['html-comment', 'a <!-- hidden --> b'],
   ['html-inline-script', 'a <script>alert(1)</script> b'],
   ['html-style-block', '<style>p { color: red }</style>\n\nafter'],
+  // Sanitisation. Every one of these must reach a reader as text or as nothing: no script, no
+  // handler, no frame, no address other than http, https, mailto or the app's own pages
+  // (tests/lib/core-rules-markdown-parity.test.ts checks the HTML itself as well as the blocks).
+  ['xss-link-javascript-upper', '[x](JAVASCRIPT:alert(1))'],
+  ['xss-link-javascript-entity', '[x](javascript&#58;alert(1))'],
+  ['xss-link-data', '[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)'],
+  ['xss-link-vbscript', '[x](vbscript:msgbox(1))'],
+  ['xss-autolink-javascript', '<javascript:alert(1)>'],
+  ['xss-link-title-quote', '[x](https://example.com "a\\" onmouseover=\\"alert(1)")'],
+  ['xss-html-anchor-javascript', '<a href="javascript:alert(1)">x</a>'],
+  ['xss-html-anchor-onclick', 'see <a href="https://example.com" onclick="alert(1)">x</a>'],
+  ['xss-html-iframe', '<iframe src="https://evil.example"></iframe>'],
+  ['xss-html-svg-onload', 'a <svg onload="alert(1)"><circle/></svg> b'],
+  ['xss-html-img-bare', '<img src=x onerror=alert(1)>'],
+  ['xss-html-form', '<form action="https://evil.example"><input type="submit" value="go"></form>'],
+  ['xss-html-style-attr', '<p style="background:url(javascript:alert(1))">styled</p>'],
+  ['xss-html-object-embed', '<object data="x"></object><embed src="x">'],
+  ['xss-html-meta-refresh', '<meta http-equiv="refresh" content="0;url=https://evil.example">'],
+  ['xss-html-input', 'a <input type="checkbox" checked> typed box'],
+  ['xss-mention-label-quote', '@[x" onmouseover="alert(1)](u1)'],
+  ['xss-mention-id-quote', '@[Ann](u1" onclick="alert(1))'],
+  ['xss-task-id-javascript', '![Plan](javascript:alert(1))'],
+  ['xss-list-label-script', '#[<script>alert(1)</script>](l1)'],
+  ['xss-entity-script', '&lt;script&gt;alert(1)&lt;/script&gt;'],
+  ['xss-code-span-html', '`<img src=x onerror=alert(1)>`'],
+  ['xss-html-in-table', '| a |\n|---|\n| <img src=x onerror=alert(1)> |'],
   // Empties
   ['empty', ''],
   ['whitespace-only', '   \n  '],
@@ -369,23 +396,9 @@ const cases = [
   ...IDENTIFIER_CASES.map(([id, text, context]) => ({ id, text, context, ...render(text, context) })),
 ]
 
-// D38: where marked-plus-DOMPurify and this crate's reading genuinely differ, and the core —
-// which the Apple apps draw through (CoreRules.markdown) — keeps its own.
-const D38 = new Set([
-  'ordered-start', // web's sanitiser allowlist has no `start`, so every ordered list counts from 1
-  'reference-in-code-span', // web draws a pill inside code; the core shows the reference as typed
-  'reference-in-code-block',
-  'html-inline-allowed', // web honours the inline tags its allowlist keeps; the core reads HTML as text
-])
-const DISPUTES = [
-  {
-    entry: 'D38',
-    why: 'markdown: an ordered list\'s start number, a reference inside code, and inline HTML tags the web allowlists',
-    applies: (c) => D38.has(c.id),
-  },
-]
-
-const result = partition(cases, DISPUTES)
+// D38 (an ordered list's start, a reference inside code, typed HTML) was resolved toward iOS:
+// astrid-web follows this crate since AWTD-1064, so no case is disputed.
+const result = partition(cases, [])
 
 process.stdout.write(JSON.stringify({
   generatedFrom: 'lib/markdown.ts (renderMarkdownWithLinks, browser path), read back into blocks',
