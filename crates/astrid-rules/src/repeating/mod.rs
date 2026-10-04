@@ -18,10 +18,10 @@
 //! not a moment. For a **timed** task it is the person's own zone: "monthly at 2pm" is 2pm on both
 //! sides of a daylight-saving change, and the third Tuesday is a Tuesday where they live.
 //!
-//! In UTC every answer here is exactly the web's (`types/repeating.ts` runs its setters in UTC on
-//! the server), which is what the contract fixtures check. A zone other than UTC is where this
-//! crate follows the Apple apps, which always calculated in the device's calendar — see
-//! `docs/CONTRACTS.md` D1 and D3.
+//! Every answer here is exactly the web's, in any zone: since AWTD-1063 web's `types/repeating.ts`
+//! steps in the zone its request names, as this does, and its server asks this crate first. The
+//! contract fixture records zoned cases from web's own calculator. The zone rule itself is the
+//! Apple apps', which always calculated in the device's calendar — see `docs/CONTRACTS.md` D1, D3.
 //!
 //! ## Adding a field to `CustomRepeatingPattern`
 //!

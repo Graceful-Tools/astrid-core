@@ -17,19 +17,26 @@ client together, and the entry says which behaviour this crate currently follows
 
 ## 1. Repeating-task rollover
 
-Canonical: `astrid-web/types/repeating.ts` and `astrid-web/lib/repeating-task-handler.ts`.
+Canonical: `astrid-web/types/repeating.ts` (`calculateTaskNextOccurrence`) and
+`astrid-web/lib/repeating-task-handler.ts`.
 Apple: asks this crate (`rules` → `completion` / `nextOccurrence`) since 2026-09-28.
+Web: its server asks this crate (`rules` → `nextOccurrence`, WebAssembly) since AWTD-1063, with
+the TypeScript as fail-safe; the browser computes no rollover.
 Here: `astrid_core::repeating`.
 
-**Under the follow-iOS rule (2026-10-03), D1–D5 need no change:** the Apple apps already ask this
-crate for repeating math, so iOS's answer *is* this crate's answer. Where web still disagrees
-(D1's timed-task zone, D3's whose-midnight, D4's server-zone dependence), this crate's answer is
-the one web adopts when it moves onto the core. Where this crate reproduces web deliberately (D2,
-D5), iOS reproduces it too, so there is no iOS-vs-core disagreement to resolve.
+**Under the follow-iOS rule (2026-10-03), D1–D5 needed no change here:** the Apple apps already
+ask this crate for repeating math, so iOS's answer *is* this crate's answer. Web adopted it in
+AWTD-1063 (D1's timed-task zone, D3's whose-midnight, D4's server-zone dependence): its TypeScript
+now steps in a named zone exactly as this crate does, the browser sends its zone with a
+completion, and `repeating.json` locks the zoned answers (`completions`, `zonedProgressions`) from
+web's own calculator. Where this crate reproduces web deliberately (D2, D5), iOS reproduces it
+too, so there is no iOS-vs-core disagreement to resolve.
 
 ### D1 — Whose calendar a step is taken on
 
-**Settled 2026-09-28: all-day tasks on UTC's, timed tasks on the person's.** Every calendar step in
+**Settled 2026-09-28: all-day tasks on UTC's, timed tasks on the person's. Web adopted it
+2026-10-03 (AWTD-1063)**: the browser sends `timeZone` with a completion and the server steps a
+timed task on that calendar; without a zone (API clients, MCP), UTC's, the old answer. Every calendar step in
 `astrid_core::repeating` takes a zone (`chrono_tz::Tz`) and is done on that zone's wall clock.
 
 - **All-day tasks step in UTC.** An all-day date is stored as UTC midnight and names a day, so
@@ -40,8 +47,8 @@ D5), iOS reproduces it too, so there is no iOS-vs-core disagreement to resolve.
 
 The Apple apps always stepped months and years in the device's calendar (`Calendar.current`);
 they now ask this crate, which answers the same for timed tasks and correctly for all-day ones,
-which the old Swift did not. Web and Windows should follow: web by passing the person's zone to
-its server-side rollover, Windows by nothing more than taking this crate.
+which the old Swift did not. Web follows since AWTD-1063; Windows by nothing more than taking
+this crate.
 
 ### D2 — Weekly patterns ignore their interval
 
@@ -56,7 +63,7 @@ have, on a field the user believes is shared. It changes on web first.
 
 ### D3 — "Same weekday of the month" drops the time of day
 
-**Reproduced deliberately — on the person's calendar.**
+**Reproduced deliberately — on the person's calendar** (web too, since AWTD-1063).
 
 Both web and Swift build this date from the first of the target month, which is midnight, and then
 add days — so a task due at 10am on the third Tuesday rolls over to midnight on the next third
@@ -71,6 +78,10 @@ the person's zone for a timed one.
 `same_date` monthly patterns are unaffected — they keep their time.
 
 ### D4 — web's custom-pattern path depends on the server's timezone
+
+**Closed 2026-10-03 (AWTD-1063).** Web's calculator no longer reads the machine's zone: every
+step is taken in the zone the request names, as here, and the progression cases pass under any
+`TZ` (web runs its tests under UTC, Tokyo, Los Angeles and Lord Howe). What follows is the history.
 
 **This crate is UTC.** The fixture is generated with `TZ=UTC` so it records one defined behaviour.
 
@@ -120,6 +131,31 @@ from running web's own calculator. The Apple column records the
 pre-2026-09-28 Swift calculator (`RepeatingTaskHandler.swift`, now a facade over this crate), which used `Calendar.date(byAdding:)`; Foundation clamps an invalid
 result to the last valid day. Worth confirming on a device before the cross-repo fix, since the
 point of that fix is to make three clients agree.
+
+### Stored patterns web read differently (closed toward this crate, AWTD-1063)
+
+Moving web onto this crate's arithmetic surfaced five readings of a malformed or partial stored
+pattern where web's old TypeScript and this crate disagreed. None is reachable from web's editor;
+an API or MCP write can store them. Web now answers as this crate does (it is what iOS runs), and
+`repeating.json` locks each:
+
+| Stored | Old web | Here (and web now) |
+|---|---|---|
+| `endAfterOccurrences: 0` | ignored (falsy): repeats forever | ends at the next completion |
+| custom yearly `month`/`day` from an anchor on a day the target month lacks (e.g. 31 Jan → "10 Feb") | `setMonth` overflowed first, then `setDate`: **10 March** | 10 February |
+| custom monthly `same_date` with no `monthDay` | invalid: series ended | steps a month (the day was never read) |
+| custom pattern with no `interval` | Invalid Date written | series ends |
+| custom `interval` < 1 | invalid: series ended | **days**: steps that many days (0 = same date, the series never advances); **months** < 0: ends |
+
+One reading every client shares is a live bug, not a divergence: a custom `months` pattern with
+no `monthRepeatType` (`{ unit: "months", interval: 6 }`, ten such tasks in production on
+2026-10-03, none written by web's editor) **ends the series at its next completion** on web, iOS
+and here alike. Reading it as `same_date` is the likely fix; it is a rule change for every client,
+so it is recorded (`repeating.json` locks today's answer) rather than made here.
+
+The last row of the table is the one answer here worth changing: an interval of 0 days re-opens the task on
+the same date forever. Which way to fix it (end the series, or read it as 1) is a product decision
+for every client at once; until then web matches.
 
 ### Settled behaviour (no divergence)
 
@@ -562,6 +598,12 @@ about rather than one to close — if it does close, it closes on web, by adding
 by taking it away.
 
 ### D21 — completing a repeating task counts the occurrence only on the web
+
+**Server half closed (astrid-web AWTD-1035):** PUT `/api/v1/tasks/:id` accepts `occurrenceCount`
+(a non-negative integer) when the same request does not make the server roll, and this crate's
+`TaskService::complete` already sends it with the device-rolled due date. A client that rolls on
+the device and does not send the count (the Apple apps' own write path, until they drive this
+crate's services) still never ends an "after N times" series. What follows is the original entry.
 
 The web completes by sending `completed: true`; the server then rolls the task forward itself
 (`lib/repeating-task-handler.ts`) and increments `occurrenceCount`. Every other client — iOS, the
