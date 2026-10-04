@@ -3341,6 +3341,86 @@ mod awtd2_56 {
         assert!(pass.task("t1").is_some(), "and the task is still here");
     }
 
+    /// AITD-463 (D39): an item this device deleted is not a twin to adopt either, though Google
+    /// still lists it live — the iOS guard this replaces (`GooglePushTwin.find`) refused it too.
+    #[tokio::test]
+    async fn aitd463_a_tombstoned_remote_item_is_not_adopted() {
+        let pass = Pass::new(Proxy {
+            items: vec![item("r1", "Buy milk", "2026-09-01T00:00:00.000Z")],
+            window: Some(Vec::new()),
+            ..Default::default()
+        });
+        ledger::record_tombstone(&pass.store, PROVIDER_KEY, "tasklist-1:r1").expect("records");
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert_ne!(
+            pass.server_link("t1").expect("linked")["remoteId"],
+            "tasklist-1:r1"
+        );
+        assert!(pass.task("t1").is_some(), "and the task is still here");
+    }
+
+    /// AITD-463 (D39): among same-title items the deleted one and the one already linked are
+    /// passed over, and the live unlinked one is adopted.
+    #[tokio::test]
+    async fn aitd463_adoption_skips_deleted_and_linked_items_for_the_live_unlinked_one() {
+        let mut deleted = item("r1", "Buy milk", "2026-09-01T00:00:00.000Z");
+        deleted["metadata"]["deleted"] = json!("1");
+        let stamp = "2026-09-07T11:00:00.000Z";
+        let pass = Pass::new(Proxy {
+            items: vec![
+                deleted,
+                item("r2", "Buy milk", stamp),
+                item("r3", "Buy milk", "2026-09-01T00:00:00.000Z"),
+                item("r4", "Bread", "2026-09-01T00:00:00.000Z"),
+            ],
+            window: Some(Vec::new()),
+            links: vec![link_row("t0", "r2", stamp, stamp)],
+            ..Default::default()
+        });
+        let mut other = listed("t0", "Buy milk", stamp);
+        other.updated_at = date::parse(stamp);
+        pass.store.upsert_task(&other).expect("writes");
+        pass.store
+            .upsert_task(&listed("t1", "Buy milk", "2026-09-07T10:00:00Z"))
+            .expect("writes");
+
+        pass.run().await;
+
+        assert_eq!(
+            pass.server_link("t1").expect("linked")["remoteId"],
+            "tasklist-1:r3"
+        );
+    }
+
+    /// AITD-463 (D39): My Tasks' push makes the same refusal — the iOS guard covered both sites.
+    #[tokio::test]
+    async fn aitd463_my_tasks_does_not_adopt_a_deleted_remote_item() {
+        let mut deleted = item("r1", "Ring the dentist", "2026-09-01T00:00:00.000Z");
+        deleted["metadata"]["deleted"] = json!("1");
+        let pass = Pass::new(Proxy {
+            items: vec![deleted],
+            sync_mode: "all_bidirectional".into(),
+            ..Default::default()
+        });
+        let mut mine = Task::new("t1", "Ring the dentist");
+        mine.assignee_id = Some("u1".into());
+        mine.updated_at = date::parse("2026-09-07T10:00:00Z");
+        pass.store.upsert_task(&mine).expect("writes");
+
+        pass.service.sync_my_tasks(CONTAINER).await.expect("a pass");
+
+        assert_ne!(
+            pass.server_link("t1").map(|link| link["remoteId"].clone()),
+            Some(json!("tasklist-1:r1"))
+        );
+        assert!(pass.task("t1").is_some(), "and the task is still here");
+    }
+
     /// AWTD2-56: when the complete listing was cut short, the twin may simply be past its end —
     /// so known twins are patched and none is created.
     #[tokio::test]

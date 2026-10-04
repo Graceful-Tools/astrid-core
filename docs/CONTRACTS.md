@@ -873,9 +873,10 @@ local task. Somebody who once deleted "Buy milk" in Google loses the "Buy milk" 
 
 **Fixed here, not followed:** this is a data-loss bug, not disputed behaviour. The crate skips
 deleted and tombstoned items when adopting (test:
-`awtd2_56_a_deleted_remote_item_is_not_adopted`). iOS should add the same guard to both adopt
-sites in `GoogleTasksSyncService` (the linked-list push and the My Tasks push) until it moves onto
-this pass.
+`awtd2_56_a_deleted_remote_item_is_not_adopted`). iOS carried the same guard (`GooglePushTwin.find`,
+AITD-462) until it moved onto this pass (AITD-463). The cases its tests held are tests here now:
+a tombstoned item, deleted and linked items passed over for the live unlinked one, and the My Tasks
+push (`aitd463_*`).
 
 
 ### D40 — a list that has never been given a sort: iOS arranges it by hand, web sorts it auto
