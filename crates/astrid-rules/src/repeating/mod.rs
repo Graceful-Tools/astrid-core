@@ -247,6 +247,11 @@ pub fn calculate_custom_next_occurrence(
         return terminated;
     };
 
+    // A stored interval below 1 steps as 1 (AWTD-1080). Without this a 0 or negative interval
+    // re-opens the task on the same date forever, or — for months — ends the series. An ABSENT
+    // interval still terminates: that is the `Some(interval)` bind above, a different case.
+    let interval = interval.max(1);
+
     let next = match unit {
         "days" => Some(adding_days(anchor, i64::from(interval), zone)),
         "weeks" => pattern
@@ -414,7 +419,13 @@ fn next_month_occurrence(
     zone: Tz,
 ) -> Option<DateTime<Utc>> {
     let months = u32::try_from(interval).ok()?;
-    match pattern.month_repeat_type? {
+    // A missing type is read as `same_date` rather than ending the series (AWTD-1077). Writes
+    // always store one since AWTD-1074, which also backfilled the ten production patterns that
+    // lacked it, so this only catches a row an offline client wrote without going through the API.
+    match pattern
+        .month_repeat_type
+        .unwrap_or(MonthRepeatType::SameDate)
+    {
         // Overflowing, not clamping: see `adding_months_overflowing`. A task set to the 31st skips
         // February on every client, which is a shared bug rather than one to fix here alone.
         MonthRepeatType::SameDate => Some(adding_months_overflowing(date, months, zone)),
