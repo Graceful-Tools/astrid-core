@@ -125,6 +125,18 @@ pub enum DurationUnit {
     Month,
 }
 
+/// `list.supports` on the wire: what a list's backend can do that a client would otherwise have
+/// to guess. Every key is at its classic value when absent, and the web adds a key as each
+/// capability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored
+/// rather than refused.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSupports {
+    /// A task here may hold several assignees (`assigneeIds`). Classic lists keep at most one.
+    #[serde(default)]
+    pub multiple_assignees: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskList {
@@ -250,6 +262,10 @@ pub struct TaskList {
     /// **`None` means SHOW.** See the module note and [`TaskList::shows_subtasks`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_subtasks: Option<bool>,
+    /// What this list's backend can do (web AWTD-1190, spec §11.2). **`None` means classic**: a
+    /// server older than the field omits it. Ask through the methods, not the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports: Option<ListSupports>,
 
     // Filter settings, used by virtual lists and as the saved default of a real one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -350,6 +366,12 @@ impl TaskList {
         !self.is_status_list() && !self.is_label_list()
     }
 
+    /// May a task on this list hold several assignees? Classic unless the server says otherwise.
+    pub fn supports_multiple_assignees(&self) -> bool {
+        self.supports
+            .is_some_and(|supports| supports.multiple_assignees)
+    }
+
     /// Whether this list splices subtasks inline. **Absent means yes** (task ba1deb9d): a list
     /// fetched before the field existed must render exactly as it did.
     pub fn shows_subtasks(&self) -> bool {
@@ -360,6 +382,26 @@ impl TaskList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AITD-466: `supports` was dropped by the cache shape, so no shell could gate on it.
+    #[test]
+    fn aitd_466_supports_survives_the_cache_shape_and_absent_means_classic() {
+        let github: TaskList = serde_json::from_str(
+            r#"{"id":"l1","name":"Board","supports":{"multipleAssignees":true,"aKeyFromLater":"spawn"}}"#,
+        )
+        .expect("decodes, unknown keys and all");
+        assert!(github.supports_multiple_assignees());
+        let stored = serde_json::to_value(&github).expect("encodes");
+        assert_eq!(stored["supports"]["multipleAssignees"], true);
+
+        let classic: TaskList =
+            serde_json::from_str(r#"{"id":"l2","name":"Home"}"#).expect("decodes");
+        assert!(!classic.supports_multiple_assignees());
+        assert!(serde_json::to_value(&classic)
+            .expect("encodes")
+            .get("supports")
+            .is_none());
+    }
 
     /// The 2026-08-29 outage in one test: the object form on one list must not cost the account
     /// every list it has.

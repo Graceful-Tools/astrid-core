@@ -257,6 +257,13 @@ pub struct Task {
     pub assignee_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<User>,
+    /// Everyone assigned, as the server sent it (web AWTD-1190). Only a list whose backend
+    /// supports several assignees ever holds more than one. Never read this directly:
+    /// [`Task::all_assignee_ids`] is the list a client shows, because `assignee_id` is written on
+    /// its own — by an older client, or by an optimistic reassignment here — and stays the truth
+    /// about who is first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_ids: Option<Vec<String>>,
     /// The MCP API returns the creator object without the id field, so both are optional and
     /// [`Task::effective_creator_id`] is the only correct way to ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -416,6 +423,7 @@ impl Task {
             identifier: None,
             assignee_id: None,
             assignee: None,
+            assignee_ids: None,
             creator_id: None,
             creator: None,
             blocked_by: None,
@@ -450,6 +458,24 @@ impl Task {
             client_request_id: None,
             parent_task_id: None,
         }
+    }
+
+    /// Everyone assigned, primary first — the web's `assigneeIdsOf` (`lib/task-assignees.ts`).
+    ///
+    /// `assignee_id` is the primary whatever the stored array says, and the array supplies the
+    /// others. No primary means nobody: the server promotes the next person when the first is
+    /// cleared, so an array without a primary is a stale one, not a second opinion.
+    pub fn all_assignee_ids(&self) -> Vec<&str> {
+        let Some(primary) = self.assignee_id.as_deref().filter(|id| !id.is_empty()) else {
+            return Vec::new();
+        };
+        let others = self
+            .assignee_ids
+            .iter()
+            .flatten()
+            .map(String::as_str)
+            .filter(|id| *id != primary);
+        std::iter::once(primary).chain(others).collect()
     }
 
     /// The creator's id, from whichever of the two places the response put it.
@@ -519,6 +545,37 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AITD-466: the cache keeps a task as this struct, so a field it does not name is gone
+    /// before any shell reads it. `assigneeIds` was dropped that way.
+    #[test]
+    fn aitd_466_assignee_ids_survive_the_round_trip_through_the_cache_shape() {
+        let decoded: Task = serde_json::from_str(
+            r#"{"id":"t1","title":"x","assigneeId":"u1","assigneeIds":["u1","u2"]}"#,
+        )
+        .expect("decodes");
+        let stored = serde_json::to_value(&decoded).expect("encodes");
+        assert_eq!(stored["assigneeIds"], serde_json::json!(["u1", "u2"]));
+    }
+
+    #[test]
+    fn aitd_466_the_primary_assignee_leads_whatever_the_array_says() {
+        let mut task = Task::new("t1", "x");
+        assert!(task.all_assignee_ids().is_empty());
+
+        // A server older than the field: one assignee, no array.
+        task.assignee_id = Some("u1".into());
+        assert_eq!(task.all_assignee_ids(), ["u1"]);
+
+        // Reassigned here, array still as fetched: the new primary leads and is not repeated.
+        task.assignee_ids = Some(vec!["u1".into(), "u2".into(), "u3".into()]);
+        task.assignee_id = Some("u3".into());
+        assert_eq!(task.all_assignee_ids(), ["u3", "u1", "u2"]);
+
+        // Unassigned here: nobody, not the array's leftovers.
+        task.assignee_id = None;
+        assert!(task.all_assignee_ids().is_empty());
+    }
 
     /// Two production tasks were observed with `priority: 4`. Swift's default decode threw, which
     /// failed the whole array and broke sync for that account until it was found.
