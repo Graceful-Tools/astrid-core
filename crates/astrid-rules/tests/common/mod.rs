@@ -2,7 +2,7 @@
 //!
 //! A web-generated fixture routes the cases the clients deliberately disagree on — the core
 //! following iOS where web has not moved yet (`docs/CONTRACTS.md`, top) — to `disputed`, each
-//! naming its CONTRACTS.md entry (`contracts/drivers/disputed.mjs`). A test runs those through the
+//! naming its CONTRACTS.md entry (astrid-web `scripts/contract-fixtures/drivers/disputed.mjs`). A test runs those through the
 //! core too, and requires that **each entry still disagrees with web somewhere**. When web adopts
 //! iOS's behaviour every case of an entry starts agreeing, this fails, and the exclusion comes
 //! out of the driver: an exclusion cannot outlive its reason.

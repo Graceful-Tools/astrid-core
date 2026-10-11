@@ -316,7 +316,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// Generated from astrid-web by `contracts/export-from-web.mjs`. Compiled in, so a stale
+    /// Generated in astrid-web by `scripts/export-contract-fixtures.ts`. Compiled in, so a stale
     /// fixture cannot be missed at runtime.
     const SHORTCUTS_FIXTURE: &str = include_str!("../../../../contracts/fixtures/shortcuts.json");
 
