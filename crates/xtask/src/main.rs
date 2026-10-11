@@ -81,7 +81,10 @@ fn check_contracts() -> ExitCode {
     let mut stale = 0usize;
     for name in &names {
         let display = name.to_string_lossy();
-        match (std::fs::read(theirs.join(name)), std::fs::read(ours.join(name))) {
+        match (
+            std::fs::read(theirs.join(name)),
+            std::fs::read(ours.join(name)),
+        ) {
             (Ok(expected), Ok(actual)) if expected == actual => {
                 println!("ok  contracts/fixtures/{display}");
             }
@@ -109,7 +112,10 @@ fn check_contracts() -> ExitCode {
                 continue;
             }
             if !theirs.join(&name).exists() {
-                eprintln!("ORPHANED  contracts/fixtures/{} — astrid-web no longer generates it", name.to_string_lossy());
+                eprintln!(
+                    "ORPHANED  contracts/fixtures/{} — astrid-web no longer generates it",
+                    name.to_string_lossy()
+                );
                 stale += 1;
             }
         }
