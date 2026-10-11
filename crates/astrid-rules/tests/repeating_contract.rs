@@ -5,7 +5,7 @@
 //! server's, which is the only thing a user notices: two clients that disagree about when a
 //! repeating task is next due will overwrite each other, and the last writer wins.
 //!
-//! Regenerate with `node contracts/export-from-web.mjs`; `cargo xtask check-contracts` fails when
+//! Regenerate in astrid-web (`npm run export:contract-fixtures`) and copy them here; `cargo xtask check-contracts` fails when
 //! web has moved and this has not.
 //!
 //! `completions` and `zonedProgressions` go through the rules door itself (`nextOccurrence`, the

@@ -436,7 +436,7 @@ until the connection comes back.
 ## 7. Adding a contract
 
 1. Change the canonical implementation in astrid-web, with tests.
-2. Teach `contracts/export-from-web.mjs` to export the cases, and regenerate.
+2. Teach astrid-web's `scripts/export-contract-fixtures.ts` to export the cases, regenerate there, and copy them here.
 3. Port or update the Rust module until its tests pass against the new fixture.
 4. Bump astrid-ios's pinned revision, which covers both iOS and Mac; mirror only what Swift still owns.
 5. Add a row to the contracts table in astrid-ios `ASTRID.md` §8.
@@ -834,7 +834,7 @@ agree on when a snooze comes back — now plus the minutes, within the v1 route'
 The web renders HTML through `marked` and its sanitiser; this crate parses with pulldown-cmark
 into blocks, which the Apple apps draw (`CoreRules.markdown`) and Windows will. `markdown.json`
 compares at the level a reader sees — the web's sanitised HTML read back into blocks in a jsdom
-window (`contracts/drivers/markdown.mjs` says exactly how). Over 107 texts covering what the apps
+window (astrid-web `scripts/contract-fixtures/drivers/markdown.mjs` says exactly how). Over 107 texts covering what the apps
 use, 103 agreed at first (130 texts, all agreeing, since AWTD-1064). **Fixed here** on the way (they were bugs, not choices):
 
 - an address the browser cannot parse (`https://google.com]`, task 11cfaf6d's own description) was

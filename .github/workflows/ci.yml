@@ -98,18 +98,12 @@ jobs:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: astrid-web/package-lock.json
-
-      # The markdown driver runs web's own renderer — `marked`, DOMPurify — in a jsdom window, so
-      # it needs astrid-web's packages. Scripts are skipped: nothing here builds or generates.
-      - name: Install astrid-web's packages
-        working-directory: astrid-web
-        run: npm ci --ignore-scripts --no-audit --no-fund
-
-      - name: Check fixtures against astrid-web
-        working-directory: astrid-core
-        run: node contracts/export-from-web.mjs --check --web ../astrid-web
+      # The fixtures are GENERATED IN astrid-web, by scripts/export-contract-fixtures.ts, and its
+      # own predeploy fails if they are stale (check:contract-fixtures). So the only question left
+      # here is whether our copies are still astrid-web's — a diff, not a regeneration (AWTD-1186).
+      #
+      # This job used to run a SECOND exporter living in this repo, which meant core was checked
+      # against a retired generator: the two copies had drifted, and permissions.json alone
+      # differed by 1800 lines. There is one exporter now, and it is web's.
+      - name: Check fixtures are byte-for-byte astrid-web's
+        run: diff -ru astrid-web/contracts/fixtures astrid-core/contracts/fixtures

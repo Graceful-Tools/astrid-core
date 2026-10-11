@@ -4,7 +4,7 @@
 //! (`lib/markdown.ts`: `marked`, GFM, `breaks: true`, then DOMPurify) in a jsdom window and
 //! reading the HTML back into this crate's blocks and runs — the level the contract really is,
 //! since web draws HTML and a native shell draws runs. How the HTML is read is written down in
-//! the driver (`contracts/drivers/markdown.mjs`). Each case is rendered here and compared as JSON.
+//! the driver (astrid-web `scripts/contract-fixtures/drivers/markdown.mjs`). Each case is rendered here and compared as JSON.
 //!
 //! The two parsers are different programs (`marked` and pulldown-cmark), so the disputed cases
 //! are where they genuinely read the same text differently; D38 in `docs/CONTRACTS.md` lists

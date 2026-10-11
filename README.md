@@ -50,9 +50,9 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 ```bash
 cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
-cargo xtask check-contracts     # fixtures against ../astrid-web (Node.js required)
+cargo xtask check-contracts     # our fixtures are byte-for-byte ../astrid-web's
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
-node contracts/export-from-web.mjs --web ../astrid-web   # regenerate them
+# the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. The core builds and tests on Windows, macOS and

@@ -1,14 +1,23 @@
 # Cross-platform contract fixtures
 
-The JSON in `fixtures/` is **generated** from the canonical astrid-web sources by
-`export-from-web.mjs`. Never hand-edit it — a rule that is retyped is a rule that drifts, which is
-the failure this whole mechanism exists to prevent.
+The JSON in `fixtures/` is **generated in astrid-web**, by its
+`scripts/export-contract-fixtures.ts`, and copied here. Never hand-edit it — a rule that is retyped
+is a rule that drifts, which is the failure this whole mechanism exists to prevent. The files here
+are copies: to change one, change the rule in astrid-web and regenerate there.
 
 ```bash
-node contracts/export-from-web.mjs            # regenerate
-node contracts/export-from-web.mjs --check    # fail if stale (what CI and predeploy run)
-node contracts/export-from-web.mjs --web ../astrid-web
+# in astrid-web
+npm run export:contract-fixtures             # regenerate
+npm run check:contract-fixtures              # fail if stale (its predeploy runs this)
+
+# here
+cargo xtask check-contracts [../astrid-web]  # fail unless our copies are byte-for-byte web's
 ```
+
+The exporter used to exist **twice** — once there and once here as `export-from-web.mjs` — and the
+two copies drifted: `permissions.json` alone differed by 1800 lines, and this repo's CI was
+checking core against the retired generator. There is one exporter now, in astrid-web, and the
+check here is a comparison rather than a second generation (AWTD-1186).
 
 The Rust tests compile these files in with `include_str!`, so a stale fixture fails the test suite
 rather than going unnoticed at runtime.
@@ -35,25 +44,11 @@ rather than going unnoticed at runtime.
 
 Some contracts are **tables**, and the exporter reads them out of the source. Others are
 **arithmetic**, and the only honest way to lock those is to run the canonical implementation and
-record what it returns — `drivers/repeating.mjs` imports `types/repeating.ts` and executes it. Node
-runs the TypeScript directly, so there is no build step. Only one driver needs astrid-web's
-packages: `markdown.mjs` runs web's real renderer (`marked`, DOMPurify) in a jsdom window, so the
-checkout needs `npm ci` first (CI runs it with `--ignore-scripts`).
-
-Modules beyond `types/repeating.ts` import astrid-web's `@/…` alias, which Node cannot resolve on
-its own. `drivers/alias-loader.mjs` installs a resolve hook that maps it onto the checkout, rather
-than requiring a Next.js build to read four pure functions. Two modules are stubbed — the logger
-(pino and its transports) and prisma (which opens a database connection at import). The prisma stub
-throws on every access, so a driver that ever did reach the database would fail loudly instead of
-quietly exporting a fixture built from nulls. Server plumbing imported beside a pure function is
-stubbed the same way, throwing on use: `@/lib/redis`, `@/lib/sse-utils` (which starts timers at
-import and would hang the export) and the `@prisma/client` package. One driver swaps a stub for a
-working fake: `reminders.mjs` runs `lib/reminder-snooze.ts` against an in-memory reminder queue
-(`stubs/prisma-reminder-queue.mjs`) that answers only the two calls the rule makes.
-
-A driver runs with `TZ=UTC`. Web's custom repeat path used local date methods, so its results
-depended on the machine's timezone (`docs/CONTRACTS.md` D4, closed by AWTD-1063: the zone is now in
-the request). The pin stays for the other drivers, which still read the machine's clock.
+record what it returns. The drivers that do that now live in astrid-web, under
+`scripts/contract-fixtures/drivers/`, and that README section is theirs; the short version is that
+each driver imports astrid-web's own module and executes it, with a resolve hook for the `@/…`
+alias, stubs for the logger, prisma and the server plumbing imported beside a pure function, and
+`TZ=UTC` pinned so a fixture never encodes whoever ran it.
 
 Still planned: all-day date handling, wire shapes, the task leading control, and the My Tasks scope
 (web's lives inside the `useFilterState` hook and cannot be run; D25 records the difference).
@@ -62,8 +57,9 @@ Still planned: all-day date handling, wire shapes, the task leading control, and
 
 Where the clients disagree, the core follows iOS (`docs/CONTRACTS.md`, top) — so some cases a
 driver runs are ones the core is *meant* to answer differently from web. They are not dropped:
-`drivers/disputed.mjs` routes them to the fixture's `disputed` array, each carrying web's answer
-and the CONTRACTS.md entry that explains it, and the fixture's `disputes` lists the entries.
+astrid-web's `scripts/contract-fixtures/drivers/disputed.mjs` routes them to the fixture's
+`disputed` array, each carrying web's answer and the CONTRACTS.md entry that explains it, and the
+fixture's `disputes` lists the entries.
 
 - A dispute is a predicate over a case's **inputs** ("an unrecognised due-date filter on an
   undated task is D7's"), never over web's answer, so it cannot hide an unrelated drift.
@@ -84,14 +80,14 @@ because astrid-web's server decides through this crate with those fields loaded 
 A contract change is a cross-repo change, always in this order:
 
 1. Change the canonical implementation in astrid-web, with its tests.
-2. Regenerate these fixtures.
+2. Regenerate the fixtures there, and copy them here.
 3. Update this crate until its tests pass again, then the clients that pin it.
 4. Bump astrid-ios's pinned revision (`core/Cargo.toml`); mirror only what Swift still owns.
 
 Deploy web first — the wire is the one thing every client shares.
 
-## Where this script belongs
+## Where this script lives
 
-It moves into astrid-web as `scripts/export-contract-fixtures.ts` so the canonical repo owns the
-export and every client consumes the same artifacts (plan §5.3). The output format will not change
-when it does. It lives here for now so the clients are not blocked on that work.
+In astrid-web, as `scripts/export-contract-fixtures.ts` — the canonical repo owns the export, so a
+change to a shared rule fails `--check` in the pull request that made it rather than as a red build
+here afterwards (plan §5.3). The move finished in AWTD-1186; the output format did not change.
