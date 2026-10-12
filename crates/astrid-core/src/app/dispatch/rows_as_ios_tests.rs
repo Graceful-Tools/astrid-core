@@ -2,7 +2,8 @@
 //!
 //! The Swift filters, sort and splice the Apple apps carried were run against this crate before
 //! they were deleted; these are the places it answered differently, each now iOS's answer
-//! (Jon, 2026-10-03: on disagreement follow iOS — `docs/CONTRACTS.md` D40–D42), and the inputs a
+//! (Jon, 2026-10-03: on disagreement follow iOS — `docs/CONTRACTS.md` D41–D42; D40 has since gone
+//! to web, AITD-495), and the inputs a
 //! shell holds ahead of the cache.
 
 use super::super::tests::app_with;
@@ -53,10 +54,11 @@ fn list(extra: Value) -> Value {
     list
 }
 
-/// D40: iOS sorts a list that has never been given a sort as `manual` — newest first with
-/// nothing arranged; this crate read the absence as auto.
+/// D40: a list that has never been given a sort is drawn as web draws it — auto: open before
+/// completed, then priority. It was read as `manual` (newest first) from AITD-460 until Jon chose
+/// the web pattern (AITD-495), so a completed task sat wherever its creation date put it.
 #[tokio::test]
-async fn aitd460_a_list_with_no_sort_is_newest_first_as_on_ios() {
+async fn aitd495_a_list_with_no_sort_is_auto_completed_last_as_on_web() {
     let app = seeded(json!([
         task(
             "old",
@@ -66,16 +68,30 @@ async fn aitd460_a_list_with_no_sort_is_newest_first_as_on_ios() {
             "new",
             json!({ "priority": 0, "createdAt": "2026-09-02T00:00:00Z" })
         ),
+        task(
+            "done",
+            json!({ "priority": 3, "createdAt": "2026-09-03T00:00:00Z", "completed": true,
+                    "completedAt": "2026-09-04T00:00:00Z" })
+        ),
     ]))
     .await;
-    let rows = ids(&app, json!({ "listId": "l1", "list": list(json!({})) })).await;
-    assert_eq!(rows, ["new", "old"]);
-    let auto = ids(
+    let unset = json!({ "filterCompletion": "all" });
+    let command = json!({ "listId": "l1", "list": list(unset) });
+    let answer = call(&app, with_kind(command.clone())).await;
+    assert_eq!(answer["value"]["sortBy"], "auto", "{answer}");
+    assert_eq!(ids(&app, command).await, ["old", "new", "done"]);
+    let manual = ids(
         &app,
-        json!({ "listId": "l1", "list": list(json!({ "sortBy": "auto" })) }),
+        json!({ "listId": "l1",
+                "list": list(json!({ "sortBy": "manual", "filterCompletion": "all" })) }),
     )
     .await;
-    assert_eq!(auto, ["old", "new"], "auto is still auto");
+    assert_eq!(manual, ["done", "new", "old"], "manual is still manual");
+}
+
+fn with_kind(mut command: Value) -> Value {
+    command["kind"] = json!("rowsForList");
+    command
 }
 
 /// D41: a spliced subtask obeys the view's completion filter alone — the list's other filters

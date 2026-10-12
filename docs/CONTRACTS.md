@@ -879,16 +879,17 @@ a tombstoned item, deleted and linked items passed over for the live unlinked on
 push (`aitd463_*`).
 
 
-### D40 — a list that has never been given a sort: iOS arranges it by hand, web sorts it auto
+### D40 — a list that has never been given a sort is auto, as on web
 
-`sortBy` is nullable on the server, and most lists never set it. iOS draws such a list as
-`manual` (`TaskListView`: `selectedList.sortBy ?? "manual"`), which with nothing arranged is newest
-first; web (`list.sortBy || "auto"`), the Mac and this crate read the absence as `auto`.
-**Resolved 2026-10-03 toward iOS** (AITD-460): `rowsForList` reads an absent sort as `manual`, and
-answers `sortBy: "manual"` for it. `filters::sort_by_setting` itself is unchanged — `None` there is
-still auto, so the fixture's rule for an absent order stands; the list's absence is decided before
-it. The Mac draws through `rowsForList` and moves with it. Test:
-`aitd460_a_list_with_no_sort_is_newest_first_as_on_ios`.
+`sortBy` is nullable on the server, and most lists never set it. Web draws such a list as `auto`
+(`list.sortBy || "auto"`): open before completed, then priority, due date, age. iOS drew it as
+`manual` (`selectedList.sortBy ?? "manual"`), which with nothing arranged is newest first — so a
+completed task sat wherever its creation date put it. This was resolved toward iOS on 2026-10-03
+(AITD-460) and **reversed 2026-10-12 toward web** (AITD-495; Jon chose the web pattern on
+AWTD-1176): `rowsForList` leaves an absent sort absent, `filters::sort_by_setting` reads `None` as
+auto, and the answer says `sortBy: "auto"`. A list *explicitly* set to `manual` is untouched — and
+still differs from web when nothing is arranged (newest first here, oldest first there), which is
+not settled. Test: `aitd495_a_list_with_no_sort_is_auto_completed_last_as_on_web`.
 
 ### D41 — which subtasks a list splices, and from where
 

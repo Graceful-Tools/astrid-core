@@ -69,12 +69,8 @@ pub(super) fn rows_for_list(
     if let Some(sort_by) = inputs.sort_by {
         list.sort_by = Some(sort_by);
     }
-    // A list that has never been given a sort is in the order it was arranged in — iOS's
-    // `selectedList.sortBy ?? "manual"`, which with nothing arranged is newest first. Web reads
-    // the same absence as auto; on disagreement the core follows iOS (CONTRACTS D40).
-    if list.sort_by.is_none() {
-        list.sort_by = Some("manual".into());
-    }
+    // A list that has never been given a sort stays unset here: `filters::sort_by_setting` and
+    // the answer's `sortBy` both read the absence as auto, as web does (CONTRACTS D40).
 
     // A VIRTUAL list has no membership: it is a saved set of filters over everything the account
     // has — "Today", "Not in a List", "I've Assigned". Sourcing it from membership, the way a real
