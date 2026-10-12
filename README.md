@@ -50,7 +50,7 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 ```bash
 cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
-cargo xtask check-contracts     # our fixtures are byte-for-byte ../astrid-web's
+cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy
 ```

@@ -105,5 +105,11 @@ jobs:
       # This job used to run a SECOND exporter living in this repo, which meant core was checked
       # against a retired generator: the two copies had drifted, and permissions.json alone
       # differed by 1800 lines. There is one exporter now, and it is web's.
-      - name: Check fixtures are byte-for-byte astrid-web's
-        run: diff -ru astrid-web/contracts/fixtures astrid-core/contracts/fixtures
+      #
+      # The comparison is `cargo xtask check-contracts` — the same one a developer runs — rather
+      # than a `diff -ru` that reimplements it in shell. Two implementations of one check is how
+      # the two exporters came to disagree, and the shell half carried exactly the bug f1c7b53f
+      # fixed: it calls a CRLF checkout drift.
+      - name: Check fixtures are astrid-web's
+        working-directory: astrid-core
+        run: cargo xtask check-contracts ../astrid-web

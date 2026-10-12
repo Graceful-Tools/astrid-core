@@ -11,8 +11,13 @@ npm run export:contract-fixtures             # regenerate
 npm run check:contract-fixtures              # fail if stale (its predeploy runs this)
 
 # here
-cargo xtask check-contracts [../astrid-web]  # fail unless our copies are byte-for-byte web's
+cargo xtask check-contracts [../astrid-web]  # fail unless our copies still say what web's do
 ```
+
+The comparison ignores line endings, and only those: `core.autocrlf=true` in one of the two
+checkouts and not the other gives one working tree CRLF and the other LF, which is a fact about
+`git config` rather than about the contract. CI runs this same command, so there is one
+implementation of the comparison and not a shell `diff` beside it (f1c7b53f).
 
 The exporter used to exist **twice** — once there and once here as `export-from-web.mjs` — and the
 two copies drifted: `permissions.json` alone differed by 1800 lines, and this repo's CI was
