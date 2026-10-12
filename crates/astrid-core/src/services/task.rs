@@ -94,6 +94,10 @@ pub struct TaskChanges {
     pub completed: Option<bool>,
     pub completed_at: Option<Option<DateTime<Utc>>>,
     pub assignee_id: Option<Option<String>>,
+    /// Everyone assigned, primary first — the whole list, replaced (AITD-491). The server reads
+    /// `assigneeIds` the same way and keeps `assigneeId` equal to its first entry, so this is
+    /// sent alone: sending both invites `assignee_ids_mismatch` for nothing.
+    pub assignee_ids: Option<Vec<String>>,
     pub repeating: Option<Option<Repeating>>,
     pub repeating_data: Option<Option<CustomRepeatingPattern>>,
     pub repeat_from: Option<RepeatFromMode>,
@@ -154,6 +158,14 @@ impl TaskChanges {
             if value.is_none() {
                 task.assignee = None;
             }
+        }
+        if let Some(value) = &self.assignee_ids {
+            // The first entry IS the primary, here as on the server; an empty list is nobody.
+            task.assignee_id = value.first().cloned();
+            if value.is_empty() {
+                task.assignee = None;
+            }
+            task.assignee_ids = Some(value.clone());
         }
         if let Some(value) = self.repeating {
             task.repeating = value;
@@ -228,6 +240,9 @@ impl TaskChanges {
         }
         if let Some(value) = &self.assignee_id {
             set("assigneeId", json!(value));
+        }
+        if let Some(value) = &self.assignee_ids {
+            set("assigneeIds", json!(value));
         }
         if let Some(value) = self.repeating {
             set("repeating", json!(value));

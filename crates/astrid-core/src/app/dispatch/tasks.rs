@@ -1032,6 +1032,9 @@ pub(super) fn changes_from_json(value: &serde_json::Value) -> Result<TaskChanges
             "assigneeId" => {
                 changes.assignee_id = Some(value.as_str().map(str::to_string));
             }
+            "assigneeIds" => {
+                changes.assignee_ids = serde_json::from_value(value.clone()).ok();
+            }
             "repeating" => {
                 changes.repeating = Some(serde_json::from_value(value.clone()).unwrap_or(None));
             }
@@ -1134,4 +1137,34 @@ fn cache_search(
             offset: app.clock.utc_offset(),
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shell's multi-select assignee picker sends the whole list as `assigneeIds`. It was an
+    /// unnamed key here, so it was dropped before the cache or the server heard of it (AITD-491).
+    #[test]
+    fn aitd_491_an_assignee_ids_edit_reaches_the_cache_and_the_wire() {
+        let changes =
+            changes_from_json(&serde_json::json!({ "assigneeIds": ["u2", "u1"] })).expect("reads");
+        assert_eq!(
+            changes.to_body()["assigneeIds"],
+            serde_json::json!(["u2", "u1"])
+        );
+
+        let mut task = crate::model::Task::new("t1", "x");
+        task.assignee_id = Some("u1".into());
+        changes.apply(&mut task);
+        assert_eq!(task.all_assignee_ids(), ["u2", "u1"], "first is primary");
+
+        // Nobody: the primary goes with the list, or `all_assignee_ids` would still be empty for
+        // the wrong reason and the row would keep the old face.
+        let cleared = changes_from_json(&serde_json::json!({ "assigneeIds": [] })).expect("reads");
+        cleared.apply(&mut task);
+        assert_eq!(task.assignee_id, None);
+        assert!(task.assignee.is_none());
+        assert_eq!(cleared.to_body()["assigneeIds"], serde_json::json!([]));
+    }
 }
