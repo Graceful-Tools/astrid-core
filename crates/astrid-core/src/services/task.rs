@@ -483,6 +483,16 @@ impl TaskService {
                     changes.closed_reason = Some(None);
                 }
             }
+            // A board whose series spawns keeps the occurrence closed as history; the server
+            // makes the next one as a new task, and it arrives like any other (AITD-491). The
+            // repeat settings stay on this one until the server moves them to its successor.
+            repeating::Completion::RollForward { .. }
+                if self.spawns_next_occurrence(&current)? =>
+            {
+                changes.completed = Some(true);
+                changes.completed_at = Some(Some(origin.at.unwrap_or(now)));
+                changes.completed_source = origin.source.clone().map(Some);
+            }
             repeating::Completion::RollForward {
                 due_date_time,
                 is_all_day,
@@ -503,6 +513,17 @@ impl TaskService {
             }
         }
         self.update(id, &changes)
+    }
+
+    /// Is the task on a list whose repeating tasks spawn their next occurrence on the server?
+    fn spawns_next_occurrence(&self, task: &Task) -> Result<bool> {
+        for list_id in task.effective_list_ids() {
+            let list = self.context.store.list(&list_id)?;
+            if list.is_some_and(|list| list.spawns_next_occurrence()) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Delete a task. Gone from the cache immediately; the server hears about it when it can.
@@ -1161,6 +1182,38 @@ mod tests {
             .expect("completes");
         assert_eq!(again.due_date_time, Some(at("2026-09-07T12:00:00Z")));
         assert!(again.completed);
+    }
+
+    /// AITD-491: on a board whose series spawns, the completed task IS completed — the server
+    /// makes the next occurrence as a new task, and one rolled forward here as well would be a
+    /// second copy of it.
+    #[test]
+    fn aitd_491_a_repeating_task_on_a_spawning_board_is_completed_not_rolled_forward() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+        let board: TaskList = serde_json::from_str(
+            r#"{"id":"board","name":"Board","supports":{"repeatMode":"spawn"}}"#,
+        )
+        .expect("decodes");
+        fixture.store.upsert_lists(&[board]).expect("stores");
+        let mut task = Task::new("t1", "Weekly triage");
+        task.repeating = Some(Repeating::Daily);
+        task.repeat_from = Some(RepeatFromMode::DueDate);
+        task.due_date_time = Some(at("2026-09-07T12:00:00Z"));
+        task.list_ids = Some(vec!["board".into()]);
+        fixture.store.upsert_task(&task).expect("stores");
+
+        let done = fixture
+            .service
+            .complete("t1", true, None, None)
+            .expect("completes");
+        assert!(done.completed, "the occurrence stays closed as history");
+        assert_eq!(done.completed_at, Some(at("2026-09-07T12:00:00Z")));
+        assert_eq!(done.due_date_time, Some(at("2026-09-07T12:00:00Z")));
+        assert_eq!(
+            done.occurrence_count, None,
+            "the count moves with the successor"
+        );
+        assert_eq!(done.repeating, Some(Repeating::Daily));
     }
 
     #[test]

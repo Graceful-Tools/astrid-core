@@ -1038,3 +1038,16 @@ capped at ten and offered a create. **Resolved toward iOS** as a mode: `listPick
 answers `ListToggles`; without it, the editor shape Windows draws is unchanged. An editor's unsaved
 lists travel as `listIds`. iOS matched with the locale's case folding; this crate lower-cases. Test:
 `aitd461_list_picks_as_toggles`.
+
+### D51 — a board whose series spawns completes the occurrence
+
+The web's `list.supports.repeatMode` is `spawn` on a GitHub board (astrid-web AWTD-1118, spec §10):
+the completed issue stays closed as history and the server makes the next occurrence as a new task,
+linked back by `previousOccurrenceId`. `TaskService::complete` rolled every repeating task forward
+in place, which on such a board would leave the old row open *and* a successor beside it.
+**Resolved toward the web, the only place the rule exists**: when the task is on a list that
+spawns, a completion the rule would roll forward is sent as a plain completion instead, with the
+repeat settings left for the server to move. A series at its end, a reopen and every classic list
+are unchanged; an unknown `repeatMode` rolls forward. `repeating::completion` itself is untouched
+— it takes no list, so the web's fixture for it still holds. Test:
+`aitd_491_a_repeating_task_on_a_spawning_board_is_completed_not_rolled_forward`.

@@ -135,6 +135,22 @@ pub struct ListSupports {
     /// A task here may hold several assignees (`assigneeIds`). Classic lists keep at most one.
     #[serde(default)]
     pub multiple_assignees: bool,
+    /// How a repeating task here advances when it is completed (web AWTD-1118, spec §10).
+    #[serde(default)]
+    pub repeat_mode: RepeatMode,
+}
+
+/// `list.supports.repeatMode`. On a GitHub board the completed issue stays closed as history and
+/// the next occurrence is a NEW task the server makes, so a client sends the completion and does
+/// not roll the row forward itself. A value this build does not know reads as the classic one:
+/// rolling forward is recoverable, a series silently dropped is not.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatMode {
+    Spawn,
+    #[default]
+    #[serde(other)]
+    RollForward,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -372,6 +388,13 @@ impl TaskList {
             .is_some_and(|supports| supports.multiple_assignees)
     }
 
+    /// Does completing a repeating task here leave it completed, with the next occurrence arriving
+    /// from the server as a new task? Classic — roll forward in place — unless the server says so.
+    pub fn spawns_next_occurrence(&self) -> bool {
+        self.supports
+            .is_some_and(|supports| supports.repeat_mode == RepeatMode::Spawn)
+    }
+
     /// Whether this list splices subtasks inline. **Absent means yes** (task ba1deb9d): a list
     /// fetched before the field existed must render exactly as it did.
     pub fn shows_subtasks(&self) -> bool {
@@ -401,6 +424,30 @@ mod tests {
             .expect("encodes")
             .get("supports")
             .is_none());
+    }
+
+    /// AITD-491: `repeatMode` was the key from later, and it was dropped like any unknown one.
+    #[test]
+    fn aitd_491_repeat_mode_survives_the_cache_shape_and_anything_else_rolls_forward() {
+        let board: TaskList = serde_json::from_str(
+            r#"{"id":"l1","name":"Board","supports":{"multipleAssignees":true,"repeatMode":"spawn"}}"#,
+        )
+        .expect("decodes");
+        assert!(board.spawns_next_occurrence());
+        assert_eq!(
+            serde_json::to_value(&board).expect("encodes")["supports"]["repeatMode"],
+            "spawn"
+        );
+
+        for classic in [
+            r#"{"id":"l2","name":"Home"}"#,
+            r#"{"id":"l3","name":"Older","supports":{"multipleAssignees":true}}"#,
+            r#"{"id":"l4","name":"Home","supports":{"repeatMode":"roll_forward"}}"#,
+            r#"{"id":"l5","name":"Later","supports":{"repeatMode":"aModeFromLater"}}"#,
+        ] {
+            let list: TaskList = serde_json::from_str(classic).expect("decodes");
+            assert!(!list.spawns_next_occurrence(), "{classic}");
+        }
     }
 
     /// The 2026-08-29 outage in one test: the object form on one list must not cost the account

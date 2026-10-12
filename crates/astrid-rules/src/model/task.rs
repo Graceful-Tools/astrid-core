@@ -300,6 +300,10 @@ pub struct Task {
     pub repeat_from: Option<RepeatFromMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurrence_count: Option<i64>,
+    /// The occurrence this one followed, on a list whose series spawns a new task each time
+    /// (web AWTD-1118). The link back; the way forward is the task that names this one here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_occurrence_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_duration: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -437,6 +441,7 @@ impl Task {
             repeating_data: None,
             repeat_from: None,
             occurrence_count: None,
+            previous_occurrence_id: None,
             timer_duration: None,
             last_timer_value: None,
             priority: Priority::None,
