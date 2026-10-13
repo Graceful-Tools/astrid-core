@@ -171,6 +171,13 @@ pub mod envelope {
     pub const CHANNELS: &str = "channels";
     pub const MEMBERS: &str = "members";
     pub const USERS: &str = "users";
+    /// The counts and flags beside the rows, rather than the rows themselves.
+    pub const META: &str = "meta";
+    /// Inside `meta`: the fields the server left out of every row on this page (`?omit=`). Absent
+    /// — not empty — on a full response, and on a server that predates it. An omitted field is
+    /// missing from the object rather than null, so this echo is the only thing that tells "not
+    /// sent" from "has none" (AITD-499).
+    pub const OMITTED: &str = "omitted";
     /// Beside `tasks` on a delta fetch (`updatedSince`): the ids the server has deleted since,
     /// which no row can carry because the row is gone. Absent on a full fetch.
     pub const DELETED_TASKS: &str = "deletedIds";
