@@ -524,6 +524,10 @@ impl SyncManager {
                     .query("leanListMembers", Some("1".to_string()))
                     .query("updatedSince", since);
                 let body = self.client.send(request).await?;
+                // Nothing else is asked for: the replica this fills is what the detail view
+                // renders offline, so a page trimmed of anything more is refused rather than
+                // stored (AITD-499).
+                require_only_omitted(&body, &OMITTED_BY_REQUEST)?;
                 deleted
                     .lock()
                     .expect("tombstone lock")
@@ -597,6 +601,50 @@ fn ids_named(body: &serde_json::Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The task fields this client asks the server to leave out, as `meta.omitted` would echo them.
+/// `leanListMembers=1` is the older spelling of `omit=listMembers`, and the server does not echo
+/// it today — naming it here is what keeps the guard right if it ever starts to. Never
+/// `description`: see [`require_only_omitted`].
+const OMITTED_BY_REQUEST: [&str; 1] = ["listMembers"];
+
+/// Refuse a task page trimmed of anything but `requested` — AITD-499, matching the Swift read's
+/// `TasksResponse.requireOnlyOmitted` (AITD-498).
+///
+/// `GET /api/v1/tasks` takes `?omit=` (and the older `leanListMembers=1`) and answers with
+/// `meta.omitted` naming what it actually left out — absent, not empty, on a full response, and
+/// absent from a server that predates it. That echo is the only thing that tells "not sent" from
+/// "has none": an omitted field is missing from the task object rather than null, and
+/// [`Task::description`] is `#[serde(default)]`, so a trimmed row decodes with an empty
+/// description that the merge then writes over the real text — and the next edit pushes the blank
+/// back. The server also IGNORES an `omit` name it does not know, so the echo is equally the only
+/// proof that a request was understood.
+///
+/// Refusing the page rather than merging field by field is deliberate: the sync fills the replica
+/// the detail view renders offline, so core keeps asking for the full shape, and a page that is
+/// not the full shape is a bug somewhere else. [`ApiError::Decode`] is not retryable, and a pass
+/// that returns it leaves the cache exactly as it was.
+fn require_only_omitted(body: &serde_json::Value, requested: &[&str]) -> Result<(), ApiError> {
+    let unrequested: Vec<&str> = body
+        .get(endpoints::envelope::META)
+        .and_then(|meta| meta.get(endpoints::envelope::OMITTED))
+        .and_then(serde_json::Value::as_array)
+        .map(|fields| {
+            fields
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|field| !requested.contains(field))
+                .collect()
+        })
+        .unwrap_or_default();
+    if unrequested.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::Decode(format!(
+        "the server left fields out of a task page this client did not ask to drop: {}",
+        unrequested.join(", ")
+    )))
 }
 
 /// Say what a lenient decode dropped. A row that vanishes silently is worse than a response that
@@ -1384,5 +1432,114 @@ mod tests {
         fixture.sync.sync().await;
         let list = fixture.store.list("l1").expect("reads").expect("kept");
         assert_eq!(list.default_due_time.as_deref(), Some("09:00"));
+    }
+
+    /// AITD-499: a page the server trimmed must not blank what it left out.
+    ///
+    /// `Task::description` is `#[serde(default)]`, so a task object WITHOUT the key decodes as
+    /// `""` — and a newer server version writes that over the real text, which the next edit then
+    /// pushes back. `meta.omitted` is the only thing that tells "not sent" from "has none", so a
+    /// page naming a field this request never asked to drop is refused and the cache kept.
+    #[tokio::test]
+    async fn aitd_499_a_page_trimmed_of_description_is_refused_and_the_cache_kept() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{
+                            "id": "t1", "title": "Buy milk",
+                            "updatedAt": "2026-09-07T12:05:00Z"
+                        }],
+                        "meta": { "total": 1, "omitted": ["description"] }
+                    }),
+                ),
+        );
+        let mut cached = Task::new("t1", "Buy milk");
+        cached.description = "The long note the person typed".to_string();
+        cached.updated_at = date::parse("2026-09-07T12:00:00Z");
+        fixture.store.upsert_task(&cached).expect("stores");
+
+        let report = fixture.sync.sync().await;
+        assert!(!report.fetched, "a trimmed page is not a pass: {report:?}");
+        assert_eq!(
+            fixture
+                .store
+                .task("t1")
+                .expect("reads")
+                .expect("present")
+                .description,
+            "The long note the person typed",
+            "the description the server did not send is the one on the device"
+        );
+        assert_eq!(
+            fixture.sync.last_sync(),
+            None,
+            "a refused page leaves no delta stamp, so the next pass pulls everything"
+        );
+    }
+
+    /// The guard is about UNREQUESTED omissions. This client sends `leanListMembers=1`, so a
+    /// server that echoes that one is doing what it was asked and the page still applies.
+    #[tokio::test]
+    async fn aitd_499_a_page_that_dropped_only_what_was_asked_for_still_applies() {
+        let fixture = fixture(empty_task_pages(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{ "id": "t1", "title": "Buy milk" }],
+                        "meta": { "total": 1, "omitted": ["listMembers"] }
+                    }),
+                ),
+        ));
+
+        let report = fixture.sync.sync().await;
+        assert!(report.fetched);
+        assert_eq!(report.tasks_added, 1);
+    }
+
+    #[test]
+    fn aitd_499_the_omission_guard_reads_the_echo_rather_than_assuming() {
+        let requested = ["listMembers"];
+        // A full response carries no `omitted` at all — absent, not empty.
+        require_only_omitted(&json!({ "tasks": [], "meta": { "total": 0 } }), &requested)
+            .expect("a full page");
+        require_only_omitted(&json!({ "tasks": [] }), &requested).expect("no meta at all");
+        require_only_omitted(
+            &json!({ "tasks": [], "meta": { "omitted": [] } }),
+            &requested,
+        )
+        .expect("an empty echo");
+        require_only_omitted(
+            &json!({ "tasks": [], "meta": { "omitted": ["listMembers"] } }),
+            &requested,
+        )
+        .expect("what was asked for");
+        // Not an array, so not an echo.
+        require_only_omitted(
+            &json!({ "tasks": [], "meta": { "omitted": "description" } }),
+            &requested,
+        )
+        .expect("nothing readable to act on");
+
+        let refused = require_only_omitted(
+            &json!({ "tasks": [], "meta": { "omitted": ["listMembers", "description"] } }),
+            &requested,
+        )
+        .expect_err("a field nobody asked to drop");
+        assert!(
+            matches!(&refused, ApiError::Decode(message) if message.contains("description")
+                && !message.contains("listMembers")),
+            "{refused:?}"
+        );
+        assert!(
+            !refused.is_retryable(),
+            "sending the same request again cannot help"
+        );
     }
 }
