@@ -1052,3 +1052,16 @@ repeat settings left for the server to move. A series at its end, a reopen and e
 are unchanged; an unknown `repeatMode` rolls forward. `repeating::completion` itself is untouched
 — it takes no list, so the web's fixture for it still holds. Test:
 `aitd_491_a_repeating_task_on_a_spawning_board_is_completed_not_rolled_forward`.
+
+### D52 — the next occurrence is kept when a response does not carry it
+
+The web serves `nextOccurrenceId` on the single-task read and on the row beside a live event only
+(astrid-web AWTD-1219): always present there, an id or `null`. A list page leaves the key out, by
+design — the full task response is over its wire budget. A plain `Option` would read both as
+"none", and every sync pass would then erase a successor the detail read had just supplied.
+**Resolved toward the web's own reading rule** ("absent and null alike" is right for a client that
+only ever holds one payload; a cache holds both): `Task::next_occurrence_id` keeps absent, none and
+an id apart, and `keeping_unsent` fills an absent one from the cached copy, as it does the blocker
+ids. Only a response that carries the key can clear it. Tests:
+`next_occurrence_id_tells_absent_from_none`,
+`a_response_without_the_successor_keeps_the_one_the_cache_knows`.
