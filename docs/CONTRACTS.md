@@ -1065,3 +1065,14 @@ an id apart, and `keeping_unsent` fills an absent one from the cached copy, as i
 ids. Only a response that carries the key can clear it. Tests:
 `next_occurrence_id_tells_absent_from_none`,
 `a_response_without_the_successor_keeps_the_one_the_cache_knows`.
+
+### D53 — `syncState` is kept through the cache; absent and null are settled
+
+The web keeps `syncState` as a column on the task (astrid-web spec §11.2, migration
+`20261010180000_task_sync_state`), so it rides every task response. It writes `pending` when a
+task made on a GitHub board has its issue but not yet its item or fields, and `null` when the
+write-back job finishes; the spec also names `synced` and `error`, which nothing writes yet. The
+cache keeps the model's JSON, so an unnamed key was dropped on the way in. `Task::sync_state` is a
+plain optional string: the key is always present, so absent and `null` need not be told apart, and
+both mean settled. A value the clients do not know is theirs to ignore. Test:
+`aitd_491_sync_state_survives_the_cache_and_null_is_settled`.

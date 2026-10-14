@@ -315,6 +315,12 @@ pub struct Task {
         deserialize_with = "present"
     )]
     pub next_occurrence_id: Option<Option<String>>,
+    /// Where the server's write-back to the list's backend stands (web spec §11.2): `pending`
+    /// while a task made on a GitHub board is still being written there, `error` if that gave
+    /// up. Absent and `null` are both "settled" — it is a column on the task, so every response
+    /// carries it, and `null` is what a settled task and every classic list send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_duration: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -468,6 +474,7 @@ impl Task {
             occurrence_count: None,
             previous_occurrence_id: None,
             next_occurrence_id: None,
+            sync_state: None,
             timer_duration: None,
             last_timer_value: None,
             priority: Priority::None,
@@ -764,6 +771,21 @@ mod tests {
             detail.keeping_unsent(&cached).next_occurrence_id,
             Some(None)
         );
+    }
+
+    /// A task made on a GitHub board whose write-back has not finished carries `pending` (AITD-491).
+    /// The cache keeps the task's whole JSON, so a key the model does not name is lost there.
+    #[test]
+    fn aitd_491_sync_state_survives_the_cache_and_null_is_settled() {
+        let decode = |json: &str| serde_json::from_str::<Task>(json).expect("decodes");
+        let pending = decode(r#"{"id":"t1","syncState":"pending"}"#);
+        assert_eq!(pending.sync_state.as_deref(), Some("pending"));
+        let again = decode(&serde_json::to_string(&pending).expect("encodes"));
+        assert_eq!(again.sync_state.as_deref(), Some("pending"));
+
+        // What the server sends for every settled task, and what a classic list sends.
+        assert_eq!(decode(r#"{"id":"t1","syncState":null}"#).sync_state, None);
+        assert_eq!(decode(r#"{"id":"t1"}"#).sync_state, None);
     }
 
     #[test]
