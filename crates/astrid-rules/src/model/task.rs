@@ -304,6 +304,17 @@ pub struct Task {
     /// (web AWTD-1118). The link back; the way forward is the task that names this one here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_occurrence_id: Option<String>,
+    /// The occurrence that followed this one (web AWTD-1219). Only the single-task read and the
+    /// row beside a live event carry the key — an id, or `null` for "none" — and a list page
+    /// leaves it out. So absent (`None`) is "this response does not say", which
+    /// [`Task::keeping_unsent`] fills from the cache, and `Some(None)` is the server saying there
+    /// is no successor. Encodes back as it arrived, because the cache keeps the whole JSON.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub next_occurrence_id: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_duration: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -404,16 +415,30 @@ pub fn is_closed_reason(value: &str) -> bool {
     CLOSED_REASONS.contains(&value)
 }
 
+/// A key that is present, even as `null`, decodes as `Some`; serde's own `Option<Option<T>>`
+/// folds a `null` into the outer `None`, which is the distinction the field exists to keep.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 impl Task {
     /// This task as the server sent it, with what the response never carries kept from the
-    /// cached copy: the blocker ids ride only on the single-task read, so a PUT answer or a list
-    /// page that leaves them out is not saying the task stopped waiting.
+    /// cached copy: the blocker ids and the next occurrence ride only on the single-task read, so
+    /// a PUT answer or a list page that leaves them out is not saying the task stopped waiting
+    /// or lost its successor.
     pub fn keeping_unsent(mut self, cached: &Task) -> Task {
         if self.blocked_by.is_none() {
             self.blocked_by = cached.blocked_by.clone();
         }
         if self.blocks.is_none() {
             self.blocks = cached.blocks.clone();
+        }
+        if self.next_occurrence_id.is_none() {
+            self.next_occurrence_id = cached.next_occurrence_id.clone();
         }
         self
     }
@@ -442,6 +467,7 @@ impl Task {
             repeat_from: None,
             occurrence_count: None,
             previous_occurrence_id: None,
+            next_occurrence_id: None,
             timer_duration: None,
             last_timer_value: None,
             priority: Priority::None,
@@ -696,6 +722,48 @@ mod tests {
         let encoded = serde_json::to_string(&Task::new("t1", "Buy milk")).expect("encodes");
         assert!(!encoded.contains("null"), "unexpected null in {encoded}");
         assert!(encoded.contains(r#""isAllDay":true"#));
+    }
+
+    /// The successor rides only on the single-task read, which always carries the key — an id, or
+    /// `null` for "none". A list page leaves the key out, and that must not read as "none".
+    #[test]
+    fn next_occurrence_id_tells_absent_from_none() {
+        let decode = |json: &str| serde_json::from_str::<Task>(json).expect("decodes");
+        assert_eq!(decode(r#"{"id":"t1"}"#).next_occurrence_id, None);
+        assert_eq!(
+            decode(r#"{"id":"t1","nextOccurrenceId":null}"#).next_occurrence_id,
+            Some(None)
+        );
+        let known = decode(r#"{"id":"t1","nextOccurrenceId":"t2"}"#);
+        assert_eq!(known.next_occurrence_id, Some(Some("t2".to_string())));
+
+        // The cache keeps the task's whole JSON, so all three have to survive a round trip.
+        let again = |task: &Task| decode(&serde_json::to_string(task).expect("encodes"));
+        assert_eq!(
+            again(&known).next_occurrence_id,
+            Some(Some("t2".to_string()))
+        );
+        let none = decode(r#"{"id":"t1","nextOccurrenceId":null}"#);
+        assert_eq!(again(&none).next_occurrence_id, Some(None));
+        assert_eq!(again(&Task::new("t1", "x")).next_occurrence_id, None);
+    }
+
+    #[test]
+    fn a_response_without_the_successor_keeps_the_one_the_cache_knows() {
+        let mut cached = Task::new("t1", "Water the plants");
+        cached.next_occurrence_id = Some(Some("t2".to_string()));
+
+        // A list page: the key is absent, so the cached answer stands.
+        let page = Task::new("t1", "Water the plants").keeping_unsent(&cached);
+        assert_eq!(page.next_occurrence_id, Some(Some("t2".to_string())));
+
+        // The single-task read saying there is none: the server's word, so it clears.
+        let mut detail = Task::new("t1", "Water the plants");
+        detail.next_occurrence_id = Some(None);
+        assert_eq!(
+            detail.keeping_unsent(&cached).next_occurrence_id,
+            Some(None)
+        );
     }
 
     #[test]
