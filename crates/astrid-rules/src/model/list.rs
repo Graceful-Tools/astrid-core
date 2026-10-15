@@ -125,6 +125,9 @@ pub enum DurationUnit {
     Month,
 }
 
+/// `list.backend` for a GitHub Projects board (astrid-web `lib/backends/supports.ts`).
+pub const GITHUB_PROJECT_BACKEND: &str = "github_project";
+
 /// `list.supports` on the wire: what a list's backend can do that a client would otherwise have
 /// to guess. Every key is at its classic value when absent, and the web adds a key as each
 /// capability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored
@@ -282,6 +285,10 @@ pub struct TaskList {
     /// server older than the field omits it. Ask through the methods, not the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports: Option<ListSupports>,
+    /// Which backend holds this list (web AWTD-1256, spec §11.2): `"github_project"` for a GitHub
+    /// Projects board, `null` for a classic one. Ask through [`TaskList::is_github_backed`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
 
     // Filter settings, used by virtual lists and as the saved default of a real one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -395,6 +402,16 @@ impl TaskList {
             .is_some_and(|supports| supports.repeat_mode == RepeatMode::Spawn)
     }
 
+    /// Is this list a GitHub Projects board, whose issues the server mirrors itself? Read from
+    /// `backend`; a server older than that field leaves only `supports`, whose every key the web
+    /// derives from the backend, so a spawning series identifies such a board there.
+    pub fn is_github_backed(&self) -> bool {
+        match self.backend.as_deref() {
+            Some(backend) => backend == GITHUB_PROJECT_BACKEND,
+            None => self.spawns_next_occurrence(),
+        }
+    }
+
     /// Whether this list splices subtasks inline. **Absent means yes** (task ba1deb9d): a list
     /// fetched before the field existed must render exactly as it did.
     pub fn shows_subtasks(&self) -> bool {
@@ -447,6 +464,36 @@ mod tests {
         ] {
             let list: TaskList = serde_json::from_str(classic).expect("decodes");
             assert!(!list.spawns_next_occurrence(), "{classic}");
+        }
+    }
+
+    /// AITD-491: `backend` reached the v1 list payload (web AWTD-1256) and the cache dropped it, so
+    /// "is this a GitHub board" could only be guessed from `supports`.
+    #[test]
+    fn aitd_491_backend_survives_the_cache_and_decides_github_backed() {
+        let board: TaskList =
+            serde_json::from_str(r#"{"id":"l1","name":"Board","backend":"github_project"}"#)
+                .expect("decodes");
+        assert!(board.is_github_backed(), "backend alone decides it");
+        assert_eq!(
+            serde_json::to_value(&board).expect("encodes")["backend"],
+            "github_project"
+        );
+
+        // A server older than the field: the supports derivation is all there is.
+        let older: TaskList =
+            serde_json::from_str(r#"{"id":"l2","name":"Board","supports":{"repeatMode":"spawn"}}"#)
+                .expect("decodes");
+        assert!(older.is_github_backed());
+
+        for classic in [
+            r#"{"id":"l3","name":"Home"}"#,
+            r#"{"id":"l4","name":"Home","backend":null}"#,
+            r#"{"id":"l5","name":"Home","backend":null,"supports":{"repeatMode":"roll_forward"}}"#,
+            r#"{"id":"l6","name":"Later","backend":"aBackendFromLater"}"#,
+        ] {
+            let list: TaskList = serde_json::from_str(classic).expect("decodes");
+            assert!(!list.is_github_backed(), "{classic}");
         }
     }
 

@@ -1076,3 +1076,15 @@ cache keeps the model's JSON, so an unnamed key was dropped on the way in. `Task
 plain optional string: the key is always present, so absent and `null` need not be told apart, and
 both mean settled. A value the clients do not know is theirs to ignore. Test:
 `aitd_491_sync_state_survives_the_cache_and_null_is_settled`.
+
+### D54 — `backend` is kept through the cache and decides "GitHub-backed"
+
+The web put `backend` on the v1 list payload (astrid-web AWTD-1256, spec §11.2):
+`"github_project"` for a GitHub Projects board, `null` for a classic list. The cache keeps the
+model's JSON, so the unnamed key was dropped on the way in, and the Apple apps had to recognise a
+board from `supports.repeatMode == "spawn"` — true only because the web derives every `supports`
+key from the backend. `TaskList::backend` keeps it, and `TaskList::is_github_backed` reads it
+first. **When the key is absent or null it falls back to the `supports` derivation**: a server
+older than the field still identifies its boards that way, and today's server never sends `null`
+with a spawning series. A backend value the clients do not know is not GitHub. Test:
+`aitd_491_backend_survives_the_cache_and_decides_github_backed`.
