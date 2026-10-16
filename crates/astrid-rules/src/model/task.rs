@@ -192,6 +192,38 @@ pub enum CommentType {
     Attachment,
 }
 
+/// `task.remote`: where a task on a GitHub board lives on GitHub (web `lib/backends/task-remote.ts`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRemote {
+    /// `issue`, `pull_request` or `draft_issue`.
+    #[serde(default)]
+    pub kind: String,
+    /// The issue or pull request on GitHub. `None` for a draft, which has no page of its own.
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    /// `owner/repo`. `None` for a draft.
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub number: Option<i64>,
+}
+
+impl TaskRemote {
+    /// `owner/repo#N`, the label a client draws for this remote; `None` when there is no page to
+    /// open, because a chip that goes nowhere is worse than no chip.
+    pub fn chip_label(&self) -> Option<String> {
+        match (&self.url, &self.repo, self.number) {
+            (Some(_), Some(repo), Some(number)) => Some(format!("{repo}#{number}")),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
@@ -321,6 +353,10 @@ pub struct Task {
     /// carries it, and `null` is what a settled task and every classic list send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_state: Option<String>,
+    /// The GitHub issue or pull request a task on a GitHub board is (web AWTD-1222, spec §11.2).
+    /// Only a GitHub-backed task carries it; absent means classic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<TaskRemote>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_duration: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -475,6 +511,7 @@ impl Task {
             previous_occurrence_id: None,
             next_occurrence_id: None,
             sync_state: None,
+            remote: None,
             timer_duration: None,
             last_timer_value: None,
             priority: Priority::None,
@@ -786,6 +823,31 @@ mod tests {
         // What the server sends for every settled task, and what a classic list sends.
         assert_eq!(decode(r#"{"id":"t1","syncState":null}"#).sync_state, None);
         assert_eq!(decode(r#"{"id":"t1"}"#).sync_state, None);
+    }
+
+    /// A GitHub-backed task carries `remote` (web AWTD-1222), the issue a `repo#N` chip opens. The
+    /// cache dropped it, so no app could draw the chip (AITD-491).
+    #[test]
+    fn aitd_491_remote_survives_the_cache_and_names_its_chip() {
+        let decode = |json: &str| serde_json::from_str::<Task>(json).expect("decodes");
+        let issue = decode(
+            r#"{"id":"t1","remote":{"kind":"issue","url":"https://github.com/o/r/issues/7","nodeId":"I_1","version":null,"repo":"o/r","number":7}}"#,
+        );
+        let remote = issue.remote.as_ref().expect("kept");
+        assert_eq!(
+            remote.url.as_deref(),
+            Some("https://github.com/o/r/issues/7")
+        );
+        assert_eq!(remote.chip_label().as_deref(), Some("o/r#7"));
+        let again = decode(&serde_json::to_string(&issue).expect("encodes"));
+        assert_eq!(again.remote, issue.remote);
+
+        // A draft has no page of its own and no chip; a classic task has no remote at all.
+        let draft = decode(
+            r#"{"id":"t2","remote":{"kind":"draft_issue","url":null,"nodeId":"D_1","version":null,"repo":null,"number":null}}"#,
+        );
+        assert_eq!(draft.remote.expect("kept").chip_label(), None);
+        assert_eq!(decode(r#"{"id":"t3"}"#).remote, None);
     }
 
     #[test]

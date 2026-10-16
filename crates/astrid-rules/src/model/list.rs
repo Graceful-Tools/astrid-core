@@ -132,7 +132,7 @@ pub const GITHUB_PROJECT_BACKEND: &str = "github_project";
 /// to guess. Every key is at its classic value when absent, and the web adds a key as each
 /// capability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored
 /// rather than refused.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListSupports {
     /// A task here may hold several assignees (`assigneeIds`). Classic lists keep at most one.
@@ -141,6 +141,59 @@ pub struct ListSupports {
     /// How a repeating task here advances when it is completed (web AWTD-1118, spec §10).
     #[serde(default)]
     pub repeat_mode: RepeatMode,
+    /// `isPrivate` means something here. A GitHub board's tasks are as visible as its project.
+    #[serde(default = "classic")]
+    pub private_tasks: bool,
+    /// Members and invitations are managed in Astrid. On a GitHub board the roster is GitHub's.
+    #[serde(default = "classic")]
+    pub membership: bool,
+    /// Priority can be set. False on a GitHub board with no Priority field mapped.
+    #[serde(default = "classic")]
+    pub priority: bool,
+    /// A due date can be set. False on a GitHub board with no date field mapped.
+    #[serde(default = "classic")]
+    pub due_date: bool,
+    #[serde(default = "classic")]
+    pub comments: bool,
+    /// Tasks here can carry the project's own field values (web AWTD-1208).
+    #[serde(default)]
+    pub fields: bool,
+    /// What deleting a task does here.
+    #[serde(default)]
+    pub delete_task: DeleteTaskMode,
+}
+
+/// A key the server leaves out of `supports` means what it means on a classic list, so a server
+/// older than the key never hides a control that works (web AWTD-1222).
+fn classic() -> bool {
+    true
+}
+
+impl Default for ListSupports {
+    fn default() -> Self {
+        Self {
+            multiple_assignees: false,
+            repeat_mode: RepeatMode::RollForward,
+            private_tasks: true,
+            membership: true,
+            priority: true,
+            due_date: true,
+            comments: true,
+            fields: false,
+            delete_task: DeleteTaskMode::Delete,
+        }
+    }
+}
+
+/// `list.supports.deleteTask`. A GitHub board takes the item off the project and leaves the issue.
+/// A value this build does not know reads as the classic one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteTaskMode {
+    RemoveFromList,
+    #[default]
+    #[serde(other)]
+    Delete,
 }
 
 /// `list.supports.repeatMode`. On a GitHub board the completed issue stays closed as history and
@@ -402,6 +455,46 @@ impl TaskList {
             .is_some_and(|supports| supports.repeat_mode == RepeatMode::Spawn)
     }
 
+    /// What this list supports, at classic values where the server says nothing.
+    fn supported(&self) -> ListSupports {
+        self.supports.unwrap_or_default()
+    }
+
+    /// Does a task's private flag mean anything here? Classic unless the server says otherwise.
+    pub fn supports_private_tasks(&self) -> bool {
+        self.supported().private_tasks
+    }
+
+    /// Are members and invitations managed in Astrid? Classic unless the server says otherwise.
+    pub fn supports_membership(&self) -> bool {
+        self.supported().membership
+    }
+
+    /// Can a task's priority be set? Classic unless the server says otherwise.
+    pub fn supports_priority(&self) -> bool {
+        self.supported().priority
+    }
+
+    /// Can a task's due date be set? Classic unless the server says otherwise.
+    pub fn supports_due_date(&self) -> bool {
+        self.supported().due_date
+    }
+
+    /// Can tasks here be commented on? Classic unless the server says otherwise.
+    pub fn supports_comments(&self) -> bool {
+        self.supported().comments
+    }
+
+    /// Can tasks here carry the project's own field values? Never on a classic list.
+    pub fn supports_fields(&self) -> bool {
+        self.supported().fields
+    }
+
+    /// What deleting a task here does. Classic unless the server says otherwise.
+    pub fn delete_task_mode(&self) -> DeleteTaskMode {
+        self.supported().delete_task
+    }
+
     /// Is this list a GitHub Projects board, whose issues the server mirrors itself? Read from
     /// `backend`; a server older than that field leaves only `supports`, whose every key the web
     /// derives from the backend, so a spawning series identifies such a board there.
@@ -494,6 +587,42 @@ mod tests {
         ] {
             let list: TaskList = serde_json::from_str(classic).expect("decodes");
             assert!(!list.is_github_backed(), "{classic}");
+        }
+    }
+
+    /// AITD-491: the rest of `supports` reached the v1 list payload (web AWTD-1222) and the cache
+    /// dropped every key it did not name, so no app could hide a control the board refuses.
+    #[test]
+    fn aitd_491_every_supports_key_survives_the_cache_and_absent_is_classic() {
+        let board: TaskList = serde_json::from_str(
+            r#"{"id":"l1","name":"Board","backend":"github_project","supports":{"multipleAssignees":true,"repeatMode":"spawn","privateTasks":false,"membership":false,"priority":false,"dueDate":true,"comments":true,"fields":true,"deleteTask":"remove_from_list"}}"#,
+        )
+        .expect("decodes");
+        assert!(!board.supports_private_tasks());
+        assert!(!board.supports_membership());
+        assert!(!board.supports_priority());
+        assert!(board.supports_due_date());
+        assert!(board.supports_comments());
+        assert!(board.supports_fields());
+        assert_eq!(board.delete_task_mode(), DeleteTaskMode::RemoveFromList);
+        let stored = serde_json::to_value(&board).expect("encodes");
+        assert_eq!(stored["supports"]["privateTasks"], false);
+        assert_eq!(stored["supports"]["deleteTask"], "remove_from_list");
+
+        // No `supports`, an older server's partial one, and an unknown delete mode: all classic.
+        for classic in [
+            r#"{"id":"l2","name":"Home"}"#,
+            r#"{"id":"l3","name":"Older","supports":{"multipleAssignees":true}}"#,
+            r#"{"id":"l4","name":"Later","supports":{"deleteTask":"aModeFromLater"}}"#,
+        ] {
+            let list: TaskList = serde_json::from_str(classic).expect("decodes");
+            assert!(list.supports_private_tasks(), "{classic}");
+            assert!(list.supports_membership(), "{classic}");
+            assert!(list.supports_priority(), "{classic}");
+            assert!(list.supports_due_date(), "{classic}");
+            assert!(list.supports_comments(), "{classic}");
+            assert!(!list.supports_fields(), "{classic}");
+            assert_eq!(list.delete_task_mode(), DeleteTaskMode::Delete, "{classic}");
         }
     }
 
