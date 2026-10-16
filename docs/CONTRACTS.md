@@ -1088,3 +1088,16 @@ first. **When the key is absent or null it falls back to the `supports` derivati
 older than the field still identifies its boards that way, and today's server never sends `null`
 with a spawning series. A backend value the clients do not know is not GitHub. Test:
 `aitd_491_backend_survives_the_cache_and_decides_github_backed`.
+
+### D55 — every `supports` key and the task's `remote` are kept through the cache
+
+The web put the rest of `supports` on the v1 list payload, and `remote` on a GitHub-backed task
+(astrid-web AWTD-1222, spec §11.2). The cache keeps the model's JSON, so the unnamed keys were
+dropped on the way in and no app could hide a control a board refuses or draw a `repo#N` chip.
+`ListSupports` now names `privateTasks`, `membership`, `priority`, `dueDate`, `comments`, `fields`
+and `deleteTask`. **A key the server leaves out reads as its classic value** (`true` for the first
+five, `false` for `fields`, `delete` for `deleteTask`), and so does an unknown `deleteTask`, so a
+server older than a key never hides a control that works. `Task::remote` is kept whole;
+`TaskRemote::chip_label` is `owner/repo#N` only when there is a page to open, so a draft draws no
+chip. Tests: `aitd_491_every_supports_key_survives_the_cache_and_absent_is_classic`,
+`aitd_491_remote_survives_the_cache_and_names_its_chip`.

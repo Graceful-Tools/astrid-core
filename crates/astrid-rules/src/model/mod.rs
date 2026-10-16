@@ -32,14 +32,14 @@ pub mod user;
 
 pub use chat::{is_temp_id, ChatChannel, ChatMessage, TEMP_ID_PREFIX};
 pub use list::{
-    DurationUnit, ListAgentConfig, ListInvite, ListMember, Privacy, RecentlyCompletedWindow,
-    TaskList,
+    DeleteTaskMode, DurationUnit, ListAgentConfig, ListInvite, ListMember, Privacy,
+    RecentlyCompletedWindow, TaskList,
 };
 pub use notification::{Inbox, Notification, NotificationTask};
 pub use project::{Project, ProjectMember};
 pub use task::{
     Attachment, Comment, CommentType, CustomRepeatingPattern, MonthWeekday, Priority, ReminderType,
-    RepeatFromMode, Repeating, SecureFile, Task,
+    RepeatFromMode, Repeating, SecureFile, Task, TaskRemote,
 };
 pub use user::User;
 
