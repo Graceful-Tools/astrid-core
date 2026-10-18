@@ -137,9 +137,40 @@ pub fn on_day(
 }
 
 pub fn with_hour(hour: u32, current: DateTime<Utc>, offset: FixedOffset) -> DateTime<Utc> {
+    with_time(hour, 0, current, offset)
+}
+
+/// As [`with_hour`], keeping a minute too — what a time picker hands back (AATD-25).
+pub fn with_time(
+    hour: u32,
+    minute: u32,
+    current: DateTime<Utc>,
+    offset: FixedOffset,
+) -> DateTime<Utc> {
     let local = current.with_timezone(&offset);
-    let time = chrono::NaiveTime::from_hms_opt(hour.min(23), 0, 0).expect("a valid hour");
+    let time =
+        chrono::NaiveTime::from_hms_opt(hour.min(23), minute.min(59), 0).expect("a valid time");
     to_utc(local.date_naive(), time, offset)
+}
+
+/// The instant whose local day a chosen time goes on: an all-day task's calendar date (noon of
+/// it, so the local reading of its UTC midnight — the day before, west of UTC — never wins), a
+/// timed task's own instant, or now when there is no date.
+pub fn time_anchor(
+    due: Option<DateTime<Utc>>,
+    is_all_day: bool,
+    now: DateTime<Utc>,
+    offset: FixedOffset,
+) -> DateTime<Utc> {
+    match due {
+        Some(due) if is_all_day => crate::model::date::all_day_date(due)
+            .and_hms_opt(12, 0, 0)
+            .and_then(|noon| noon.and_local_timezone(offset).single())
+            .map(|at| at.with_timezone(&Utc))
+            .unwrap_or(due),
+        Some(due) => due,
+        None => now,
+    }
 }
 
 fn to_utc(day: chrono::NaiveDate, time: chrono::NaiveTime, offset: FixedOffset) -> DateTime<Utc> {
@@ -164,6 +195,33 @@ mod tests {
 
     fn day(year: i32, month: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month, d).expect("a real day")
+    }
+
+    /// AATD-25. A time picker hands back an hour AND a minute; both are kept.
+    #[test]
+    fn aatd_25_a_chosen_time_keeps_its_minutes_on_the_tasks_day() {
+        // A timed task on the 14th at 17:00 California, moved to 08:45 — still the 14th.
+        let current = date::parse("2026-12-15T01:00:00Z").expect("a date");
+        let picked = with_time(8, 45, current, california());
+        assert_eq!(date::format(picked), "2026-12-14T15:45:00Z");
+    }
+
+    /// The day a time goes on: an all-day task's calendar date (not the local reading of its UTC
+    /// midnight, which is the day before west of UTC), a timed task's own day, or today.
+    #[test]
+    fn aatd_25_the_time_goes_on_the_tasks_own_day() {
+        let now = date::parse("2026-12-01T18:00:00Z").expect("a date");
+        let christmas = date::all_day_instant(day(2026, 12, 25));
+        let anchor = time_anchor(Some(christmas), true, now, california());
+        assert_eq!(
+            date::format(with_time(14, 30, anchor, california())),
+            "2026-12-25T21:30:00Z"
+        );
+        let anchor = time_anchor(None, false, now, california());
+        assert_eq!(
+            date::format(with_time(14, 30, anchor, california())),
+            "2026-12-01T21:30:00Z"
+        );
     }
 
     /// An all-day task stores a calendar date, and it has to read back as the same date west of

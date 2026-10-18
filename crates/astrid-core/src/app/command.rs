@@ -117,6 +117,14 @@ pub enum Command {
         /// The calendar day the reader clicked, as `YYYY-MM-DD`.
         day: String,
     },
+    /// A time of day from a picker (24-hour), on the task's own day, as a timed due date — answers
+    /// `{ dueDateTime, isAllDay: false }` like a quick pick (AATD-25).
+    DueDateAtTime {
+        task_id: String,
+        hour: u32,
+        #[serde(default)]
+        minute: u32,
+    },
     ///
     /// A date pick is the reader's calendar day as an all-day date, at UTC midnight, whatever the
     /// task held — iOS's quick date (AITD-461, `docs/CONTRACTS.md` D48). An editor holding a date
