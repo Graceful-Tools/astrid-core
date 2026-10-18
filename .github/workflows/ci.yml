@@ -85,6 +85,28 @@ jobs:
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
 
+  # astrid-android builds this crate for Android through the NDK. A dependency that cannot target
+  # it — the system OpenSSL that native-tls wants, for one — is caught here, the day it lands
+  # (AATD-4).
+  android:
+    name: astrid-core (android, arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: NDK and cargo-ndk
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Build
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+        run: cargo ndk -t arm64-v8a --platform 28 build -p astrid-core
+
   contracts:
     name: cross-platform contracts
     runs-on: ubuntu-latest
