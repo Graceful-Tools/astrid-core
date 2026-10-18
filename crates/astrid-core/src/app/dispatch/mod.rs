@@ -176,6 +176,23 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Err(error) => Response::failed(error.into()),
         },
         Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
+        Command::TaskProjectFields { task_id } => {
+            let fields = app.context.project_fields();
+            match fields.refresh(&task_id).await {
+                Ok(rows) => Response::ok(rows),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::SetTaskProjectField {
+            task_id,
+            field_id,
+            value,
+        } => answer(
+            app.context
+                .project_fields()
+                .set_now(&task_id, &field_id, value)
+                .await,
+        ),
         Command::AddTaskBlocker {
             task_id,
             blocking_task_id,

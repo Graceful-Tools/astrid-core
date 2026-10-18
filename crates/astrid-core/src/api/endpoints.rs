@@ -211,6 +211,15 @@ pub fn task_blocker(task_id: &str, blocking_task_id: &str) -> String {
     )
 }
 
+/// One GitHub project field on one task, for `PUT { value }` — `null` clears (web AWTD-1209).
+pub fn task_field(task_id: &str, field_id: &str) -> String {
+    format!(
+        "{}/fields/{}",
+        task(task_id),
+        escaped_path_component(field_id)
+    )
+}
+
 pub fn comment(id: &str) -> String {
     format!("/api/v1/comments/{}", escaped_path_component(id))
 }
@@ -264,6 +273,12 @@ pub fn manual_order(list_id: &str) -> String {
 
 pub fn project(id: &str) -> String {
     format!("{PROJECTS}/{}", escaped_path_component(id))
+}
+
+/// A GitHub project's field schema, once per project (web AWTD-1208). `404` on a deployment
+/// without the `githubProjects` capability, and for a board the caller cannot see.
+pub fn project_fields(project_id: &str) -> String {
+    format!("{}/fields", project(project_id))
 }
 
 pub fn channel_messages(channel_id: &str) -> String {

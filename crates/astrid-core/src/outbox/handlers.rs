@@ -100,6 +100,7 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         }
         kind::ADD_TASK_BLOCKER => add_task_blocker(client, store, entry).await,
         kind::REMOVE_TASK_BLOCKER => remove_task_blocker(client, store, entry).await,
+        kind::SET_TASK_FIELD => set_task_field(client, store, entry).await,
         unknown => Outcome::Dead(format!(
             "no handler for {unknown} — the journal was written by a newer build"
         )),
@@ -240,6 +241,40 @@ async fn add_task_blocker(client: &ApiClient, store: &Store, entry: &Entry) -> O
         Err(error) if error.status() == Some(409) => Outcome::Dead(
             "those tasks would end up waiting for each other, so the link was refused".into(),
         ),
+        Err(error) => from_error(error),
+    }
+}
+
+/// One GitHub project field on one task (AITD-491).
+///
+/// A `400` (wrong type, an option that is gone, a field now mapped), `403` or `404` will say the
+/// same in five minutes, so it is dead-lettered rather than retried; the cached value then shows
+/// what was typed until the next refresh corrects it from the server.
+async fn set_task_field(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let task_id = match id(entry, "taskId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let field_id = match id(entry, "fieldId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .put(endpoints::task_field(task_id, field_id))
+        .value(body(entry));
+    match client.send(request).await {
+        Ok(value) => {
+            let kept = value
+                .get("field")
+                .and_then(|field| field.get("value"))
+                .cloned()
+                .filter(|value| !value.is_null());
+            crate::services::project_fields::store_value(store, task_id, field_id, kept);
+            Outcome::done()
+        }
+        Err(error) if matches!(error.status(), Some(400 | 403 | 404)) => {
+            Outcome::Dead(format!("the field edit was refused: {error}"))
+        }
         Err(error) => from_error(error),
     }
 }

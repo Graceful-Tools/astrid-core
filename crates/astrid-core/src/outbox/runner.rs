@@ -119,7 +119,8 @@ impl Delivery {
             | kind::COMPLETE_TASK
             | kind::DELETE_TASK
             | kind::ADD_TASK_BLOCKER
-            | kind::REMOVE_TASK_BLOCKER => {
+            | kind::REMOVE_TASK_BLOCKER
+            | kind::SET_TASK_FIELD => {
                 for id in [temp, field("taskId"), produced("taskId")]
                     .into_iter()
                     .flatten()

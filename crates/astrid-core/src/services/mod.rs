@@ -28,6 +28,7 @@ pub mod list;
 pub mod list_defaults;
 pub mod members;
 pub mod notifications;
+pub mod project_fields;
 pub mod search;
 pub mod share;
 pub mod task;
@@ -97,6 +98,11 @@ impl Context {
     /// What one task is waiting on, and what waits on it.
     pub fn dependencies(&self) -> TaskDependencyService {
         TaskDependencyService::new(self.clone())
+    }
+
+    /// A GitHub board's project fields on one task (AITD-491).
+    pub fn project_fields(&self) -> project_fields::ProjectFieldService {
+        project_fields::ProjectFieldService::new(self.clone())
     }
 
     /// Links other people can open. Online-only, like the web's.

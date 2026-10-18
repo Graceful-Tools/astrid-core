@@ -1101,3 +1101,20 @@ server older than a key never hides a control that works. `Task::remote` is kept
 `TaskRemote::chip_label` is `owner/repo#N` only when there is a page to open, so a draft draws no
 chip. Tests: `aitd_491_every_supports_key_survives_the_cache_and_absent_is_classic`,
 `aitd_491_remote_survives_the_cache_and_names_its_chip`.
+
+### D56 — a GitHub board's project fields: cached beside the task, sent at once, queued offline
+
+Web AWTD-1208 serves a project's field schema once per project (`GET /api/v1/projects/:id/fields`)
+and AWTD-1209 writes one value through to GitHub (`PUT /api/v1/tasks/:id/fields/:fieldId`,
+`{ "value": <scalar> | null }`). Values ride `GET /api/v1/tasks/:id` but the list route only on
+`?include=fields`, so they are **not** a field on the cached `Task` — it would be filled for the
+tasks someone opened and absent, reading as "no values", for the rest. `services::project_fields`
+caches the schema under `projectFields:<projectId>` and the values under
+`taskFieldValues:<taskId>`. `taskProjectFields` answers with the rows task detail draws — web
+`visibleProjectFields` (never a mapped field, never an unknown type, `position` order) with
+iterations ordered as web `orderIterationChoices` — and with the cache when offline or on a `404`.
+`setTaskProjectField` is sent at once like `addTaskBlocker` (D32): a refusal reaches the person by
+its code (`auth_required` and `sso_required` are `403`, never `401`, which means the Astrid
+session), and only a network failure journals it as `setTaskField`, which dead-letters a
+`400`/`403`/`404` on replay. Tests: `aitd_491_*` in `services::project_fields` and
+`app::dispatch::tests`.

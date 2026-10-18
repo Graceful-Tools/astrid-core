@@ -5663,3 +5663,161 @@ async fn aitd_463_an_apple_ledger_imports_in_one_command() {
     .await;
     assert_eq!(bare["ok"], true, "{bare}");
 }
+
+/// A task on a GitHub board, and a classic one, in a fresh app (AITD-491).
+fn on_a_github_board(app: &super::App) {
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({
+                "id": "gh", "name": "Roadmap", "backend": "github_project", "projectId": "p1"
+            }))
+            .expect("a list"),
+        )
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "home", "name": "Home" })).expect("a list"),
+        )
+        .expect("stores");
+    for (id, list) in [("t1", "gh"), ("t2", "home")] {
+        app.store
+            .upsert_task(
+                &serde_json::from_value(json!({ "id": id, "title": id, "listIds": [list] }))
+                    .expect("a task"),
+            )
+            .expect("stores");
+    }
+}
+
+fn project_schema() -> serde_json::Value {
+    json!({ "fields": [
+        { "id": "f-size", "remoteId": "R1", "name": "Size", "dataType": "number", "options": null,
+          "iterations": null, "mappedTo": null, "position": 2 },
+        { "id": "f-team", "remoteId": "R2", "name": "Team", "dataType": "single_select",
+          "options": [{ "id": "o-ios", "name": "iOS", "color": "BLUE" }], "iterations": null,
+          "mappedTo": null, "position": 1 },
+        { "id": "f-status", "remoteId": "R3", "name": "Status", "dataType": "single_select",
+          "options": [], "iterations": null, "mappedTo": "status", "position": 0 }
+    ] })
+}
+
+/// Task detail reads the schema once per project and the values from the task's own route, and
+/// draws the unmapped fields in order with this task's values. A classic task has no rows.
+#[tokio::test]
+async fn aitd_491_a_github_task_shows_its_project_fields_and_a_classic_one_none() {
+    let transport = StubTransport::new()
+        .push_json("/api/v1/projects/p1/fields", 200, project_schema())
+        .push_json(
+            "/api/v1/tasks/t1",
+            200,
+            json!({ "task": { "id": "t1", "fields": { "f-team": "o-ios", "f-size": 5 } } }),
+        );
+    let app = app_with(transport);
+    on_a_github_board(&app);
+
+    let fields = call(&app, json!({ "kind": "taskProjectFields", "taskId": "t1" })).await;
+    assert_eq!(fields["ok"], true, "{fields}");
+    let rows = fields["value"]["rows"].as_array().expect("rows");
+    assert_eq!(
+        rows.len(),
+        2,
+        "the mapped Status field is not drawn: {fields}"
+    );
+    assert_eq!(rows[0]["name"], "Team");
+    assert_eq!(rows[0]["value"], "o-ios");
+    assert_eq!(rows[0]["options"][0]["name"], "iOS");
+    assert_eq!(rows[1]["name"], "Size");
+    assert_eq!(rows[1]["value"], 5);
+
+    // Offline now (nothing more is stubbed): the cache answers, unchanged.
+    let again = call(&app, json!({ "kind": "taskProjectFields", "taskId": "t1" })).await;
+    assert_eq!(again["value"], fields["value"], "{again}");
+
+    let classic = call(&app, json!({ "kind": "taskProjectFields", "taskId": "t2" })).await;
+    assert_eq!(classic["ok"], true, "{classic}");
+    assert!(classic["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .is_empty());
+}
+
+/// Online, an edit is sent at once and the server's value is kept; a refusal reaches the person
+/// who made it, by its code, and nothing is journalled to be refused again unseen.
+#[tokio::test]
+async fn aitd_491_a_field_edit_online_is_sent_and_a_refusal_comes_back_by_its_code() {
+    let transport = StubTransport::new()
+        .push_json("/api/v1/projects/p1/fields", 200, project_schema())
+        .push_json(
+            "/api/v1/tasks/t1/fields/f-size",
+            200,
+            json!({ "field": { "id": "f-size", "value": 8 } }),
+        )
+        .push_json(
+            "/api/v1/tasks/t1/fields/f-team",
+            // 403, never 401: a 401 from Astrid means the Astrid session (web lib/github/projects/http.ts).
+            403,
+            json!({ "error": "sso_required", "ssoUrl": "https://github.com/orgs/x/sso" }),
+        )
+        .push_json("/api/v1/tasks/t1", 200, json!({ "task": { "id": "t1" } }));
+    let app = app_with(transport);
+    on_a_github_board(&app);
+    let _ = call(&app, json!({ "kind": "taskProjectFields", "taskId": "t1" })).await;
+
+    let set = call(
+        &app,
+        json!({ "kind": "setTaskProjectField", "taskId": "t1", "fieldId": "f-size", "value": 8 }),
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["value"]["rows"][1]["value"], 8, "{set}");
+
+    let refused = call(
+        &app,
+        json!({ "kind": "setTaskProjectField", "taskId": "t1", "fieldId": "f-team", "value": "o-ios" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(
+        refused.to_string().contains("sso_required"),
+        "the code the shell picks its words from: {refused}"
+    );
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+
+    // The wrong JSON type is refused here, before anything is sent.
+    let mismatched = call(
+        &app,
+        json!({ "kind": "setTaskProjectField", "taskId": "t1", "fieldId": "f-size", "value": "eight" }),
+    )
+    .await;
+    assert_eq!(mismatched["ok"], false, "{mismatched}");
+}
+
+/// Offline, an edit — a clear included — shows at once and waits in the journal.
+#[tokio::test]
+async fn aitd_491_a_field_edit_offline_shows_at_once_and_is_journalled() {
+    let transport = StubTransport::new()
+        .push_json("/api/v1/projects/p1/fields", 200, project_schema())
+        .push_json(
+            "/api/v1/tasks/t1",
+            200,
+            json!({ "task": { "id": "t1", "fields": { "f-team": "o-ios" } } }),
+        );
+    let app = app_with(transport);
+    on_a_github_board(&app);
+    let _ = call(&app, json!({ "kind": "taskProjectFields", "taskId": "t1" })).await;
+
+    let cleared = call(
+        &app,
+        json!({ "kind": "setTaskProjectField", "taskId": "t1", "fieldId": "f-team", "value": null }),
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert!(cleared["value"]["rows"][0]["value"].is_null(), "{cleared}");
+    let journal = crate::outbox::journal::all(&app.store).expect("reads");
+    assert_eq!(journal.len(), 1);
+    assert_eq!(journal[0].kind, "setTaskField");
+    assert_eq!(journal[0].payload["fieldId"], "f-team");
+    assert!(journal[0].payload["body"]["value"].is_null());
+}
