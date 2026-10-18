@@ -19,13 +19,23 @@ sha2 = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
 url = { workspace = true }
-reqwest = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 rusqlite = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+
+# The HTTP stack. Everywhere but Android it speaks the platform's own TLS (see the workspace
+# manifest). Android has no system OpenSSL for an NDK build to link — native-tls there means
+# OpenSSL, which would also have to be taught Android's certificate store — so on Android it is
+# rustls with the Mozilla root bundle. That matches what an Android app trusts by default since
+# API 24: the system's CAs, never user-installed ones (AATD-4).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "gzip", "stream", "charset", "http2"] }
 
 [dev-dependencies]
 # `hooks` lets a test count commits: the sync merge is one transaction per phase, not one per row
