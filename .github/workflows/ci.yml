@@ -48,7 +48,7 @@ jobs:
           - advisories
           - licenses bans sources
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.checks }}
@@ -71,7 +71,7 @@ jobs:
           - name: windows
             runner: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The toolchain and its components come from rust-toolchain.toml, so there is one place
       # that decides which Rust this crate builds with.
@@ -101,7 +101,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Add the wasm target
         run: rustup target add wasm32-unknown-unknown
@@ -128,7 +128,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Packages named explicitly: the action's default list still includes the retired `tools`.
       - uses: android-actions/setup-android@v3
         with:
@@ -150,11 +150,11 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: astrid-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
