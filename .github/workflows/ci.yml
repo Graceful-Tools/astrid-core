@@ -125,6 +125,7 @@ jobs:
   # (AATD-4).
   android:
     name: astrid-core (android, arm64)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

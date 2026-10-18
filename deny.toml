@@ -32,16 +32,22 @@ ignore = []
 # problem, and a lockfile that lags a yank by a day should not stop a release.
 yanked = "warn"
 
-# Computed from the real graph (`cargo metadata --all-features`, 204 packages on 2026-10-18), not
+# Computed from the real graph (`cargo metadata --all-features`, 218 packages on 2026-10-18), not
 # copied from a list of licences that are usually fine. Every term here is REQUIRED by something in
 # the tree: BSD-3-Clause and Unicode-3.0 and ISC each arrive through an `AND` that no `OR` branch can
 # satisfy, and Zlib arrives alone. A new licence in the graph is meant to fail here and be read.
+#
+# CDLA-Permissive-2.0 is `webpki-roots`, which carries the Mozilla root certificate set rather than
+# code — it arrived with rustls on Android (AATD-4) and is the one entry here that is a DATA licence.
+# It is also why this list is computed and not assumed: nothing about "a TLS stack" suggests a
+# Community Data License Agreement.
 [licenses]
 version = 2
 allow = [
     "Apache-2.0",
     "MIT",
     "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
     "ISC",
     "Unicode-3.0",
     "Zlib",
