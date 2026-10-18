@@ -409,6 +409,10 @@ pub enum Command {
     /// still shows everything. Journals nothing and leaves the sync cursor alone: the first pass
     /// still pulls everything, and the server's answer replaces what was seeded.
     SeedCache {
+        /// Who is signed in, recorded as sign-in records it — for a UI-test build, which seeds a
+        /// signed-in person without ever reaching the server (AATD-18). Absent, nobody changes.
+        #[serde(default)]
+        current_user: Option<Box<crate::model::User>>,
         #[serde(default)]
         tasks: Vec<crate::model::Task>,
         #[serde(default)]

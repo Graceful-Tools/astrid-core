@@ -125,6 +125,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             }
         }
         Command::SeedCache {
+            current_user,
             tasks,
             lists,
             comments,
@@ -149,6 +150,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .and_then(|()| store.upsert_projects(&projects))
                 .and_then(|()| store.upsert_channels(&channels))
                 .and_then(|()| store.upsert_messages(&messages));
+            if let (Ok(()), Some(user)) = (&written, current_user) {
+                if let Err(error) = app.context.account().set_current_user(&user).await {
+                    return Response::failed(error.into());
+                }
+            }
             match written {
                 Ok(()) => Response::ok(serde_json::json!({
                     "seeded": true,
