@@ -699,6 +699,12 @@ asks the same function, so there is one rule. Tests: `d28_list_picker_excludes_v
 `virtual_lists_are_not_offered_as_destinations`. The Mac's `MacListPicker` (excludes only status
 lists) should take this.
 
+**Amended 2026-10-18 (AITD-506):** a GitHub **milestone** or **iteration** list is not offered
+either. The server refuses joining or leaving one (`github_milestone_read_only`,
+`github_iteration_read_only`), so the row could only fail; a task's iteration changes as a project
+field. Both are tags (`TaskList::is_tag_list`, the web's `isTagList`), so neither is a domain list:
+out of the sidebar, drawn as a chip. A label is still offered. Tests: `aitd506_*`.
+
 ### Subtask splice depth and list search — checked against iOS 2026-10-03
 
 - **Splice depth cap: no divergence.** iOS's private splice in `TaskListView.filteredTasks` and the

@@ -330,7 +330,8 @@ pub struct ListChip {
     pub id: String,
     pub name: String,
     pub color: String,
-    /// A label rather than a place (`listType: "label"`). Drawn as a tag, and never opened.
+    /// A tag rather than a place — a label, milestone or iteration (`TaskList::is_tag_list`).
+    /// Drawn as a tag, and never opened.
     pub is_label: bool,
 }
 
@@ -378,13 +379,14 @@ impl TaskRow {
             .filter_map(|id| context.lists.iter().find(|list| &list.id == id))
             // A board column is a state, not a place. Drawing it as a chip beside "Home" and
             // "Work" tells the reader a task is filed somewhere it is not. A label IS drawn —
-            // that is the whole point of a label — marked so the shell draws it as a tag.
+            // that is the whole point of a label — marked so the shell draws it as a tag, and so
+            // are a milestone and an iteration, which are tags too (AITD-506).
             .filter(|list| !list.is_status_list())
             .map(|list| ListChip {
                 id: list.id.clone(),
                 name: list.name.clone(),
                 color: list.display_color().to_string(),
-                is_label: list.is_label_list(),
+                is_label: list.is_tag_list(),
             })
             .collect();
 
