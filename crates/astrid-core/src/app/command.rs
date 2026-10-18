@@ -125,6 +125,16 @@ pub enum Command {
         #[serde(default)]
         minute: u32,
     },
+    /// Taking the time off a task: all-day, on the day it was already showing (task 0616f2d1).
+    ///
+    /// The other half of [`Command::DueDateAtTime`], and it cannot be the shell writing
+    /// `{ dueDateTime: <the instant it had>, isAllDay: true }` — nothing normalises that pair, and
+    /// an all-day date is read as its UTC day, so a task due in the evening west of UTC would move
+    /// to tomorrow. Answers `{ dueDateTime, isAllDay: true }` like a quick pick; a task with no
+    /// date has no day to keep and answers a null date rather than inventing today.
+    DueDateAllDay {
+        task_id: String,
+    },
     ///
     /// A date pick is the reader's calendar day as an all-day date, at UTC midnight, whatever the
     /// task held — iOS's quick date (AITD-461, `docs/CONTRACTS.md` D48). An editor holding a date

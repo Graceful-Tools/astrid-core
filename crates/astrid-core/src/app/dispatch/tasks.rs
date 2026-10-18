@@ -525,6 +525,32 @@ pub(super) fn due_date_at_time(app: &App, task_id: &str, hour: u32, minute: u32)
     }))
 }
 
+/// Taking the time off a task: all-day, on the day it was already showing (task 0616f2d1).
+///
+/// The inverse of [`due_date_at_time`], and the reason it is a command at all is that the obvious
+/// shell-side write — the instant it had, with `isAllDay: true` — moves the date. See
+/// `rows::due_picks::to_all_day`.
+pub(super) fn due_date_all_day(app: &App, task_id: &str) -> Response {
+    let task = match app.store.task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    // An all-day task is already its own day at UTC midnight and must not be recomputed: west of
+    // UTC that midnight reads as the previous afternoon, so it would walk backwards a day a tap.
+    // A task with no date has no day to keep.
+    let kept = match task.due_date_time {
+        Some(due) if !task.is_all_day => {
+            Some(rows::due_picks::to_all_day(due, app.clock.utc_offset()))
+        }
+        other => other,
+    };
+    Response::ok(serde_json::json!({
+        "dueDateTime": kept.map(date::format),
+        "isAllDay": true,
+    }))
+}
+
 /// The quick date and time picks for a task, or for the date an editor holds (`draft`).
 ///
 /// A date pick is iOS's (D48): the reader's calendar day, `n` days on, as an all-day date at UTC

@@ -1149,3 +1149,33 @@ than one to close — and if it closes, it closes on web by lifting the restrict
 details have somewhere else to go, not here by adding one. Tests: `PaneToggleTests` in
 `astrid-windows/app/Astrid.App.Tests` (named for task `ab4cb9ee`), and web's
 `desktop-chat-pane.test.tsx`.
+
+### D58 — taking a time off a task keeps the day the reader saw it on
+
+The inverse of D48, which settled only what a *pick* means. Removing a time of day leaves an
+all-day task, and the question is which day: the task's **local** calendar day, re-expressed as
+midnight UTC (`rows::due_picks::to_all_day`), which is `all_day_instant` of
+`due.with_timezone(&reader_offset).date_naive()`.
+
+Neither shortcut works, and both are live in the codebase:
+
+- **Keep the instant, flip the flag.** Nothing normalises the pair — not `TaskChanges::apply`
+  (`services/task.rs`), not `changes_from_json`, and not web's PATCH route
+  (`services/task.service.ts`; only its *create* path flattens, via `resolveCreateDateFields`).
+  Every all-day consumer then reads the **UTC** day through `date::all_day_date`, so a task due
+  20:00 in California — `03:00Z` — reads back as tomorrow, and one due 07:00 in Tokyo as
+  yesterday.
+- **Local midnight.** `astrid-web/components/task-detail.tsx` clears a time client-side with
+  `updatedDate.setHours(0, 0, 0, 0)`, which writes the previous UTC day for any reader east of
+  UTC. **Web is the one that is wrong** — this is the same mistake D12 records the Apple apps
+  having made, and it was not copied as the reference. Filed on the Astrid Web board.
+
+The arithmetic is not new: `external::decisions::push_due`'s timed branch has sent Google this
+same day all along. An already-all-day task is left alone rather than recomputed — its stored
+midnight reads as the previous afternoon west of UTC, so recomputing would walk the date back a
+day per tap. A task with no date has no day to keep and answers a null date.
+
+Exposed as the `dueDateAllDay` command, answering `{ dueDateTime, isAllDay: true }` in the same
+shape a quick pick does, because the shell must not do this arithmetic. Tests:
+`task_0616f2d1_clearing_a_time_west_of_utc_keeps_the_readers_day` and its east-of-UTC twin in
+`rows::due_picks`, and the five `task_0616f2d1_*` dispatch tests.

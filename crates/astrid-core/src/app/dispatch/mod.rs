@@ -182,6 +182,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             hour,
             minute,
         } => due_date_at_time(app, &task_id, hour, minute),
+        Command::DueDateAllDay { task_id } => due_date_all_day(app, &task_id),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),

@@ -140,6 +140,30 @@ pub fn with_hour(hour: u32, current: DateTime<Utc>, offset: FixedOffset) -> Date
     with_time(hour, 0, current, offset)
 }
 
+/// Taking the time off a timed due date, keeping the day the reader sees it on (task 0616f2d1).
+///
+/// The task's **local** day, re-expressed as UTC midnight — the way an all-day date is stored.
+/// Neither of the two obvious shortcuts works:
+///
+/// - Keeping the instant and flipping `isAllDay` moves the date. Nothing normalises the pair —
+///   not `TaskChanges::apply`, not web's PATCH route — and every all-day consumer reads the
+///   **UTC** day through [`crate::model::date::all_day_date`]. A task due 20:00 in California is
+///   `03:00Z` the next day, so it would read back as tomorrow; one due 07:00 in Tokyo, as
+///   yesterday.
+/// - Local midnight is the mistake web makes today (`setHours(0,0,0,0)`), and the one the Apple
+///   apps made before `docs/CONTRACTS.md` D12.
+///
+/// This is `push_due`'s timed branch (`external::decisions`), which has pushed the same day to
+/// Google all along.
+///
+/// **Takes a timed instant.** An instant that is already an all-day date would go backwards west
+/// of UTC, where UTC midnight reads as the previous afternoon; [`time_anchor`] is what turns an
+/// all-day task into a valid input, and the caller that has an `is_all_day` flag should simply
+/// leave such a task alone.
+pub fn to_all_day(due: DateTime<Utc>, offset: FixedOffset) -> DateTime<Utc> {
+    crate::model::date::all_day_instant(due.with_timezone(&offset).date_naive())
+}
+
 /// As [`with_hour`], keeping a minute too — what a time picker hands back (AATD-25).
 pub fn with_time(
     hour: u32,
@@ -256,6 +280,63 @@ mod tests {
     fn a_timed_task_with_no_date_takes_the_day() {
         let picked = on_day(day(2026, 9, 14), None, false, california());
         assert_eq!(date::all_day_date(picked), day(2026, 9, 14));
+    }
+
+    /// Task 0616f2d1. Taking the time off a task keeps the day the reader sees it on — which is
+    /// their LOCAL day re-expressed as UTC midnight, not the raw instant with a flag flipped.
+    /// A task due 20:00 in California is 03:00Z the next day; written back unchanged it reads as
+    /// tomorrow, because every all-day consumer goes through `date::all_day_date`, which reads UTC.
+    #[test]
+    fn task_0616f2d1_clearing_a_time_west_of_utc_keeps_the_readers_day() {
+        // 20:00 on the 14th in California is 03:00 on the 15th in UTC.
+        let evening = at("2026-12-15T03:00:00Z");
+        assert_eq!(
+            date::format(to_all_day(evening, california())),
+            "2026-12-14T00:00:00Z"
+        );
+        assert_eq!(
+            date::all_day_date(to_all_day(evening, california())),
+            day(2026, 12, 14),
+            "and it reads back as the same day it was shown on"
+        );
+    }
+
+    /// The mirror image, east of UTC: a task due 07:00 in Tokyo is the previous day in UTC, and
+    /// keeping the raw instant would move it back a day.
+    #[test]
+    fn task_0616f2d1_clearing_a_time_east_of_utc_keeps_the_readers_day() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).expect("an offset");
+        // 07:00 on the 15th in Tokyo is 22:00 on the 14th in UTC.
+        let morning = at("2026-12-14T22:00:00Z");
+        assert_eq!(
+            date::format(to_all_day(morning, tokyo)),
+            "2026-12-15T00:00:00Z"
+        );
+    }
+
+    /// The hazard the doc comment names, pinned so nobody "simplifies" the caller's guard away:
+    /// handed an instant that is ALREADY an all-day date, this walks the date backwards west of
+    /// UTC, because UTC midnight reads as the previous afternoon there. Only a timed instant goes
+    /// in — [`time_anchor`] is what turns an all-day task into one.
+    #[test]
+    fn task_0616f2d1_an_all_day_instant_is_not_a_valid_input() {
+        let christmas = date::all_day_instant(day(2026, 12, 25));
+        assert_eq!(
+            date::all_day_date(to_all_day(christmas, california())),
+            day(2026, 12, 24),
+            "which is why the caller must not pass one"
+        );
+        // Through the anchor, which is how the command reaches it, the day is kept.
+        let anchor = time_anchor(
+            Some(christmas),
+            true,
+            at("2026-12-01T18:00:00Z"),
+            california(),
+        );
+        assert_eq!(
+            date::format(to_all_day(anchor, california())),
+            "2026-12-25T00:00:00Z"
+        );
     }
 
     /// The reader's zone decides, not the server's.

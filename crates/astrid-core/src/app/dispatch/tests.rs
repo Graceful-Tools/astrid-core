@@ -6080,3 +6080,112 @@ async fn aatd_25_a_picked_time_lands_on_the_tasks_own_day() {
         "UTC test clock: the 25th at 14:30, got {due}"
     );
 }
+
+/// An app whose reader is `hours` from UTC, for the date arithmetic that only goes wrong there.
+fn app_in_zone(hours: i32) -> App {
+    App::with_parts(
+        &Config {
+            cache_path: ":memory:".into(),
+            base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
+        },
+        std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+        std::sync::Arc::new(StubTransport::new()),
+        std::sync::Arc::new(
+            crate::platform::FixedClock::parsed("2026-12-01T18:00:00Z").in_zone(hours),
+        ),
+    )
+    .expect("starts")
+}
+
+/// Task 0616f2d1: taking the time off a task keeps the day the reader sees it on. West of UTC the
+/// stored instant is already the next UTC day, so writing it back with `isAllDay: true` — the
+/// shortcut nothing rejects — would move the task to tomorrow.
+#[tokio::test]
+async fn task_0616f2d1_clearing_a_time_keeps_the_readers_day_west_of_utc() {
+    let app = app_in_zone(-7);
+    let made = call(&app, json!({ "kind": "createTask", "title": "Dentist" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    // 20:00 on the 14th in California is 03:00 on the 15th in UTC.
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "dueDateTime": "2026-12-15T03:00:00Z", "isAllDay": false } }),
+    )
+    .await;
+
+    let cleared = call(&app, json!({ "kind": "dueDateAllDay", "taskId": id })).await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert_eq!(cleared["value"]["isAllDay"], true, "{cleared}");
+    assert_eq!(
+        cleared["value"]["dueDateTime"], "2026-12-14T00:00:00Z",
+        "the 14th, the day it was shown on — not the 15th: {cleared}"
+    );
+}
+
+/// The mirror image east of UTC, where the stored instant is the PREVIOUS UTC day.
+#[tokio::test]
+async fn task_0616f2d1_clearing_a_time_keeps_the_readers_day_east_of_utc() {
+    let app = app_in_zone(9);
+    let made = call(&app, json!({ "kind": "createTask", "title": "Breakfast" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    // 07:00 on the 15th in Tokyo is 22:00 on the 14th in UTC.
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "dueDateTime": "2026-12-14T22:00:00Z", "isAllDay": false } }),
+    )
+    .await;
+
+    let cleared = call(&app, json!({ "kind": "dueDateAllDay", "taskId": id })).await;
+    assert_eq!(
+        cleared["value"]["dueDateTime"], "2026-12-15T00:00:00Z",
+        "the 15th, the day it was shown on — not the 14th: {cleared}"
+    );
+    assert_eq!(cleared["value"]["isAllDay"], true, "{cleared}");
+}
+
+/// A task that is already all-day has nothing to clear, and must not drift: west of UTC its stored
+/// midnight reads as the previous afternoon locally, so a second tap would walk the date back.
+#[tokio::test]
+async fn task_0616f2d1_an_all_day_task_does_not_move() {
+    let app = app_in_zone(-7);
+    let made = call(&app, json!({ "kind": "createTask", "title": "Christmas" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "dueDateTime": "2026-12-25T00:00:00Z", "isAllDay": true } }),
+    )
+    .await;
+
+    let cleared = call(&app, json!({ "kind": "dueDateAllDay", "taskId": id })).await;
+    assert_eq!(
+        cleared["value"]["dueDateTime"], "2026-12-25T00:00:00Z",
+        "{cleared}"
+    );
+    assert_eq!(cleared["value"]["isAllDay"], true, "{cleared}");
+}
+
+/// A task with no date has no day to keep, so the answer carries no date rather than inventing
+/// today — the shell is turning a time off, not setting a due date.
+#[tokio::test]
+async fn task_0616f2d1_a_task_with_no_date_keeps_none() {
+    let app = app_in_zone(-7);
+    let made = call(&app, json!({ "kind": "createTask", "title": "Someday" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+
+    let cleared = call(&app, json!({ "kind": "dueDateAllDay", "taskId": id })).await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert_eq!(
+        cleared["value"]["dueDateTime"],
+        serde_json::Value::Null,
+        "{cleared}"
+    );
+    assert_eq!(cleared["value"]["isAllDay"], true, "{cleared}");
+}
+
+/// A task the cache has not got answers notFound, like every other task command.
+#[tokio::test]
+async fn task_0616f2d1_clearing_a_time_on_an_unknown_task_says_not_found() {
+    let app = app_in_zone(0);
+    let missing = call(&app, json!({ "kind": "dueDateAllDay", "taskId": "nope" })).await;
+    assert_eq!(missing["ok"], false, "{missing}");
+}
