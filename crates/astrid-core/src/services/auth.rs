@@ -69,10 +69,25 @@ impl AuthService {
 
     /// Start signing in. Returns the URL for the shell to open in the browser.
     pub fn begin(&self) -> Result<String> {
+        self.begin_with(None)
+    }
+
+    /// As [`AuthService::begin`], asking the hand-off page to start `provider` directly.
+    pub fn begin_with(&self, provider: Option<&str>) -> Result<String> {
         let flow = desktop_handoff::begin_flow()
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
-        let url = desktop_handoff::authorize_url(self.context.client.base_url(), &flow)
+        let client = self.context.client.platform().handoff_client();
+        let url = desktop_handoff::authorize_url(self.context.client.base_url(), client, &flow)
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
+        let url = match provider.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(name) => {
+                let mut url = url::Url::parse(&url)
+                    .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
+                url.query_pairs_mut().append_pair("provider", name);
+                url.into()
+            }
+            None => url,
+        };
         *self.flow.lock().expect("auth lock") = Some(flow);
         Ok(url)
     }
@@ -102,7 +117,8 @@ impl AuthService {
         let callback = desktop_handoff::parse_callback(callback_url, &flow, URL_SCHEME)
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
 
-        let request = ExchangeRequest::new(&callback, &flow);
+        let client = self.context.client.platform().handoff_client();
+        let request = ExchangeRequest::new(client, &callback, &flow);
         let value = self
             .context
             .client
@@ -146,13 +162,16 @@ mod tests {
     }
 
     fn fixture(transport: StubTransport) -> Fixture {
+        fixture_on(transport, crate::api::Platform::default())
+    }
+
+    fn fixture_on(transport: StubTransport, platform: crate::api::Platform) -> Fixture {
         let secure = Arc::new(MemorySecureStore::new());
         let context = Context::new(
-            Arc::new(ApiClient::new(
-                "https://astrid.cc",
-                Arc::new(transport),
-                secure.clone(),
-            )),
+            Arc::new(
+                ApiClient::new("https://astrid.cc", Arc::new(transport), secure.clone())
+                    .with_platform(platform),
+            ),
             Arc::new(Store::in_memory().expect("opens")),
             Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
         );
@@ -171,6 +190,53 @@ mod tests {
             "sessionCookieName": "next-auth.session-token",
             "user": { "id": "u1", "email": "ada@example.com", "name": "Ada" }
         })
+    }
+
+    /// AATD-3. The hand-off page names the app it is signing in ("Astrid for Android"), and the
+    /// server's registry refuses a client it does not know — so the client is the shell's own,
+    /// in both halves of the flow, not the "windows" every caller used to send.
+    #[tokio::test]
+    async fn aatd_3_a_shell_signs_in_as_its_own_client() {
+        let transport =
+            StubTransport::new().push_json("/api/v1/auth/desktop/exchange", 200, exchange_body());
+        let recorded = transport.recorded.clone();
+        let fixture = fixture_on(transport, crate::api::Platform::Android);
+        let url = fixture.auth.begin().expect("begins");
+        assert!(url.contains("client=android"), "{url}");
+
+        let state = state_from(&url);
+        fixture
+            .auth
+            .complete(&format!("astrid://auth/callback?code=abc&state={state}"))
+            .await
+            .expect("completes");
+        let sent = recorded.lock().expect("recorded").clone();
+        let body: serde_json::Value =
+            serde_json::from_slice(sent.last().expect("sent").body.as_deref().expect("a body"))
+                .expect("json");
+        assert_eq!(body["client"], "android");
+    }
+
+    /// AATD-3. The iOS sign-in screen asks which provider first; the page should start it.
+    #[test]
+    fn aatd_3_a_chosen_provider_rides_on_the_hand_off_url() {
+        let fixture = fixture(StubTransport::new());
+        let url = fixture.auth.begin_with(Some("google")).expect("begins");
+        assert!(url.contains("provider=google"), "{url}");
+        assert!(url.contains("state="), "the flow is still bound: {url}");
+        let plain = fixture.auth.begin_with(None).expect("begins");
+        assert!(!plain.contains("provider="), "{plain}");
+        let blank = fixture.auth.begin_with(Some("  ")).expect("begins");
+        assert!(!blank.contains("provider="), "{blank}");
+    }
+
+    #[test]
+    fn aatd_3_every_platform_has_the_client_the_server_registers() {
+        use crate::api::Platform;
+        assert_eq!(Platform::Windows.handoff_client(), "windows");
+        assert_eq!(Platform::Ios.handoff_client(), "ios");
+        assert_eq!(Platform::Mac.handoff_client(), "mac");
+        assert_eq!(Platform::Android.handoff_client(), "android");
     }
 
     /// The state in the URL is what the callback is later checked against.

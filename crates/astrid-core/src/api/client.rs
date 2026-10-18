@@ -176,6 +176,11 @@ impl ApiClient {
         self
     }
 
+    /// Which client this build states it is — the platform header, and the sign-in client.
+    pub fn platform(&self) -> platform_header::Platform {
+        self.platform
+    }
+
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
