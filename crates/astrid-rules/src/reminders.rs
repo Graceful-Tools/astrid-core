@@ -102,6 +102,30 @@ pub fn due_now(
     due
 }
 
+/// The earliest reminder still to come after `now` — what a shell that must be woken (Android's
+/// AlarmManager) schedules next. The same reading of a task as [`due_now`]: its reminder time or a
+/// snooze made on this device, never a completed task, never one already shown for that time.
+pub fn next_after(
+    tasks: &[Task],
+    now: DateTime<Utc>,
+    snoozed_until: impl Fn(&str) -> Option<DateTime<Utc>>,
+    shown: impl Fn(&str, DateTime<Utc>) -> bool,
+) -> Option<Reminder> {
+    tasks
+        .iter()
+        .filter(|task| !task.completed)
+        .filter_map(|task| {
+            let at = reminder_at(task, snoozed_until(task.id.as_str()))?;
+            (at > now && !shown(task.id.as_str(), at)).then(|| Reminder {
+                task_id: task.id.clone(),
+                title: task.title.clone(),
+                reminder_time: at,
+                due_date_time: task.due_date_time,
+            })
+        })
+        .min_by_key(|reminder| (reminder.reminder_time, reminder.task_id.clone()))
+}
+
 /// When a reminder snoozed now should come back.
 pub fn snooze_until(now: DateTime<Utc>, minutes: i64) -> DateTime<Utc> {
     // A snooze of nothing is a reminder that fires again immediately; a minute is the floor.
@@ -130,6 +154,43 @@ mod tests {
 
     fn unsnoozed(_: &str) -> Option<DateTime<Utc>> {
         None
+    }
+
+    /// AATD-21. A shell that schedules an alarm needs the next reminder, not only the ones due now:
+    /// Android cannot be woken for a reminder it was never told about.
+    #[test]
+    fn aatd_21_the_next_reminder_is_the_earliest_still_to_come() {
+        let mut done = task("done", Some("2026-09-07T09:30:00Z"));
+        done.completed = true;
+        let tasks = vec![
+            task("later", Some("2026-09-07T12:00:00Z")),
+            task("sooner", Some("2026-09-07T10:00:00Z")),
+            task("past", Some("2026-09-07T08:00:00Z")),
+            task("none", None),
+            done,
+        ];
+        let next =
+            next_after(&tasks, at("2026-09-07T09:00:00Z"), unsnoozed, none).expect("one to come");
+        assert_eq!(next.task_id, "sooner");
+        assert_eq!(next.reminder_time, at("2026-09-07T10:00:00Z"));
+    }
+
+    #[test]
+    fn aatd_21_a_snooze_moves_the_next_reminder_and_a_shown_one_is_not_next() {
+        let tasks = vec![
+            task("t1", Some("2026-09-07T10:00:00Z")),
+            task("t2", Some("2026-09-07T11:00:00Z")),
+        ];
+        let snoozed = |id: &str| (id == "t1").then(|| at("2026-09-07T13:00:00Z"));
+        let next =
+            next_after(&tasks, at("2026-09-07T09:00:00Z"), snoozed, none).expect("one to come");
+        assert_eq!(next.task_id, "t2");
+        let shown = |id: &str, _: DateTime<Utc>| id == "t2";
+        let next =
+            next_after(&tasks, at("2026-09-07T09:00:00Z"), snoozed, shown).expect("one to come");
+        assert_eq!(next.task_id, "t1");
+        assert_eq!(next.reminder_time, at("2026-09-07T13:00:00Z"));
+        assert!(next_after(&tasks, at("2026-09-08T00:00:00Z"), unsnoozed, none).is_none());
     }
 
     #[test]

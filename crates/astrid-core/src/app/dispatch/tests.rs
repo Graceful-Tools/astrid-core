@@ -5853,3 +5853,52 @@ async fn aitd_491_a_field_edit_offline_shows_at_once_and_is_journalled() {
     assert_eq!(journal[0].payload["fieldId"], "f-team");
     assert!(journal[0].payload["body"]["value"].is_null());
 }
+
+/// AATD-21: `nextReminder` is the alarm a shell sets — the earliest reminder still to come, and
+/// the snoozed time once snoozed.
+#[tokio::test]
+async fn aatd_21_next_reminder_names_the_alarm_to_set() {
+    let clock = std::sync::Arc::new(crate::platform::FixedClock::parsed("2026-09-07T12:00:00Z"));
+    let app = App::with_parts(
+        &Config {
+            cache_path: ":memory:".into(),
+            base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
+        },
+        std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+        std::sync::Arc::new(StubTransport::new()),
+        clock.clone(),
+    )
+    .expect("starts");
+    let none = call(&app, json!({ "kind": "nextReminder" })).await;
+    assert_eq!(none["value"]["reminder"], serde_json::Value::Null, "{none}");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Call the vet" }),
+    )
+    .await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "reminderTime": "2026-09-07T13:00:00Z" } }),
+    )
+    .await;
+    let next = call(&app, json!({ "kind": "nextReminder" })).await;
+    assert_eq!(next["value"]["reminder"]["taskId"], id.as_str(), "{next}");
+    assert_eq!(
+        next["value"]["reminder"]["reminderTime"],
+        "2026-09-07T13:00:00Z"
+    );
+
+    call(
+        &app,
+        json!({ "kind": "snoozeReminder", "taskId": id, "minutes": 120 }),
+    )
+    .await;
+    let snoozed = call(&app, json!({ "kind": "nextReminder" })).await;
+    assert_eq!(
+        snoozed["value"]["reminder"]["reminderTime"], "2026-09-07T14:00:00Z",
+        "{snoozed}"
+    );
+}

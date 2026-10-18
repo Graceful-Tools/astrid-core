@@ -258,6 +258,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         } => move_task_to_column(app, &task_id, &column_id, &list_id),
         Command::ReminderOptions { task_id } => reminder_options(app, &task_id),
         Command::RemindersDue => reminders_due(app),
+        Command::NextReminder => next_reminder(app),
         Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
         Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
         Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
