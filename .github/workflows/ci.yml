@@ -129,10 +129,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Packages named explicitly: the action's default list still includes the retired `tools`.
       - uses: android-actions/setup-android@v3
-      - name: NDK and cargo-ndk
+        with:
+          packages: platform-tools ndk;27.2.12479018
+      - name: cargo-ndk
         run: |
-          sdkmanager "ndk;27.2.12479018"
           rustup target add aarch64-linux-android
           cargo install cargo-ndk --locked
       - uses: Swatinem/rust-cache@v2
