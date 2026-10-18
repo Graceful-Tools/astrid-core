@@ -374,7 +374,11 @@ pub struct TaskList {
     pub status_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_completed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_recently_completed_window"
+    )]
     pub recently_completed_window: Option<RecentlyCompletedWindow>,
 }
 
@@ -397,6 +401,26 @@ fn deserialize_agents_enabled<'de, D: Deserializer<'de>>(
                     .ok()
                     .map(|config| config.enabled_types)
             }),
+    })
+}
+
+/// `recentlyCompletedWindow` is an unvalidated JSON column that `lib/lists/v1-list-shape.ts` passes
+/// straight through, so the wire can carry a value no version of web's own type describes. Anything
+/// this crate cannot read means "the legacy 24-hour default", exactly as an absent one does.
+///
+/// Task f8dfc84e found the cost of not doing this: the `list.event` surface of
+/// `contracts/fixtures/wire-shapes.json` sends `{ "amount": 3, "unit": "days" }` — no `kind`, and
+/// a plural unit — and a tagged decode answered `missing field \`kind\`` for the whole `TaskList`.
+/// The API client decodes collections leniently, so in production that is not one unreadable
+/// setting: it is a list that disappears from the sidebar, which is the 2026-08-29 outage again.
+/// Through [`serde_json::Value`] for the same reason as [`deserialize_agents_enabled`].
+fn deserialize_recently_completed_window<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<RecentlyCompletedWindow>, D::Error> {
+    let raw = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match raw {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => serde_json::from_value::<RecentlyCompletedWindow>(value).ok(),
     })
 }
 
@@ -725,6 +749,45 @@ mod tests {
             serde_json::from_str(r#"{"id":"l3","name":"Doing","listType":"status"}"#)
                 .expect("decodes");
         assert!(!status.is_tag_list());
+    }
+
+    /// Task f8dfc84e: `recentlyCompletedWindow` is an unvalidated JSON column, and the
+    /// `list.event` surface of `contracts/fixtures/wire-shapes.json` sends a value no version of
+    /// web's type describes — `{ "amount": 3, "unit": "days" }`, no `kind`. A tagged decode
+    /// answered `missing field \`kind\`` and failed the WHOLE list, and because collections decode
+    /// leniently that is a list vanishing from the sidebar over one unreadable setting.
+    #[test]
+    fn f8dfc84e_an_unreadable_recently_completed_window_costs_the_setting_not_the_list() {
+        for malformed in [
+            r#"{"amount":3,"unit":"days"}"#,
+            r#"{"kind":"duration","amount":3,"unit":"fortnight"}"#,
+            r#"{"kind":"aModeFromLater"}"#,
+            r#""3 days""#,
+            r#"7"#,
+        ] {
+            let json =
+                format!(r#"{{"id":"l1","name":"Board","recentlyCompletedWindow":{malformed}}}"#);
+            let list: TaskList = serde_json::from_str(&json)
+                .unwrap_or_else(|error| panic!("{malformed} must not fail the list: {error}"));
+            assert_eq!(list.id, "l1");
+            assert_eq!(
+                list.recently_completed_window, None,
+                "{malformed} reads as the legacy default"
+            );
+        }
+
+        // A readable one still arrives, so the tolerance is not blanket.
+        let good: TaskList = serde_json::from_str(
+            r#"{"id":"l2","name":"Home","recentlyCompletedWindow":{"kind":"duration","amount":3,"unit":"day"}}"#,
+        )
+        .expect("decodes");
+        assert_eq!(
+            good.recently_completed_window,
+            Some(RecentlyCompletedWindow::Duration {
+                amount: 3,
+                unit: DurationUnit::Day
+            })
+        );
     }
 
     #[test]
