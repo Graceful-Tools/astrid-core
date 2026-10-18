@@ -52,11 +52,19 @@ cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
+cargo deny check                # advisories, licences, wildcards, where the crates came from
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. The core builds and tests on Windows, macOS and
 Linux; CI runs all three.
+
+`cargo deny` is the dependency gate — the Rust half of astrid-web's `npm audit`. The rules are in
+[`deny.toml`](./deny.toml); CI runs it on every push and PR and again every Monday, because an
+advisory is published between commits. Install it with `cargo install cargo-deny --locked`;
+`.github/dependabot.yml` proposes the bumps. astrid-windows and astrid-ios carry their own copies of
+`deny.toml` over their own lockfiles — the three resolve the same versions today, so an advisory on
+the sign-in path is one advisory in three places.
 
 ## Consuming it
 

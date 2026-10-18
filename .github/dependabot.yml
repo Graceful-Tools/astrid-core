@@ -1,0 +1,29 @@
+# Who proposes the bumps that `deny.toml` would otherwise only complain about.
+#
+# The advisory gate says an advisory exists; this says what to do about it, as a PR. Grouped
+# minor/patch so a week of routine bumps is one PR to read rather than fifteen — the same shape as
+# astrid-web's, which is the repo this convention comes from.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"

@@ -13,6 +13,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # An advisory is published between commits, so a push-only gate learns about it on whatever day
+  # someone happens to touch the repo. astrid-web learned this on AWTD-914 and runs its npm audit
+  # weekly for the same reason. Monday 06:00 UTC, before the Dependabot PRs land.
+  schedule:
+    - cron: "0 6 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,8 +28,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── The supply chain ──────────────────────────────────────────────────────────────────────────
+  # `cargo deny` over this workspace's own lockfile: advisories, licences, wildcard requirements and
+  # where the crates came from. The rules are in `deny.toml` at the root, which says why each
+  # licence in the allow list is there.
+  #
+  # Two invocations rather than one, because the two halves fail for unrelated reasons and a single
+  # red job would not say which: `advisories` goes red when the WORLD changed (an advisory was
+  # published against a version this repo already pinned), `licenses bans sources` when THIS REPO
+  # changed (a new dependency arrived with a licence or from a place nobody has accepted). Both
+  # block — a gate that cannot fail is documentation.
+  supply-chain:
+    name: cargo-deny (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - licenses bans sources
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
+
   core:
     name: core (${{ matrix.name }})
+    # The weekly tick exists to ask the advisory database a question, not to rebuild the crate on
+    # three operating systems. fmt, clippy and the tests answer to a commit, so they run when there
+    # is one.
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -64,6 +98,7 @@ jobs:
   # dependency that reaches for one fails here, the day it lands, rather than in the web's build.
   wasm:
     name: astrid-rules (wasm32)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,6 +122,7 @@ jobs:
 
   contracts:
     name: cross-platform contracts
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

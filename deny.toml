@@ -1,0 +1,62 @@
+# What this workspace accepts from crates.io, and what fails the build.
+#
+# The Rust half of astrid-web's `npm audit --audit-level=high` gate. Until this file existed the
+# three Rust workspaces — this one, astrid-windows and astrid-ios' `core/` — had no advisory gate at
+# all, so an advisory against the HTTP stack, TLS, SQLite or the PKCE crates on the sign-in path
+# would have hit every client at once with nothing to say so. All three lockfiles resolve the same
+# versions, which is good hygiene and also means one advisory is one failure in three places.
+#
+# This file is COPIED into each Rust repo, not referenced across them. A shared config would make a
+# licence decision in one repo silently change the gate in the other two, and the repos are pinned
+# to each other by revision precisely so that nothing crosses between them implicitly.
+#
+# Run it the way CI does: `cargo deny check` (all four checks), or one at a time —
+# `cargo deny check advisories`, `cargo deny check licenses bans sources`.
+
+# One graph for every target, because the clients do not share one. astrid-windows builds x64 and
+# ARM64 Windows, astrid-ios builds Apple platforms, astrid-rules builds wasm32: a platform-gated
+# dependency with an advisory against it is still an advisory. `all-features` for the same reason —
+# a feature nobody enables today is enabled by the next caller.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+# A vulnerability, an unmaintained crate or an unsound one fails the build; that is version 2's
+# behaviour and it is not configurable per-kind. To ACCEPT one deliberately, add its id here with
+# the date and the reason — an empty list is a claim that nothing has been waved through.
+ignore = []
+
+# A yank is not a vulnerability. Upstream yanks for a bad release as often as for a security
+# problem, and a lockfile that lags a yank by a day should not stop a release.
+yanked = "warn"
+
+# Computed from the real graph (`cargo metadata --all-features`, 204 packages on 2026-10-18), not
+# copied from a list of licences that are usually fine. Every term here is REQUIRED by something in
+# the tree: BSD-3-Clause and Unicode-3.0 and ISC each arrive through an `AND` that no `OR` branch can
+# satisfy, and Zlib arrives alone. A new licence in the graph is meant to fail here and be read.
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+# Duplicate versions are a fact of a Rust graph this size and failing on them would make the gate
+# noise rather than signal. A wildcard requirement is different: it is a dependency whose version
+# nothing records, so the lockfile is the only thing that knows what shipped.
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# The core depends on nothing by git. astrid-windows and astrid-ios depend on THIS repo that way, so
+# their copies of this file carry it here.
+allow-git = []
