@@ -1279,7 +1279,14 @@ pub enum Command {
     /// Mark all of it read.
     MarkAllNotificationsRead,
     /// Start signing in. Answers with the URL for the shell to open in the browser.
-    BeginSignIn,
+    ///
+    /// `provider` (`google`, `github`, `sso`) starts that provider on the hand-off page directly,
+    /// for a shell that already asked which one — the iOS sign-in screen's buttons. Absent, the
+    /// page offers every provider. The server ignores one it cannot start (AATD-3).
+    BeginSignIn {
+        #[serde(default)]
+        provider: Option<String>,
+    },
     /// Finish signing in, from the URL Windows activated the app with.
     CompleteSignIn {
         callback_url: String,

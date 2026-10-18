@@ -39,6 +39,9 @@ pub enum Platform {
     Ios,
     #[serde(rename = "mac-app")]
     Mac,
+    /// astrid-android (AATD-3). `AnalyticsPlatform.ANDROID_APP` on the server.
+    #[serde(rename = "android-app")]
+    Android,
 }
 
 impl Platform {
@@ -48,6 +51,19 @@ impl Platform {
             Platform::Windows => PLATFORM,
             Platform::Ios => "ios-app",
             Platform::Mac => "mac-app",
+            Platform::Android => "android-app",
+        }
+    }
+
+    /// The app's id in the server's desktop hand-off registry (astrid-web
+    /// `lib/auth/desktop-handoff.ts`, `DesktopClientId`). The hand-off page names the app it signs
+    /// in, and the registry refuses an id it does not know, so each shell signs in as itself.
+    pub fn handoff_client(self) -> &'static str {
+        match self {
+            Platform::Windows => "windows",
+            Platform::Ios => "ios",
+            Platform::Mac => "mac",
+            Platform::Android => "android",
         }
     }
 }
@@ -86,6 +102,14 @@ mod tests {
         assert_eq!(Platform::Mac.wire(), "mac-app");
         let read: Platform = serde_json::from_str("\"mac-app\"").expect("reads");
         assert_eq!(read, Platform::Mac);
+    }
+
+    /// AATD-3: `AnalyticsPlatform.ANDROID_APP` on the server (astrid-web AATD-2).
+    #[test]
+    fn aatd_3_the_android_app_names_itself_android_app() {
+        assert_eq!(Platform::Android.wire(), "android-app");
+        let read: Platform = serde_json::from_str("\"android-app\"").expect("reads");
+        assert_eq!(read, Platform::Android);
     }
 
     #[test]

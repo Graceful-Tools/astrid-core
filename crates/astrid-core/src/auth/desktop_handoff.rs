@@ -32,9 +32,6 @@ use url::Url;
 /// The only PKCE method the server accepts. `plain` binds nothing.
 pub const CODE_CHALLENGE_METHOD: &str = "S256";
 
-/// Which app this is, in the server's client registry.
-pub const CLIENT_ID: &str = "windows";
-
 /// Path the browser opens to start the hand-off.
 pub const AUTHORIZE_PATH: &str = "/auth/desktop";
 
@@ -123,7 +120,13 @@ pub fn begin_flow() -> Result<HandoffFlow, HandoffError> {
 /// `base_url` is the server origin, so a Debug build pointed at
 /// `http://localhost:3000` hands off to the local dev server exactly as a
 /// release build hands off to production.
-pub fn authorize_url(base_url: &str, flow: &HandoffFlow) -> Result<String, HandoffError> {
+///
+/// `client` is the app's id in the server's registry — [`crate::api::Platform::handoff_client`].
+pub fn authorize_url(
+    base_url: &str,
+    client: &str,
+    flow: &HandoffFlow,
+) -> Result<String, HandoffError> {
     let mut url = Url::parse(base_url).map_err(|_| HandoffError::MalformedCallback)?;
 
     // set_path rather than string concatenation, so a base URL with or without a
@@ -131,7 +134,7 @@ pub fn authorize_url(base_url: &str, flow: &HandoffFlow) -> Result<String, Hando
     url.set_path(AUTHORIZE_PATH);
     url.query_pairs_mut()
         .clear()
-        .append_pair("client", CLIENT_ID)
+        .append_pair("client", client)
         .append_pair("state", &flow.state)
         .append_pair("code_challenge", &flow.pkce.challenge)
         .append_pair("code_challenge_method", CODE_CHALLENGE_METHOD);
@@ -211,9 +214,9 @@ pub struct ExchangeRequest<'a> {
 }
 
 impl<'a> ExchangeRequest<'a> {
-    pub fn new(callback: &'a Callback, flow: &'a HandoffFlow) -> Self {
+    pub fn new(client: &'a str, callback: &'a Callback, flow: &'a HandoffFlow) -> Self {
         Self {
-            client: CLIENT_ID,
+            client,
             code: &callback.code,
             code_verifier: &flow.pkce.verifier,
         }
@@ -305,14 +308,15 @@ mod tests {
     #[test]
     fn authorize_url_carries_what_the_server_reads() {
         let flow = flow_with_state("state-123");
-        let url = Url::parse(&authorize_url("https://astrid.cc", &flow).unwrap()).unwrap();
+        let url =
+            Url::parse(&authorize_url("https://astrid.cc", "windows", &flow).unwrap()).unwrap();
 
         assert_eq!(url.path(), AUTHORIZE_PATH);
         let pairs: Vec<(String, String)> = url
             .query_pairs()
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
-        assert!(pairs.contains(&("client".into(), CLIENT_ID.into())));
+        assert!(pairs.contains(&("client".into(), "windows".into())));
         assert!(pairs.contains(&("state".into(), "state-123".into())));
         assert!(pairs.contains(&("code_challenge".into(), flow.pkce.challenge.clone())));
         assert!(pairs.contains(&("code_challenge_method".into(), CODE_CHALLENGE_METHOD.into())));
@@ -322,14 +326,14 @@ mod tests {
     fn authorize_url_honours_a_local_dev_server() {
         // The Debug build points at localhost; the flow must be identical.
         let flow = flow_with_state("s");
-        let url = authorize_url("http://localhost:3000", &flow).unwrap();
+        let url = authorize_url("http://localhost:3000", "windows", &flow).unwrap();
         assert!(url.starts_with("http://localhost:3000/auth/desktop?"));
     }
 
     #[test]
     fn authorize_url_never_sends_the_verifier() {
         let flow = flow_with_state("s");
-        let url = authorize_url("https://astrid.cc", &flow).unwrap();
+        let url = authorize_url("https://astrid.cc", "windows", &flow).unwrap();
         assert!(!url.contains(&flow.pkce.verifier));
     }
 
@@ -442,9 +446,9 @@ mod tests {
         let callback = Callback {
             code: "the-code".into(),
         };
-        let json = serde_json::to_value(ExchangeRequest::new(&callback, &flow)).unwrap();
+        let json = serde_json::to_value(ExchangeRequest::new("windows", &callback, &flow)).unwrap();
 
-        assert_eq!(json["client"], CLIENT_ID);
+        assert_eq!(json["client"], "windows");
         assert_eq!(json["code"], "the-code");
         assert_eq!(json["codeVerifier"], flow.pkce.verifier);
     }

@@ -1239,7 +1239,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::MarkAllNotificationsRead => {
             inbox_response(app.context.notifications().mark_all_read().await)
         }
-        Command::BeginSignIn => match app.auth.begin() {
+        Command::BeginSignIn { provider } => match app.auth.begin_with(provider.as_deref()) {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),
         },
