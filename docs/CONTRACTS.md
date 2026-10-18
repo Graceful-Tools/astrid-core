@@ -1124,3 +1124,28 @@ its code (`auth_required` and `sso_required` are `403`, never `401`, which means
 session), and only a network failure journals it as `setTaskField`, which dead-letters a
 `400`/`403`/`404` on replay. Tests: `aitd_491_*` in `services::project_fields` and
 `app::dispatch::tests`.
+
+### D57 — hiding the messages pane is offered in list view on Windows, in board mode only on web
+
+AWTD-1178 gave the 2- and 3-column layouts a hide/show control on the right-hand messages pane,
+mirroring the sidebar's on the left, with the choice remembered per device. Both clients have it.
+They disagree about **when it may be used**.
+
+Web restricts it to board mode (AWTD-1213). `DesktopChatPane.tsx` computes
+`collapsed = boardMode && hidden`, and says why: in the list layout a task's details open *over*
+that column, so a hidden one would leave them nowhere to open. There the pane is always drawn,
+whatever that browser remembered for the board.
+
+Windows offers it in both. `ShellPage.xaml` is a four-column grid — sidebar, list/board, messages,
+task detail — so the detail pane is its own column rather than a tenant of the messages one, and on
+the board the detail is lifted into the expanded card. The reason web needs the restriction does not
+arise here, and task `ab4cb9ee` asked for a control that "applies in list view as well as board
+view". `ShellViewModel.IsSidebarOpen` and `IsChatOpen` are therefore unconditional, each remembered
+under its own key (`DevicePreferences`), as web keeps its two flags separately in local storage.
+
+Nothing in this crate decides it: a pane is shell furniture, not a rule, and neither client asks the
+core whether its own window may fold a column away. So this is a divergence to know about rather
+than one to close — and if it closes, it closes on web by lifting the restriction once a task's
+details have somewhere else to go, not here by adding one. Tests: `PaneToggleTests` in
+`astrid-windows/app/Astrid.App.Tests` (named for task `ab4cb9ee`), and web's
+`desktop-chat-pane.test.tsx`.
