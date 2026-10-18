@@ -67,6 +67,28 @@ pub(in crate::app) fn due_reminders(
     )
 }
 
+/// The earliest reminder still to come, by the same reading as [`due_reminders`] (AATD-21).
+pub(super) fn next_reminder(app: &App) -> Response {
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let snoozes = snoozes(app);
+    let next = crate::reminders::next_after(
+        &tasks,
+        app.clock.now(),
+        |id| snoozes.get(id).copied(),
+        |id, at| {
+            app.store
+                .metadata(&shown_key(id))
+                .ok()
+                .flatten()
+                .is_some_and(|stamp| stamp == at.to_rfc3339())
+        },
+    );
+    Response::ok(serde_json::json!({ "reminder": next }))
+}
+
 /// Reminders whose time has come and which have not been shown.
 pub(super) fn reminders_due(app: &App) -> Response {
     let tasks = match app.store.tasks() {

@@ -273,6 +273,9 @@ pub enum Command {
     /// Read while the app is running. The server owns push and email; this is only what a running
     /// client can notice about a reminder whose time has arrived — see [`crate::reminders`].
     RemindersDue,
+    /// The earliest reminder still to come — `{ "reminder": {taskId, title, reminderTime, …} | null }`
+    /// — for a shell that schedules its own wake-up (Android's AlarmManager, AATD-21).
+    NextReminder,
     /// Remember that a reminder was shown, so it is not shown again.
     ReminderShown {
         task_id: String,
