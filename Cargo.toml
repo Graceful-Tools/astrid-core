@@ -51,7 +51,7 @@ async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # The offline cache. `bundled` compiles SQLite itself: the version is then the same on every
 # machine and every architecture, rather than whatever the OS happens to ship.
-rusqlite = { version = "0.32", features = ["bundled", "chrono", "serde_json", "backup"] }
+rusqlite = { version = "0.40", features = ["bundled", "chrono", "serde_json", "backup"] }
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 # Markdown, for task descriptions, comments and chat: the same GFM the web renders through
