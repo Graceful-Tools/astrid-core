@@ -39,7 +39,7 @@ thiserror = "2"
 # from the OS CSPRNG.
 sha2 = "0.10"
 base64 = "0.22"
-getrandom = "0.2"
+getrandom = "0.4"
 url = "2"
 # The HTTP stack, over the platform's own TLS: schannel on Windows, Security.framework on macOS,
 # OpenSSL on Linux. A bundled rustls would ship a second root store that ignores the enterprise
