@@ -5475,6 +5475,38 @@ async fn a_seed_fills_an_empty_cache_once() {
     assert_eq!(tasks["value"].as_array().map(Vec::len), Some(1));
 }
 
+/// AATD-18. A UI-test build seeds who is signed in, exactly as sign-in records it, so My Tasks —
+/// which is only what is assigned to the reader (D25) — has someone to be about.
+#[tokio::test]
+async fn aatd_18_a_seed_can_say_who_is_signed_in() {
+    let app = app_with(StubTransport::new());
+    call(
+        &app,
+        json!({ "kind": "seedCache",
+                "currentUser": { "id": "u-me", "name": "Ada", "email": "ada@example.com" },
+                "tasks": [{ "id": "t1", "title": "Mine", "assigneeId": "u-me", "creatorId": "u-me" },
+                          { "id": "t2", "title": "Theirs", "assigneeId": "u-them", "creatorId": "u-them" }] }),
+    )
+    .await;
+    assert_eq!(
+        call(&app, json!({ "kind": "currentUser" })).await["value"]["id"],
+        "u-me"
+    );
+    let mine = call(&app, json!({ "kind": "myTasksList" })).await;
+    let rows = call(
+        &app,
+        json!({ "kind": "rowsForList", "listId": mine["value"]["id"] }),
+    )
+    .await;
+    let titles: Vec<_> = rows["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["title"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(titles, ["Mine"], "{rows}");
+}
+
 /// A shell that holds a temporary id learns the real one once the create lands, and only the ids
 /// that moved come back.
 #[tokio::test]
