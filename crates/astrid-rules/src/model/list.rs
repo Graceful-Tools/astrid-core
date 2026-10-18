@@ -434,12 +434,32 @@ impl TaskList {
         self.list_type.as_deref() == Some("label")
     }
 
+    /// True for a GitHub milestone (web AWTD-1189): a tag, like a label, of which a task has at
+    /// most one. Read-only here — GitHub owns the membership.
+    pub fn is_milestone_list(&self) -> bool {
+        self.list_type.as_deref() == Some("milestone")
+    }
+
+    /// True for a GitHub project iteration, a sprint (web AWTD-1230, AITD-506): a tag, like a
+    /// milestone, with dates. Read-only here; changing a task's iteration is a project-field edit.
+    pub fn is_iteration_list(&self) -> bool {
+        self.list_type.as_deref() == Some("iteration")
+    }
+
+    /// A tag rather than a place: a label, a milestone or an iteration — the web's `isTagList`.
+    ///
+    /// Ask this, not the flavours one by one, wherever the question is "chip or destination", so a
+    /// sixth flavour is added here and nowhere else.
+    pub fn is_tag_list(&self) -> bool {
+        self.is_label_list() || self.is_milestone_list() || self.is_iteration_list()
+    }
+
     /// True for list-shaped destinations a person can navigate into and file tasks in.
     ///
     /// A missing `listType` is regular: every row predating flavours is a domain list, and
     /// defaulting the other way would hide them all.
     pub fn is_domain_list(&self) -> bool {
-        !self.is_status_list() && !self.is_label_list()
+        !self.is_status_list() && !self.is_tag_list()
     }
 
     /// May a task on this list hold several assignees? Classic unless the server says otherwise.
@@ -685,6 +705,26 @@ mod tests {
         assert!(status.is_status_list());
         assert!(!status.is_domain_list());
         assert!(TaskList::new("l2", "Home").is_domain_list());
+    }
+
+    /// AITD-506: a GitHub milestone and a GitHub project iteration are tags, as a label is — chips
+    /// on a task, never a sidebar list. Before this only a label was, so every sprint and every
+    /// milestone drew as a list of its own.
+    #[test]
+    fn aitd506_milestones_and_iterations_are_tags_not_destinations() {
+        for flavor in ["label", "milestone", "iteration"] {
+            let list: TaskList = serde_json::from_str(&format!(
+                r#"{{"id":"l1","name":"Sprint 4","listType":"{flavor}"}}"#
+            ))
+            .expect("decodes");
+            assert!(list.is_tag_list(), "{flavor} is a tag");
+            assert!(!list.is_domain_list(), "{flavor} is not a destination");
+        }
+        assert!(!TaskList::new("l2", "Home").is_tag_list());
+        let status: TaskList =
+            serde_json::from_str(r#"{"id":"l3","name":"Doing","listType":"status"}"#)
+                .expect("decodes");
+        assert!(!status.is_tag_list());
     }
 
     #[test]

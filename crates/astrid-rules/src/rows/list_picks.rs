@@ -79,12 +79,15 @@ pub struct ListPicks {
     pub create_name: Option<String>,
 }
 
-/// Whether a task can be filed in this list at all: anything but a virtual list.
+/// Whether a task can be filed in this list at all: anything but a virtual list, a GitHub
+/// milestone or a GitHub iteration.
 ///
 /// iOS's `InlineListsPicker` rule (D28, resolved toward iOS). `ListService::destinations` asks
-/// this too, so there is one answer.
+/// this too, so there is one answer. A milestone or iteration is refused because the server
+/// refuses joining or leaving one (`github_milestone_read_only`, `github_iteration_read_only`;
+/// AITD-506) — offering it would be a row that always fails.
 pub fn is_destination(list: &TaskList) -> bool {
-    !list.is_virtual.unwrap_or(false)
+    !list.is_virtual.unwrap_or(false) && !list.is_milestone_list() && !list.is_iteration_list()
 }
 
 fn pick(list: &TaskList) -> ListPick {
@@ -261,6 +264,31 @@ mod tests {
 
         let picks = picks(&[], &[column, label, today, list("home", "Home")], "");
         assert_eq!(ids(&picks.options), vec!["bug", "home", "ready"]);
+    }
+
+    /// AITD-506: a GitHub milestone or iteration is never offered — the server refuses joining or
+    /// leaving one (`github_milestone_read_only`, `github_iteration_read_only`), so a row would be a
+    /// tap that always fails. Changing a task's iteration is a project-field edit instead. A label
+    /// is still offered (D28).
+    #[test]
+    fn aitd506_milestones_and_iterations_are_not_offered() {
+        let mut label = list("bug", "Bug");
+        label.list_type = Some("label".into());
+        let mut milestone = list("v1", "v1.0");
+        milestone.list_type = Some("milestone".into());
+        let mut sprint = list("s4", "Sprint 4");
+        sprint.list_type = Some("iteration".into());
+
+        assert!(!is_destination(&milestone));
+        assert!(!is_destination(&sprint));
+        assert!(is_destination(&label));
+
+        let all = [label, milestone, sprint, list("home", "Home")];
+        let picks = picks(&["s4".to_string()], &all, "");
+        assert_eq!(ids(&picks.options), vec!["bug", "home"]);
+        let toggles = toggles(&["s4".to_string()], &all, "");
+        let offered: Vec<&str> = toggles.options.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(offered, vec!["bug", "home"]);
     }
 
     #[test]
