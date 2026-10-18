@@ -44,6 +44,8 @@ rather than going unnoticed at runtime.
 | `manual-order.json` | `lib/list-manual-order.ts` (`sanitizeManualOrder`) and the "manual" sort of `lib/task-sort.ts` — **executed**: 11 reconciliations and 5 arrangements drawn; 14 cases, 2 disputed (D33) | `astrid_core::manual_order`, `filters::sort_by_setting` |
 | `reminders.json` | `lib/reminder-snooze.ts`, **executed** against an in-memory reminder queue under a moving clock, plus the v1 snooze route's accepted range (read from its schema): 9 cases, 1 disputed (D37) | `astrid_core::reminders` |
 | `markdown.json` | `lib/markdown.ts` (`renderMarkdownWithLinks`) — **executed** in a jsdom window, so through DOMPurify as a page is, and the HTML read back into the core's blocks (the driver documents how): 130 texts: GFM, breaks, links and autolinks, references, task ids, HTML, and 23 `xss-*` sanitisation cases. 130 cases, none disputed: web adopted D38 (AWTD-1064) | `astrid_core::markdown` |
+| `my-tasks.json` | `lib/my-tasks-scope.ts` (`myTasksShows`, as `hooks/useFilterState.ts` calls it for `"my-tasks"`) — **executed** over ten tasks by reader, priority filter and assignee filter; completion and due date are left to `filters.json` rather than asserted twice. 18 cases, 222 disputed (D25) | `astrid_core::filters::my_tasks` |
+| `wire-shapes.json` | each `/api/v1` route's own Prisma select and serializer — **executed** over fixed records, so it is what the server sends rather than a description of it: six surfaces (the task list page and its `?omit=` variant, a task and a list read classic and GitHub-backed). Not a rule but a shape: every key on the wire must survive a decode and re-encode, and none may be invented (D53–D55) | `astrid_rules::model::Task`, `astrid_rules::model::TaskList` |
 
 ## Two kinds of export
 
@@ -55,8 +57,7 @@ each driver imports astrid-web's own module and executes it, with a resolve hook
 alias, stubs for the logger, prisma and the server plumbing imported beside a pure function, and
 `TZ=UTC` pinned so a fixture never encodes whoever ran it.
 
-Still planned: all-day date handling, wire shapes, the task leading control, and the My Tasks scope
-(web's lives inside the `useFilterState` hook and cannot be run; D25 records the difference).
+Still planned: all-day date handling and the task leading control.
 
 ## Disputed cases
 
