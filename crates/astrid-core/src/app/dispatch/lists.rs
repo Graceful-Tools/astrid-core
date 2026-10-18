@@ -62,6 +62,12 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
         ),
         None => (false, false, false),
     };
+    // A GitHub-backed board's roster lives in the project, not in Astrid (`supports.membership`,
+    // astrid-web's GITHUB_PROJECTS_WHITELABEL §11.3), so none of the three controls that would
+    // change it are offered there — however the permission rules answer. Absent means classic,
+    // so this takes nothing away from a list the server says nothing about (task 93ffa9ea).
+    // What the list *is* — its name, colour, columns, whether it exists — is still Astrid's.
+    let membership = list.supports_membership();
 
     Response::ok(serde_json::json!({
         "listId": list.id,
@@ -93,17 +99,17 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
             "dueDate": list.default_due_date.clone().unwrap_or_else(|| "none".into()),
             "dueTime": list.default_due_time,
         },
-        "canManageMembers": can_manage_members,
+        "canManageMembers": can_manage_members && membership,
         "canManageList": can_manage_list,
         "canDeleteList": can_delete,
         // Leaving is for a list somebody else owns: an owner leaving their own list would strand
         // it, which is what deleting is for.
-        "canLeave": me.is_some() && list.owner_id.as_deref() != me.as_deref(),
+        "canLeave": membership && me.is_some() && list.owner_id.as_deref() != me.as_deref(),
         // The owner is offered a handover instead: ownership is what `canDelete` keys on, so it
         // is handed to someone by name rather than implied by whoever remains (Apple AITD-392).
         // Whether there is anybody to hand it to is the server's answer, asked when the control
         // opens (`eligibleNewOwners`).
-        "canTransferOwnership": me.is_some() && list.owner_id.is_some() && list.owner_id.as_deref() == me.as_deref(),
+        "canTransferOwnership": membership && me.is_some() && list.owner_id.is_some() && list.owner_id.as_deref() == me.as_deref(),
         "currentUserId": me,
         "members": members,
     }))

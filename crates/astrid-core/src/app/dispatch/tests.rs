@@ -3163,6 +3163,70 @@ async fn list_members_come_with_what_this_account_may_do() {
     );
 }
 
+/// A GitHub-backed board keeps its roster in the project, not in Astrid
+/// (`supports.membership: false`, astrid-web's GITHUB_PROJECTS_WHITELABEL §11.3): none of the
+/// controls that would change it are offered, and it is the core that says so. The permission
+/// rules alone would answer yes to all three here — the owner of a shared list may invite, hand
+/// over and (on somebody else's) leave — so a shell left to combine the two answers itself would
+/// be a fourth implementation of the rule, and the one that 403s (task 93ffa9ea).
+#[tokio::test]
+async fn a_board_that_does_not_do_membership_offers_nothing_that_would_change_it() {
+    let app = app_with(StubTransport::new());
+    let store = |value: serde_json::Value| {
+        app.store
+            .upsert_list(&serde_json::from_value(value).expect("a list"))
+            .expect("stores");
+    };
+    // Mine, so the rules alone would offer inviting and handing over.
+    store(json!({
+        "id": "gh", "name": "Roadmap", "ownerId": "me", "privacy": "SHARED",
+        "backend": "github_project",
+        "supports": { "repeatMode": "spawn", "membership": false, "privateTasks": false },
+    }));
+    // Somebody else's, so the rules alone would offer leaving.
+    store(json!({
+        "id": "ghTheirs", "name": "Theirs", "ownerId": "dana", "privacy": "SHARED",
+        "backend": "github_project",
+        "supports": { "repeatMode": "spawn", "membership": false },
+    }));
+    // A `supports` block that simply does not mention membership is a classic list saying
+    // nothing, not a board saying no.
+    store(json!({
+        "id": "quiet", "name": "Quiet", "ownerId": "me", "privacy": "SHARED",
+        "supports": { "priority": false },
+    }));
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let mine = call(&app, json!({ "kind": "listMembers", "listId": "gh" })).await;
+    assert_eq!(mine["ok"], true, "{mine}");
+    assert_eq!(
+        mine["value"]["canManageMembers"], false,
+        "nobody is invited onto a GitHub board from here"
+    );
+    assert_eq!(
+        mine["value"]["canTransferOwnership"], false,
+        "a roster Astrid does not hold cannot be handed to anyone"
+    );
+    // What the list itself is — its name, colour, columns — is still Astrid's, and still the
+    // owner's to change. Only the roster is the project's.
+    assert_eq!(mine["value"]["canManageList"], true);
+    assert_eq!(mine["value"]["canDeleteList"], true);
+
+    let theirs = call(&app, json!({ "kind": "listMembers", "listId": "ghTheirs" })).await;
+    assert_eq!(
+        theirs["value"]["canLeave"], false,
+        "there is no Astrid membership to leave"
+    );
+
+    let quiet = call(&app, json!({ "kind": "listMembers", "listId": "quiet" })).await;
+    assert_eq!(
+        quiet["value"]["canManageMembers"], true,
+        "an absent key means what it means on a classic list"
+    );
+}
+
 /// The flyout opens offline. One network call in here used to take the list's name, colour,
 /// privacy and permissions — none of which need a connection — down with it.
 #[tokio::test]
