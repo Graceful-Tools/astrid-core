@@ -87,6 +87,9 @@ pub mod kind {
     /// one, and neither needs a client request id to be safe.
     pub const ADD_TASK_BLOCKER: &str = "addTaskBlocker";
     pub const REMOVE_TASK_BLOCKER: &str = "removeTaskBlocker";
+    /// One GitHub project field on one task, set while offline (`services::project_fields`).
+    /// Replays safely: the server writes one field per request and the value is absolute.
+    pub const SET_TASK_FIELD: &str = "setTaskField";
     /// Who is on a list, changed while offline (`services::members`). Online these are sent at
     /// once and never journalled, so a refusal reaches the person who asked.
     pub const INVITE_TO_LIST: &str = "inviteToList";

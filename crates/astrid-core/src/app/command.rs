@@ -153,6 +153,20 @@ pub enum Command {
         task_id: String,
         blocking_task_id: String,
     },
+    /// A GitHub board's project fields for one task, schema and values (AITD-491; web AWTD-1210).
+    ///
+    /// Shaped like [`Command::TaskBlockers`]: the round trip that refreshes the cache, which
+    /// answers with what is cached when offline. No rows on a task off a GitHub board.
+    TaskProjectFields {
+        task_id: String,
+    },
+    /// Set one project field; `value: null` clears it. Sent at once, journalled only when offline.
+    SetTaskProjectField {
+        task_id: String,
+        field_id: String,
+        #[serde(default)]
+        value: Option<serde_json::Value>,
+    },
     /// What the "Wait on a task…" picker may offer for a query.
     ///
     /// The search is the SERVER's (`GET /api/v1/search`), which is permission-filtered in the
