@@ -501,6 +501,23 @@ pub(super) fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
     }))
 }
 
+/// A time of day from a picker, on the task's own day, as a timed due date (AATD-25). The same
+/// day the quick time picks use, so "14:30" and "Afternoon" land on the same date.
+pub(super) fn due_date_at_time(app: &App, task_id: &str, hour: u32, minute: u32) -> Response {
+    let task = match app.store.task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let offset = app.clock.utc_offset();
+    let anchor =
+        rows::due_picks::time_anchor(task.due_date_time, task.is_all_day, app.clock.now(), offset);
+    Response::ok(serde_json::json!({
+        "dueDateTime": date::format(rows::due_picks::with_time(hour, minute, anchor, offset)),
+        "isAllDay": false,
+    }))
+}
+
 /// The quick date and time picks for a task, or for the date an editor holds (`draft`).
 ///
 /// A date pick is iOS's (D48): the reader's calendar day, `n` days on, as an all-day date at UTC
@@ -543,17 +560,7 @@ pub(super) fn due_date_options(
         .collect();
 
     // The hour goes on the task's own day.
-    let day_anchor = match due {
-        Some(due) if is_all_day => {
-            let day = date::all_day_date(due);
-            day.and_hms_opt(12, 0, 0)
-                .and_then(|noon| noon.and_local_timezone(offset).single())
-                .map(|at| at.with_timezone(&chrono::Utc))
-                .unwrap_or(due)
-        }
-        Some(due) => due,
-        None => now,
-    };
+    let day_anchor = rows::due_picks::time_anchor(due, is_all_day, now, offset);
     let times: Vec<serde_json::Value> = rows::due_picks::TIME_OPTIONS
         .iter()
         .map(|option| {

@@ -177,6 +177,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             due_date_options(app, task_id.as_deref(), draft)
         }
         Command::DueDateOnDay { task_id, day } => due_date_on_day(app, &task_id, &day),
+        Command::DueDateAtTime {
+            task_id,
+            hour,
+            minute,
+        } => due_date_at_time(app, &task_id, hour, minute),
         Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
             Ok(comments) => Response::ok(comments),
             Err(error) => Response::failed(error.into()),

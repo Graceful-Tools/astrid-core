@@ -5902,3 +5902,27 @@ async fn aatd_21_next_reminder_names_the_alarm_to_set() {
         "{snoozed}"
     );
 }
+
+/// AATD-25: a picked time lands on the task's own day — for an all-day task, its calendar date.
+#[tokio::test]
+async fn aatd_25_a_picked_time_lands_on_the_tasks_own_day() {
+    let app = app_with(StubTransport::new());
+    let made = call(&app, json!({ "kind": "createTask", "title": "Dentist" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "dueDateTime": "2026-12-25T00:00:00Z", "isAllDay": true } }),
+    )
+    .await;
+    let at = call(
+        &app,
+        json!({ "kind": "dueDateAtTime", "taskId": id, "hour": 14, "minute": 30 }),
+    )
+    .await;
+    assert_eq!(at["value"]["isAllDay"], false, "{at}");
+    let due = at["value"]["dueDateTime"].as_str().expect("a date");
+    assert!(
+        due.starts_with("2026-12-25T14:30"),
+        "UTC test clock: the 25th at 14:30, got {due}"
+    );
+}
