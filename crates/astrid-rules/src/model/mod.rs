@@ -32,7 +32,7 @@ pub mod user;
 
 pub use chat::{is_temp_id, ChatChannel, ChatMessage, TEMP_ID_PREFIX};
 pub use list::{
-    DeleteTaskMode, DurationUnit, ListAgentConfig, ListInvite, ListMember, Privacy,
+    DeleteTaskMode, DurationUnit, ListAgentConfig, ListInvite, ListMember, ListSupports, Privacy,
     RecentlyCompletedWindow, TaskList,
 };
 pub use notification::{Inbox, Notification, NotificationTask};

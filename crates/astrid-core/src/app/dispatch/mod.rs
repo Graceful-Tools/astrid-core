@@ -1296,6 +1296,49 @@ fn answer<T: serde::Serialize>(result: crate::services::Result<T>) -> Response {
     }
 }
 
+/// What a list permits, as the shells read it (task 897e25c5, astrid-web's
+/// GITHUB_PROJECTS_WHITELABEL §11.2).
+///
+/// One projection, used by the task detail and by the list-settings flyout, because the keys are
+/// the list's and a second copy of this shape is a second chance to spell `dueDate` differently.
+/// Every answer comes from [`crate::model::TaskList`]'s accessors, so **an absent key reads as
+/// classic** and gating on these takes nothing away from a list the server says nothing about.
+///
+/// `None` — the list is not in this cache, or the task is on no list at all — is classic too, and
+/// deliberately so: a membership the reader cannot see must never hide a control that works.
+fn supports_json(list: Option<&crate::model::TaskList>) -> serde_json::Value {
+    let classic = crate::model::ListSupports::default();
+    let (priority, due_date, comments, private_tasks, multiple_assignees, delete_task) = match list
+    {
+        Some(list) => (
+            list.supports_priority(),
+            list.supports_due_date(),
+            list.supports_comments(),
+            list.supports_private_tasks(),
+            list.supports_multiple_assignees(),
+            list.delete_task_mode(),
+        ),
+        None => (
+            classic.priority,
+            classic.due_date,
+            classic.comments,
+            classic.private_tasks,
+            classic.multiple_assignees,
+            classic.delete_task,
+        ),
+    };
+    serde_json::json!({
+        "priority": priority,
+        "dueDate": due_date,
+        "comments": comments,
+        "privateTasks": private_tasks,
+        "multipleAssignees": multiple_assignees,
+        // The destructive action's wording AND what it sends: a GitHub board's item comes off the
+        // project and the issue stays, so "Delete" there would promise something it does not do.
+        "deleteTask": delete_task,
+    })
+}
+
 // The helpers, by domain. Glob-imported so an arm above names a helper the way it always
 // has, and so the domain files can reach each other through `use super::*`.
 mod account;

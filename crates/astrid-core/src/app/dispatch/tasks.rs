@@ -296,6 +296,13 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
 
     Response::ok(serde_json::json!({
         "blockers": blockers,
+        // What this task's list permits, so the screen offers a control only where it would work
+        // (task 897e25c5, spec §11.2). Decided here and not in a view: a GitHub board with no
+        // Priority field mapped answers `priority: false`, and a shell that worked that out from
+        // `backend` would be the fourth implementation of the rule — the one that offers a picker
+        // whose write 403s. Which list decides is the task's OWN first domain membership, the same
+        // walk the board-state row takes.
+        "supports": super::supports_json(rows::detail::deciding_list_for_task(&task, &lists)),
         // The description as blocks to draw, beside the text to edit: the web renders one and
         // edits the other, and a shell handed only the text drew `**bold**` with its asterisks
         // (task 11cfaf6d). Which markdown means what is `crate::markdown`, mirrored from web.

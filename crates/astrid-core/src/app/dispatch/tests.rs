@@ -3227,6 +3227,96 @@ async fn a_board_that_does_not_do_membership_offers_nothing_that_would_change_it
     );
 }
 
+/// The remaining five `supports` keys gate TASK-DETAIL controls, and the answer comes from the
+/// core for the same reason `supports.membership` does (task 897e25c5): a shell that worked out
+/// from `backend` whether a priority picker would 403 would be the fourth implementation of the
+/// rule. `taskDetail` had no capability fields at all before this, so there was nowhere for a
+/// shell to look even if it wanted to ask.
+///
+/// Two cases the membership work flagged and this pins. A `supports` block that OMITS a key is a
+/// classic list saying nothing, not a board saying no — the whole point of `unwrap_or_default` on
+/// the way in. And a task on no list this cache knows is classic too: a membership the reader
+/// cannot see must never take away a control that works.
+#[tokio::test]
+async fn a_board_that_maps_no_priority_field_offers_no_priority_on_task_detail() {
+    let app = app_with(StubTransport::new());
+    let store_list = |value: serde_json::Value| {
+        app.store
+            .upsert_list(&serde_json::from_value(value).expect("a list"))
+            .expect("stores");
+    };
+    let store_task = |value: serde_json::Value| {
+        app.store
+            .upsert_task(&serde_json::from_value(value).expect("a task"))
+            .expect("stores");
+    };
+    // A board with neither field mapped, no Astrid comments and an item that comes off the
+    // project rather than being deleted.
+    store_list(json!({
+        "id": "gh", "name": "Roadmap", "ownerId": "me", "backend": "github_project",
+        "supports": {
+            "repeatMode": "spawn", "membership": false, "privateTasks": false,
+            "priority": false, "dueDate": false, "comments": false,
+            "multipleAssignees": true, "deleteTask": "remove_from_list",
+        },
+    }));
+    // A `supports` block that says nothing about any of the five.
+    store_list(json!({ "id": "quiet", "name": "Quiet", "ownerId": "me",
+                       "supports": { "membership": false } }));
+    // A tag is not what decides: a task in a milestone and on a classic list is the list's.
+    store_list(json!({ "id": "tag", "name": "v2", "listType": "milestone" }));
+    store_task(json!({ "id": "t1", "title": "Mapped nothing", "listIds": ["gh"] }));
+    store_task(json!({ "id": "t2", "title": "Quiet list", "listIds": ["quiet"] }));
+    store_task(json!({ "id": "t3", "title": "Tagged", "listIds": ["tag", "quiet"] }));
+    store_task(json!({ "id": "t4", "title": "Nowhere this cache knows", "listIds": ["gone"] }));
+
+    let board = call(&app, json!({ "kind": "taskDetail", "taskId": "t1" })).await;
+    assert_eq!(board["ok"], true, "{board}");
+    let supports = &board["value"]["supports"];
+    assert_eq!(supports["priority"], false, "no Priority field is mapped");
+    assert_eq!(supports["dueDate"], false, "no date field is mapped");
+    assert_eq!(supports["comments"], false, "comments live on the issue");
+    assert_eq!(supports["privateTasks"], false);
+    assert_eq!(supports["multipleAssignees"], true);
+    assert_eq!(
+        supports["deleteTask"], "remove_from_list",
+        "the item comes off the project and the issue stays"
+    );
+
+    for (task_id, why) in [
+        (
+            "t2",
+            "a block that omits a key is a classic list saying nothing",
+        ),
+        (
+            "t3",
+            "a milestone has no controls to offer; the list decides",
+        ),
+        ("t4", "a list this cache cannot see takes nothing away"),
+    ] {
+        let answered = call(&app, json!({ "kind": "taskDetail", "taskId": task_id })).await;
+        let supports = &answered["value"]["supports"];
+        assert_eq!(supports["priority"], true, "{why}");
+        assert_eq!(supports["dueDate"], true, "{why}");
+        assert_eq!(supports["comments"], true, "{why}");
+        assert_eq!(supports["privateTasks"], true, "{why}");
+        assert_eq!(supports["multipleAssignees"], false, "{why}");
+        assert_eq!(supports["deleteTask"], "delete", "{why}");
+    }
+
+    // And the flyout's DEFAULTS section is gated on the same two keys, because it offers the very
+    // controls they gate: a default priority for a field the board does not have is a default
+    // nothing can apply.
+    let settings = call(&app, json!({ "kind": "listMembers", "listId": "gh" })).await;
+    assert_eq!(settings["value"]["supports"]["priority"], false);
+    assert_eq!(settings["value"]["supports"]["dueDate"], false);
+    let quiet = call(&app, json!({ "kind": "listMembers", "listId": "quiet" })).await;
+    assert_eq!(
+        quiet["value"]["supports"]["priority"], true,
+        "a classic list keeps every default it has always had"
+    );
+}
+
 /// The flyout opens offline. One network call in here used to take the list's name, colour,
 /// privacy and permissions — none of which need a connection — down with it.
 #[tokio::test]

@@ -99,6 +99,12 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
             "dueDate": list.default_due_date.clone().unwrap_or_else(|| "none".into()),
             "dueTime": list.default_due_time,
         },
+        // The same `supports` block the task detail answers with (task 897e25c5), because the
+        // defaults section offers the very controls those keys gate: a board with no Priority
+        // field mapped must not offer a DEFAULT priority for it either, and the default When /
+        // When-time choices go with `dueDate`. Absent means classic, so a list the server says
+        // nothing about keeps every default it has always had.
+        "supports": super::supports_json(Some(&list)),
         "canManageMembers": can_manage_members && membership,
         "canManageList": can_manage_list,
         "canDeleteList": can_delete,

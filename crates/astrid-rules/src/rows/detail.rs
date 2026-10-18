@@ -121,6 +121,23 @@ pub fn project_id_for_task(task: &Task, lists: &[TaskList]) -> Option<String> {
     })
 }
 
+/// Which of a task's lists decides what may be DONE to it — its `supports` answers (task
+/// 897e25c5).
+///
+/// The same walk as [`project_id_for_task`], and for the same reason: a detail opens from search,
+/// from a label or from another list entirely, so what a task permits is a fact about the task and
+/// not about where the reader happened to be standing. Tag memberships are skipped — a task in a
+/// milestone and in a classic list is decided by the list, because a label has no controls to
+/// offer. A task on no list this cache knows answers `None`, and every caller reads that as
+/// classic: a membership the reader cannot see must never take a working control away.
+pub fn deciding_list_for_task<'a>(task: &Task, lists: &'a [TaskList]) -> Option<&'a TaskList> {
+    task.effective_list_ids().into_iter().find_map(|id| {
+        lists
+            .iter()
+            .find(|list| list.id == id && list.is_domain_list())
+    })
+}
+
 /// Does this task have a board column at all?
 ///
 /// Either it already carries a status, or it is on a list that belongs to a project. The first
@@ -257,6 +274,41 @@ mod tests {
             None,
             "a membership the viewer cannot see names no project"
         );
+    }
+
+    /// What a task permits is decided by its OWN first domain membership (task 897e25c5): tags are
+    /// skipped because a milestone offers no controls, and a task on nothing this cache knows
+    /// answers `None` so every caller can read it as classic.
+    #[test]
+    fn the_deciding_list_is_the_tasks_own_first_domain_membership() {
+        let flavoured = |id: &str, list_type: &str| -> TaskList {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "listType": list_type
+            }))
+            .expect("a list")
+        };
+        let plain = list("plain-list", None);
+        let board = list("board-list", Some("project-1"));
+        let milestone = flavoured("v2", "milestone");
+        let lists = vec![milestone, plain.clone(), board.clone()];
+
+        assert_eq!(
+            deciding_list_for_task(&task_in(&["board-list", "plain-list"], None), &lists)
+                .map(|list| list.id.as_str()),
+            Some("board-list"),
+            "the first membership the cache knows, in the task's own order"
+        );
+        assert_eq!(
+            deciding_list_for_task(&task_in(&["v2", "plain-list"], None), &lists)
+                .map(|list| list.id.as_str()),
+            Some("plain-list"),
+            "a milestone is a tag, not what decides"
+        );
+        assert!(
+            deciding_list_for_task(&task_in(&["invisible"], None), &lists).is_none(),
+            "a membership the viewer cannot see decides nothing"
+        );
+        assert!(deciding_list_for_task(&task_in(&[], None), &lists).is_none());
     }
 
     /// A task on a project list is on a board; so is one that already carries a role from a board
