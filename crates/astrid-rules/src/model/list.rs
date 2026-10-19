@@ -128,6 +128,41 @@ pub enum DurationUnit {
 /// `list.backend` for a GitHub Projects board (astrid-web `lib/backends/supports.ts`).
 pub const GITHUB_PROJECT_BACKEND: &str = "github_project";
 
+/// `list.remote`: which GitHub Project a GitHub-backed list mirrors (web
+/// `lib/backends/list-wire.ts`).
+///
+/// The counterpart of [`super::task::TaskRemote`] one level up, and a simpler shape: web fills all
+/// three keys or sends `null` for the whole object, never a partial one — `null` for a classic
+/// list, for an iteration list, which is a tag rather than a bound board, and for a board whose
+/// GitHub installation row has gone. They are still `#[serde(default)]`, for the same reason every
+/// field in this module is: a thinner payload from a server this build does not know must not fail
+/// the whole list.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRemote {
+    /// `https://github.com/orgs/acme/projects/7` — or `/users/…` for a personal project.
+    #[serde(default)]
+    pub url: String,
+    /// The GitHub account the project belongs to: an organisation's login, or a person's.
+    #[serde(default)]
+    pub owner: String,
+    /// The project's number in that account, which is how GitHub itself names it.
+    #[serde(default)]
+    pub number: i64,
+}
+
+impl ListRemote {
+    /// `acme/7`, the label a client draws for this board; `None` when there is no page to open,
+    /// because a chip that goes nowhere is worse than no chip ([`super::task::TaskRemote`] decides
+    /// the same way). [`ListRemote::url`] is what it opens.
+    pub fn chip_label(&self) -> Option<String> {
+        if self.url.trim().is_empty() || self.owner.trim().is_empty() {
+            return None;
+        }
+        Some(format!("{}/{}", self.owner, self.number))
+    }
+}
+
 /// `list.supports` on the wire: what a list's backend can do that a client would otherwise have
 /// to guess. Every key is at its classic value when absent, and the web adds a key as each
 /// capability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored
@@ -342,6 +377,11 @@ pub struct TaskList {
     /// Projects board, `null` for a classic one. Ask through [`TaskList::is_github_backed`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+    /// The GitHub Project this list mirrors (web AWTD-1222, spec §11.2), for the board's own chip
+    /// and its "open on GitHub". **`None` means there is no page**, which a classic list, an
+    /// iteration list and a board whose installation has gone all share — see [`ListRemote`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<ListRemote>,
 
     // Filter settings, used by virtual lists and as the saved default of a real one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -602,6 +642,54 @@ mod tests {
             let list: TaskList = serde_json::from_str(classic).expect("decodes");
             assert!(!list.spawns_next_occurrence(), "{classic}");
         }
+    }
+
+    /// Task faa32e20: `remote` was the one GitHub key a list payload carried that this crate had
+    /// no counterpart for, so it was dropped on decode and the board's own chip had no data —
+    /// found by `tests/wire_shapes_contract.rs` on the `list.event` surface (task f8dfc84e).
+    #[test]
+    fn faa32e20_a_list_remote_survives_the_cache_and_names_its_chip() {
+        let board: TaskList = serde_json::from_str(
+            r#"{"id":"l1","name":"Board","backend":"github_project","remote":{"url":"https://github.com/orgs/acme/projects/7","owner":"acme","number":7}}"#,
+        )
+        .expect("decodes");
+        let remote = board.remote.as_ref().expect("kept");
+        assert_eq!(remote.url, "https://github.com/orgs/acme/projects/7");
+        assert_eq!(remote.chip_label().as_deref(), Some("acme/7"));
+
+        // The round trip the cache is: what came back has to be what went in.
+        let again: TaskList =
+            serde_json::from_str(&serde_json::to_string(&board).expect("encodes"))
+                .expect("decodes");
+        assert_eq!(again.remote, board.remote);
+
+        // No page to open, so no chip — a classic list, an iteration list, and a board whose
+        // GitHub installation has gone all send `null`, and a partial object is still not a chip.
+        for pageless in [
+            r#"{"id":"l2","name":"Home"}"#,
+            r#"{"id":"l3","name":"Home","remote":null}"#,
+        ] {
+            let list: TaskList = serde_json::from_str(pageless).expect("decodes");
+            assert_eq!(list.remote, None, "{pageless}");
+            assert!(
+                !serde_json::to_value(&list)
+                    .expect("encodes")
+                    .as_object()
+                    .expect("an object")
+                    .contains_key("remote"),
+                "{pageless}: an absent remote is not re-encoded as null"
+            );
+        }
+        assert_eq!(
+            ListRemote {
+                owner: "acme".into(),
+                number: 7,
+                ..ListRemote::default()
+            }
+            .chip_label(),
+            None,
+            "a remote with no url goes nowhere"
+        );
     }
 
     /// AITD-491: `backend` reached the v1 list payload (web AWTD-1256) and the cache dropped it, so

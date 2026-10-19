@@ -8,6 +8,8 @@
 //! that has been seen carrying a value outside its range falls back rather than failing. The
 //! reason is on `Priority` below, and it is not hypothetical.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -362,6 +364,29 @@ pub struct Task {
     /// Only a GitHub-backed task carries it; absent means classic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<TaskRemote>,
+    /// This task's GitHub project field VALUES, keyed by `ProjectField.id` (web AWTD-1208, spec
+    /// §9.4.3). No names and no types: those come once per project from
+    /// `GET /api/v1/projects/:id/fields`.
+    ///
+    /// **`None` means "not asked", never "none".** The list route carries values only on
+    /// `?include=fields`, because a thousand tasks' worth is 42.2 KiB over an already tight
+    /// payload budget, while the task-detail route always carries them — and a task with no
+    /// values carries no key at all (web `lib/tasks/v1-task-fields.ts`). Those three cases are
+    /// indistinguishable here, so nothing may read an absent map as "this task has no field
+    /// values".
+    ///
+    /// Which is why this is NOT where a pane reads them from:
+    /// `astrid_core::services::project_fields` caches the values under a key of their own, since
+    /// `store::upsert_task` replaces the whole encoded task and one list page fetched without
+    /// `?include=fields` would otherwise wipe what a detail fetch knew. What the key is modelled
+    /// FOR is the round trip — a value is only safe to cache and pass on once it survives a
+    /// decode and a re-encode, which is what task faa32e20 found it did not.
+    ///
+    /// Values are `string | number` on the wire. They stay [`serde_json::Value`] because that is
+    /// already how a field value is represented where it is typed and validated
+    /// (`project_fields::accepts`), and two representations of one scalar is one too many.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timer_duration: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,6 +553,7 @@ impl Task {
             next_occurrence_id: None,
             sync_state: None,
             remote: None,
+            fields: None,
             timer_duration: None,
             last_timer_value: None,
             priority: Priority::None,
@@ -895,6 +921,41 @@ mod tests {
         // What the server sends for every settled task, and what a classic list sends.
         assert_eq!(decode(r#"{"id":"t1","syncState":null}"#).sync_state, None);
         assert_eq!(decode(r#"{"id":"t1"}"#).sync_state, None);
+    }
+
+    /// Task faa32e20: a GitHub board's field VALUES (web AWTD-1208) were dropped on decode, so
+    /// they could not survive the cache or any pass-through — found by
+    /// `tests/wire_shapes_contract.rs` on the `task.event` and `task.listPage` surfaces (task
+    /// f8dfc84e). The three absent cases must stay indistinguishable: absent is "not asked".
+    #[test]
+    fn faa32e20_field_values_survive_the_cache_and_absent_is_never_none() {
+        let decode = |json: &str| serde_json::from_str::<Task>(json).expect("decodes");
+        let valued = decode(
+            r#"{"id":"t1","fields":{"field-status":"opt-in-progress","field-estimate":3,"field-target":"2026-02-01"}}"#,
+        );
+        let fields = valued.fields.as_ref().expect("kept");
+        assert_eq!(fields["field-status"], serde_json::json!("opt-in-progress"));
+        // A whole number stays a whole number: 3 re-encoded as 3.0 would not equal the wire.
+        assert_eq!(fields["field-estimate"], serde_json::json!(3));
+
+        let again = decode(&serde_json::to_string(&valued).expect("encodes"));
+        assert_eq!(again.fields, valued.fields);
+
+        // The list route without `?include=fields`, the same route with nothing to send, and a
+        // classic task all look like this — and all re-encode with the key still absent, which is
+        // what stops "not asked" being stored as "no values".
+        for unasked in [r#"{"id":"t2"}"#, r#"{"id":"t3","fields":null}"#] {
+            let task = decode(unasked);
+            assert_eq!(task.fields, None, "{unasked}");
+            assert!(
+                !serde_json::to_value(&task)
+                    .expect("encodes")
+                    .as_object()
+                    .expect("an object")
+                    .contains_key("fields"),
+                "{unasked}"
+            );
+        }
     }
 
     /// A GitHub-backed task carries `remote` (web AWTD-1222), the issue a `repo#N` chip opens. The

@@ -10,11 +10,13 @@
 //! `GET /api/v1/projects/:id/fields`, so a task's values can stay a compact
 //! `{ "<fieldId>": <scalar> }` map. The **values** ride `GET /api/v1/tasks/:id` but not the list
 //! route, which carries them only on `?include=fields` because a thousand tasks' worth would break
-//! its payload budget (web `lib/tasks/v1-task-fields.ts`). So a `fields` key on the cached `Task`
-//! would be filled for the tasks someone happened to open and absent for the rest, and absent
-//! would read as "no values". Both halves are cached here instead, under `metadata` keys, the way
-//! `dependency` caches its projection: the screen draws from the cache at once, works offline,
-//! and the round trip corrects it.
+//! its payload budget (web `lib/tasks/v1-task-fields.ts`). `model::Task` does carry the key — task
+//! faa32e20 modelled it, because a key that does not survive a decode and a re-encode cannot be
+//! passed on at all — but the cached task ROW is no good as the source of truth: `upsert_task`
+//! replaces the whole encoded task, so the key would be filled for the tasks someone happened to
+//! open and emptied again by the next list page, and absent would read as "no values". Both halves
+//! are cached here instead, under `metadata` keys, the way `dependency` caches its projection: the
+//! screen draws from the cache at once, works offline, and the round trip corrects it.
 //!
 //! ## Which fields show
 //!
@@ -328,11 +330,14 @@ impl ProjectFieldService {
         }
         if !crate::model::is_temp_id(&task_id) && !self.queued(&task_id)? {
             if let Ok(answer) = client.send(client.get(endpoints::task(&task_id))).await {
+                // Through `model::Task`, not by reaching into the body: the detail route always
+                // carries the values, so a task that decodes without them has none (task
+                // faa32e20, which is what put the key on the model).
                 let values: BTreeMap<String, Value> = answer
                     .get("task")
-                    .and_then(|task| task.get("fields"))
                     .cloned()
-                    .and_then(|fields| serde_json::from_value(fields).ok())
+                    .and_then(|task| serde_json::from_value::<crate::model::Task>(task).ok())
+                    .and_then(|task| task.fields)
                     .unwrap_or_default();
                 self.write(&values_key(&task_id), &values);
             }

@@ -67,13 +67,14 @@ const SURFACES: &[(&str, Kind, Shape)] = &[
 ///
 /// **Adding to this list is a decision, not a formality.** The reason has to say why a native shell
 /// never needs the key, or name the task that will carry it — not that the round trip was
-/// inconvenient. Scoping by surface is what keeps that honest: `/remote` is excused on
-/// `list.event` only, so `model::Task`'s own `remote` is still checked everywhere it is sent.
+/// inconvenient. Scoping by surface is what keeps that honest: `/statusRoleBeforeDone` is excused
+/// on `task.event` only, so a list page that started sending it would fail here rather than ride
+/// an exclusion written for something else.
 ///
-/// `description` used to be excused here, on the `?omit=` surface. Task ebe0966b made
-/// `Task::description` an `Option<String>` instead, so the omitted surface now round-trips with the
-/// key absent on both sides and the entry is gone — which is the outcome an entry is supposed to
-/// have.
+/// Three entries have already been earned out of this list, which is the outcome an entry is
+/// supposed to have. `description` was excused on the `?omit=` surface until task ebe0966b made
+/// `Task::description` an `Option<String>`; `/fields` and `list.event`'s `/remote` were excused
+/// until task faa32e20 modelled them as `Task::fields` and `TaskList::remote`.
 const ALLOWLIST: &[(&str, &str, &str)] = &[
     (
         "*",
@@ -98,21 +99,6 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
          legacy 24-hour default\" is the right answer and dropping the key is that answer being \
          honest. It stopped being a decode FAILURE in this task; see \
          `deserialize_recently_completed_window`.",
-    ),
-    (
-        "list.event",
-        "/remote",
-        "Where a GitHub-backed list lives (`url`, `owner`, `number`). `model::Task` has \
-         `TaskRemote`; `TaskList` has no counterpart yet, so the chip that would show `acme/7` \
-         has no data. Needed by the Windows supports work (93ffa9ea) and filed with `fields` as \
-         task faa32e20.",
-    ),
-    (
-        "*",
-        "/fields",
-        "A GitHub Project's own field values, keyed by `ProjectField.id` (web AWTD-1208). \
-         Modelling them needs the schema route `GET /api/v1/projects/:id/fields` as well as the \
-         values, which is more than a struct. Filed as task faa32e20 with `/remote`.",
     ),
 ];
 
@@ -363,9 +349,9 @@ fn f8dfc84e_every_allowlisted_path_is_explained_and_still_on_the_wire() {
         if reason.trim().is_empty() {
             failures.push(format!("{scope} {path} is allowlisted with no reason"));
         }
-        // Any surface, not the scoped one: `/remote` is excused on `list.event` precisely BECAUSE
-        // only that surface sends it to a model that has no counterpart, and an entry is still
-        // earning its keep as long as the key is part of the contract somewhere.
+        // Any surface, not the scoped one: `/recentlyCompletedWindow` is excused on `list.event`
+        // precisely BECAUSE only that surface sends a value this crate cannot read, and the entry
+        // is still earning its keep while `list.read` sends a readable one under the same key.
         if !on_the_wire.contains(*path) {
             failures.push(format!(
                 "{path} is allowlisted ({scope}) but no surface in the fixture carries that key \
