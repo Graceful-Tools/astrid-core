@@ -1333,7 +1333,9 @@ impl ExternalSyncService {
         let mut body = serde_json::Map::new();
         body.insert(address.to_string(), json!(value));
         body.insert("title".into(), json!(task.title));
-        body.insert("notes".into(), json!(task.description));
+        // `description_text`, not the field: the bridge has always sent `""` for a task with no
+        // description, and `json!(None)` would send `null` instead — a different value to Google.
+        body.insert("notes".into(), json!(task.description_text()));
         body.insert("dueDate".into(), json!(due));
         body.insert("completed".into(), json!(task.completed));
         body.insert("remoteId".into(), json!(remote_id));
@@ -1724,7 +1726,7 @@ impl ExternalSyncService {
         // Google leaves `notes` out when there are none, so absent is empty — as on Apple. Safe
         // now that last-write-wins guards the call: a pending local edit never gets here.
         let notes = item.notes.clone().unwrap_or_default();
-        if task.description != notes {
+        if task.description_text() != notes {
             changes.description = Some(notes);
         }
         let due = item.due_date.as_deref().and_then(date::parse);
@@ -1964,7 +1966,7 @@ fn parent_of(item: &RemoteItem, container_id: &str, links: &LinkMap) -> Option<S
 /// but Google's stamp.
 fn same_content(remote: &RemoteItem, task: &Task, due: Option<&str>) -> bool {
     remote.title == task.title
-        && remote.notes.as_deref().unwrap_or_default() == task.description
+        && remote.notes.as_deref().unwrap_or_default() == task.description_text()
         && remote.completed == task.completed
         && remote.due_date.as_deref().and_then(date::parse) == due.and_then(date::parse)
 }

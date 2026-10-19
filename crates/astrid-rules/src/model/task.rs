@@ -278,8 +278,13 @@ pub struct Task {
     pub id: String,
     #[serde(default)]
     pub title: String,
-    #[serde(default)]
-    pub description: String,
+    /// `None` is **the response did not say** — `GET /api/v1/tasks?omit=description` leaves the
+    /// key out and names it in `meta.omitted` — and `Some("")` is a description a person cleared.
+    /// They were one `""` until task ebe0966b (D55), which meant any write built from a cached row
+    /// erased text somebody had typed. [`Task::keeping_unsent`] fills an omitted one from the
+    /// cache; [`Task::description_text`] is what a reader that only draws or searches it wants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// The human-readable id — `AST-142` (web task 12f54df4). Minted by the server for tasks on
     /// a project; absent for a task on a project-less list, so a solo user never sees one.
     /// Searchable as a direct hit.
@@ -471,7 +476,8 @@ impl Task {
     /// This task as the server sent it, with what the response never carries kept from the
     /// cached copy: the blocker ids and the next occurrence ride only on the single-task read, so
     /// a PUT answer or a list page that leaves them out is not saying the task stopped waiting
-    /// or lost its successor.
+    /// or lost its successor — and a page fetched with `?omit=description` is not saying the
+    /// description was cleared (task ebe0966b).
     pub fn keeping_unsent(mut self, cached: &Task) -> Task {
         if self.blocked_by.is_none() {
             self.blocked_by = cached.blocked_by.clone();
@@ -482,7 +488,17 @@ impl Task {
         if self.next_occurrence_id.is_none() {
             self.next_occurrence_id = cached.next_occurrence_id.clone();
         }
+        if self.description.is_none() {
+            self.description = cached.description.clone();
+        }
         self
+    }
+
+    /// The description as a reader that only draws or searches it wants: `""` both for a task
+    /// nobody has described and for a response that did not say. A reader deciding what to WRITE
+    /// must take [`Task::description`] itself, because those two are the case this distinguishes.
+    pub fn description_text(&self) -> &str {
+        self.description.as_deref().unwrap_or_default()
     }
 
     /// A task with nothing but an id and a title, for the paths that build one from scratch.
@@ -490,7 +506,7 @@ impl Task {
         Task {
             id: id.into(),
             title: title.into(),
-            description: String::new(),
+            description: None,
             identifier: None,
             assignee_id: None,
             assignee: None,
@@ -807,6 +823,62 @@ mod tests {
         assert_eq!(
             detail.keeping_unsent(&cached).next_occurrence_id,
             Some(None)
+        );
+    }
+
+    /// Task ebe0966b (D55): a description the server OMITTED and one a person CLEARED are
+    /// different facts, and `#[serde(default)] String` made them the same `""`.
+    ///
+    /// `GET /api/v1/tasks?omit=description` answers with the key absent and says so in
+    /// `meta.omitted`. Decoded as `""`, that empty string is a value the server will store — so the
+    /// next write built from the cached row erases text a person typed.
+    #[test]
+    fn ebe0966b_an_omitted_description_is_not_a_cleared_one() {
+        let decode = |json: &str| serde_json::from_str::<Task>(json).expect("decodes");
+
+        // Omitted: the response does not say, and re-encoding must not start saying.
+        let omitted = decode(r#"{"id":"t1","title":"Buy milk"}"#);
+        assert_eq!(omitted.description, None);
+        assert_eq!(omitted.description_text(), "");
+        let stored = serde_json::to_value(&omitted).expect("encodes");
+        assert!(
+            stored.get("description").is_none(),
+            "an omitted description must not reappear as a key: {stored}"
+        );
+
+        // Cleared: the server said "empty", which is a value and survives the cache verbatim.
+        let cleared = decode(r#"{"id":"t1","title":"Buy milk","description":""}"#);
+        assert_eq!(cleared.description.as_deref(), Some(""));
+        assert_eq!(
+            serde_json::to_value(&cleared).expect("encodes")["description"],
+            serde_json::json!("")
+        );
+
+        // Written: unchanged by any of this.
+        let written = decode(r#"{"id":"t1","title":"Buy milk","description":"two litres"}"#);
+        assert_eq!(written.description_text(), "two litres");
+    }
+
+    /// The half that stops the erasure: a payload that left the description out is merged against
+    /// the cached copy, the same way the blocker ids and the successor already are.
+    #[test]
+    fn ebe0966b_a_response_without_a_description_keeps_the_one_the_cache_knows() {
+        let mut cached = Task::new("t1", "Buy milk");
+        cached.description = Some("The long note the person typed".to_string());
+
+        let page = Task::new("t1", "Buy milk").keeping_unsent(&cached);
+        assert_eq!(
+            page.description.as_deref(),
+            Some("The long note the person typed"),
+            "a page that omitted the description does not blank it"
+        );
+
+        // The server saying it is empty is the server's word, not an omission, so it stands.
+        let mut cleared = Task::new("t1", "Buy milk");
+        cleared.description = Some(String::new());
+        assert_eq!(
+            cleared.keeping_unsent(&cached).description.as_deref(),
+            Some("")
         );
     }
 

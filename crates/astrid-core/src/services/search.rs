@@ -198,7 +198,7 @@ pub fn search(
 /// reads, but never its "Unknown User" placeholder: nobody searching "unknown" means that.
 fn text_matches(task: &Task, needle: &str, users: &[User]) -> bool {
     if task.title.to_lowercase().contains(needle)
-        || task.description.to_lowercase().contains(needle)
+        || task.description_text().to_lowercase().contains(needle)
     {
         return true;
     }
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn it_matches_the_title_and_the_description_without_regard_to_case() {
         let mut noted = task("t2", "Trip");
-        noted.description = "book the FLIGHTS".into();
+        noted.description = Some("book the FLIGHTS".into());
         let tasks = vec![task("t1", "Book Flights"), noted, task("t3", "Buy milk")];
 
         let results = matches(&tasks, "flights", &SearchScope::everywhere());
@@ -560,7 +560,7 @@ mod tests {
         let mut low = task("low", "milk");
         low.priority = Priority::Low;
         let mut high = task("high", "notes about it");
-        high.description = "milk".into();
+        high.description = Some("milk".into());
         high.priority = Priority::High;
         high.updated_at = date::parse("2026-01-01T00:00:00Z");
         let mut done = task("done", "milk");

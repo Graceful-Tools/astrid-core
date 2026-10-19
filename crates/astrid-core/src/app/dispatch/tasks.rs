@@ -306,7 +306,7 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         // The description as blocks to draw, beside the text to edit: the web renders one and
         // edits the other, and a shell handed only the text drew `**bold**` with its asterisks
         // (task 11cfaf6d). Which markdown means what is `crate::markdown`, mirrored from web.
-        "descriptionBlocks": crate::markdown::render(&task.description),
+        "descriptionBlocks": crate::markdown::render(task.description_text()),
         "task": task,
         "fieldOrder": rows::detail::field_order(mode)
             .iter()

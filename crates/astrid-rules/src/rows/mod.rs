@@ -418,7 +418,7 @@ impl TaskRow {
             is_pending: crate::model::is_temp_id(&task.id),
             is_private: task.is_private,
             is_repeating: task.is_repeating(),
-            has_description: !task.description.trim().is_empty(),
+            has_description: !task.description_text().trim().is_empty(),
             comment_count: task.comments.as_ref().map(Vec::len).unwrap_or(0),
             attachment_count: task.all_secure_files().len(),
             subtask_count: context.subtask_counts.get(&task.id).copied().unwrap_or(0),
@@ -745,7 +745,7 @@ mod tests {
         let counts = HashMap::from([("t1".to_string(), 3)]);
 
         let mut task = Task::new("t1", "Buy milk");
-        task.description = "two litres".into();
+        task.description = Some("two litres".into());
         task.assignee_id = Some("them".into());
         task.list_ids = Some(vec!["l1".into(), "s1".into()]);
         task.priority = Priority::High;

@@ -636,7 +636,11 @@ fn read_summary(row: &rusqlite::Row<'_>) -> SqlResult<TaskSummary> {
         creator_id: row.get(10)?,
         status_role: row.get(11)?,
         is_private: row.get::<_, i64>(12)? != 0,
-        has_description: !row.get::<_, String>(13)?.trim().is_empty(),
+        // NULL since task ebe0966b: the column is written from `Task::description`, which is
+        // `None` for a task whose description the response never sent. Nothing to draw either way.
+        has_description: row
+            .get::<_, Option<String>>(13)?
+            .is_some_and(|text| !text.trim().is_empty()),
         timer_duration: row.get(14)?,
         occurrence_count: row.get(15)?,
         comment_count: row.get(16)?,
@@ -942,7 +946,7 @@ mod tests {
         let store = Store::in_memory().expect("opens");
         let mut task = task_in_lists("t1", &["l1"]);
         task.title = "Buy milk".into();
-        task.description = "two litres".into();
+        task.description = Some("two litres".into());
         task.priority = Priority::High;
         task.repeating = Some(Repeating::Weekly);
         task.due_date_time = date::parse("2026-09-07T12:00:00Z");

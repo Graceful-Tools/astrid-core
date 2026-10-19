@@ -56,7 +56,7 @@ fn app_with_tasks(count: usize) -> App {
             due_date_time: date::parse("2026-09-08T09:00:00Z"),
             completed: index % 7 == 0,
             assignee_id: Some("me".into()),
-            description: format!("something about number {index}"),
+            description: Some(format!("something about number {index}")),
             ..Task::new(format!("t{index}"), format!("Task number {index}"))
         })
         .collect();

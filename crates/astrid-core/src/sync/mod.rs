@@ -1458,7 +1458,7 @@ mod tests {
                 ),
         );
         let mut cached = Task::new("t1", "Buy milk");
-        cached.description = "The long note the person typed".to_string();
+        cached.description = Some("The long note the person typed".to_string());
         cached.updated_at = date::parse("2026-09-07T12:00:00Z");
         fixture.store.upsert_task(&cached).expect("stores");
 
@@ -1471,7 +1471,7 @@ mod tests {
                 .expect("reads")
                 .expect("present")
                 .description,
-            "The long note the person typed",
+            Some("The long note the person typed".to_string()),
             "the description the server did not send is the one on the device"
         );
         assert_eq!(

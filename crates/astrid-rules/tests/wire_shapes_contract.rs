@@ -67,8 +67,13 @@ const SURFACES: &[(&str, Kind, Shape)] = &[
 ///
 /// **Adding to this list is a decision, not a formality.** The reason has to say why a native shell
 /// never needs the key, or name the task that will carry it — not that the round trip was
-/// inconvenient. Scoping by surface is what keeps that honest: `description` is excused on the
-/// `?omit=` surface only, so the surfaces that DO send it are still checked.
+/// inconvenient. Scoping by surface is what keeps that honest: `/remote` is excused on
+/// `list.event` only, so `model::Task`'s own `remote` is still checked everywhere it is sent.
+///
+/// `description` used to be excused here, on the `?omit=` surface. Task ebe0966b made
+/// `Task::description` an `Option<String>` instead, so the omitted surface now round-trips with the
+/// key absent on both sides and the entry is gone — which is the outcome an entry is supposed to
+/// have.
 const ALLOWLIST: &[(&str, &str, &str)] = &[
     (
         "*",
@@ -83,16 +88,6 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "Which column an un-completed task returns to. The server decides that and sends the \
          result as `statusRole`, which IS modelled and IS what the board draws; a client that \
          kept its own copy would be a second opinion about a move it does not make.",
-    ),
-    (
-        "task.listPage.omitted",
-        "/description",
-        "D55, and the finding this test was written to produce: `Task::description` is \
-         `#[serde(default)] String`, so a description the server OMITTED (`?omit=description`) \
-         decodes to `\"\"` — indistinguishable from one a person cleared. Writing it back would \
-         erase the real description. The fix is `Option<String>` and it reaches every reader of \
-         the field, so it is its own task: ebe0966b on the Astrid Windows board. Excused HERE \
-         ONLY: the surfaces that do send a description still assert it survives.",
     ),
     (
         "list.event",
@@ -368,9 +363,9 @@ fn f8dfc84e_every_allowlisted_path_is_explained_and_still_on_the_wire() {
         if reason.trim().is_empty() {
             failures.push(format!("{scope} {path} is allowlisted with no reason"));
         }
-        // Any surface, not the scoped one: `/description` is excused on `task.listPage.omitted`
-        // precisely BECAUSE that surface omits it, and the entry is still earning its keep as
-        // long as the key is part of the contract somewhere.
+        // Any surface, not the scoped one: `/remote` is excused on `list.event` precisely BECAUSE
+        // only that surface sends it to a model that has no counterpart, and an entry is still
+        // earning its keep as long as the key is part of the contract somewhere.
         if !on_the_wire.contains(*path) {
             failures.push(format!(
                 "{path} is allowlisted ({scope}) but no surface in the fixture carries that key \

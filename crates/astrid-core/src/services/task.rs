@@ -130,7 +130,7 @@ impl TaskChanges {
             task.title = value.clone();
         }
         if let Some(value) = &self.description {
-            task.description = value.clone();
+            task.description = Some(value.clone());
         }
         if let Some(value) = self.priority {
             task.priority = value;
@@ -362,7 +362,9 @@ impl TaskService {
         let list_ids = self.filed_in(&draft.list_ids)?;
 
         let mut task = Task::new(temp_id.clone(), draft.title.clone());
-        task.description = draft.description.clone();
+        // A draft always states its description, even as `""`: the person is creating the task
+        // here, so there is nothing the server could have omitted.
+        task.description = Some(draft.description.clone());
         task.list_ids = Some(list_ids.clone());
         task.priority = draft.priority;
         task.due_date_time = draft.due_date_time;
