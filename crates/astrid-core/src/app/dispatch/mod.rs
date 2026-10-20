@@ -572,7 +572,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 .set_image(&list_id, std::path::Path::new(&path))
                 .await,
         ),
-        Command::ListImage { list_id } => answer(
+        Command::ListImage {
+            image_url: Some(address),
+            ..
+        } => answer(
+            app.context
+                .lists()
+                .image_at(&address, app.attachment_cache())
+                .await,
+        ),
+        Command::ListImage { list_id, .. } => answer(
             app.context
                 .lists()
                 .image(&list_id, app.attachment_cache())

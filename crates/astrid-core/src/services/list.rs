@@ -630,14 +630,24 @@ impl ListService {
     /// web draws a hashed default icon then, which this client does not (CONTRACTS.md D14).
     pub async fn image(&self, id: &str, cache_dir: &std::path::Path) -> Result<Option<ListImage>> {
         let list = self.require(id)?;
-        let Some(address) = list
-            .image_url
-            .clone()
-            .or(list.cover_image_url.clone())
-            .filter(|address| !address.trim().is_empty())
-        else {
+        match list.image_url.clone().or(list.cover_image_url.clone()) {
+            Some(address) => self.image_at(&address, cache_dir).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The same, for an address the caller holds rather than a list in this store — a public
+    /// list's `imageUrl`, whose secure file needs the session as much as one of the reader's own
+    /// (AATD-39: iOS draws the Bugs list's bug in the public sections too).
+    pub async fn image_at(
+        &self,
+        address: &str,
+        cache_dir: &std::path::Path,
+    ) -> Result<Option<ListImage>> {
+        let address = address.trim().to_string();
+        if address.is_empty() {
             return Ok(None);
-        };
+        }
         if address.starts_with("http://") || address.starts_with("https://") {
             return Ok(Some(ListImage {
                 source: address,
