@@ -305,6 +305,10 @@ pub struct PublicListSummary {
     pub task_count: i64,
     #[serde(default)]
     pub member_count: i64,
+    /// `collaborative` (anyone may add) or `copy_only` (read and copy): which sidebar section, and
+    /// whether "View & Add" or only "Copy" is offered (iOS PublicListSections, AATD-46).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_list_type: Option<String>,
 }
 
 /// Who a public list belongs to.
@@ -520,6 +524,25 @@ impl ListService {
         serde_json::from_value(lists).map_err(|error| {
             ServiceError::Api(crate::api::ApiError::Decode(format!(
                 "the public lists could not be read: {error}"
+            )))
+        })
+    }
+
+    /// A public list's tasks, straight from the server and not into the cache: somebody else's
+    /// tasks are shown while the list is open, never mixed into My Tasks or search (iOS's
+    /// featuredListTasks, AATD-46).
+    pub async fn public_list_tasks(&self, id: &str) -> Result<Vec<crate::model::Task>> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::TASKS)
+            .query("listId", Some(id.to_string()))
+            .query("limit", Some("200".to_string()));
+        let answer = self.context.client.send(request).await?;
+        let tasks = answer.get("tasks").cloned().unwrap_or(answer);
+        serde_json::from_value(tasks).map_err(|error| {
+            ServiceError::Api(crate::api::ApiError::Decode(format!(
+                "the list's tasks could not be read: {error}"
             )))
         })
     }

@@ -703,6 +703,15 @@ pub enum Command {
         list_id: String,
         order: Vec<String>,
     },
+    /// A featured public list's rows (AATD-46): its tasks fetched from the server (not cached),
+    /// with this account's own unsent ones for it, projected as `rowsForList` projects — other
+    /// people's tasks read-only, their control copying. `list` is the public list as the shell
+    /// holds it, when this account does not.
+    FeaturedRows {
+        list_id: String,
+        #[serde(default)]
+        list: Option<Box<crate::model::TaskList>>,
+    },
     /// A row dropped in the list's tree (AATD-42): `zone` is `row` (with `targetId`), `line`,
     /// `outdent` or `indent` (with the visible `rowIds`). Writes the new parent when there is one
     /// and answers `{ outcome, parentId }` — `reorderOnly` asks the shell to write the order itself.
