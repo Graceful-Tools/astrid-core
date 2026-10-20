@@ -442,6 +442,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
         Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
         Command::ShareTask { task_id } => share_task(app, &task_id).await,
+        Command::ShareList { list_id } => match app.context.share().link_for_list(&list_id).await {
+            Ok(url) => Response::ok(serde_json::json!({ "url": url })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ResolveShortcode { code } => answer(app.context.share().resolve(&code).await),
         Command::CopyTask {
             task_id,
             target_list_id,

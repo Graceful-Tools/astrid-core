@@ -20,11 +20,34 @@ impl ShareService {
 
     /// Mint a share link for a task and return its address, as the web's Share does.
     pub async fn link_for_task(&self, task_id: &str) -> Result<String> {
+        self.link_for("task", task_id).await
+    }
+
+    /// Mint a share link for a list — iOS's Share List (AATD-44).
+    pub async fn link_for_list(&self, list_id: &str) -> Result<String> {
+        self.link_for("list", list_id).await
+    }
+
+    /// What a share link opens: `{ targetType: "task" | "list", targetId }` (AATD-59). iOS's
+    /// DeepLinkManager resolves `astrid.cc/s/<code>` the same way.
+    pub async fn resolve(&self, code: &str) -> Result<serde_json::Value> {
+        let answer = self
+            .context
+            .client
+            .send(self.context.client.get(endpoints::shortcode(code)))
+            .await?;
+        Ok(json!({
+            "targetType": answer.get("targetType").cloned().unwrap_or(serde_json::Value::Null),
+            "targetId": answer.get("targetId").cloned().unwrap_or(serde_json::Value::Null),
+        }))
+    }
+
+    async fn link_for(&self, target_type: &str, target_id: &str) -> Result<String> {
         let request = self
             .context
             .client
             .post(endpoints::SHORTCODES)
-            .value(json!({ "targetType": "task", "targetId": task_id }));
+            .value(json!({ "targetType": target_type, "targetId": target_id }));
         let answer = self.context.client.send(request).await?;
         answer
             .get("url")
