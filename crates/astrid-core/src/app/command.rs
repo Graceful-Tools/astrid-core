@@ -703,6 +703,17 @@ pub enum Command {
         list_id: String,
         order: Vec<String>,
     },
+    /// A row dropped in the list's tree (AATD-42): `zone` is `row` (with `targetId`), `line`,
+    /// `outdent` or `indent` (with the visible `rowIds`). Writes the new parent when there is one
+    /// and answers `{ outcome, parentId }` — `reorderOnly` asks the shell to write the order itself.
+    NestTask {
+        task_id: String,
+        zone: String,
+        #[serde(default)]
+        target_id: Option<String>,
+        #[serde(default)]
+        row_ids: Vec<String>,
+    },
     PostComment {
         task_id: String,
         content: String,

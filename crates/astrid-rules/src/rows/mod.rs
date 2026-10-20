@@ -25,6 +25,7 @@ pub mod due_picks;
 pub mod filter_picks;
 pub mod identifier;
 pub mod list_picks;
+pub mod nesting;
 pub mod reminder_picks;
 pub mod repeat;
 

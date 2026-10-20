@@ -1216,3 +1216,51 @@ mod tests {
         assert_eq!(cleared.to_body()["assigneeIds"], serde_json::json!([]));
     }
 }
+
+/// Apply a drag in the subtask tree, by iOS's rules (AATD-42).
+pub(super) fn nest_task(
+    app: &App,
+    task_id: &str,
+    zone: &str,
+    target_id: Option<String>,
+    row_ids: Vec<String>,
+) -> Response {
+    use crate::rows::nesting::{self, Outcome, Zone};
+    let zone = match (zone, target_id) {
+        ("row", Some(target)) => Zone::OnRow(target),
+        ("line", _) => Zone::Line,
+        ("outdent", _) => Zone::Outdent,
+        ("indent", _) => Zone::Indent(row_ids),
+        (other, _) => {
+            return Response::failed(Failure::bad_request(format!("unknown zone {other}")))
+        }
+    };
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let by_id: std::collections::HashMap<String, &crate::model::Task> =
+        tasks.iter().map(|task| (task.id.clone(), task)).collect();
+    let Some(dragged) = by_id.get(task_id).copied() else {
+        return Response::failed(Failure::not_found("task", task_id));
+    };
+    let outcome = nesting::outcome(&zone, dragged, &by_id);
+    let parent = match &outcome {
+        Outcome::MakeSubtask { parent_id } => Some(Some(parent_id.clone())),
+        Outcome::MoveToTopLevel => Some(None),
+        Outcome::ReorderOnly | Outcome::None => None,
+    };
+    if let Some(parent) = parent.clone() {
+        let changes = TaskChanges {
+            parent_task_id: Some(parent),
+            ..Default::default()
+        };
+        if let Err(error) = app.context.tasks().update(task_id, &changes) {
+            return Response::failed(error.into());
+        }
+    }
+    Response::ok(serde_json::json!({
+        "outcome": outcome.name(),
+        "parentId": parent.flatten(),
+    }))
+}
