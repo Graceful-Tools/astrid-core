@@ -6510,3 +6510,28 @@ async fn aatd54_the_triage_deck_is_what_is_due_for_me() {
         .collect();
     assert_eq!(ids, vec!["pinged", "late"], "{deck}");
 }
+
+/// AATD-37: rowsForList says whether the reader may add here — yes in a list they belong to, no in
+/// a copy-only public list they do not.
+#[tokio::test]
+async fn aatd37_rows_say_whether_the_reader_may_add() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "mine", "name": "Home", "ownerId": "me" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    let mine = call(&app, json!({ "kind": "rowsForList", "listId": "mine" })).await;
+    assert_eq!(mine["value"]["canAddTasks"], true, "{mine}");
+    let theirs = call(
+        &app,
+        json!({ "kind": "rowsForList", "listId": "pub",
+                "list": { "id": "pub", "name": "Tips", "privacy": "PUBLIC", "ownerId": "them" } }),
+    )
+    .await;
+    assert_eq!(theirs["value"]["canAddTasks"], false, "{theirs}");
+}
