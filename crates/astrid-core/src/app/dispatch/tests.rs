@@ -6372,3 +6372,42 @@ async fn aatd44_the_roster_and_agents_come_from_the_core() {
     );
     assert_eq!(options["value"]["agents"][0]["aiAgentType"], "claude_agent");
 }
+
+/// AATD-42: a row dropped on another becomes its subtask; pulled to the gutter it climbs back out.
+#[tokio::test]
+async fn aatd42_nest_task_writes_the_parent_the_drop_means() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    call(
+        &app,
+        json!({ "kind": "seedCache", "tasks": [
+            { "id": "a", "title": "Paint", "listIds": ["l1"] },
+            { "id": "b", "title": "Buy brushes", "listIds": ["l1"] }
+        ] }),
+    )
+    .await;
+    let nested = call(
+        &app,
+        json!({ "kind": "nestTask", "taskId": "b", "zone": "row", "targetId": "a" }),
+    )
+    .await;
+    assert_eq!(nested["value"]["outcome"], "makeSubtask", "{nested}");
+    let task = call(&app, json!({ "kind": "task", "taskId": "b" })).await;
+    assert_eq!(task["value"]["parentTaskId"], "a", "{task}");
+    let out = call(
+        &app,
+        json!({ "kind": "nestTask", "taskId": "b", "zone": "outdent" }),
+    )
+    .await;
+    assert_eq!(out["value"]["outcome"], "moveToTopLevel", "{out}");
+    let task = call(&app, json!({ "kind": "task", "taskId": "b" })).await;
+    assert!(task["value"]["parentTaskId"].is_null(), "{task}");
+    let reorder = call(
+        &app,
+        json!({ "kind": "nestTask", "taskId": "a", "zone": "line" }),
+    )
+    .await;
+    assert_eq!(reorder["value"]["outcome"], "reorderOnly");
+}

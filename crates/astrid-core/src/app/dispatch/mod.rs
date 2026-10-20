@@ -45,6 +45,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             lists,
             current_user_id,
         } => list_counts(app, &lists, current_user_id),
+        Command::NestTask {
+            task_id,
+            zone,
+            target_id,
+            row_ids,
+        } => nest_task(app, &task_id, &zone, target_id, row_ids),
         Command::ListBadges {
             lists,
             my_tasks_id,
