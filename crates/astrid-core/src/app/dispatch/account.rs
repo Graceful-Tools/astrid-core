@@ -122,7 +122,14 @@ pub(super) fn settings(app: &App) -> Response {
 pub(super) fn features(app: &App) -> Response {
     let account = app.context.account();
     let flag = |name: &str| account.has_feature(name).ok().flatten();
+    let hide_list_images = flag("hide_list_images");
+    let settings = crate::smart_tasks::SmartTaskSettings::from_stored(
+        &account.smart_task_settings().unwrap_or_default(),
+    );
     Response::ok(serde_json::json!({
+        "hideListImages": hide_list_images,
+        // iOS ListImagesVisibility: the person's choice, else the test's arm (AATD-39).
+        "showListImages": settings.shows_list_images(hide_list_images.unwrap_or(false)),
         "projectMode": flag("project_mode"),
         "googleTasks": flag("google_tasks"),
         "taskCost": flag("task_cost"),

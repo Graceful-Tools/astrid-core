@@ -34,6 +34,9 @@ pub struct SmartTaskSettings {
     pub task_display_mode: String,
     pub subtask_display: String,
     pub smart_task_creation_enabled: bool,
+    /// Whether list pictures are drawn, as chosen; `None` follows the `hide_list_images` test
+    /// (iOS ListImagesVisibility, AATD-39).
+    pub show_list_images: Option<bool>,
 }
 
 impl SmartTaskSettings {
@@ -65,7 +68,13 @@ impl SmartTaskSettings {
                 "indented".to_string()
             },
             smart_task_creation_enabled: flag("smartTaskCreationEnabled"),
+            show_list_images: stored.get("showListImages").and_then(Value::as_bool),
         }
+    }
+
+    /// iOS's ListImagesVisibility.shouldShow: the person's choice, else the flag's arm.
+    pub fn shows_list_images(&self, hide_flag: bool) -> bool {
+        self.show_list_images.unwrap_or(!hide_flag)
     }
 
     /// The layout rows and the detail draw with.
@@ -82,6 +91,11 @@ pub fn validate(changes: &Value) -> Result<(), String> {
     };
     for (key, value) in fields {
         match key.as_str() {
+            "showListImages" => {
+                if !(value.is_boolean() || value.is_null()) {
+                    return Err("Invalid showListImages value".to_string());
+                }
+            }
             "emailToTaskEnabled" | "smartTaskCreationEnabled" => {
                 if !value.is_boolean() {
                     return Err(format!("{key} must be true or false"));
@@ -197,6 +211,21 @@ pub fn layout_choices() -> Vec<Choice> {
 
 #[cfg(test)]
 mod tests {
+
+    /// AATD-39: list pictures follow the person's choice, else the hide_list_images arm.
+    #[test]
+    fn aatd_39_list_images_follow_the_choice_then_the_flag() {
+        let unset = SmartTaskSettings::from_stored(&serde_json::json!({}));
+        assert_eq!(unset.show_list_images, None);
+        assert!(unset.shows_list_images(false));
+        assert!(!unset.shows_list_images(true));
+        let chosen = SmartTaskSettings::from_stored(&serde_json::json!({ "showListImages": true }));
+        assert!(chosen.shows_list_images(true));
+        assert!(validate(&serde_json::json!({ "showListImages": false })).is_ok());
+        assert!(validate(&serde_json::json!({ "showListImages": null })).is_ok());
+        assert!(validate(&serde_json::json!({ "showListImages": "yes" })).is_err());
+    }
+
     use super::*;
     use serde_json::json;
 

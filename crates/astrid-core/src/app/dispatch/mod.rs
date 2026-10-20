@@ -45,6 +45,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             lists,
             current_user_id,
         } => list_counts(app, &lists, current_user_id),
+        Command::ListBadges {
+            lists,
+            my_tasks_id,
+            current_user_id,
+        } => list_badges(app, &lists, my_tasks_id, current_user_id),
         Command::Tasks { ids } => {
             let store = &app.store;
             let found = match ids {

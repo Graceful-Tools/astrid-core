@@ -269,6 +269,64 @@ pub(super) fn list_counts(
     Response::ok(serde_json::Value::Object(counts))
 }
 
+/// iOS's ListTaskCount: open tasks per list, a saved filter's kept count, a public list's server
+/// count, and My Tasks as the reader's open assigned tasks (AATD-39).
+pub(super) fn list_badges(
+    app: &App,
+    lists: &[crate::model::TaskList],
+    my_tasks_id: Option<String>,
+    current_user_id: Option<String>,
+) -> Response {
+    let current_user_id = match current_user_id {
+        Some(held) => Some(held),
+        None => match app.context.account().current_user_id() {
+            Ok(user) => user,
+            Err(error) => return Response::failed(error.into()),
+        },
+    };
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let virtual_lists: Vec<crate::model::TaskList> = lists
+        .iter()
+        .filter(|list| list.is_virtual.unwrap_or(false))
+        .cloned()
+        .collect();
+    let kept = match list_counts(app, &virtual_lists, current_user_id.clone()).value {
+        Some(serde_json::Value::Object(kept)) => kept,
+        _ => serde_json::Map::new(),
+    };
+    let mut open_by_list: std::collections::HashMap<String, usize> = Default::default();
+    for task in tasks.iter().filter(|task| !task.completed) {
+        for id in task.effective_list_ids() {
+            *open_by_list.entry(id).or_insert(0) += 1;
+        }
+    }
+    let mut badges = serde_json::Map::new();
+    for list in lists {
+        let count =
+            if list.privacy == Some(crate::model::Privacy::Public) && list.task_count.is_some() {
+                serde_json::json!(list.task_count)
+            } else if list.is_virtual.unwrap_or(false) {
+                kept.get(&list.id).cloned().unwrap_or(serde_json::json!(0))
+            } else {
+                serde_json::json!(open_by_list.get(&list.id).copied().unwrap_or(0))
+            };
+        badges.insert(list.id.clone(), count);
+    }
+    if let Some(id) = my_tasks_id {
+        let mine = current_user_id.as_deref().map_or(0, |me| {
+            tasks
+                .iter()
+                .filter(|task| !task.completed && task.assignee_id.as_deref() == Some(me))
+                .count()
+        });
+        badges.insert(id, serde_json::json!(mine));
+    }
+    Response::ok(serde_json::Value::Object(badges))
+}
+
 /// Rows on the wire.
 ///
 /// Hand-written rather than derived so the field names are chosen for the shell that reads them
