@@ -5075,6 +5075,39 @@ async fn the_editing_session_is_stepped_by_command_task_e71ed760() {
 /// with the list as context and its address is written on the list; asked for, a secure file is
 /// fetched once into the cache and answered as a local path, a site path is made absolute, and
 /// a list without one answers nothing.
+/// AATD-39: an image stored under the LEGACY secure-file path (`/api/secure-files/<id>`, older
+/// lists still carry it) is a secure file too — fetched with the session and answered locally, as
+/// iOS's ListImageHelper accepts both. Made absolute instead, it needed a cookie no image control has.
+#[tokio::test]
+async fn aatd39_a_legacy_secure_file_list_image_is_fetched_with_the_session() {
+    use crate::api::transport::HttpResponse;
+    let transport = StubTransport::new().push(
+        "/api/v1/secure-files/file_old",
+        Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".into(), "image/png".into())],
+            body: b"\x89PNG".to_vec(),
+        }),
+    );
+    let (app, _transport) = app_and_transport(transport);
+    call(&app, json!({ "kind": "createList", "name": "Bugs" })).await;
+    let bugs = list_id_named(&app, "Bugs").await;
+    call(
+        &app,
+        json!({ "kind": "updateList", "listId": bugs, "changes": { "imageUrl": "/api/secure-files/file_old" } }),
+    )
+    .await;
+    let image = call(&app, json!({ "kind": "listImage", "listId": bugs })).await;
+    assert_eq!(image["ok"], true, "{image}");
+    assert_eq!(image["value"]["isLocal"], true, "{image}");
+    let local = image["value"]["source"]
+        .as_str()
+        .expect("a path")
+        .to_string();
+    assert!(local.ends_with("file_old.png"), "{local}");
+    let _ = std::fs::remove_file(&local);
+}
+
 #[tokio::test]
 async fn a_list_image_is_uploaded_stored_and_fetched_task_3a913e52() {
     use crate::api::transport::HttpResponse;
