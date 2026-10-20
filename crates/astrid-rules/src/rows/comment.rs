@@ -30,6 +30,11 @@ pub struct CommentRow {
     pub created_at: Option<String>,
     /// Who wrote it, or `None` for one the server authored.
     pub author_name: Option<String>,
+    /// The author's id, photo and initials, for the face beside the bubble (iOS's comment thread,
+    /// AATD-53).
+    pub author_id: Option<String>,
+    pub author_image: Option<String>,
+    pub author_initials: Option<String>,
     /// Still in the Outbox. Not an error — the same meaning it has in a chat transcript.
     pub is_pending: bool,
     /// Whether to draw a text bubble at all.
@@ -162,6 +167,12 @@ fn row(
             .author
             .as_ref()
             .map(|author| author.display_name().to_string()),
+        author_id: comment.author_id.clone(),
+        author_image: comment
+            .author
+            .as_ref()
+            .and_then(|author| author.image.clone()),
+        author_initials: comment.author.as_ref().map(|author| author.initials()),
         is_pending: crate::model::is_temp_id(&comment.id),
         shows_text: shows_text(&comment.content),
         // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
@@ -214,6 +225,25 @@ pub fn with_local_paths(rows: &mut [CommentRow], resolve: impl Fn(&str) -> Optio
 
 #[cfg(test)]
 mod tests {
+
+    /// AATD-53: a comment row carries its author's face — id, photo, initials — for the avatar
+    /// iOS draws beside each bubble.
+    #[test]
+    fn aatd_53_a_row_carries_its_authors_face() {
+        let comment: Comment = serde_json::from_value(serde_json::json!({
+            "id": "c1", "content": "Done", "type": "TEXT", "taskId": "t1", "authorId": "u2",
+            "author": { "id": "u2", "name": "Ada Lovelace", "image": "https://example.com/ada.png" }
+        }))
+        .expect("decodes");
+        let rows = rows(&[comment], Some("me"));
+        assert_eq!(rows[0].author_id.as_deref(), Some("u2"));
+        assert_eq!(
+            rows[0].author_image.as_deref(),
+            Some("https://example.com/ada.png")
+        );
+        assert_eq!(rows[0].author_initials.as_deref(), Some("AL"));
+    }
+
     use super::*;
     use serde_json::json;
 
