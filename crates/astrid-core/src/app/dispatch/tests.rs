@@ -6313,3 +6313,62 @@ async fn aatd59_share_links_for_lists_and_resolving_a_code() {
         "{resolved}"
     );
 }
+
+/// AATD-44: the roster as iOS draws it comes from the core — the owner as a person, the
+/// description, the recently-completed window, and pending invitations minus anyone already a
+/// member. An agent offered to a list carries its address, face and kind.
+#[tokio::test]
+async fn aatd44_the_roster_and_agents_come_from_the_core() {
+    let transport = StubTransport::new().push_json(
+        "/available-agents",
+        200,
+        json!({ "agents": [
+            { "id": "ai-agent-claude", "name": "Claude Agent", "email": "claude@astrid.cc",
+              "image": "/ai-claude.png", "aiAgentType": "claude_agent" }
+        ] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({
+                "id": "l1", "name": "Family", "description": "Groceries and chores",
+                "ownerId": "me", "owner": { "id": "me", "name": "Jon", "email": "jon@example.com" },
+                "listMembers": [
+                    { "userId": "mum", "role": "member", "user": { "id": "mum", "email": "Mum@example.com" } }
+                ],
+                "invitations": [
+                    { "id": "i1", "listId": "l1", "email": "mum@example.com", "role": "member", "token": "a" },
+                    { "id": "i2", "listId": "l1", "email": "dad@example.com", "role": "admin", "token": "b" }
+                ],
+                "recentlyCompletedWindow": { "kind": "duration", "amount": 3, "unit": "day" }
+            }))
+            .expect("a list"),
+        )
+        .expect("stores");
+    let roster = call(&app, json!({ "kind": "listMembers", "listId": "l1" })).await;
+    assert_eq!(roster["ok"], true, "{roster}");
+    assert_eq!(roster["value"]["description"], "Groceries and chores");
+    assert_eq!(roster["value"]["owner"]["name"], "Jon");
+    let invited: Vec<&str> = roster["value"]["invitations"]
+        .as_array()
+        .expect("invitations")
+        .iter()
+        .map(|invite| invite["email"].as_str().expect("an email"))
+        .collect();
+    assert_eq!(
+        invited,
+        vec!["dad@example.com"],
+        "mum already joined: {roster}"
+    );
+    assert!(
+        !roster["value"]["recentlyCompletedWindow"].is_null(),
+        "{roster}"
+    );
+
+    let options = call(&app, json!({ "kind": "listAgentOptions", "listId": "l1" })).await;
+    assert_eq!(
+        options["value"]["agents"][0]["email"], "claude@astrid.cc",
+        "{options}"
+    );
+    assert_eq!(options["value"]["agents"][0]["aiAgentType"], "claude_agent");
+}
