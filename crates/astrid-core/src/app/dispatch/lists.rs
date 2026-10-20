@@ -69,7 +69,28 @@ pub(super) fn list_members(app: &App, list_id: &str) -> Response {
     // What the list *is* — its name, colour, columns, whether it exists — is still Astrid's.
     let membership = list.supports_membership();
 
+    // Pending invitations, minus anyone whose address is already a member's: an invitation the
+    // person accepted on another device lingers in the list's copy until the next fetch, and iOS
+    // drops it rather than showing somebody twice (ListMembershipTab, AATD-44).
+    let member_emails: Vec<String> = members
+        .iter()
+        .filter_map(|member| member.user.as_ref().and_then(|user| user.email.clone()))
+        .map(|email| email.to_lowercase())
+        .collect();
+    let invitations: Vec<&crate::model::ListInvite> = list
+        .invitations
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|invite| !member_emails.contains(&invite.email.to_lowercase()))
+        .collect();
+
     Response::ok(serde_json::json!({
+        "description": list.description,
+        // The owner as a person, for the roster's first row (AATD-44).
+        "owner": list.owner,
+        "invitations": invitations,
+        "recentlyCompletedWindow": list.recently_completed_window,
         "listId": list.id,
         "name": list.name,
         "ownerId": list.owner_id,
@@ -151,7 +172,15 @@ pub(super) async fn list_agent_options(app: &App, list_id: &str) -> Response {
                             .get("name")
                             .and_then(|value| value.as_str())
                             .unwrap_or(id);
-                        Some(serde_json::json!({ "id": id, "name": name }))
+                        // The address an agent is invited by, its face and its kind (iOS's agents
+                        // section, AATD-44): without the email no agent can be added to the list.
+                        Some(serde_json::json!({
+                            "id": id,
+                            "name": name,
+                            "email": agent.get("email"),
+                            "image": agent.get("image"),
+                            "aiAgentType": agent.get("aiAgentType"),
+                        }))
                     })
                     .collect()
             })
