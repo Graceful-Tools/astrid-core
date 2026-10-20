@@ -621,7 +621,12 @@ impl ListService {
                 is_local: false,
             }));
         }
-        if let Some(rest) = address.strip_prefix("/api/v1/secure-files/") {
+        // The legacy `/api/secure-files/` path is a secure file too: older lists still carry it,
+        // and iOS's ListImageHelper accepts both (AATD-39).
+        if let Some(rest) = address
+            .strip_prefix("/api/v1/secure-files/")
+            .or_else(|| address.strip_prefix("/api/secure-files/"))
+        {
             let file_id: String = rest
                 .split(['?', '#'])
                 .next()
