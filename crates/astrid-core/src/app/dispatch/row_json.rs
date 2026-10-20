@@ -483,6 +483,9 @@ pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 })).collect::<Vec<_>>(),
                 "assignee": row.assignee,
                 "statusRole": row.status_role,
+                "isCanceled": row.is_canceled,
+                "syncMark": row.sync_mark,
+                "remote": row.remote_chip.as_ref().map(|(label, url)| serde_json::json!({ "label": label, "url": url })),
             })
         })
         .collect()

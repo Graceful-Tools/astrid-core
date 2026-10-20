@@ -328,6 +328,12 @@ pub struct TaskRow {
     pub assignee: Option<User>,
     /// The board column this task sits in, when it has one.
     pub status_role: Option<String>,
+    /// Closed as won't-do — iOS's "Won't do" title chip (AATD-36).
+    pub is_canceled: bool,
+    /// A GitHub-board task not yet all written there: `pending` or `failed` (iOS TaskSyncState).
+    pub sync_mark: Option<&'static str>,
+    /// The GitHub issue it is, `repo#N`, and its page (iOS's remote chip).
+    pub remote_chip: Option<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -483,6 +489,16 @@ impl TaskRow {
                     .or_else(|| context.users.iter().find(|user| user.id == id).cloned())
             }),
             status_role: task.status_role.clone(),
+            is_canceled: task.is_canceled(),
+            sync_mark: match task.sync_state.as_deref() {
+                Some("pending") => Some("pending"),
+                Some("error") => Some("failed"),
+                _ => None,
+            },
+            remote_chip: task
+                .remote
+                .as_ref()
+                .and_then(|remote| remote.chip_label().map(|label| (label, remote.url.clone()))),
         }
     }
 
@@ -514,6 +530,29 @@ pub fn subtask_counts(tasks: &[Task]) -> std::collections::HashMap<String, usize
 
 #[cfg(test)]
 mod tests {
+
+    /// AATD-36: a row says what iOS's title chips draw — won't do, a GitHub sync mark, `repo#N`.
+    #[test]
+    fn aatd_36_a_row_carries_its_title_chips() {
+        let lists = Vec::new();
+        let users = Vec::new();
+        let depths = HashMap::new();
+        let counts = HashMap::new();
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": "Fix login", "completed": true, "closedReason": "canceled",
+            "syncState": "error",
+            "remote": { "kind": "issue", "url": "https://github.com/o/r/issues/7", "nodeId": "n", "repo": "o/r", "number": 7 }
+        }))
+        .expect("decodes");
+        let row = TaskRow::build(&task, &context(&lists, &users, &depths, &counts));
+        assert!(row.is_canceled);
+        assert_eq!(row.sync_mark, Some("failed"));
+        assert_eq!(
+            row.remote_chip.as_ref().map(|chip| chip.0.as_str()),
+            Some("r#7")
+        );
+    }
+
     use super::*;
     use std::collections::HashMap;
 
