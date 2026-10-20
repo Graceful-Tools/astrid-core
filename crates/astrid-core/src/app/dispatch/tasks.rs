@@ -301,7 +301,11 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         .and_then(|id| app.context.tasks().task(id).ok().flatten())
         .map(|parent| serde_json::json!({ "id": parent.id, "title": parent.title }));
 
+    // Repeated completions, folded as iOS folds them (AATD-53).
+    let streaks = rows::comment::streaks(&comments, offset);
+
     Response::ok(serde_json::json!({
+        "streaks": streaks,
         "parent": parent,
         "blockers": blockers,
         // What this task's list permits, so the screen offers a control only where it would work

@@ -35,6 +35,8 @@ pub struct CommentRow {
     pub author_id: Option<String>,
     pub author_image: Option<String>,
     pub author_initials: Option<String>,
+    /// Whether an AI agent wrote it — a reply that also ends that agent's "is thinking..." (AATD-53).
+    pub author_is_agent: bool,
     /// Still in the Outbox. Not an error — the same meaning it has in a chat transcript.
     pub is_pending: bool,
     /// Whether to draw a text bubble at all.
@@ -82,6 +84,64 @@ pub struct FileRow {
 /// The files a comment carries.
 pub fn files_of(comment: &Comment) -> Vec<&SecureFile> {
     comment.secure_files.iter().flatten().collect()
+}
+
+/// A run of repeated completions folded into one line, as iOS's CompletionStreak (AATD-53):
+/// three or more consecutive server notes that the task was marked complete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Streak {
+    /// The comments it stands for, in order; the first is where it is drawn.
+    pub ids: Vec<String>,
+    pub count: usize,
+    /// Days from the first to the last, in the reader's calendar, at least 1; `None` without dates.
+    pub span_days: Option<i64>,
+    pub dates: Vec<String>,
+}
+
+/// iOS's `CompletionStreak.marker`: what a server-written completion note says.
+const COMPLETION_MARKER: &str = "marked this as complete";
+const MINIMUM_RUN: usize = 3;
+
+/// Runs of completion notes among the rows, in the order the rows are drawn.
+pub fn streaks(rows: &[CommentRow], offset: chrono::FixedOffset) -> Vec<Streak> {
+    let is_completion =
+        |row: &CommentRow| row.is_system && row.content.to_lowercase().contains(COMPLETION_MARKER);
+    let mut out = Vec::new();
+    let mut run: Vec<&CommentRow> = Vec::new();
+    let mut flush = |run: &mut Vec<&CommentRow>| {
+        if run.len() >= MINIMUM_RUN {
+            let days: Vec<chrono::NaiveDate> = run
+                .iter()
+                .filter_map(|row| row.created_at.as_deref())
+                .filter_map(crate::model::date::parse)
+                .map(|at| at.with_timezone(&offset).date_naive())
+                .collect();
+            let span_days = match (days.iter().min(), days.iter().max()) {
+                (Some(first), Some(last)) => Some((*last - *first).num_days().max(1)),
+                _ => None,
+            };
+            out.push(Streak {
+                ids: run.iter().map(|row| row.id.clone()).collect(),
+                count: run.len(),
+                span_days,
+                dates: run
+                    .iter()
+                    .filter_map(|row| row.created_at.clone())
+                    .collect(),
+            });
+        }
+        run.clear();
+    };
+    for row in rows {
+        if is_completion(row) {
+            run.push(row);
+        } else {
+            flush(&mut run);
+        }
+    }
+    flush(&mut run);
+    out
 }
 
 /// Whether there is a caption to draw.
@@ -173,6 +233,10 @@ fn row(
             .as_ref()
             .and_then(|author| author.image.clone()),
         author_initials: comment.author.as_ref().map(|author| author.initials()),
+        author_is_agent: comment
+            .author
+            .as_ref()
+            .is_some_and(|author| author.is_agent()),
         is_pending: crate::model::is_temp_id(&comment.id),
         shows_text: shows_text(&comment.content),
         // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
@@ -225,6 +289,35 @@ pub fn with_local_paths(rows: &mut [CommentRow], resolve: impl Fn(&str) -> Optio
 
 #[cfg(test)]
 mod tests {
+
+    /// AATD-53: three or more completions in a row fold into one streak, as iOS draws them.
+    #[test]
+    fn aatd_53_repeated_completions_fold_into_a_streak() {
+        let note = |id: &str, at: &str| -> Comment {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "content": "Jon marked this as complete", "type": "TEXT", "taskId": "t1",
+                "createdAt": at
+            }))
+            .expect("decodes")
+        };
+        let said: Comment = serde_json::from_value(serde_json::json!({
+            "id": "c9", "content": "Nice", "type": "TEXT", "taskId": "t1", "authorId": "me"
+        }))
+        .expect("decodes");
+        let comments = vec![
+            note("a", "2026-10-01T09:00:00Z"),
+            note("b", "2026-10-03T09:00:00Z"),
+            note("c", "2026-10-08T09:00:00Z"),
+            said,
+            note("d", "2026-10-09T09:00:00Z"),
+        ];
+        let rows = rows(&comments, Some("me"));
+        let streaks = streaks(&rows, chrono::FixedOffset::east_opt(0).expect("utc"));
+        assert_eq!(streaks.len(), 1, "a lone completion stays a note");
+        assert_eq!(streaks[0].ids, vec!["a", "b", "c"]);
+        assert_eq!(streaks[0].count, 3);
+        assert_eq!(streaks[0].span_days, Some(7));
+    }
 
     /// AATD-53: a comment row carries its author's face — id, photo, initials — for the avatar
     /// iOS draws beside each bubble.
