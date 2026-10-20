@@ -201,8 +201,64 @@ pub fn resolve(id: Option<&str>, pools: &[&[User]], task_assignee: Option<&User>
     Some(User::new(id))
 }
 
+/// iOS's AssigneeSelection.maximum: the most people one task can be given to.
+pub const MAXIMUM_ASSIGNEES: usize = 10;
+
+/// iOS's AssigneeSelection.toggling (AATD-51): tapping someone already chosen removes them; an agent
+/// goes first and replaces any other agent; anyone else is added at the end, up to the maximum.
+/// No id at all clears the choice.
+pub fn toggling(id: Option<&str>, current: &[String], agent_ids: &[String]) -> Vec<String> {
+    let Some(id) = id.filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+    if current.iter().any(|held| held == id) {
+        return current.iter().filter(|held| *held != id).cloned().collect();
+    }
+    if agent_ids.iter().any(|agent| agent == id) {
+        return std::iter::once(id.to_string())
+            .chain(
+                current
+                    .iter()
+                    .filter(|held| !agent_ids.contains(held))
+                    .cloned(),
+            )
+            .collect();
+    }
+    if current.len() >= MAXIMUM_ASSIGNEES {
+        return current.to_vec();
+    }
+    current
+        .iter()
+        .cloned()
+        .chain(std::iter::once(id.to_string()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// AATD-51, iOS AssigneeSelectionTests: add, remove, an agent first, the cap.
+    #[test]
+    fn aatd_51_toggling_assignees_as_ios_does() {
+        let held = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        let agents = held(&["claude", "codex"]);
+        assert_eq!(
+            toggling(Some("bo"), &held(&["me"]), &agents),
+            held(&["me", "bo"])
+        );
+        assert_eq!(
+            toggling(Some("me"), &held(&["me", "bo"]), &agents),
+            held(&["bo"])
+        );
+        assert_eq!(
+            toggling(Some("claude"), &held(&["me", "codex"]), &agents),
+            held(&["claude", "me"])
+        );
+        let ten: Vec<String> = (0..10).map(|n| format!("u{n}")).collect();
+        assert_eq!(toggling(Some("extra"), &ten, &agents), ten);
+        assert!(toggling(None, &held(&["me"]), &agents).is_empty());
+    }
+
     use super::*;
     use crate::model::list::ListMember;
 

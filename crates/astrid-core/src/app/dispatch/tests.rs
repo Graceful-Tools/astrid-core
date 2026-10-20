@@ -6448,3 +6448,65 @@ async fn aatd46_a_featured_list_shows_its_tasks_without_caching_them() {
     let cached = call(&app, json!({ "kind": "task", "taskId": "theirs" })).await;
     assert_eq!(cached["ok"], false, "not cached: {cached}");
 }
+
+/// AATD-51: tapping people in a multi-assignee picker adds and removes them, primary first.
+#[tokio::test]
+async fn aatd51_toggle_assignee_adds_and_removes_people() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    call(&app, json!({ "kind": "seedCache", "tasks": [ { "id": "t1", "title": "Ship", "assigneeId": "me" } ] })).await;
+    let added = call(
+        &app,
+        json!({ "kind": "toggleAssignee", "taskId": "t1", "userId": "bo" }),
+    )
+    .await;
+    assert_eq!(added["ok"], true, "{added}");
+    let options = call(&app, json!({ "kind": "assigneeOptions", "taskId": "t1" })).await;
+    assert_eq!(
+        options["value"]["assigneeIds"],
+        json!(["me", "bo"]),
+        "{options}"
+    );
+    call(
+        &app,
+        json!({ "kind": "toggleAssignee", "taskId": "t1", "userId": "me" }),
+    )
+    .await;
+    let options = call(&app, json!({ "kind": "assigneeOptions", "taskId": "t1" })).await;
+    assert_eq!(options["value"]["assigneeIds"], json!(["bo"]), "{options}");
+}
+
+/// AATD-54: the triage deck is the reminded task, then my open tasks due today or overdue —
+/// never someone else's, never a done one.
+#[tokio::test]
+async fn aatd54_the_triage_deck_is_what_is_due_for_me() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    call(
+        &app,
+        json!({ "kind": "seedCache", "tasks": [
+            { "id": "late", "title": "Late", "assigneeId": "me", "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "theirs", "title": "Theirs", "assigneeId": "bo", "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "done", "title": "Done", "assigneeId": "me", "completed": true, "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "later", "title": "Later", "assigneeId": "me", "dueDateTime": "2099-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "pinged", "title": "Pinged", "assigneeId": "me", "dueDateTime": "2099-06-01T00:00:00Z", "isAllDay": true }
+        ] }),
+    )
+    .await;
+    let deck = call(
+        &app,
+        json!({ "kind": "reminderTriageDeck", "remindedTaskId": "pinged" }),
+    )
+    .await;
+    let ids: Vec<&str> = deck["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(ids, vec!["pinged", "late"], "{deck}");
+}

@@ -45,6 +45,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             lists,
             current_user_id,
         } => list_counts(app, &lists, current_user_id),
+        Command::ReminderTriageDeck { reminded_task_id } => {
+            reminder_triage_deck(app, reminded_task_id.as_deref())
+        }
+        Command::ToggleAssignee { task_id, user_id } => {
+            toggle_assignee(app, &task_id, user_id.as_deref())
+        }
         Command::FeaturedRows { list_id, list } => {
             featured_rows(app, &list_id, list.map(|list| *list)).await
         }

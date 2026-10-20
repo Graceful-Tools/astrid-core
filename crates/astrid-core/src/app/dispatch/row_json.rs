@@ -380,6 +380,68 @@ pub(super) async fn featured_rows(
     )
 }
 
+/// iOS's ReminderTriage.deck and .assistant (AATD-54).
+pub(super) fn reminder_triage_deck(app: &App, reminded_task_id: Option<&str>) -> Response {
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
+    let Some(me) = app.context.account().current_user_id().ok().flatten() else {
+        return Response::ok(serde_json::json!({ "rows": [], "assistant": null }));
+    };
+    let tasks = match app.store.tasks() {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let due_now = |task: &crate::model::Task| {
+        task.due_date_time
+            .is_some_and(|due| rows::day_offset(due, task.is_all_day, now, offset) == 0)
+            || filters::is_overdue(task, now, offset)
+    };
+    let mut deck: Vec<&crate::model::Task> = tasks
+        .iter()
+        .filter(|task| {
+            task.assignee_id.as_deref() == Some(me.as_str()) && !task.completed && due_now(task)
+        })
+        .collect();
+    deck.sort_by_key(|task| task.due_date_time);
+    if let Some(reminded) = reminded_task_id
+        .and_then(|id| tasks.iter().find(|task| task.id == id))
+        .filter(|task| !task.completed)
+        // Somebody else's task is theirs to triage, not mine.
+        .filter(|task| {
+            task.assignee_id
+                .as_deref()
+                .is_none_or(|assignee| assignee == me)
+        })
+    {
+        deck.retain(|task| task.id != reminded.id);
+        deck.insert(0, reminded);
+    }
+    let lists = app.store.lists().unwrap_or_default();
+    let users = app.store.users().unwrap_or_default();
+    let depths = std::collections::HashMap::new();
+    let counts = std::collections::HashMap::new();
+    let context = RowContext {
+        current_user_id: Some(me.as_str()),
+        display_mode: resolved_display_mode(app, None),
+        surface: Command::surface(None),
+        now,
+        offset,
+        lists: &lists,
+        users: &users,
+        depths: &depths,
+        subtask_counts: &counts,
+    };
+    // The account's own assistant: the agent iOS's AvailableAgent.defaultAssistantService names.
+    let assistant = users
+        .iter()
+        .find(|user| user.is_agent() && user.ai_agent_type.as_deref() == Some("astrid"))
+        .map(|user| serde_json::json!({ "id": user.id, "name": user.name }));
+    Response::ok(serde_json::json!({
+        "rows": serialize_rows(&TaskRow::build_all(&deck, &context)),
+        "assistant": assistant,
+    }))
+}
+
 /// Rows on the wire.
 ///
 /// Hand-written rather than derived so the field names are chosen for the shell that reads them

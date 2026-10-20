@@ -955,10 +955,49 @@ pub(super) fn assignee_options(app: &App, inputs: AssigneeInputs<'_>) -> Respons
         ..Default::default()
     });
 
+    // Several people at once where a list in play allows it (a GitHub board), iOS's
+    // AssigneeSelection.allowsMultiple; the chosen ones, primary first (AATD-51).
+    let allows_multiple = lists
+        .iter()
+        .any(|list| list_ids.contains(&list.id) && list.supports_multiple_assignees());
     Response::ok(serde_json::json!({
         "assigneeId": task.as_ref().and_then(|task| task.assignee_id.clone()),
+        "assigneeIds": task.as_ref().map(|task| task.all_assignee_ids()).unwrap_or_default(),
+        "allowsMultiple": allows_multiple,
+        "maximum": crate::rows::assignee::MAXIMUM_ASSIGNEES,
         "options": options,
     }))
+}
+
+/// Tap one person in a multi-assignee picker (AATD-51): iOS's toggle rule, written as the task's
+/// assignees, primary first.
+pub(super) fn toggle_assignee(app: &App, task_id: &str, user_id: Option<&str>) -> Response {
+    let task = match app.context.tasks().task(task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    let current: Vec<String> = task
+        .all_assignee_ids()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let agents: Vec<String> = app
+        .store
+        .users()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|user| user.is_agent())
+        .map(|user| user.id)
+        .collect();
+    let next = crate::rows::assignee::toggling(user_id, &current, &agents);
+    match changes_from_json(&serde_json::json!({
+        "assigneeIds": next,
+        "assigneeId": next.first(),
+    })) {
+        Ok(changes) => answer(app.context.tasks().update(task_id, &changes)),
+        Err(failure) => Response::failed(failure),
+    }
 }
 
 /// What quick-add's leading control shows before anything is typed, and who it may offer
