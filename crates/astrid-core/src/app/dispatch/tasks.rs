@@ -1187,36 +1187,6 @@ fn cache_search(
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The shell's multi-select assignee picker sends the whole list as `assigneeIds`. It was an
-    /// unnamed key here, so it was dropped before the cache or the server heard of it (AITD-491).
-    #[test]
-    fn aitd_491_an_assignee_ids_edit_reaches_the_cache_and_the_wire() {
-        let changes =
-            changes_from_json(&serde_json::json!({ "assigneeIds": ["u2", "u1"] })).expect("reads");
-        assert_eq!(
-            changes.to_body()["assigneeIds"],
-            serde_json::json!(["u2", "u1"])
-        );
-
-        let mut task = crate::model::Task::new("t1", "x");
-        task.assignee_id = Some("u1".into());
-        changes.apply(&mut task);
-        assert_eq!(task.all_assignee_ids(), ["u2", "u1"], "first is primary");
-
-        // Nobody: the primary goes with the list, or `all_assignee_ids` would still be empty for
-        // the wrong reason and the row would keep the old face.
-        let cleared = changes_from_json(&serde_json::json!({ "assigneeIds": [] })).expect("reads");
-        cleared.apply(&mut task);
-        assert_eq!(task.assignee_id, None);
-        assert!(task.assignee.is_none());
-        assert_eq!(cleared.to_body()["assigneeIds"], serde_json::json!([]));
-    }
-}
-
 /// Apply a drag in the subtask tree, by iOS's rules (AATD-42).
 pub(super) fn nest_task(
     app: &App,
@@ -1263,4 +1233,34 @@ pub(super) fn nest_task(
         "outcome": outcome.name(),
         "parentId": parent.flatten(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shell's multi-select assignee picker sends the whole list as `assigneeIds`. It was an
+    /// unnamed key here, so it was dropped before the cache or the server heard of it (AITD-491).
+    #[test]
+    fn aitd_491_an_assignee_ids_edit_reaches_the_cache_and_the_wire() {
+        let changes =
+            changes_from_json(&serde_json::json!({ "assigneeIds": ["u2", "u1"] })).expect("reads");
+        assert_eq!(
+            changes.to_body()["assigneeIds"],
+            serde_json::json!(["u2", "u1"])
+        );
+
+        let mut task = crate::model::Task::new("t1", "x");
+        task.assignee_id = Some("u1".into());
+        changes.apply(&mut task);
+        assert_eq!(task.all_assignee_ids(), ["u2", "u1"], "first is primary");
+
+        // Nobody: the primary goes with the list, or `all_assignee_ids` would still be empty for
+        // the wrong reason and the row would keep the old face.
+        let cleared = changes_from_json(&serde_json::json!({ "assigneeIds": [] })).expect("reads");
+        cleared.apply(&mut task);
+        assert_eq!(task.assignee_id, None);
+        assert!(task.assignee.is_none());
+        assert_eq!(cleared.to_body()["assigneeIds"], serde_json::json!([]));
+    }
 }
