@@ -672,9 +672,12 @@ pub enum Command {
     },
     /// Where a list's picture can be drawn from — a cached local path for a secure file, an
     /// absolute address otherwise — or null when it has none. `updateList` with `imageUrl: null`
-    /// removes one.
+    /// removes one. `imageUrl` names the picture directly for a list this store does not hold —
+    /// a public one, from `publicLists` — and `listId` is then only the caller's label for it.
     ListImage {
         list_id: String,
+        #[serde(default)]
+        image_url: Option<String>,
     },
     /// The agents that could power `@astrid`, and which one does (task 810e1876): the web's
     /// selector, read from the account's AI preferences. Online-only, like the Agent Hub.

@@ -5142,6 +5142,41 @@ async fn aatd39_a_legacy_secure_file_list_image_is_fetched_with_the_session() {
     let _ = std::fs::remove_file(&local);
 }
 
+/// AATD-39: a public list is not in this store, but its picture is a secure file all the same —
+/// handed over by address it is fetched with the session, as the reader's own lists' are.
+#[tokio::test]
+async fn aatd39_a_public_lists_picture_is_fetched_by_its_address() {
+    use crate::api::transport::HttpResponse;
+    let transport = StubTransport::new().push(
+        "/api/v1/secure-files/file_public",
+        Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".into(), "image/png".into())],
+            body: b"\x89PNG".to_vec(),
+        }),
+    );
+    let (app, _transport) = app_and_transport(transport);
+    let image = call(
+        &app,
+        json!({ "kind": "listImage", "listId": "not-in-the-store", "imageUrl": "/api/secure-files/file_public" }),
+    )
+    .await;
+    assert_eq!(image["ok"], true, "{image}");
+    assert_eq!(image["value"]["isLocal"], true, "{image}");
+    let local = image["value"]["source"]
+        .as_str()
+        .expect("a path")
+        .to_string();
+    assert!(local.ends_with("file_public.png"), "{local}");
+    let _ = std::fs::remove_file(&local);
+    let none = call(
+        &app,
+        json!({ "kind": "listImage", "listId": "x", "imageUrl": " " }),
+    )
+    .await;
+    assert_eq!(none["value"], serde_json::Value::Null, "{none}");
+}
+
 #[tokio::test]
 async fn a_list_image_is_uploaded_stored_and_fetched_task_3a913e52() {
     use crate::api::transport::HttpResponse;
