@@ -209,6 +209,11 @@ pub(super) fn rows_for_list(
         subtask_counts: &counts,
     };
 
+    // A virtual list always; a real one by the reader's right to add to it.
+    let can_add_tasks = list.is_virtual.unwrap_or(false)
+        || current_user_id.as_deref().is_some_and(|me| {
+            crate::permissions::can_edit_tasks(me, &crate::permissions::access_of(&list))
+        });
     Response::ok(serde_json::json!({
         // The total is what a virtualised list needs to size its scrollbar, and it is the count
         // AFTER filtering — the number of rows there are to scroll through, not the number of
@@ -221,6 +226,8 @@ pub(super) fn rows_for_list(
         // How the rows were sorted, so the shell knows whether a drag may rearrange them
         // (task 7883f710): only an order made by hand survives a refresh.
         "sortBy": sort_by,
+        // Whether the quick-add bar is offered here (iOS ListPermissions.canAddTasks, AATD-37).
+        "canAddTasks": can_add_tasks,
     }))
 }
 
