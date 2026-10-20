@@ -34,6 +34,8 @@ fn app_with_tasks(count: usize) -> App {
             cache_path: ":memory:".into(),
             base_url: "https://astrid.cc".into(),
             platform: Default::default(),
+            url_scheme: astrid_core::app::DEFAULT_URL_SCHEME.into(),
+            handoff_client_id: None,
         },
         Arc::new(MemorySecureStore::new()),
         Arc::new(StubTransport::new()),

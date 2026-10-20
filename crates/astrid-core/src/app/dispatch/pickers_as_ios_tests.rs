@@ -165,6 +165,8 @@ async fn aitd461_a_time_pick_stays_on_an_all_day_tasks_date() {
             cache_path: ":memory:".into(),
             base_url: "https://astrid.cc".into(),
             platform: Default::default(),
+            url_scheme: crate::app::DEFAULT_URL_SCHEME.into(),
+            handoff_client_id: None,
         },
         std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
         std::sync::Arc::new(StubTransport::new()),
