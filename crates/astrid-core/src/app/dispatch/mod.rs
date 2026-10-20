@@ -45,6 +45,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             lists,
             current_user_id,
         } => list_counts(app, &lists, current_user_id),
+        Command::FeaturedRows { list_id, list } => {
+            featured_rows(app, &list_id, list.map(|list| *list)).await
+        }
         Command::NestTask {
             task_id,
             zone,

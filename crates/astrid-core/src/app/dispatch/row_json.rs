@@ -164,10 +164,15 @@ pub(super) fn rows_for_list(
         }));
     }
 
-    let lists = match app.store.lists() {
+    let mut lists = match app.store.lists() {
         Ok(lists) => lists,
         Err(error) => return Response::failed(error.into()),
     };
+    // A list handed in that this account does not hold — a featured public list — still decides
+    // which rows are someone else's, read-only, copy-only (AATD-46).
+    if !lists.iter().any(|held| held.id == list.id) {
+        lists.push(list.clone());
+    }
     // Everyone the rows might name. Small: the assignees of the tasks in one list.
     let users = tasks
         .iter()
@@ -325,6 +330,54 @@ pub(super) fn list_badges(
         badges.insert(id, serde_json::json!(mine));
     }
     Response::ok(serde_json::Value::Object(badges))
+}
+
+/// A featured public list's rows: the server's tasks plus this account's unsent ones for it,
+/// through the same projection as any list (AATD-46).
+pub(super) async fn featured_rows(
+    app: &App,
+    list_id: &str,
+    held: Option<crate::model::TaskList>,
+) -> Response {
+    let fetched = match app.context.lists().public_list_tasks(list_id).await {
+        Ok(tasks) => tasks,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let mut tasks = fetched;
+    // What was added here and has not reached the server yet stays on screen (iOS).
+    for unsent in app
+        .store
+        .tasks_in_list(list_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|task| crate::model::is_temp_id(&task.id))
+    {
+        if !tasks.iter().any(|task| task.id == unsent.id) {
+            tasks.insert(0, unsent);
+        }
+    }
+    let list = held
+        .or_else(|| app.store.list(list_id).ok().flatten())
+        .unwrap_or_else(|| {
+            let mut list = crate::model::TaskList::new(list_id, "");
+            list.privacy = Some(crate::model::Privacy::Public);
+            list
+        });
+    rows_for_list(
+        app,
+        list_id,
+        RowsWindow {
+            display_mode: None,
+            surface: None,
+            offset: None,
+            limit: None,
+        },
+        crate::app::command::RowsInputs {
+            list: Some(list),
+            tasks: Some(tasks),
+            ..Default::default()
+        },
+    )
 }
 
 /// Rows on the wire.

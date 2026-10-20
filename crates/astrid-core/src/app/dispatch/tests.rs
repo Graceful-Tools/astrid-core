@@ -6411,3 +6411,40 @@ async fn aatd42_nest_task_writes_the_parent_the_drop_means() {
     .await;
     assert_eq!(reorder["value"]["outcome"], "reorderOnly");
 }
+
+/// AATD-46: a featured (collaborative) public list shows its tasks from the server — someone else's read-only,
+/// its control copying; mine completing — and none of them enter the cache.
+#[tokio::test]
+async fn aatd46_a_featured_list_shows_its_tasks_without_caching_them() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/tasks",
+        200,
+        json!({ "tasks": [
+            { "id": "theirs", "title": "Plant tulips", "listIds": ["pub"], "creatorId": "them" },
+            { "id": "mine", "title": "Water roses", "listIds": ["pub"], "creatorId": "me" }
+        ] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let rows = call(
+        &app,
+        json!({ "kind": "featuredRows", "listId": "pub",
+                "list": { "id": "pub", "name": "Garden tips", "privacy": "PUBLIC", "ownerId": "them", "publicListType": "collaborative" } }),
+    )
+    .await;
+    assert_eq!(rows["ok"], true, "{rows}");
+    let action = |id: &str| {
+        rows["value"]["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["id"] == id)
+            .map(|row| row["action"].clone())
+    };
+    assert_eq!(action("theirs"), Some(json!("copy")), "{rows}");
+    assert_eq!(action("mine"), Some(json!("complete")), "{rows}");
+    let cached = call(&app, json!({ "kind": "task", "taskId": "theirs" })).await;
+    assert_eq!(cached["ok"], false, "not cached: {cached}");
+}
