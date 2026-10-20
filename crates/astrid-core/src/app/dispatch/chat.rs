@@ -9,8 +9,22 @@ use super::*;
 /// `channelId` is null when this deployment has no channel for the list — chat is a feature a
 /// deployment can be without, and a shell that read that as an error would show a broken panel to
 /// everybody using a server that simply does not have it.
+/// My Tasks' conversation is a virtual channel, keyed by the reader (iOS ChatPanelView,
+/// `virtual-chat:<user>:my-tasks`). A list's is found by the list. AATD-62.
+pub(super) fn virtual_key_for(app: &App, list_id: &str) -> Option<String> {
+    if list_id != crate::filters::my_tasks::VIRTUAL_ID {
+        return None;
+    }
+    let me = app.context.account().current_user_id().ok().flatten()?;
+    Some(format!("virtual-chat:{me}:my-tasks"))
+}
+
 pub(super) fn chat(app: &App, list_id: &str) -> Response {
-    let channel = match app.context.chat().channel_for_list(list_id) {
+    let found = match virtual_key_for(app, list_id) {
+        Some(key) => app.context.chat().channel_for_virtual_key(&key),
+        None => app.context.chat().channel_for_list(list_id),
+    };
+    let channel = match found {
         Ok(channel) => channel,
         Err(error) => return Response::failed(error.into()),
     };
@@ -56,7 +70,7 @@ pub(super) async fn refresh_chat(app: &App, list_id: &str) -> Response {
     let channel = match app
         .context
         .chat()
-        .resolve_channel(Some(list_id), None)
+        .resolve_channel(Some(list_id), virtual_key_for(app, list_id).as_deref())
         .await
     {
         Ok(channel) => channel,

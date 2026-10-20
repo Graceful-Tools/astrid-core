@@ -55,6 +55,16 @@ impl ChatService {
             .find(|channel| channel.list_id.as_deref() == Some(list_id)))
     }
 
+    /// The cached channel for a virtual list (My Tasks), by its key.
+    pub fn channel_for_virtual_key(&self, key: &str) -> Result<Option<ChatChannel>> {
+        Ok(self
+            .context
+            .store
+            .channels()?
+            .into_iter()
+            .find(|channel| channel.virtual_key.as_deref() == Some(key)))
+    }
+
     pub fn messages(&self, channel_id: &str) -> Result<Vec<ChatMessage>> {
         Ok(self.context.store.messages_in_channel(channel_id)?)
     }

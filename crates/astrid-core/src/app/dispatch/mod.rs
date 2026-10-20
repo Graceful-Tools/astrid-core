@@ -1130,7 +1130,16 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         } => answer(
             app.context
                 .chat()
-                .resolve_channel(list_id.as_deref(), virtual_key.as_deref())
+                .resolve_channel(
+                    list_id.as_deref(),
+                    virtual_key
+                        .or_else(|| {
+                            list_id
+                                .as_deref()
+                                .and_then(|id| chat::virtual_key_for(app, id))
+                        })
+                        .as_deref(),
+                )
                 .await,
         ),
         Command::ChatMessages { channel_id } => answer(app.context.chat().messages(&channel_id)),
