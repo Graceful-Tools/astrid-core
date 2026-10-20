@@ -2753,6 +2753,40 @@ async fn a_message_is_in_the_transcript_before_it_is_sent() {
     assert_eq!(messages[0]["isPending"], true);
 }
 
+/// AATD-62: My Tasks has a conversation too — iOS's virtual channel, keyed by the reader. Asked for
+/// `virtual:my-tasks`, chat finds it and resolveChatChannel answers it.
+#[tokio::test]
+async fn aatd62_my_tasks_has_its_own_conversation() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .upsert_channels(&[serde_json::from_value(json!({
+            "id": "c7", "virtualKey": "virtual-chat:me:my-tasks", "name": "My Tasks"
+        }))
+        .expect("a channel")])
+        .expect("stores");
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let resolved = call(
+        &app,
+        json!({ "kind": "resolveChatChannel", "listId": "virtual:my-tasks" }),
+    )
+    .await;
+    assert_eq!(resolved["value"]["id"], "c7", "{resolved}");
+    call(
+        &app,
+        json!({ "kind": "sendChatMessage", "channelId": "c7", "content": "plan the week" }),
+    )
+    .await;
+    let panel = call(
+        &app,
+        json!({ "kind": "chat", "listId": "virtual:my-tasks" }),
+    )
+    .await;
+    assert_eq!(panel["value"]["channelId"], "c7", "{panel}");
+    assert_eq!(panel["value"]["messages"][0]["content"], "plan the week");
+}
+
 /// A picture sent in chat: in the transcript at once under the id its thumbnail was drawn with,
 /// the upload queued with the conversation's list, and the message waiting for the upload — the
 /// Apple apps' upload-then-send chain, now the core's.
