@@ -712,6 +712,18 @@ pub enum Command {
         #[serde(default)]
         list: Option<Box<crate::model::TaskList>>,
     },
+    /// iOS's reminder triage deck (AATD-54): the reminded task first, then my open tasks due today
+    /// or overdue, soonest first, as rows; and the assistant an up-swipe hands a task to.
+    ReminderTriageDeck {
+        #[serde(default)]
+        reminded_task_id: Option<String>,
+    },
+    /// Tap one person in a multi-assignee picker (AATD-51): add, remove, an agent first, at most 10.
+    ToggleAssignee {
+        task_id: String,
+        #[serde(default)]
+        user_id: Option<String>,
+    },
     /// A row dropped in the list's tree (AATD-42): `zone` is `row` (with `targetId`), `line`,
     /// `outdent` or `indent` (with the visible `rowIds`). Writes the new parent when there is one
     /// and answers `{ outcome, parentId }` — `reorderOnly` asks the shell to write the order itself.
