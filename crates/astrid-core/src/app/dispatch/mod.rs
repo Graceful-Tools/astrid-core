@@ -334,6 +334,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 "failed": stats.failed,
                 "hasUnsentWork": stats.has_unsent_work(),
                 "deadLetters": dead_letters(app),
+                // When the last full pass began, for Settings' "Last Sync" (iOS; AATD-55).
+                "lastSync": app.store.metadata(crate::sync::LAST_SYNC_KEY).ok().flatten(),
             })),
             Err(error) => Response::failed(error.into()),
         },

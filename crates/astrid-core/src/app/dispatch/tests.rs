@@ -6256,3 +6256,19 @@ async fn task_0616f2d1_clearing_a_time_on_an_unknown_task_says_not_found() {
     let missing = call(&app, json!({ "kind": "dueDateAllDay", "taskId": "nope" })).await;
     assert_eq!(missing["ok"], false, "{missing}");
 }
+
+/// AATD-55: Settings' "Last Sync" — outboxStats says when the last pass was, or null before one.
+#[tokio::test]
+async fn aatd55_outbox_stats_say_when_the_last_sync_was() {
+    let app = app_with(StubTransport::new());
+    let before = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert!(before["value"]["lastSync"].is_null(), "{before}");
+    app.store
+        .set_metadata(crate::sync::LAST_SYNC_KEY, "2026-10-19T21:00:00Z")
+        .expect("stores");
+    let after = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert_eq!(
+        after["value"]["lastSync"], "2026-10-19T21:00:00Z",
+        "{after}"
+    );
+}
