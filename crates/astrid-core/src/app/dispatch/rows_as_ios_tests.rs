@@ -251,6 +251,45 @@ async fn aitd460_list_counts_answer_for_every_list_at_once() {
     assert_eq!(counts["value"], json!({ "daily": 1, "l1": 2 }), "{counts}");
 }
 
+/// AATD-39: the sidebar's numbers, as iOS's ListTaskCount draws them — a list's OPEN tasks, a saved
+/// filter what its filters keep, a public list the server's count, and My Tasks the open tasks
+/// assigned to the reader.
+#[tokio::test]
+async fn aatd39_list_badges_count_as_ios_sidebar_does() {
+    let app = seeded(json!([
+        task("open mine", json!({ "assigneeId": "me" })),
+        task("open theirs", json!({ "assigneeId": "them" })),
+        task(
+            "done mine",
+            json!({ "assigneeId": "me", "completed": true, "completedAt": "2026-08-01T00:00:00Z" })
+        ),
+        task(
+            "elsewhere",
+            json!({ "assigneeId": "me", "listIds": ["l2"], "repeating": "daily" })
+        ),
+    ]))
+    .await;
+    let badges = call(
+        &app,
+        json!({
+            "kind": "listBadges",
+            "lists": [
+                { "id": "l1", "name": "Work", "filterCompletion": "all" },
+                { "id": "l2", "name": "Home" },
+                { "id": "pub", "name": "Ideas", "privacy": "PUBLIC", "taskCount": 7 },
+                { "id": "daily", "name": "", "isVirtual": true, "filterRepeating": "daily" },
+            ],
+            "myTasksId": "my-tasks",
+        }),
+    )
+    .await;
+    assert_eq!(
+        badges["value"],
+        json!({ "l1": 2, "l2": 1, "pub": 7, "daily": 1, "my-tasks": 2 }),
+        "{badges}"
+    );
+}
+
 /// iOS draws a search result's subtasks under it; asked to, the search splices them in by the
 /// default completion window. Unasked, results stay flat (the Mac, web).
 #[tokio::test]

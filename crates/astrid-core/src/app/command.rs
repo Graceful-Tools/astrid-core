@@ -78,6 +78,16 @@ pub enum Command {
         #[serde(default)]
         current_user_id: Option<String>,
     },
+    /// The sidebar's numbers as iOS's ListTaskCount draws them (AATD-39): a list's open tasks, a
+    /// saved filter what its filters keep (as `listCounts`), a public list the server's count, and
+    /// — under `my_tasks_id` — the open tasks assigned to the reader.
+    ListBadges {
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        my_tasks_id: Option<String>,
+        #[serde(default)]
+        current_user_id: Option<String>,
+    },
     /// One task in full, for the detail view.
     Task {
         task_id: String,
