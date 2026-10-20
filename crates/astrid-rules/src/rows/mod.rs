@@ -304,6 +304,10 @@ pub struct TaskRow {
     pub completed: bool,
     pub priority: Priority,
     pub due: DueLabel,
+    /// For a timed task, its date and time where the reader is; `None` for an all-day one or none.
+    /// iOS draws a timed row as "Oct 19 6:00 PM" even when it is today, which `due` cannot say
+    /// (AATD-36).
+    pub due_at: Option<chrono::NaiveDateTime>,
     pub is_overdue: bool,
     pub leading: LeadingControl,
     pub action: LeadingAction,
@@ -333,6 +337,50 @@ pub struct ListChip {
     /// A tag rather than a place — a label, milestone or iteration (`TaskList::is_tag_list`).
     /// Drawn as a tag, and never opened.
     pub is_label: bool,
+    /// The symbol drawn before the name (AATD-36).
+    pub glyph: ChipGlyph,
+}
+
+/// The symbol before a list chip's name — iOS's TaskRowView: a tag for a label, a globe for a
+/// public list, two people for a list with other members, `#` for anything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChipGlyph {
+    Tag,
+    Globe,
+    People,
+    Hash,
+}
+
+impl ChipGlyph {
+    pub fn for_list(list: &TaskList) -> ChipGlyph {
+        if list.is_tag_list() {
+            return ChipGlyph::Tag;
+        }
+        if list.privacy == Some(crate::model::Privacy::Public) {
+            return ChipGlyph::Globe;
+        }
+        let members = list
+            .list_members
+            .as_ref()
+            .map(Vec::len)
+            .or_else(|| list.members.as_ref().map(Vec::len))
+            .unwrap_or(0);
+        if members > 1 {
+            ChipGlyph::People
+        } else {
+            ChipGlyph::Hash
+        }
+    }
+
+    /// The wire word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChipGlyph::Tag => "tag",
+            ChipGlyph::Globe => "globe",
+            ChipGlyph::People => "people",
+            ChipGlyph::Hash => "hash",
+        }
+    }
 }
 
 /// What the row builder needs to resolve a task against.
@@ -387,6 +435,7 @@ impl TaskRow {
                 name: list.name.clone(),
                 color: list.display_color().to_string(),
                 is_label: list.is_tag_list(),
+                glyph: ChipGlyph::for_list(list),
             })
             .collect();
 
@@ -411,6 +460,10 @@ impl TaskRow {
                 context.now,
                 context.offset,
             ),
+            due_at: task
+                .due_date_time
+                .filter(|_| !task.is_all_day)
+                .map(|due| due.with_timezone(&context.offset).naive_local()),
             is_overdue: filters::is_overdue(task, context.now, context.offset),
             leading,
             action,
@@ -775,6 +828,77 @@ mod tests {
             vec!["l1"]
         );
         assert_eq!(row.list_chips[0].color, "#3b82f6");
+    }
+
+    /// AATD-36: iOS draws a timed task's row date as "Oct 19 6:00 PM" even when it is today, and an
+    /// all-day one as "Today". The label alone says only "Today", so the row also carries the
+    /// reader's local date and time for a timed task.
+    #[test]
+    fn aatd_36_a_timed_row_carries_its_local_date_and_time() {
+        let lists = Vec::new();
+        let users = Vec::new();
+        let depths = HashMap::new();
+        let counts = HashMap::new();
+        let mut timed = Task::new("t1", "Call");
+        timed.due_date_time = Some(at("2026-09-07T18:30:00Z"));
+        timed.is_all_day = false;
+        let row = TaskRow::build(&timed, &context(&lists, &users, &depths, &counts));
+        assert_eq!(row.due, DueLabel::Today);
+        assert_eq!(
+            row.due_at,
+            Some(
+                NaiveDate::from_ymd_opt(2026, 9, 7)
+                    .expect("a day")
+                    .and_hms_opt(18, 30, 0)
+                    .expect("a time")
+            )
+        );
+        let mut all_day = Task::new("t2", "Pay rent");
+        all_day.due_date_time = Some(at("2026-09-07T00:00:00Z"));
+        all_day.is_all_day = true;
+        let row = TaskRow::build(&all_day, &context(&lists, &users, &depths, &counts));
+        assert_eq!(row.due_at, None);
+    }
+
+    /// AATD-36: a chip's glyph is iOS's — a tag for a label, a globe for a public list, two people
+    /// for a list shared with others, `#` otherwise.
+    #[test]
+    fn aatd_36_a_chip_says_which_glyph_it_draws() {
+        let lists: Vec<TaskList> = vec![
+            TaskList::new("home", "Home"),
+            serde_json::from_value(serde_json::json!({ "id": "pub", "name": "Ideas", "privacy": "PUBLIC" }))
+                .expect("decodes"),
+            serde_json::from_value(serde_json::json!({
+                "id": "fam", "name": "Family", "privacy": "SHARED",
+                "listMembers": [{ "userId": "me", "role": "owner" }, { "userId": "mum", "role": "member" }]
+            }))
+            .expect("decodes"),
+            serde_json::from_value(serde_json::json!({ "id": "bug", "name": "bug", "listType": "label" }))
+                .expect("decodes"),
+        ];
+        let users = Vec::new();
+        let depths = HashMap::new();
+        let counts = HashMap::new();
+        let mut task = Task::new("t1", "Plan");
+        task.list_ids = Some(vec![
+            "home".into(),
+            "pub".into(),
+            "fam".into(),
+            "bug".into(),
+        ]);
+        let row = TaskRow::build(&task, &context(&lists, &users, &depths, &counts));
+        assert_eq!(
+            row.list_chips
+                .iter()
+                .map(|chip| chip.glyph)
+                .collect::<Vec<_>>(),
+            vec![
+                ChipGlyph::Hash,
+                ChipGlyph::Globe,
+                ChipGlyph::People,
+                ChipGlyph::Tag
+            ]
+        );
     }
 
     /// A row for a task that has not reached the server yet says so, so the shell can mark it.
