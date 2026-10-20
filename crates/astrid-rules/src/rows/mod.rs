@@ -549,7 +549,7 @@ mod tests {
         assert_eq!(row.sync_mark, Some("failed"));
         assert_eq!(
             row.remote_chip.as_ref().map(|chip| chip.0.as_str()),
-            Some("r#7")
+            Some("o/r#7")
         );
     }
 
