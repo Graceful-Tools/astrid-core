@@ -99,6 +99,16 @@ pub enum Rule {
         #[serde(default)]
         identifiers: Option<Identifiers>,
     },
+    /// The words for a repeat being edited, before it is saved — the custom editor's Preview
+    /// (iOS CustomRepeatingPatternEditor, AATD-50). Same parts as a saved task's `repeatSummary`.
+    RepeatSummary {
+        #[serde(default)]
+        repeating: Option<crate::model::Repeating>,
+        #[serde(default)]
+        repeating_data: Option<crate::model::CustomRepeatingPattern>,
+        #[serde(default)]
+        repeat_from: Option<crate::model::RepeatFromMode>,
+    },
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -191,6 +201,15 @@ pub fn run(rule: Rule) -> Response {
             let is_empty = query.is_empty();
             Response::ok(SearchParse { query, is_empty })
         }
+        Rule::RepeatSummary {
+            repeating,
+            repeating_data,
+            repeat_from,
+        } => Response::ok(crate::rows::repeat::summary(
+            repeating,
+            repeating_data.as_ref(),
+            repeat_from,
+        )),
         Rule::RenderMarkdown { text, identifiers } => Response::ok(match identifiers {
             Some(Identifiers {
                 project_key,
@@ -228,6 +247,23 @@ pub fn run_json(request: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// AATD-50: the custom editor's Preview words a pattern nobody has saved yet.
+    #[test]
+    fn aatd_50_a_repeat_being_edited_is_worded_before_it_is_saved() {
+        let answer = run(serde_json::from_value(serde_json::json!({
+            "kind": "repeatSummary",
+            "repeating": "custom",
+            "repeatingData": { "type": "custom", "unit": "weeks", "interval": 2, "weekdays": ["monday", "thursday"] },
+            "repeatFrom": "COMPLETION_DATE"
+        }))
+        .expect("a rule"));
+        assert!(answer.ok, "{:?}", answer.error);
+        let parts = answer.value.expect("parts");
+        assert!(!parts.as_array().expect("parts").is_empty(), "{parts}");
+        assert!(parts.to_string().contains("weeks"), "{parts}");
+    }
+
     use super::*;
     use serde_json::{json, Value};
 
