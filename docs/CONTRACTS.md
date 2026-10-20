@@ -246,6 +246,13 @@ against a live server:
 The state comparison is not constant-time and does not need to be: `state` binds a callback to the
 flow that started it, and it travels in the same URL as the code anyway. The secret is the verifier.
 
+**White label (AWTD2-95).** The scheme and the client id are the shell's to name, in the JSON
+`Config` it already hands the core: `urlScheme` (without `://`; `astrid` when absent) and
+`handoffClientId` (the platform's registered id — `windows`, `android`, … — when absent). Blank
+values fall back the same way, so a shell that says nothing is Astrid byte for byte. The server's
+side of the same choice is `BRAND.appUrlScheme` and its `DesktopClient` registry: a partner build
+must register the same scheme with its OS and the same id with its server.
+
 ---
 
 ## 5. List permissions

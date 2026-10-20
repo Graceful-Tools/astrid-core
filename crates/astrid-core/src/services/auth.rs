@@ -37,6 +37,10 @@ use crate::platform::SESSION_COOKIE_KEY;
 const EXCHANGE_PATH: &str = "/api/v1/auth/desktop/exchange";
 
 /// The scheme Windows activates the app on. Registered by the installer; see `docs/PARITY.md`.
+///
+/// Astrid's, and the default. A white-label shell registers its own and names it in
+/// [`crate::app::Config::url_scheme`] (AWTD2-95), so two brands installed side by side do not fight
+/// over each other's sign-in callbacks.
 pub const URL_SCHEME: &str = "astrid";
 
 pub struct AuthService {
@@ -46,6 +50,12 @@ pub struct AuthService {
     /// One at a time on purpose: starting a second sign-in replaces the first, so a callback for
     /// an abandoned attempt is refused by the state check rather than quietly completing.
     flow: Mutex<Option<HandoffFlow>>,
+    /// The scheme a callback must arrive on, without `://`. [`URL_SCHEME`] unless the shell said
+    /// otherwise.
+    url_scheme: String,
+    /// The id the server's hand-off registry knows this app by, when it is not the platform's own
+    /// ([`crate::api::Platform::handoff_client`]) — a partner build registered under its own id.
+    handoff_client: Option<String>,
 }
 
 impl AuthService {
@@ -53,7 +63,43 @@ impl AuthService {
         AuthService {
             context,
             flow: Mutex::new(None),
+            url_scheme: URL_SCHEME.to_string(),
+            handoff_client: None,
         }
+    }
+
+    /// Accept callbacks on `scheme` instead of `astrid` (AWTD2-95). Blank keeps Astrid's.
+    pub fn with_url_scheme(mut self, scheme: &str) -> Self {
+        let scheme = scheme.trim();
+        self.url_scheme = if scheme.is_empty() {
+            URL_SCHEME
+        } else {
+            scheme
+        }
+        .to_string();
+        self
+    }
+
+    /// Sign in as `client` instead of the platform's registered id (AWTD2-95). `None` or blank
+    /// keeps the platform's.
+    pub fn with_handoff_client(mut self, client: Option<&str>) -> Self {
+        self.handoff_client = client
+            .map(str::trim)
+            .filter(|client| !client.is_empty())
+            .map(str::to_string);
+        self
+    }
+
+    /// The scheme a sign-in callback must arrive on.
+    pub fn url_scheme(&self) -> &str {
+        &self.url_scheme
+    }
+
+    /// The id sent as `client` in both halves of the hand-off.
+    pub fn handoff_client(&self) -> &str {
+        self.handoff_client
+            .as_deref()
+            .unwrap_or_else(|| self.context.client.platform().handoff_client())
     }
 
     /// Whether there is a stored session. Not whether it is still valid — only the server knows
@@ -76,9 +122,12 @@ impl AuthService {
     pub fn begin_with(&self, provider: Option<&str>) -> Result<String> {
         let flow = desktop_handoff::begin_flow()
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
-        let client = self.context.client.platform().handoff_client();
-        let url = desktop_handoff::authorize_url(self.context.client.base_url(), client, &flow)
-            .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
+        let url = desktop_handoff::authorize_url(
+            self.context.client.base_url(),
+            self.handoff_client(),
+            &flow,
+        )
+        .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
         let url = match provider.map(str::trim).filter(|name| !name.is_empty()) {
             Some(name) => {
                 let mut url = url::Url::parse(&url)
@@ -114,11 +163,10 @@ impl AuthService {
             .take()
             .ok_or_else(|| crate::api::ApiError::Refused("no sign-in is in progress".into()))?;
 
-        let callback = desktop_handoff::parse_callback(callback_url, &flow, URL_SCHEME)
+        let callback = desktop_handoff::parse_callback(callback_url, &flow, &self.url_scheme)
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
 
-        let client = self.context.client.platform().handoff_client();
-        let request = ExchangeRequest::new(client, &callback, &flow);
+        let request = ExchangeRequest::new(self.handoff_client(), &callback, &flow);
         let value = self
             .context
             .client
@@ -215,6 +263,65 @@ mod tests {
             serde_json::from_slice(sent.last().expect("sent").body.as_deref().expect("a body"))
                 .expect("json");
         assert_eq!(body["client"], "android");
+    }
+
+    /// AWTD2-95. A white-label app installed beside Astrid registers its own scheme, so a sign-in
+    /// it started comes back on `partner://`, and its server's registry knows it by its own id. An
+    /// `astrid://` callback is Astrid's — refused here, whatever state it carries.
+    #[tokio::test]
+    async fn awtd2_95_a_white_label_shell_signs_in_on_its_own_scheme_and_client() {
+        let transport =
+            StubTransport::new().push_json("/api/v1/auth/desktop/exchange", 200, exchange_body());
+        let recorded = transport.recorded.clone();
+        let fixture = fixture_on(transport, crate::api::Platform::Windows);
+        let auth = fixture
+            .auth
+            .with_url_scheme("partner")
+            .with_handoff_client(Some("partner-windows"));
+        assert_eq!(auth.url_scheme(), "partner");
+        assert_eq!(auth.handoff_client(), "partner-windows");
+
+        let url = auth.begin().expect("begins");
+        assert!(url.contains("client=partner-windows"), "{url}");
+        let error = auth
+            .complete(&format!(
+                "astrid://auth/callback?code=abc&state={}",
+                state_from(&url)
+            ))
+            .await
+            .expect_err("Astrid's scheme is not this app's");
+        assert!(error.to_string().contains("scheme"), "{error}");
+
+        let url = auth.begin().expect("begins again");
+        auth.complete(&format!(
+            "partner://auth/callback?code=abc&state={}",
+            state_from(&url)
+        ))
+        .await
+        .expect("completes on its own scheme");
+        let sent = recorded.lock().expect("recorded").clone();
+        let body: serde_json::Value =
+            serde_json::from_slice(sent.last().expect("sent").body.as_deref().expect("a body"))
+                .expect("json");
+        assert_eq!(body["client"], "partner-windows");
+    }
+
+    /// AWTD2-95. Hosted Astrid is unchanged: with nothing configured — or something blank — the
+    /// scheme is `astrid` and the client is the platform's own registered id.
+    #[test]
+    fn awtd2_95_unset_or_blank_identity_keeps_astrids_defaults() {
+        let fixture = fixture_on(StubTransport::new(), crate::api::Platform::Android);
+        assert_eq!(fixture.auth.url_scheme(), "astrid");
+        assert_eq!(fixture.auth.handoff_client(), "android");
+        let auth = fixture
+            .auth
+            .with_url_scheme("  ")
+            .with_handoff_client(Some(" "));
+        assert_eq!(auth.url_scheme(), URL_SCHEME);
+        assert_eq!(auth.handoff_client(), "android");
+        let auth = auth.with_url_scheme(" Partner ").with_handoff_client(None);
+        assert_eq!(auth.url_scheme(), "Partner");
+        assert_eq!(auth.handoff_client(), "android");
     }
 
     /// AATD-3. The iOS sign-in screen asks which provider first; the page should start it.

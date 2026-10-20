@@ -53,10 +53,28 @@ pub struct Config {
     /// Which client this is, stated on every request (`x-platform`). Windows when absent.
     #[serde(default)]
     pub platform: crate::api::Platform,
+    /// The URL scheme the shell registered for the sign-in callback, without `://`
+    /// (`urlScheme`). Astrid's `astrid` when absent; a white-label build names its own so it and
+    /// Astrid can be installed side by side (AWTD2-95).
+    #[serde(default = "default_url_scheme")]
+    pub url_scheme: String,
+    /// The id the server's desktop hand-off registry knows this app by (`handoffClientId`). The
+    /// platform's own (`windows`, `android`, …) when absent — see
+    /// [`crate::api::Platform::handoff_client`]. A partner server that registers its app under a
+    /// different id names it here.
+    #[serde(default)]
+    pub handoff_client_id: Option<String>,
 }
+
+/// Astrid's sign-in callback scheme — what [`Config::url_scheme`] is when a shell leaves it out.
+pub const DEFAULT_URL_SCHEME: &str = crate::services::auth::URL_SCHEME;
 
 fn default_base_url() -> String {
     crate::api::DEFAULT_BASE_URL.to_string()
+}
+
+fn default_url_scheme() -> String {
+    DEFAULT_URL_SCHEME.to_string()
 }
 
 /// The running client.
@@ -146,7 +164,12 @@ impl App {
                 .join("attachments"),
         };
         Ok(App {
-            auth: Arc::new(context.auth()),
+            auth: Arc::new(
+                context
+                    .auth()
+                    .with_url_scheme(&config.url_scheme)
+                    .with_handoff_client(config.handoff_client_id.as_deref()),
+            ),
             context,
             runner,
             sync,
@@ -237,12 +260,75 @@ mod tests {
                 cache_path: ":memory:".into(),
                 base_url: "https://astrid.cc".into(),
                 platform: Default::default(),
+                url_scheme: crate::app::DEFAULT_URL_SCHEME.into(),
+                handoff_client_id: None,
             },
             Arc::new(MemorySecureStore::new()),
             Arc::new(transport),
             Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
         )
         .expect("starts")
+    }
+
+    /// AWTD2-95. A shell that says nothing about its identity is Astrid, exactly as before.
+    #[test]
+    fn awtd2_95_a_config_without_an_identity_is_astrids() {
+        let config: Config = serde_json::from_str(r#"{"cachePath":":memory:"}"#).expect("reads");
+        assert_eq!(config.url_scheme, "astrid");
+        assert_eq!(config.url_scheme, DEFAULT_URL_SCHEME);
+        assert_eq!(config.handoff_client_id, None);
+        let app = App::with_parts(
+            &config,
+            Arc::new(MemorySecureStore::new()),
+            Arc::new(StubTransport::new()),
+            Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
+        )
+        .expect("starts");
+        assert_eq!(app.auth().url_scheme(), "astrid");
+        assert_eq!(app.auth().handoff_client(), "windows");
+    }
+
+    /// AWTD2-95. The white-label identity rides in the same JSON config the Windows C ABI and the
+    /// Android UniFFI binding already hand over, and reaches the sign-in flow.
+    #[tokio::test]
+    async fn awtd2_95_a_shell_names_its_scheme_and_client_in_the_config() {
+        let config: Config = serde_json::from_str(
+            r#"{"cachePath":":memory:","platform":"android-app","urlScheme":"partner","handoffClientId":"partner-android"}"#,
+        )
+        .expect("reads");
+        assert_eq!(config.url_scheme, "partner");
+        assert_eq!(config.handoff_client_id.as_deref(), Some("partner-android"));
+        let transport = StubTransport::new().push_json(
+            "/api/v1/auth/desktop/exchange",
+            200,
+            serde_json::json!({
+                "sessionToken": "t",
+                "expiresAt": "2026-10-07T12:00:00Z",
+                "sessionCookieName": "next-auth.session-token",
+                "user": { "id": "u1", "email": "ada@example.com" }
+            }),
+        );
+        let app = App::with_parts(
+            &config,
+            Arc::new(MemorySecureStore::new()),
+            Arc::new(transport),
+            Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
+        )
+        .expect("starts");
+        let url = app.auth().begin().expect("begins");
+        assert!(url.contains("client=partner-android"), "{url}");
+        let state = url::Url::parse(&url)
+            .expect("a URL")
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("a state");
+        let user = app
+            .auth()
+            .complete(&format!("partner://auth/callback?code=abc&state={state}"))
+            .await
+            .expect("completes");
+        assert_eq!(user.id, "u1");
     }
 
     #[tokio::test]
