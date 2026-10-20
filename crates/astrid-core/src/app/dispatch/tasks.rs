@@ -294,7 +294,15 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
         })
     });
 
+    // The task this one is a subtask of, for iOS's "Parent task:" link (AATD-52).
+    let parent = task
+        .parent_task_id
+        .as_deref()
+        .and_then(|id| app.context.tasks().task(id).ok().flatten())
+        .map(|parent| serde_json::json!({ "id": parent.id, "title": parent.title }));
+
     Response::ok(serde_json::json!({
+        "parent": parent,
         "blockers": blockers,
         // What this task's list permits, so the screen offers a control only where it would work
         // (task 897e25c5, spec §11.2). Decided here and not in a view: a GitHub board with no
