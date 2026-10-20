@@ -6272,3 +6272,44 @@ async fn aatd55_outbox_stats_say_when_the_last_sync_was() {
         "{after}"
     );
 }
+
+/// AATD-44 and AATD-59: a list's share link is minted as a task's is, and a share link's code
+/// resolves to what it opens.
+#[tokio::test]
+async fn aatd59_share_links_for_lists_and_resolving_a_code() {
+    let transport = StubTransport::new()
+        .push_json(
+            "/api/v1/shortcodes",
+            200,
+            json!({ "url": "https://astrid.cc/s/lst1" }),
+        )
+        .push_json(
+            "/api/v1/shortcodes/abc123",
+            200,
+            json!({ "targetType": "task", "targetId": "t9", "meta": {} }),
+        );
+    let (app, transport) = app_and_transport(transport);
+    let shared = call(&app, json!({ "kind": "shareList", "listId": "l1" })).await;
+    assert_eq!(
+        shared["value"]["url"], "https://astrid.cc/s/lst1",
+        "{shared}"
+    );
+    let minted = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.url.ends_with("/api/v1/shortcodes"))
+        .expect("a shortcode request");
+    let body: serde_json::Value =
+        serde_json::from_slice(minted.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["targetType"], "list");
+    let resolved = call(
+        &app,
+        json!({ "kind": "resolveShortcode", "code": "abc123" }),
+    )
+    .await;
+    assert_eq!(
+        resolved["value"],
+        json!({ "targetType": "task", "targetId": "t9" }),
+        "{resolved}"
+    );
+}

@@ -562,6 +562,14 @@ pub enum Command {
     ShareTask {
         task_id: String,
     },
+    /// Mint a link to a list, as iOS's Share List does (AATD-44). Online-only.
+    ShareList {
+        list_id: String,
+    },
+    /// What a share link (`astrid.cc/s/<code>`) opens: `{ targetType, targetId }` (AATD-59).
+    ResolveShortcode {
+        code: String,
+    },
     /// Copy a task into a list, with or without its comments, as the web's Copy does. The server
     /// makes the copy, so this is online-only; the copy comes back and is cached at once.
     CopyTask {
