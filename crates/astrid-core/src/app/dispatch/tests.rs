@@ -4637,6 +4637,134 @@ async fn passkeys_are_listed_renamed_and_revoked_through_the_core_task_19fd9289(
         .contains("does not offer passkeys"));
 }
 
+/// Task 4c285039: a passkey is registered through the core, so Android's Credential Manager and
+/// Windows Hello each only have to run the ceremony. Two commands, one server-side ceremony — the
+/// `sessionId` the challenge arrived with has to go back out with the attestation.
+#[tokio::test]
+async fn a_passkey_is_registered_through_the_core_task_4c285039() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "webauthn/register/options",
+                200,
+                json!({
+                    "options": { "challenge": "Y2hhbGxlbmdl", "rp": { "id": "astrid.cc" } },
+                    "sessionId": "s1",
+                }),
+            )
+            .push_json(
+                "webauthn/register/verify",
+                200,
+                json!({ "verified": true, "isNewUser": false }),
+            ),
+    );
+
+    let begun = call(&app, json!({ "kind": "passkeyRegistrationOptions" })).await;
+    assert_eq!(begun["ok"], true, "{begun}");
+    assert_eq!(begun["value"]["sessionId"], "s1");
+    assert_eq!(begun["value"]["options"]["challenge"], "Y2hhbGxlbmdl");
+
+    let no_session = call(
+        &app,
+        json!({ "kind": "registerPasskey", "sessionId": " ", "attestation": { "id": "new" } }),
+    )
+    .await;
+    assert_eq!(
+        no_session["ok"], false,
+        "refused before any request: the server would only fail it later"
+    );
+
+    let registered = call(
+        &app,
+        json!({
+            "kind": "registerPasskey",
+            "sessionId": "s1",
+            "attestation": { "id": "new", "rawId": "new", "type": "public-key" },
+            "name": "Surface",
+        }),
+    )
+    .await;
+    assert_eq!(registered["ok"], true, "{registered}");
+
+    let sent: Vec<(String, String)> = transport
+        .requests()
+        .iter()
+        .filter(|request| request.url.contains("webauthn"))
+        .map(|request| (request.method.as_str().to_string(), request.url.clone()))
+        .collect();
+    assert_eq!(sent.len(), 2, "one challenge, one verification");
+    assert_eq!(sent[0].0, "POST");
+    assert!(sent[0].1.ends_with("/api/auth/webauthn/register/options"));
+    assert!(sent[1].1.ends_with("/api/auth/webauthn/register/verify"));
+
+    let body: serde_json::Value = serde_json::from_slice(
+        transport.requests()[transport.requests().len() - 1]
+            .body
+            .as_deref()
+            .expect("a body"),
+    )
+    .expect("json");
+    assert_eq!(body["sessionId"], "s1", "the ceremony is one exchange");
+    assert_eq!(body["response"]["rawId"], "new", "passed through unread");
+    assert_eq!(body["name"], "Surface");
+}
+
+/// Task 4c285039: the address changes when the mail is answered, so the core reports that it asked
+/// rather than claiming it changed.
+#[tokio::test]
+async fn changing_the_email_reports_the_verification_it_asked_for_task_4c285039() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "users/me",
+                200,
+                json!({
+                    "success": true,
+                    "message": "Account updated successfully. Please check your email to verify the new address.",
+                    "emailVerificationRequired": true,
+                }),
+            )
+            .push_json(
+                "users/me",
+                409,
+                json!({ "error": "Email address is already in use" }),
+            ),
+    );
+
+    let blank = call(&app, json!({ "kind": "changeEmail", "email": "  " })).await;
+    assert_eq!(blank["ok"], false, "refused before any request");
+
+    let asked = call(
+        &app,
+        json!({ "kind": "changeEmail", "email": "grace@example.com" }),
+    )
+    .await;
+    assert_eq!(asked["ok"], true, "{asked}");
+    assert_eq!(asked["value"]["verificationRequired"], true);
+
+    let taken = call(
+        &app,
+        json!({ "kind": "changeEmail", "email": "taken@example.com" }),
+    )
+    .await;
+    assert_eq!(taken["ok"], false);
+    assert!(
+        taken["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("already in use"),
+        "a 409 belongs on screen as a sentence: {taken}"
+    );
+
+    let sent: Vec<String> = transport
+        .requests()
+        .iter()
+        .filter(|request| request.url.ends_with("/api/v1/users/me"))
+        .map(|request| request.method.as_str().to_string())
+        .collect();
+    assert_eq!(sent, vec!["PUT", "PUT"], "the blank one never went");
+}
+
 /// The Contacts page (task 438494c7): the server's list, shaped to what the page draws, and
 /// clearing it answers with the count.
 #[tokio::test]

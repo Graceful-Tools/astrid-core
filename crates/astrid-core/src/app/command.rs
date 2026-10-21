@@ -1016,8 +1016,13 @@ pub enum Command {
     },
     /// Send the verification email again. Answers with the server's message.
     ResendVerification,
-    /// The passkeys the account signs in with (task 19fd9289). Online-only; registering one is the
-    /// browser's.
+    /// Change the signed-in user's email address (task 4c285039). The address changes only when
+    /// the link in the mail is followed, so the answer is `verificationRequired` and the server's
+    /// sentence — not a new account screen.
+    ChangeEmail {
+        email: String,
+    },
+    /// The passkeys the account signs in with (task 19fd9289). Online-only.
     Passkeys,
     /// Rename a passkey. An empty name is refused before any request, as the server would refuse it.
     RenamePasskey {
@@ -1027,6 +1032,21 @@ pub enum Command {
     /// Revoke a passkey.
     RevokePasskey {
         id: String,
+    },
+    /// Begin registering a passkey (task 4c285039). Answers `{ options, sessionId }`: the options
+    /// go to the platform authenticator — Credential Manager on Android, Windows Hello here — and
+    /// the `sessionId` comes back to [`Command::RegisterPasskey`].
+    PasskeyRegistrationOptions,
+    /// Finish registering a passkey (task 4c285039) with what the authenticator signed.
+    ///
+    /// `attestation` is the platform's registration response, passed through unread: its shape is
+    /// the WebAuthn spec's and the server's business, and a core that parsed it would have to be
+    /// released again for every field either of them adds.
+    RegisterPasskey {
+        session_id: String,
+        attestation: serde_json::Value,
+        #[serde(default)]
+        name: Option<String>,
     },
     /// The contacts this account imported for collaborator suggestions (task 438494c7). Online-only.
     Contacts,

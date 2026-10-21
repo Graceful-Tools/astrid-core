@@ -135,12 +135,25 @@ pub const SEARCH: &str = "/api/v1/search";
 /// them, `DELETE` clears them all. Windows has no address book to `POST` from.
 pub const CONTACTS: &str = "/api/v1/contacts";
 /// The account's passkeys (task 19fd9289, web c4ad9e68): `GET` lists them; one is renamed with
-/// `PATCH` and revoked with `DELETE` at [`passkey`]. Registering one stays in the browser.
+/// `PATCH` and revoked with `DELETE` at [`passkey`]. Registering one is
+/// [`WEBAUTHN_REGISTER_OPTIONS`].
 pub const PASSKEYS: &str = "/api/v1/users/me/passkeys";
 
 pub fn passkey(id: &str) -> String {
     format!("{PASSKEYS}/{}", escaped_path_component(id))
 }
+
+/// Ask for a WebAuthn registration challenge (task 4c285039). With a session this adds a passkey
+/// to the signed-in account; the answer is `{ options, sessionId }` and the options go straight to
+/// the platform authenticator — Credential Manager on Android, Windows Hello here.
+///
+/// Outside `/api/v1/` because the whole WebAuthn flow is, and there is no v1 equivalent: the
+/// read-only [`PASSKEYS`] route cannot issue a challenge. Both paths are in the client's
+/// `LEGACY_PATH_ALLOWLIST` on purpose.
+pub const WEBAUTHN_REGISTER_OPTIONS: &str = "/api/auth/webauthn/register/options";
+/// Hand the signed challenge back (task 4c285039): `{ sessionId, response, name? }`. The server
+/// matches `sessionId` against the session that asked, so these two calls are one ceremony.
+pub const WEBAUTHN_REGISTER_VERIFY: &str = "/api/auth/webauthn/register/verify";
 /// Everything this account has, as one file. `?format=json` or `?format=csv`.
 pub const EXPORT: &str = "/api/v1/users/me/export";
 /// Close the account for good (task 19fd9289). The body carries the typed confirmation.

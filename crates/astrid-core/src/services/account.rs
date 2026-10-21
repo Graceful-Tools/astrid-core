@@ -47,6 +47,22 @@ fn merge_into(target: &mut serde_json::Value, changes: &serde_json::Value) {
     }
 }
 
+/// The server's own check, in the same shape (`app/api/v1/users/me/route.ts`): something, an `@`,
+/// something, a dot, something, and no spaces. Deliberately not stricter — an address this refuses
+/// cannot be typed at all, and real addresses are stranger than a tight pattern allows.
+fn is_email_shaped(email: &str) -> bool {
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            !local.is_empty()
+                && !domain.is_empty()
+                && !email.contains(char::is_whitespace)
+                && !domain.contains('@')
+                && matches!(domain.split_once('.'), Some((host, tld)) if !host.is_empty() && !tld.is_empty())
+        }
+        None => false,
+    }
+}
+
 /// A 404 from the passkeys route is a deployment without passkeys for apps — not a missing
 /// account — and it should read that way on screen (task 19fd9289).
 fn no_passkeys_here(error: crate::api::ApiError) -> super::ServiceError {
@@ -161,6 +177,51 @@ impl AccountService {
                     "the upload answered without an address".into(),
                 ))
             })
+    }
+
+    /// Change the signed-in user's email address (task 4c285039).
+    ///
+    /// The address does **not** change here. The server sends a verification mail to the new one
+    /// and swaps it over when the link is followed, which is why this answers
+    /// `emailVerificationRequired` rather than a changed [`User`] — a client that redrew the
+    /// account screen from a returned user would show the new address as if it were live, and it
+    /// is not yet. The cache is deliberately left alone for the same reason.
+    ///
+    /// The format is checked here as well as on the server, and an address already in use comes
+    /// back as one sentence instead of a bare 409, because "409" is not something to put on a
+    /// screen.
+    pub async fn change_email(&self, email: &str) -> Result<serde_json::Value> {
+        let email = email.trim();
+        if !is_email_shaped(email) {
+            return Err(super::ServiceError::Api(crate::api::ApiError::Refused(
+                "that does not look like an email address".to_string(),
+            )));
+        }
+        let request = self
+            .context
+            .client
+            .put(endpoints::ME)
+            .value(json!({ "email": email.to_lowercase() }));
+        let answer = self
+            .context
+            .client
+            .send(request)
+            .await
+            .map_err(|error| match error {
+                crate::api::ApiError::Http { status: 409, .. } => {
+                    super::ServiceError::Api(crate::api::ApiError::Refused(
+                        "that email address is already in use by another account".to_string(),
+                    ))
+                }
+                other => super::ServiceError::Api(other),
+            })?;
+        Ok(json!({
+            "verificationRequired": answer
+                .get("emailVerificationRequired")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
+        }))
     }
 
     /// Ask the server to send the verification email again (task 19fd9289).
@@ -414,6 +475,95 @@ impl AccountService {
             .await
             .map_err(no_passkeys_here)?;
         Ok(())
+    }
+
+    /// Begin registering a passkey for the signed-in account (task 4c285039): ask the server for a
+    /// challenge and hand back `{ options, sessionId }` untouched.
+    ///
+    /// The options are passed through rather than parsed because they are the authenticator's
+    /// input, not the core's: every field the server chooses — the challenge, the relying party,
+    /// the algorithms it will accept, `excludeCredentials` so an authenticator already registered
+    /// is refused — has to arrive at the platform API exactly as sent. Reshaping them here would
+    /// mean a server that adds a field needs a new core release before any client sees it.
+    ///
+    /// `sessionId` is the server's handle on this ceremony and must come back to
+    /// [`Self::register_passkey`].
+    pub async fn passkey_registration_options(&self) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::WEBAUTHN_REGISTER_OPTIONS)
+            .value(json!({}));
+        let answer = self
+            .context
+            .client
+            .send(request)
+            .await
+            .map_err(no_passkeys_here)?;
+        let session_id = answer
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                super::ServiceError::Api(crate::api::ApiError::Decode(
+                    "the server issued a challenge without a sessionId".into(),
+                ))
+            })?;
+        let options = answer.get("options").cloned().ok_or_else(|| {
+            super::ServiceError::Api(crate::api::ApiError::Decode(
+                "the server answered without registration options".into(),
+            ))
+        })?;
+        Ok(json!({ "options": options, "sessionId": session_id }))
+    }
+
+    /// Finish registering a passkey (task 4c285039): the attestation the platform authenticator
+    /// produced, the `sessionId` from [`Self::passkey_registration_options`], and an optional name
+    /// for the key.
+    ///
+    /// The ceremony itself cannot live here — Credential Manager and Windows Hello are platform
+    /// APIs, and each shell runs its own. What the core owns is the pair of requests around it, so
+    /// no client reimplements the challenge handling.
+    ///
+    /// `verified: false` is a failure, not a result to return: the server sends it when the
+    /// attestation does not check out or the challenge has expired, and a client that read the
+    /// `Ok` and redrew would claim a passkey that does not exist.
+    pub async fn register_passkey(
+        &self,
+        session_id: &str,
+        attestation: serde_json::Value,
+        name: Option<&str>,
+    ) -> Result<()> {
+        let mut body = serde_json::Map::new();
+        body.insert("sessionId".into(), json!(session_id));
+        body.insert("response".into(), attestation);
+        if let Some(name) = name {
+            let name = name.trim();
+            if !name.is_empty() {
+                body.insert("name".into(), json!(name));
+            }
+        }
+        let request = self
+            .context
+            .client
+            .post(endpoints::WEBAUTHN_REGISTER_VERIFY)
+            .value(serde_json::Value::Object(body));
+        let answer = self
+            .context
+            .client
+            .send(request)
+            .await
+            .map_err(no_passkeys_here)?;
+        if answer.get("verified").and_then(serde_json::Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        Err(super::ServiceError::Api(crate::api::ApiError::Refused(
+            answer
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("that passkey could not be registered; try again")
+                .to_string(),
+        )))
     }
 
     // ─── Feature flags ────────────────────────────────────────────────────────────────────────
@@ -880,6 +1030,169 @@ mod tests {
         assert!(crate::external::ledger::pending(&fixture.store, "google").is_empty());
         assert!(crate::external::ledger::tombstoned(&fixture.store, "google").is_empty());
         assert!(crate::external::ledger::twin(&fixture.store, "google", "t1").is_none());
+    }
+
+    /// Task 4c285039. The server verifies the new address before it swaps it, so the signed-in
+    /// user keeps the old one until the link is followed — and the cache has to agree, or the
+    /// account screen shows an address no mail will reach.
+    #[tokio::test]
+    async fn changing_the_email_asks_for_verification_and_does_not_move_the_cached_address_task_4c285039(
+    ) {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/users/me",
+            200,
+            json!({
+                "success": true,
+                "message": "Account updated successfully. Please check your email to verify the new address.",
+                "emailVerificationRequired": true,
+            }),
+        ));
+        fixture
+            .service
+            .set_current_user(&user("u1"))
+            .await
+            .expect("stores");
+
+        let answer = fixture
+            .service
+            .change_email("  Grace@Example.COM ")
+            .await
+            .expect("asks");
+        assert_eq!(answer["verificationRequired"], true);
+        assert!(answer["message"]
+            .as_str()
+            .expect("a message")
+            .contains("verify the new address"));
+
+        assert_eq!(
+            fixture
+                .service
+                .current_user()
+                .expect("reads")
+                .expect("present")
+                .email
+                .as_deref(),
+            Some("ada@example.com"),
+            "the address changes when the link is followed, not when it is asked for"
+        );
+    }
+
+    /// The format check and the already-in-use answer both have to read as a sentence: one is
+    /// refused without a request, the other turns a bare 409 into something to put on a screen.
+    #[tokio::test]
+    async fn a_misshapen_email_is_refused_unsent_and_a_taken_one_reads_as_a_sentence_task_4c285039()
+    {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/users/me",
+            409,
+            json!({ "error": "Email address is already in use" }),
+        ));
+
+        let refused = fixture
+            .service
+            .change_email("grace at example.com")
+            .await
+            .expect_err("refused");
+        assert!(
+            refused.to_string().contains("does not look like an email"),
+            "{refused}"
+        );
+
+        let taken = fixture
+            .service
+            .change_email("grace@example.com")
+            .await
+            .expect_err("refused");
+        assert!(taken.to_string().contains("already in use"), "{taken}");
+    }
+
+    /// Task 4c285039. The two WebAuthn calls are one ceremony: the challenge goes out untouched to
+    /// the platform authenticator, and its `sessionId` has to come back with the attestation.
+    #[tokio::test]
+    async fn registering_a_passkey_passes_the_challenge_through_and_returns_its_session_task_4c285039(
+    ) {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json(
+                    "/api/auth/webauthn/register/options",
+                    200,
+                    json!({
+                        "options": {
+                            "challenge": "Y2hhbGxlbmdl",
+                            "rp": { "name": "Astrid", "id": "astrid.cc" },
+                            "pubKeyCredParams": [{ "alg": -7, "type": "public-key" }],
+                            "excludeCredentials": [{ "id": "k1", "type": "public-key" }],
+                        },
+                        "sessionId": "s1",
+                    }),
+                )
+                .push_json(
+                    "/api/auth/webauthn/register/verify",
+                    200,
+                    json!({ "verified": true, "isNewUser": false }),
+                ),
+        );
+
+        let begun = fixture
+            .service
+            .passkey_registration_options()
+            .await
+            .expect("issues a challenge");
+        assert_eq!(begun["sessionId"], "s1");
+        assert_eq!(begun["options"]["challenge"], "Y2hhbGxlbmdl");
+        assert_eq!(
+            begun["options"]["excludeCredentials"][0]["id"], "k1",
+            "an authenticator already registered has to be excludable, so the options go through whole"
+        );
+
+        fixture
+            .service
+            .register_passkey(
+                "s1",
+                json!({ "id": "new", "rawId": "new", "type": "public-key" }),
+                Some("  Surface  "),
+            )
+            .await
+            .expect("registers");
+    }
+
+    /// `verified: false` is the server saying the attestation did not check out or the challenge
+    /// expired. Reading it as success would claim a passkey the account does not have.
+    #[tokio::test]
+    async fn a_passkey_the_server_did_not_verify_is_a_failure_task_4c285039() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/auth/webauthn/register/verify",
+            200,
+            json!({ "verified": false, "error": "Challenge expired or not found" }),
+        ));
+
+        let error = fixture
+            .service
+            .register_passkey("s1", json!({ "id": "new" }), None)
+            .await
+            .expect_err("a 200 that says it did not work is still a failure");
+        assert!(error.to_string().contains("Challenge expired"), "{error}");
+    }
+
+    /// A deployment with `authPasskey` switched off answers 404 on the registration routes just as
+    /// it does on the list, and it should read the same way (task 19fd9289's wording).
+    #[tokio::test]
+    async fn a_deployment_without_passkeys_cannot_register_one_either_task_4c285039() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/auth/webauthn/register/options",
+            404,
+            json!({ "error": "Not found" }),
+        ));
+
+        let error = fixture
+            .service
+            .passkey_registration_options()
+            .await
+            .expect_err("refused");
+        assert!(
+            error.to_string().contains("does not offer passkeys"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

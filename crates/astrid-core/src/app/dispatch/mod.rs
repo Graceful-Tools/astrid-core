@@ -1008,6 +1008,15 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             })),
             Err(error) => Response::failed(error.into()),
         },
+        Command::ChangeEmail { email } => {
+            if email.trim().is_empty() {
+                return Response::failed(Failure::bad_request("an email address is required"));
+            }
+            match app.context.account().change_email(&email).await {
+                Ok(answer) => Response::ok(answer),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::Passkeys => match app.context.account().passkeys().await {
             Ok(passkeys) => Response::ok(serde_json::json!({ "passkeys": passkeys })),
             Err(error) => Response::failed(error.into()),
@@ -1025,6 +1034,37 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
         },
+        Command::PasskeyRegistrationOptions => {
+            match app.context.account().passkey_registration_options().await {
+                Ok(answer) => Response::ok(answer),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RegisterPasskey {
+            session_id,
+            attestation,
+            name,
+        } => {
+            if session_id.trim().is_empty() {
+                return Response::failed(Failure::bad_request(
+                    "a passkey registration needs the sessionId the challenge came with",
+                ));
+            }
+            if attestation.is_null() {
+                return Response::failed(Failure::bad_request(
+                    "a passkey registration needs the authenticator's response",
+                ));
+            }
+            match app
+                .context
+                .account()
+                .register_passkey(&session_id, attestation, name.as_deref())
+                .await
+            {
+                Ok(()) => Response::done(),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::Contacts => match app.context.account().contacts().await {
             Ok((contacts, total)) => {
                 Response::ok(serde_json::json!({ "contacts": contacts, "total": total }))

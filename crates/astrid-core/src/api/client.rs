@@ -24,6 +24,7 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use super::endpoints;
 use super::path;
 use super::platform as platform_header;
 use super::transport::{HttpRequest, HttpResponse, HttpTransport, Method, TransportError};
@@ -41,9 +42,19 @@ pub const API_PREFIX: &str = "/api/v1/";
 
 /// The paths outside `/api/v1/` this client is allowed to reach.
 ///
-/// Exactly two, both from before the versioned API existed and neither with a v1 equivalent yet.
-/// An allow-list rather than a loosened rule: a new legacy path has to be added here on purpose.
-const LEGACY_PATH_ALLOWLIST: [&str; 2] = ["/api/auth/desktop/grant", "/api/mcp/user-tokens"];
+/// None has a v1 equivalent. An allow-list rather than a loosened rule: a new legacy path has to
+/// be added here on purpose.
+///
+/// The two WebAuthn registration paths joined them for task 4c285039. Registering a passkey needs
+/// a challenge issued and verified by the server, and `/api/v1/users/me/passkeys` is read-only —
+/// so without these a native client cannot add a passkey at all, which is what sent Android and
+/// Windows to the web page for it.
+const LEGACY_PATH_ALLOWLIST: [&str; 4] = [
+    "/api/auth/desktop/grant",
+    "/api/mcp/user-tokens",
+    endpoints::WEBAUTHN_REGISTER_OPTIONS,
+    endpoints::WEBAUTHN_REGISTER_VERIFY,
+];
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ApiError {
@@ -450,19 +461,35 @@ mod tests {
         ));
     }
 
-    /// Two paths predate the versioned API and have no v1 equivalent. They are named, not waved
-    /// through by loosening the rule.
+    /// Four paths have no v1 equivalent. They are named, not waved through by loosening the rule —
+    /// so a sibling under the very same `/api/auth/webauthn/` prefix is still refused (task
+    /// 4c285039, which added the two registration paths).
     #[tokio::test]
-    async fn the_two_legacy_paths_are_allowed_by_name() {
-        let (client, _) = client_with(StubTransport::new().push_json(
+    async fn the_legacy_paths_are_allowed_one_by_one_and_their_siblings_are_not() {
+        for path in [
+            "/api/auth/desktop/grant",
             "/api/mcp/user-tokens",
-            200,
-            serde_json::json!({}),
-        ));
-        assert!(client
-            .send(client.get("/api/mcp/user-tokens"))
-            .await
-            .is_ok());
+            endpoints::WEBAUTHN_REGISTER_OPTIONS,
+            endpoints::WEBAUTHN_REGISTER_VERIFY,
+        ] {
+            let (client, _) =
+                client_with(StubTransport::new().push_json(path, 200, serde_json::json!({})));
+            assert!(
+                client.send(client.get(path)).await.is_ok(),
+                "{path} is on the allow-list"
+            );
+        }
+
+        let (client, _) = client_with(StubTransport::new());
+        assert!(
+            matches!(
+                client
+                    .send(client.get("/api/auth/webauthn/authenticate/options"))
+                    .await,
+                Err(ApiError::Refused(_))
+            ),
+            "signing in with a passkey is the shell's browser hand-off, not this client's"
+        );
     }
 
     /// 401 is the only status that means "sign out", and it has to arrive as itself.
