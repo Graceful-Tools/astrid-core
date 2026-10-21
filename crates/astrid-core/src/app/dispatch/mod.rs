@@ -826,6 +826,13 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer_done(app.context.agents().delete_credential(&service_id).await)
         }
         Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
+        Command::ExternalAccounts => external_accounts(app).await,
+        Command::CreateAndLinkGoogleList { list_id, name } => answer(
+            app.context
+                .external()
+                .create_and_link_google_list(&list_id, &name)
+                .await,
+        ),
         Command::ConnectProvider { provider } => {
             match app.context.external().authorize_url(provider).await {
                 Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),

@@ -2426,6 +2426,133 @@ async fn a_connected_provider_reads_as_connected_under_the_servers_name_for_it()
     assert_eq!(github["connected"], true);
 }
 
+/// Task 6db679c3. Which account, not just whether: somebody with a work Google account and a
+/// personal one cannot tell from a tick which of them their lists are being mirrored into.
+#[tokio::test]
+async fn the_account_panel_says_which_account_each_provider_is_connected_as() {
+    let app = app_with(
+        StubTransport::new()
+            .push_json(
+                "/api/v1/integrations",
+                200,
+                json!({
+                    "integrations": [
+                        { "provider": "GOOGLE_TASKS", "externalAccountId": "jon@gmail.com" },
+                        { "provider": "GITHUB_ISSUES", "externalAccountId": "jonparis" },
+                    ],
+                }),
+            )
+            .fallback(Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: b"{}".to_vec(),
+            })),
+    );
+
+    let panel = call(&app, json!({ "kind": "externalAccounts" })).await;
+    let providers = panel["value"]["providers"].as_array().expect("providers");
+    let google = providers
+        .iter()
+        .find(|provider| provider["provider"] == "google_tasks")
+        .expect("Google is one of the two");
+    assert_eq!(google["connected"], true);
+    assert_eq!(google["connectedAs"], "jon@gmail.com");
+    let github = providers
+        .iter()
+        .find(|provider| provider["provider"] == "git_hub")
+        .expect("GitHub is the other");
+    assert_eq!(github["connectedAs"], "jonparis");
+}
+
+/// Task 6db679c3. The whole account's links in one answer, each naming both ends — the screen
+/// draws "Work → Work (Google)", and neither name may be an opaque id it has to go and resolve.
+#[tokio::test]
+async fn the_account_panel_names_both_ends_of_every_link_it_has() {
+    let app = app_with(
+        StubTransport::new()
+            .push_json(
+                "/api/v1/integrations",
+                200,
+                json!({ "integrations": [{ "provider": "GOOGLE_TASKS" }] }),
+            )
+            .push_json(
+                "/sync/google/links",
+                200,
+                json!({
+                    "links": [{
+                        "id": "link-1",
+                        "astridListId": "l1",
+                        "remoteContainerId": "tasklist-1",
+                        "remoteContainerName": "Work (Google)",
+                    }],
+                }),
+            )
+            .fallback(Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: b"{}".to_vec(),
+            })),
+    );
+    app.store
+        .upsert_list(&crate::model::TaskList::new("l1", "Work"))
+        .expect("stores");
+
+    let panel = call(&app, json!({ "kind": "externalAccounts" })).await;
+    let google = panel["value"]["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .find(|provider| provider["provider"] == "google_tasks")
+        .cloned()
+        .expect("Google");
+    let links = google["links"].as_array().expect("links");
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["id"], "link-1");
+    assert_eq!(links[0]["listId"], "l1");
+    assert_eq!(links[0]["listName"], "Work");
+    assert_eq!(links[0]["containerId"], "tasklist-1");
+    assert_eq!(links[0]["containerName"], "Work (Google)");
+}
+
+/// Task 6db679c3. "New List" is one gesture, so it is one command: make the list on Google and
+/// bind it, rather than leaving the client to do the second half and get it wrong.
+#[tokio::test]
+async fn new_list_creates_the_google_list_and_links_it() {
+    let transport = StubTransport::new()
+        .push_json("/sync/google/tasklists", 200, json!({ "tasklists": [] }))
+        .push_json("/sync/google/links", 200, json!({ "links": [] }))
+        .push_json(
+            "/sync/google/tasklists",
+            200,
+            json!({ "tasklist": { "id": "tasklist-9", "name": "Garden" } }),
+        )
+        .push_json(
+            "/sync/google/links",
+            200,
+            json!({ "link": { "id": "link-9", "astridListId": "l1", "remoteContainerId": "tasklist-9" } }),
+        )
+        .fallback(Ok(crate::api::HttpResponse {
+            status: 200,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: b"{}".to_vec(),
+        }));
+    let app = app_with(transport);
+    app.store
+        .upsert_list(&crate::model::TaskList::new("l1", "Garden"))
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createAndLinkGoogleList", "listId": "l1", "name": "Garden" }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true);
+    assert_eq!(made["value"]["containerId"], "tasklist-9");
+    assert_eq!(made["value"]["created"], true);
+    assert_eq!(made["value"]["link"]["id"], "link-9");
+}
+
 /// A pull applies what came back and commits the cursor only after it has — a client killed
 /// mid-pass re-pulls rather than skipping what it never wrote down.""
 #[tokio::test]

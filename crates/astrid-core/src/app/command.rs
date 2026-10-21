@@ -924,6 +924,23 @@ pub enum Command {
     ExternalSync {
         list_id: String,
     },
+    /// The account's side of external sync: for each provider, whether it is connected, **which
+    /// account it is connected as**, and every list it has linked — both ends of each named
+    /// (task 6db679c3).
+    ///
+    /// Account-wide where [`Command::ExternalSync`] is one list's, because that is the shape the
+    /// settings screen is: a GitHub Issues section and a Google Tasks section, each headed
+    /// "Connected as …" over the list of links.
+    ExternalAccounts,
+    /// Google's "New List": make a list on Google and bind it to an Astrid list, in one gesture.
+    ///
+    /// One command because it is one gesture — and because the half-done state (made on Google,
+    /// not bound here) is one this has to clean up after itself rather than hand to a client.
+    CreateAndLinkGoogleList {
+        list_id: String,
+        /// What to call it on Google. The Astrid list's own name, unless somebody typed another.
+        name: String,
+    },
     /// The URL to open in a browser to connect a provider.
     ConnectProvider {
         provider: crate::services::Provider,

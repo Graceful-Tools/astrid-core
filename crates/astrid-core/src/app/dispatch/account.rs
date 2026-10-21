@@ -241,16 +241,8 @@ pub(super) async fn external_sync(app: &App, list_id: &str) -> Response {
         crate::services::Provider::GoogleTasks,
         crate::services::Provider::GitHub,
     ] {
-        let connected = status
-            .get("integrations")
-            .and_then(|value| value.as_array())
-            .map(|integrations| {
-                integrations.iter().any(|integration| {
-                    integration.get("provider").and_then(|value| value.as_str())
-                        == Some(provider.wire())
-                })
-            })
-            .unwrap_or(false);
+        let integration = integration_in(&status, provider);
+        let connected = integration.is_some();
 
         // Only when connected: asking for somebody's task lists before they have said yes to the
         // provider is a request that can only 401.
@@ -270,12 +262,98 @@ pub(super) async fn external_sync(app: &App, list_id: &str) -> Response {
         providers.push(serde_json::json!({
             "provider": provider,
             "connected": connected,
+            // Which account, not just whether — the same row says "Connected as …" (task
+            // 6db679c3), and it is in the status this already asked for.
+            "connectedAs": connected_as(integration),
             "containers": containers,
             "link": linked,
         }));
     }
 
     Response::ok(serde_json::json!({ "listId": list_id, "providers": providers }))
+}
+
+/// The account's side of external sync: who each provider is connected as, and every list it has
+/// linked (task 6db679c3).
+///
+/// One command for the whole settings screen, for the reason [`Command::ExternalSync`] gives for
+/// one list: a panel filled by three round trips is a panel with three chances to be seen half
+/// drawn. Both ends of every link are named here, so nothing downstream has to resolve an opaque
+/// Google tasklist id.
+pub(super) async fn external_accounts(app: &App) -> Response {
+    let external = app.context.external();
+    let status = external
+        .status()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+
+    let mut providers = Vec::new();
+    for provider in [
+        crate::services::Provider::GoogleTasks,
+        crate::services::Provider::GitHub,
+    ] {
+        let integration = integration_in(&status, provider);
+        // Same reason as the per-list panel: links for a provider nobody has connected can only
+        // 401, and an empty section is the honest thing to draw.
+        let links = match integration {
+            Some(_) => external.links(provider).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let links: Vec<serde_json::Value> = links
+            .into_iter()
+            .map(|link| {
+                let name = app
+                    .store
+                    .list(&link.astrid_list_id)
+                    .ok()
+                    .flatten()
+                    .map(|list| list.name);
+                serde_json::json!({
+                    "id": link.id,
+                    "listId": link.astrid_list_id,
+                    // Absent when the link names a list this device has not cached yet — the
+                    // screen shows the link rather than hiding it, and fills the name in on the
+                    // next refresh.
+                    "listName": name,
+                    "containerId": link.remote_container_id,
+                    "containerName": link.remote_container_name,
+                })
+            })
+            .collect();
+
+        providers.push(serde_json::json!({
+            "provider": provider,
+            "connected": integration.is_some(),
+            "connectedAs": connected_as(integration),
+            "links": links,
+        }));
+    }
+
+    Response::ok(serde_json::json!({ "providers": providers }))
+}
+
+/// The account's integration for one provider, as `/api/v1/integrations` answered it.
+///
+/// Matched on the server's own name for the provider — see [`crate::services::Provider::wire`]:
+/// a name we invented reads a connected account as disconnected.
+fn integration_in(
+    status: &serde_json::Value,
+    provider: crate::services::Provider,
+) -> Option<&serde_json::Value> {
+    status
+        .get("integrations")
+        .and_then(|value| value.as_array())?
+        .iter()
+        .find(|integration| {
+            integration.get("provider").and_then(|value| value.as_str()) == Some(provider.wire())
+        })
+}
+
+/// The Google email or GitHub login the account is connected as, when the server knows one.
+fn connected_as(integration: Option<&serde_json::Value>) -> Option<&str> {
+    integration?
+        .get("externalAccountId")
+        .and_then(|value| value.as_str())
 }
 
 /// One Google pass over every linked list.

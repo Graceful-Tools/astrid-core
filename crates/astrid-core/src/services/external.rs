@@ -82,6 +82,11 @@ pub struct ExternalLink {
     pub astrid_list_id: String,
     #[serde(default)]
     pub remote_container_id: String,
+    /// What the other side calls it — the server fetches and stores this on every link precisely
+    /// so no client has to render an opaque Google tasklist id, or make a second call to find a
+    /// name it was already told (task 6db679c3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_container_name: Option<String>,
     /// Where the last pull got to. Held by the server, committed by the client after it has
     /// applied a pass — so a client killed mid-pass re-pulls rather than skipping for ever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -751,6 +756,43 @@ impl ExternalSyncService {
                 Err(_) => report.failed += 1,
             }
         }
+    }
+
+    /// "New List": make the list on Google and bind it to an Astrid list, in one call (task
+    /// 6db679c3).
+    ///
+    /// Two writes, so the failure that matters is *made on Google, not bound here* — and a blind
+    /// retry would leave a second list of the same name on somebody's account every time they
+    /// pressed the button. So an unlinked container already called this is adopted instead, which
+    /// is exactly what [`auto_link::astrid_to_google`] does for the all-lists modes; a container
+    /// somebody else's list is already bound to is not an orphan and is left alone. A retry after
+    /// a failed bind therefore finishes the first attempt rather than duplicating it.
+    pub async fn create_and_link_google_list(
+        &self,
+        list_id: &str,
+        name: &str,
+    ) -> Result<serde_json::Value> {
+        let (containers, _) = self.containers(Provider::GoogleTasks).await?;
+        let links = self.links(Provider::GoogleTasks).await?;
+        let orphan = containers.into_iter().find(|container| {
+            container.name == name
+                && !links
+                    .iter()
+                    .any(|link| link.remote_container_id == container.id)
+        });
+        let (container_id, created) = match orphan {
+            Some(container) => (container.id, false),
+            None => (self.create_container(name).await?, true),
+        };
+        let answer = self
+            .link(Provider::GoogleTasks, list_id, &container_id)
+            .await?;
+        Ok(json!({
+            "containerId": container_id,
+            "containerName": name,
+            "created": created,
+            "link": answer.get("link").cloned().unwrap_or(serde_json::Value::Null),
+        }))
     }
 
     /// Make a Google task list, and answer with its id.
@@ -2077,6 +2119,7 @@ mod tests {
             id: "link-1".into(),
             astrid_list_id: "l1".into(),
             remote_container_id: "tasklist-1".into(),
+            remote_container_name: None,
             cursor: None,
         }
     }
@@ -2459,6 +2502,172 @@ mod tests {
             serde_json::from_slice(&linked.body.unwrap_or_default()).expect("a body");
         assert_eq!(body["astridListId"], "cm3real");
         assert_eq!(body["remoteContainerId"], "c1");
+    }
+
+    // ── "New List": create on Google and bind, in one gesture ────────────────────────────────
+
+    /// Task 6db679c3. Two writes, one gesture: the list is made on Google and bound here, and the
+    /// answer says which container it ended up on so the screen can draw the row it just made.
+    #[tokio::test]
+    async fn new_list_makes_the_google_list_and_binds_it() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json("google/tasklists", 200, json!({ "tasklists": [] }))
+                .push_json("google/links", 200, json!({ "links": [] }))
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({ "tasklist": { "id": "c9", "name": "Garden" } }),
+                )
+                .push_json(
+                    "google/links",
+                    200,
+                    json!({ "link": { "id": "link-9", "remoteContainerId": "c9" } }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Garden"))
+            .expect("writes");
+
+        let answer = fixture
+            .service
+            .create_and_link_google_list("cm3real", "Garden")
+            .await
+            .expect("links");
+
+        assert_eq!(answer["containerId"], "c9");
+        assert_eq!(answer["created"], true);
+        assert_eq!(answer["link"]["id"], "link-9");
+        let created = fixture
+            .transport
+            .requests()
+            .into_iter()
+            .find(|request| {
+                request.url.contains("google/tasklists") && request.method.as_str() == "POST"
+            })
+            .expect("a tasklist was made");
+        let body: serde_json::Value =
+            serde_json::from_slice(&created.body.unwrap_or_default()).expect("a body");
+        assert_eq!(body["title"], "Garden");
+    }
+
+    /// Task 6db679c3. The partial failure this command has to survive: an earlier attempt made the
+    /// Google list and then could not bind it. The second attempt adopts that orphan by name — the
+    /// rule [`auto_link::astrid_to_google`] already applies — rather than leaving a new list of the
+    /// same name on somebody's Google account every time they press the button again.
+    #[tokio::test]
+    async fn new_list_adopts_an_unlinked_google_list_of_the_same_name() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({ "tasklists": [{ "id": "c-orphan", "name": "Garden" }] }),
+                )
+                .push_json("google/links", 200, json!({ "links": [] }))
+                .push_json(
+                    "google/links",
+                    200,
+                    json!({ "link": { "id": "link-9", "remoteContainerId": "c-orphan" } }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Garden"))
+            .expect("writes");
+
+        let answer = fixture
+            .service
+            .create_and_link_google_list("cm3real", "Garden")
+            .await
+            .expect("links");
+
+        assert_eq!(answer["containerId"], "c-orphan");
+        assert_eq!(answer["created"], false);
+        assert!(
+            !fixture.transport.requests().into_iter().any(|request| {
+                request.url.contains("google/tasklists") && request.method.as_str() == "POST"
+            }),
+            "nothing was made on Google: the orphan was bound instead"
+        );
+    }
+
+    /// Task 6db679c3. A container already bound to another list is not an orphan — adopting it
+    /// would silently move somebody's sync from one list to another.
+    #[tokio::test]
+    async fn new_list_does_not_adopt_a_google_list_that_is_already_linked() {
+        let fixture = fixture_with(
+            StubTransport::new()
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({ "tasklists": [{ "id": "c-taken", "name": "Garden" }] }),
+                )
+                .push_json(
+                    "google/links",
+                    200,
+                    json!({
+                        "links": [{
+                            "id": "link-1",
+                            "astridListId": "other",
+                            "remoteContainerId": "c-taken",
+                        }],
+                    }),
+                )
+                .push_json(
+                    "google/tasklists",
+                    200,
+                    json!({ "tasklist": { "id": "c9", "name": "Garden" } }),
+                )
+                .push_json(
+                    "google/links",
+                    200,
+                    json!({ "link": { "id": "link-9", "remoteContainerId": "c9" } }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_list(&a_list("cm3real", "Garden"))
+            .expect("writes");
+
+        let answer = fixture
+            .service
+            .create_and_link_google_list("cm3real", "Garden")
+            .await
+            .expect("links");
+
+        assert_eq!(answer["containerId"], "c9");
+        assert_eq!(answer["created"], true);
+    }
+
+    /// Task 6db679c3. The name the server stores for the container travels with the link, so a
+    /// screen never has to render an opaque Google tasklist id while it waits for a second call.
+    #[tokio::test]
+    async fn a_link_carries_the_containers_name() {
+        let fixture = fixture_with(StubTransport::new().push_json(
+            "google/links",
+            200,
+            json!({
+                "links": [{
+                    "id": "link-1",
+                    "astridListId": "cm3real",
+                    "remoteContainerId": "c1",
+                    "remoteContainerName": "Garden (Google)",
+                }],
+            }),
+        ));
+
+        let links = fixture
+            .service
+            .links(Provider::GoogleTasks)
+            .await
+            .expect("reads");
+
+        assert_eq!(
+            links[0].remote_container_name.as_deref(),
+            Some("Garden (Google)")
+        );
     }
 
     /// Manual is the default and has to stay one: a mode this build does not recognise must not
@@ -3015,6 +3224,7 @@ mod awtd2_56 {
                     id: "link-1".into(),
                     astrid_list_id: "l1".into(),
                     remote_container_id: CONTAINER.into(),
+                    remote_container_name: None,
                     cursor: None,
                 })
                 .await
