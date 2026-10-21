@@ -446,6 +446,13 @@ pub(super) async fn profile_rows(app: &App, user_id: Option<&str>) -> Response {
             .unwrap_or_else(|| me.as_deref() == Some(asked_for.as_str())),
         "name": answer.pointer("/user/name").cloned().unwrap_or(serde_json::Value::Null),
         "image": answer.pointer("/user/image").cloned().unwrap_or(serde_json::Value::Null),
+        // Enough to draw someone else's profile from this one answer (AATD-69): who they are and
+        // their three numbers, from the same moment as the rows. Never an email — the server gives
+        // one only on your own profile, and `currentUser` already has yours.
+        "id": answer.pointer("/user/id").cloned().unwrap_or(serde_json::Value::String(asked_for.clone())),
+        "createdAt": answer.pointer("/user/createdAt").cloned().unwrap_or(serde_json::Value::Null),
+        "isAIAgent": answer.pointer("/user/isAIAgent").cloned().unwrap_or(serde_json::Value::Null),
+        "stats": answer.get("stats").cloned().unwrap_or(serde_json::Value::Null),
     }))
 }
 
