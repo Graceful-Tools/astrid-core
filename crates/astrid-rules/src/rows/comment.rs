@@ -223,16 +223,28 @@ fn row(
         id: comment.id.clone(),
         content: comment.content.clone(),
         created_at: comment.created_at.map(crate::model::date::format),
+        // A GitHub commenter with no Astrid account is named by login (AITD-517).
         author_name: comment
             .author
             .as_ref()
-            .map(|author| author.display_name().to_string()),
+            .map(|author| author.display_name().to_string())
+            .or_else(|| remote_name(comment)),
         author_id: comment.author_id.clone(),
         author_image: comment
             .author
             .as_ref()
             .and_then(|author| author.image.clone()),
-        author_initials: comment.author.as_ref().map(|author| author.initials()),
+        author_initials: comment
+            .author
+            .as_ref()
+            .map(|author| author.initials())
+            .or_else(|| {
+                comment
+                    .remote_author_login
+                    .as_deref()
+                    .and_then(|login| login.chars().next())
+                    .map(|first| first.to_uppercase().collect())
+            }),
         author_is_agent: comment
             .author
             .as_ref()
@@ -242,7 +254,7 @@ fn row(
         // Signed out, nothing is mine. Comparing `None == None` would otherwise put every
         // system comment on the reader's own side.
         is_mine: me.is_some() && comment.author_id.as_deref() == me,
-        is_system: comment.author_id.is_none(),
+        is_system: comment.is_system(),
         parent_id: under.map(|(parent, _)| parent.clone()),
         is_reply: under.is_some(),
         indent_right: under
@@ -269,6 +281,14 @@ fn row(
             })
             .collect(),
     }
+}
+
+/// `@login` for a GitHub commenter with no Astrid account (AITD-517).
+fn remote_name(comment: &Comment) -> Option<String> {
+    comment
+        .remote_author_login
+        .as_deref()
+        .map(|login| format!("@{login}"))
 }
 
 /// Say where each file's bytes already are, for the ones that are here.
@@ -317,6 +337,37 @@ mod tests {
         assert_eq!(streaks[0].ids, vec!["a", "b", "c"]);
         assert_eq!(streaks[0].count, 3);
         assert_eq!(streaks[0].span_days, Some(7));
+    }
+
+    /// AITD-517: a comment someone made on github.com, by a login with no Astrid account, arrives
+    /// with no author but a `remoteAuthorLogin`. It is a person talking, not the server: drawn as
+    /// a bubble named `@login`, and never folded into a completion streak.
+    #[test]
+    fn aitd_517_a_github_commenter_without_an_account_is_a_person_not_the_system() {
+        let remote = |id: &str| -> Comment {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "content": "octocat marked this as complete", "type": "TEXT",
+                "taskId": "t1", "authorId": null, "author": null,
+                "remoteAuthorLogin": "octocat", "remoteNodeId": "IC_kwDO123"
+            }))
+            .expect("decodes")
+        };
+        let comments = vec![remote("a"), remote("b"), remote("c")];
+        assert_eq!(comments[0].remote_author_login.as_deref(), Some("octocat"));
+        let round_trip: Comment =
+            serde_json::from_value(serde_json::to_value(&comments[0]).expect("encodes"))
+                .expect("decodes");
+        assert_eq!(round_trip, comments[0], "the cache keeps the login");
+        let rows = rows(&comments, Some("me"));
+        assert!(!rows[0].is_system);
+        assert!(!rows[0].is_mine);
+        assert_eq!(rows[0].author_name.as_deref(), Some("@octocat"));
+        assert_eq!(rows[0].author_initials.as_deref(), Some("O"));
+        let utc = chrono::FixedOffset::east_opt(0).expect("utc");
+        assert!(
+            streaks(&rows, utc).is_empty(),
+            "a person's words never fold"
+        );
     }
 
     /// AATD-53: a comment row carries its author's face — id, photo, initials — for the avatar

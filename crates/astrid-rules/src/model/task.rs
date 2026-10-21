@@ -272,6 +272,24 @@ pub struct Comment {
     /// The server echoes the `temp_<uuid>` idempotency key back. Offline dedup depends on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_request_id: Option<String>,
+    /// The GitHub comment this one mirrors, on a GitHub Projects deployment (AWTD-1283).
+    /// Informational only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_node_id: Option<String>,
+    /// The GitHub login of a commenter with no Astrid account (AWTD-1283). Set only when
+    /// `author_id` and `author` are both absent, and it makes the comment a person's, not the
+    /// server's — see [`Comment::is_system`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_author_login: Option<String>,
+}
+
+impl Comment {
+    /// Written by the server ("marked this as complete"), not by anybody. A comment with no
+    /// author used to mean exactly that; since AWTD-1283 a GitHub commenter with no Astrid
+    /// account has no author either, and is named by `remote_author_login` instead (AITD-517).
+    pub fn is_system(&self) -> bool {
+        self.author_id.is_none() && self.remote_author_login.is_none()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
