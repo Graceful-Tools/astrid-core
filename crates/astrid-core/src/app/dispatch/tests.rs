@@ -5065,6 +5065,73 @@ async fn contacts_are_listed_and_cleared_through_the_core_task_438494c7() {
     assert_eq!(methods, ["GET", "DELETE"]);
 }
 
+/// AATD-68 (astrid-android). Uploading the device's contacts is iOS's ContactsService.syncContacts:
+/// batches of 500, the first replacing what the server had and the rest appending to it, and the
+/// answer is the last batch's stats (its `total` is the account's whole count).
+#[tokio::test]
+async fn aatd68_contacts_upload_in_batches_the_first_replacing_the_rest_appending() {
+    let stats = |total: u64| {
+        json!({ "message": "Contacts synced successfully",
+        "stats": { "received": 0, "valid": 0, "created": 0, "updated": 0, "total": total, "errors": 0 } })
+    };
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json("v1/contacts", 200, stats(500))
+            .push_json("v1/contacts", 200, stats(1001))
+            .push_json("v1/contacts", 200, stats(1201)),
+    );
+    let contacts: Vec<serde_json::Value> = (0..1201)
+        .map(|i| json!({ "email": format!("p{i}@x.io"), "name": format!("P {i}"), "phoneNumber": null }))
+        .collect();
+
+    let uploaded = call(
+        &app,
+        json!({ "kind": "uploadContacts", "contacts": contacts }),
+    )
+    .await;
+
+    assert_eq!(uploaded["ok"], true, "{uploaded}");
+    assert_eq!(uploaded["value"]["total"], 1201);
+    let sent: Vec<serde_json::Value> = transport
+        .requests()
+        .iter()
+        .filter(|request| request.url.ends_with("/api/v1/contacts"))
+        .map(|request| {
+            assert_eq!(request.method.as_str(), "POST");
+            serde_json::from_slice(&request.body.clone().unwrap_or_default()).expect("a body")
+        })
+        .collect();
+    let sizes: Vec<usize> = sent
+        .iter()
+        .map(|body| body["contacts"].as_array().map_or(0, Vec::len))
+        .collect();
+    assert_eq!(sizes, [500, 500, 201]);
+    let replace: Vec<bool> = sent.iter().map(|body| body["replaceAll"] == true).collect();
+    assert_eq!(replace, [true, false, false]);
+}
+
+/// AATD-68. A device with no contacts that have an email still says so: one empty upload that
+/// replaces, so a person who deleted everyone is not still suggested.
+#[tokio::test]
+async fn aatd68_no_contacts_still_clears_what_the_server_had() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "v1/contacts",
+        200,
+        json!({ "stats": { "total": 0 } }),
+    ));
+
+    let uploaded = call(&app, json!({ "kind": "uploadContacts", "contacts": [] })).await;
+
+    assert_eq!(uploaded["ok"], true, "{uploaded}");
+    assert_eq!(uploaded["value"]["total"], 0);
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value =
+        serde_json::from_slice(&requests[0].body.clone().unwrap_or_default()).expect("a body");
+    assert_eq!(body["replaceAll"], true);
+    assert_eq!(body["contacts"], json!([]));
+}
+
 /// Dragging a repeating card to Done rolls it forward like every other completion. Rule 2 does
 /// not stop applying because the gesture is a drag.
 #[tokio::test]
