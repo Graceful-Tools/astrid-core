@@ -387,6 +387,68 @@ pub(super) async fn featured_rows(
     )
 }
 
+/// A profile's shared tasks, as rows (task da326190).
+///
+/// The tasks are the server's — up to twenty public ones the person created or was assigned
+/// (`app/api/v1/users/[userId]/profile/route.ts`) — and are projected rather than cached: they
+/// belong to somebody else's public lists, and writing them into this account's store would put
+/// another person's tasks in its sidebar counts and its search.
+///
+/// The section is read-only, so every row's leading control is a plain mark rather than a
+/// complete box: tapping to finish someone else's task is not something this screen offers.
+pub(super) async fn profile_rows(app: &App, user_id: Option<&str>) -> Response {
+    let me = app.context.account().current_user_id().ok().flatten();
+    // Signed out there is nobody whose profile this is, and an empty section would read as an
+    // account that shares nothing — the same refusal `ProfileStats` gives.
+    let asked_for = match user_id.map(str::to_string).or_else(|| me.clone()) {
+        Some(id) => id,
+        None => return Response::failed(Failure::unauthorized()),
+    };
+    let answer = match app.context.account().profile(&asked_for).await {
+        Ok(answer) => answer,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let tasks: Vec<crate::model::Task> = answer
+        .get("sharedTasks")
+        .and_then(|tasks| tasks.as_array())
+        .map(|tasks| {
+            tasks
+                .iter()
+                .filter_map(|task| serde_json::from_value(task.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let shown: Vec<&crate::model::Task> = tasks.iter().collect();
+    let lists = app.store.lists().unwrap_or_default();
+    let users = app.store.users().unwrap_or_default();
+    let depths = std::collections::HashMap::new();
+    let counts = std::collections::HashMap::new();
+    let context = RowContext {
+        current_user_id: me.as_deref(),
+        display_mode: resolved_display_mode(app, None),
+        surface: Command::surface(None),
+        now: app.clock.now(),
+        offset: app.clock.utc_offset(),
+        lists: &lists,
+        users: &users,
+        depths: &depths,
+        subtask_counts: &counts,
+    };
+    let rows = serialize_rows(&TaskRow::build_all(&shown, &context));
+    Response::ok(serde_json::json!({
+        "rows": rows,
+        "count": rows.len(),
+        // The server's own answer, not a comparison made here: on your own profile it is true
+        // whichever id was asked for.
+        "isOwnProfile": answer
+            .get("isOwnProfile")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or_else(|| me.as_deref() == Some(asked_for.as_str())),
+        "name": answer.pointer("/user/name").cloned().unwrap_or(serde_json::Value::Null),
+        "image": answer.pointer("/user/image").cloned().unwrap_or(serde_json::Value::Null),
+    }))
+}
+
 /// iOS's ReminderTriage.deck and .assistant (AATD-54).
 pub(super) fn reminder_triage_deck(app: &App, reminded_task_id: Option<&str>) -> Response {
     let now = app.clock.now();

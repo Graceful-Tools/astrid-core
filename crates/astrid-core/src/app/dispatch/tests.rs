@@ -1975,6 +1975,97 @@ async fn a_pasted_screenshot_comes_back_with_a_name() {
     );
 }
 
+// ── A profile's shared tasks (task da326190) ─────────────────────────────────────────────
+
+/// Task da326190. iOS's profile draws a read-only section of the person's shared tasks beneath
+/// the three numbers. The same `/users/:id/profile` answer that `profileStats` already fetches
+/// carries them, so this is a projection and not a second round trip: the server's tasks go
+/// through `TaskRow`, the way every other row surface here is projected.
+///
+/// The answer names who the profile belongs to and whether it is your own, and NOT a title.
+/// iOS's two titles ("Your Tasks" / "Shared tasks with Dana") are user-facing strings, and those
+/// live in each client's resources.
+#[tokio::test]
+async fn da326190_a_profile_answers_its_shared_tasks_as_rows() {
+    let app = app_with(StubTransport::new().push_json(
+        "users/u-them/profile",
+        200,
+        json!({
+            "user": { "id": "u-them", "name": "Dana", "image": "https://astrid.cc/dana.png" },
+            "stats": { "completed": 3, "inspired": 1, "supported": 2 },
+            "sharedTasks": [
+                { "id": "t1", "title": "Plant the bulbs", "creatorId": "u-them",
+                  "completed": false, "priority": 1 },
+                { "id": "t2", "title": "Water them", "creatorId": "u-them", "completed": true },
+            ],
+            "isOwnProfile": false,
+        }),
+    ));
+    call(
+        &app,
+        json!({ "kind": "seedCache", "currentUser": { "id": "u-me", "name": "Ada" } }),
+    )
+    .await;
+
+    let profile = call(&app, json!({ "kind": "profileTasks", "userId": "u-them" })).await;
+
+    assert_eq!(profile["ok"], true, "{profile}");
+    let rows = profile["value"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2, "{profile}");
+    assert_eq!(rows[0]["title"], "Plant the bulbs");
+    assert_eq!(rows[0]["completed"], false);
+    assert_eq!(rows[1]["completed"], true);
+    // The count iOS shows beside the heading is the section's own, not the account's statistics.
+    assert_eq!(profile["value"]["count"], 2);
+    assert_eq!(profile["value"]["isOwnProfile"], false);
+    assert_eq!(profile["value"]["name"], "Dana");
+    assert!(
+        profile["value"]["title"].is_null(),
+        "the core names no user-facing string: {profile}"
+    );
+}
+
+/// Task da326190. With no `userId` it is your own profile, asked for by the id sign-in recorded;
+/// and signed out it is refused the way `profileStats` is, because an empty list would read as an
+/// account that shares nothing rather than as nobody being signed in.
+#[tokio::test]
+async fn da326190_your_own_profile_needs_no_id_and_signed_out_is_refused() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "users/u-me/profile",
+        200,
+        json!({
+            "user": { "id": "u-me", "name": "Ada" },
+            "sharedTasks": [{ "id": "t1", "title": "Mine", "creatorId": "u-me" }],
+            "isOwnProfile": true,
+        }),
+    ));
+
+    let signed_out = call(&app, json!({ "kind": "profileTasks" })).await;
+    assert_eq!(signed_out["ok"], false, "{signed_out}");
+    assert!(
+        transport.requests().is_empty(),
+        "nothing is asked of the server with nobody signed in"
+    );
+
+    call(
+        &app,
+        json!({ "kind": "seedCache", "currentUser": { "id": "u-me", "name": "Ada" } }),
+    )
+    .await;
+    let mine = call(&app, json!({ "kind": "profileTasks" })).await;
+
+    assert_eq!(mine["ok"], true, "{mine}");
+    assert_eq!(mine["value"]["isOwnProfile"], true);
+    assert_eq!(mine["value"]["count"], 1);
+    assert!(
+        transport
+            .requests()
+            .iter()
+            .any(|request| request.url.ends_with("/api/v1/users/u-me/profile")),
+        "your own profile is asked for by the signed-in id"
+    );
+}
+
 // ── Attaching a file ─────────────────────────────────────────────────────────────────────
 
 /// The whole offline story for attachments in one test: on the task immediately, in the

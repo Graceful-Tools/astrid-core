@@ -998,6 +998,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 None => Response::failed(Failure::unauthorized()),
             }
         }
+        Command::ProfileTasks { user_id } => row_json::profile_rows(app, user_id.as_deref()).await,
         Command::UpdateProfile { name, photo_path } => {
             let account = app.context.account();
             let image = match photo_path {

@@ -656,9 +656,19 @@ impl AccountService {
     /// Fetched rather than counted here. They are about the whole account across every device, and
     /// a client counting its own cache would answer with whatever it happens to have synced.
     pub async fn stats(&self, user_id: &str) -> Result<serde_json::Value> {
-        let request = self.context.client.get(endpoints::user_profile(user_id));
-        let answer = self.context.client.send(request).await?;
+        let answer = self.profile(user_id).await?;
         Ok(answer.get("stats").cloned().unwrap_or(json!({})))
+    }
+
+    /// Somebody's whole profile: who they are, the three numbers, and the public tasks they share
+    /// (`app/api/v1/users/[userId]/profile/route.ts`).
+    ///
+    /// One request answers all three, which is why [`Self::stats`] goes through here rather than
+    /// fetching the same thing again: a profile screen that drew its numbers and its tasks from
+    /// two round trips could show a count that disagrees with the rows beneath it.
+    pub async fn profile(&self, user_id: &str) -> Result<serde_json::Value> {
+        let request = self.context.client.get(endpoints::user_profile(user_id));
+        Ok(self.context.client.send(request).await?)
     }
 
     /// Everything this account has, as bytes, written to `path`.

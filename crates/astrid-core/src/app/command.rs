@@ -1023,6 +1023,16 @@ pub enum Command {
     },
     /// The three numbers on the signed-in account's profile.
     ProfileStats,
+    /// The public tasks a profile shares, as rows, with no `userId` meaning your own (task
+    /// da326190 — iOS's `UserProfileView` draws this section beneath the three numbers).
+    ///
+    /// Answers `isOwnProfile` and the person's `name` rather than a heading: iOS's two titles
+    /// ("Your Tasks" and "Shared tasks with <name>") are user-facing strings, and a client holds
+    /// its own.
+    ProfileTasks {
+        #[serde(default)]
+        user_id: Option<String>,
+    },
     /// Write everything this account has to a file on this machine.
     ///
     /// `format` is `json` or `csv`. The path comes from the shell's save dialog, because choosing
