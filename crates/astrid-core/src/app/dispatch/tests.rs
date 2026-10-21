@@ -2025,6 +2025,42 @@ async fn da326190_a_profile_answers_its_shared_tasks_as_rows() {
     );
 }
 
+/// AATD-69 (astrid-android). Another person's profile is drawn from this one answer: who they are
+/// (photo, joined, AI agent), their three numbers and their shared tasks. One request, so the
+/// numbers and the rows beneath them come from the same moment. No email: the server discloses it
+/// only on your own profile, and the core does not go looking for it.
+#[tokio::test]
+async fn aatd69_a_profile_answers_who_they_are_and_their_numbers_too() {
+    let app = app_with(StubTransport::new().push_json(
+        "users/u-them/profile",
+        200,
+        json!({
+            "user": { "id": "u-them", "name": "Dana", "image": "https://astrid.cc/dana.png",
+                      "createdAt": "2025-03-04T10:00:00.000Z", "isAIAgent": false },
+            "stats": { "completed": 3, "inspired": 1, "supported": 2 },
+            "sharedTasks": [],
+            "isOwnProfile": false,
+        }),
+    ));
+    call(
+        &app,
+        json!({ "kind": "seedCache", "currentUser": { "id": "u-me", "name": "Ada" } }),
+    )
+    .await;
+
+    let profile = call(&app, json!({ "kind": "profileTasks", "userId": "u-them" })).await;
+
+    assert_eq!(profile["ok"], true, "{profile}");
+    assert_eq!(profile["value"]["id"], "u-them");
+    assert_eq!(profile["value"]["createdAt"], "2025-03-04T10:00:00.000Z");
+    assert_eq!(profile["value"]["isAIAgent"], false);
+    assert_eq!(
+        profile["value"]["stats"],
+        json!({ "completed": 3, "inspired": 1, "supported": 2 })
+    );
+    assert!(profile["value"]["email"].is_null(), "{profile}");
+}
+
 /// Task da326190. With no `userId` it is your own profile, asked for by the id sign-in recorded;
 /// and signed out it is refused the way `profileStats` is, because an empty list would read as an
 /// account that shares nothing rather than as nobody being signed in.
