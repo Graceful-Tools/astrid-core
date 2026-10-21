@@ -109,6 +109,10 @@ pub enum Rule {
         #[serde(default)]
         repeat_from: Option<crate::model::RepeatFromMode>,
     },
+    /// Whether a custom agent could be registered under the name somebody is typing — see
+    /// [`crate::agent_name`]. Through this door rather than the async one because it is asked on
+    /// every keystroke, and because the answer depends on nothing but the name.
+    CustomAgentName { name: String },
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -225,6 +229,7 @@ pub fn run(rule: Rule) -> Response {
             ),
             None => crate::markdown::render(&text),
         }),
+        Rule::CustomAgentName { name } => Response::ok(crate::agent_name::check(&name)),
     }
 }
 

@@ -802,6 +802,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::DeleteCustomAgent { agent_id } => {
             answer_done(app.context.agents().delete_custom_agent(&agent_id).await)
         }
+        Command::SetCustomAgentPhoto { agent_id, image } => answer(
+            app.context
+                .agents()
+                .set_custom_agent_photo(&agent_id, image.as_deref())
+                .await,
+        ),
         Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),

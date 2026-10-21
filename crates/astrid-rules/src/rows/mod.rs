@@ -23,6 +23,7 @@ pub mod credential;
 pub mod detail;
 pub mod due_picks;
 pub mod filter_picks;
+pub mod github_app;
 pub mod identifier;
 pub mod list_picks;
 pub mod nesting;

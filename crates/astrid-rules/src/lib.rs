@@ -12,6 +12,7 @@
 //! sync live in `astrid-core`, which depends on this crate and re-exports every module here at
 //! its old path (`astrid_core::repeating`, `astrid_core::rules`, …).
 
+pub mod agent_name;
 pub mod board;
 pub mod board_cards;
 pub mod editing;

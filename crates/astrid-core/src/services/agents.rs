@@ -224,6 +224,40 @@ impl AgentService {
         Ok(())
     }
 
+    /// Set a custom agent's photo, or clear it.
+    ///
+    /// `None` — and an empty string, which is what a cleared field sends — puts the default avatar
+    /// back rather than leaving the agent with no photo at all; that substitution is the server's
+    /// (`PATCH /api/v1/custom-agents/agents/:id`), and the answer says which image it settled on,
+    /// so a screen draws what was actually stored rather than what it asked for.
+    ///
+    /// A URL, not an upload. The photo is wherever it already lives, which is how the web and iOS
+    /// both set one.
+    pub async fn set_custom_agent_photo(
+        &self,
+        id: &str,
+        image: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .patch(endpoints::custom_agent(id))
+            // Always sent, including as null: the route only acts when `image` is present in the
+            // body, and answers 400 — "No valid fields to update" — when it is absent.
+            .value(json!({ "image": image }));
+        Ok(self.context.client.send(request).await?)
+    }
+
+    /// Every GitHub App installation the account can act on.
+    ///
+    /// Whether the App is installed is the length of that list — see
+    /// [`crate::rows::github_app`], which decides it once for every client rather than letting
+    /// each one compare a length.
+    pub async fn github_installations(&self) -> Result<serde_json::Value> {
+        let request = self.context.client.get(endpoints::GITHUB_INSTALLATIONS);
+        Ok(self.context.client.send(request).await?)
+    }
+
     // ─── The model behind @astrid (task 810e1876) ──────────────────────────────────────────
 
     /// The agents that could power `@astrid`, and which one does — as the web's selector reads

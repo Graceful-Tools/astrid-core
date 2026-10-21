@@ -893,6 +893,14 @@ pub enum Command {
     DeleteCustomAgent {
         agent_id: String,
     },
+    /// Set a registered agent's photo, or clear it back to the default. A URL, not an upload: the
+    /// image is wherever it already lives. Answers with the image the server settled on, which
+    /// for a cleared one is the default rather than nothing.
+    SetCustomAgentPhoto {
+        agent_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+    },
     /// Start connecting Copilot, or stop.
     ///
     /// The same browser hand-off as every other provider: somebody's GitHub password belongs in

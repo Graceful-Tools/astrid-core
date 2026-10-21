@@ -209,6 +209,15 @@ pub(super) async fn agents(app: &App) -> Response {
         .copilot_status()
         .await
         .unwrap_or_else(|_| serde_json::json!({ "connected": false }));
+    // The GitHub App belongs in this answer for the same reason the credentials do: a hub that
+    // drew the coding agents before it knew whether the App was installed would say they were
+    // ready and then correct itself (task 959b24b5). A deployment without the coding-agent
+    // capability answers 403 here, which is the empty list, which is "not installed" — the honest
+    // thing to draw, and the state somebody opens this screen to fix.
+    let github_app = service
+        .github_installations()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
 
     Response::ok(serde_json::json!({
         // Projected, not passed through: the route describes each agent as a mailbox row with a
@@ -222,6 +231,9 @@ pub(super) async fn agents(app: &App) -> Response {
         // screen to fill in — is simply absent from it. See `rows::credential`.
         "credentials": rows::credential::rows(&credentials),
         "copilot": copilot,
+        // Projected, not passed through: the endpoint answers a bare list, and "installed" is a
+        // length the web card computes itself. See `rows::github_app`.
+        "githubApp": rows::github_app::of(&github_app),
     }))
 }
 

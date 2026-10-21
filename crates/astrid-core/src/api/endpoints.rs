@@ -106,6 +106,11 @@ pub const GOOGLE_TASKLISTS: &str = "/api/v1/sync/google/tasklists";
 pub const GOOGLE_TASKS: &str = "/api/v1/sync/google/tasks";
 pub const GOOGLE_TASK_LINKS: &str = "/api/v1/sync/google/task-links";
 pub const GITHUB_REPOSITORIES: &str = "/api/v1/github/repositories";
+/// Every GitHub App installation the account can act on, suspended ones included —
+/// `{ "installations": [{ "id", "accountLogin", "accountType", "repositorySelection",
+/// "repoCount", "suspended" }] }`. Whether the App is installed at all is the length of that
+/// list; there is no separate "connected" field, and the web card computes it the same way.
+pub const GITHUB_INSTALLATIONS: &str = "/api/v1/github/installations";
 /// The repositories a list can be mirrored to for Issues sync — `{ repos: [{ id: "owner/repo" }] }`.
 /// Not [`GITHUB_REPOSITORIES`], which is the GitHub App's and answers numeric ids.
 pub const GITHUB_SYNC_REPOS: &str = "/api/v1/sync/github/repos";
