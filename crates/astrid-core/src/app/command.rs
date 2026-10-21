@@ -1090,6 +1090,14 @@ pub enum Command {
     Contacts,
     /// Remove every imported contact. Answers with how many went.
     ClearContacts,
+    /// Upload the device's contacts for collaborator suggestions, replacing what the server had
+    /// (AATD-68, iOS `ContactsService.syncContacts`). Each is `{email, name?, phoneNumber?}` as the
+    /// shell read it from the address book; the batching is here. Answers the server's stats, whose
+    /// `total` is the account's whole count. Online-only.
+    UploadContacts {
+        #[serde(default)]
+        contacts: Vec<serde_json::Value>,
+    },
     /// Delete the account for good. `confirmation` must be the phrase the web requires, typed
     /// exactly; anything else is refused without a request. Signs out afterwards.
     DeleteAccount {

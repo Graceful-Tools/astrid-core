@@ -29,6 +29,9 @@ const FEATURES_KEY: &str = "account.features";
 const SETTINGS_KEY: &str = "account.settings";
 const SMART_TASKS_KEY: &str = "account.smartTasks";
 
+/// Contacts per upload request — iOS's `ContactsService.batchSize`.
+const CONTACT_BATCH: usize = 500;
+
 /// What the server makes somebody type before it deletes their account, character for character
 /// (web's `AccountDeletionSection`). Checked here too, so a near miss is refused without a request.
 pub const DELETE_CONFIRMATION: &str = "DELETE MY ACCOUNT";
@@ -405,6 +408,35 @@ impl AccountService {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(rows.len() as u64);
         Ok((rows, total))
+    }
+
+    /// Upload the device's contacts, replacing what the server had (AATD-68): iOS's
+    /// `ContactsService.syncContacts`, batch for batch. The first request replaces and the rest
+    /// append, so a large address book never meets a request timeout and a partial failure leaves
+    /// the first batches rather than nothing. An empty book still sends one replacing request —
+    /// otherwise someone who deleted everyone would go on being suggested. Answers the last
+    /// batch's stats; its `total` is the whole account's.
+    pub async fn upload_contacts(
+        &self,
+        contacts: &[serde_json::Value],
+    ) -> Result<serde_json::Value> {
+        let empty: [serde_json::Value; 0] = [];
+        let batches: Vec<&[serde_json::Value]> = if contacts.is_empty() {
+            vec![&empty]
+        } else {
+            contacts.chunks(CONTACT_BATCH).collect()
+        };
+        let mut stats = json!({});
+        for (index, batch) in batches.into_iter().enumerate() {
+            let request = self
+                .context
+                .client
+                .post(endpoints::CONTACTS)
+                .value(json!({ "contacts": batch, "replaceAll": index == 0 }));
+            let answer = self.context.client.send(request).await?;
+            stats = answer.get("stats").cloned().unwrap_or(json!({}));
+        }
+        Ok(stats)
     }
 
     /// Remove every imported contact. The server answers with how many went.
