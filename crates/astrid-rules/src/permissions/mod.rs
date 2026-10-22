@@ -324,10 +324,11 @@ fn normalized_role(membership: &ListMembership) -> Option<String> {
 ///
 /// 1. ownership (`owner_id` or the `owner` relation);
 /// 2. an admin list membership, then the legacy `admins` array;
-/// 3. any other list membership, then the legacy `members` array — raised to admin when the
+/// 3. a viewer list membership — read-only unless the project grants more;
+/// 4. any other list membership, then the legacy `members` array — raised to admin when the
 ///    project makes this person an admin;
-/// 4. the project — its owner (as admin), its members, and the status-list cascade;
-/// 5. the public viewer fallback.
+/// 5. the project — its owner (as admin), its members, and the status-list cascade;
+/// 6. the public viewer fallback.
 ///
 /// So the higher of the list role and the project role wins: a plain list member who owns or
 /// administers the project is an **admin** of the list (Jon, 2026-10-04; until then list
@@ -349,6 +350,13 @@ pub fn role_in_list(user_id: &str, list: &ListAccess) -> Option<ListRole> {
     }
 
     let from_project = project_role(user_id, list);
+
+    // A "viewer" membership is a read-only seat: GitHub Projects materialises a GitHub read
+    // permission as one (web spec §8.6). It used to fall through to member below and grant
+    // editing (AWTD-1318). A project role still raises it.
+    if membership.is_some_and(|m| normalized_role(m).as_deref() == Some("viewer")) {
+        return Some(from_project.unwrap_or(ListRole::Viewer));
+    }
 
     // Presence is membership. Deliberately not a match on "member": an unrecognised or empty role
     // still means this person was added to this list.
