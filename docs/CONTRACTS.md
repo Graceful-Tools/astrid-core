@@ -29,7 +29,7 @@ ask this crate for repeating math, so iOS's answer *is* this crate's answer. Web
 AWTD-1063 (D1's timed-task zone, D3's whose-midnight, D4's server-zone dependence): its TypeScript
 now steps in a named zone exactly as this crate does, the browser sends its zone with a
 completion, and `repeating.json` locks the zoned answers (`completions`, `zonedProgressions`) from
-web's own calculator. Where this crate reproduces web deliberately (D2, D5), iOS reproduces it
+web's own calculator. Where this crate reproduces web deliberately (D5), iOS reproduces it
 too, so there is no iOS-vs-core disagreement to resolve.
 
 ### D1 — Whose calendar a step is taken on
@@ -52,14 +52,17 @@ this crate.
 
 ### D2 — Weekly patterns ignore their interval
 
-**Reproduced deliberately.** `astrid_core::repeating::next_weekday_occurrence` ignores `interval`.
+**Closed 2026-10-23 (AITD-547), on web and here together.** "Every 4 weeks on Friday, from the
+due date" rolled forward one week: web's `nextWeekdayOccurrence` and this crate's
+`next_weekday_occurrence` never read `interval`, so every weekly custom pattern advanced weekly
+on every client.
 
-Both web and Swift ignore `interval` for weekly custom patterns: `getNextWeekdayOccurrence` takes the
-interval and never reads it. So "every 2 weeks on Mon and Wed" advances every week on all three
-clients. The stored pattern says one thing and every client does another.
-
-Diverging here would be worse than the bug: this client would schedule occurrences the others do not
-have, on a field the user believes is shared. It changes on web first.
+The rule now, the same in `types/repeating.ts` and here: a later selected weekday in the same
+week comes next; past the last one, the series jumps `interval` weeks and takes the first
+selected weekday of that week. Weeks start on Sunday, the order of web's `WEEKDAYS`. With an
+interval of 1 this is exactly the old answer, so every existing weekly series is unchanged; only
+patterns with an interval above 1 move. `repeating.json` locks it (the `AITD-547` cases in
+`customProgressions`, `completions` and `zonedProgressions`).
 
 ### D3 — "Same weekday of the month" drops the time of day
 
@@ -67,7 +70,7 @@ have, on a field the user believes is shared. It changes on web first.
 
 Both web and Swift build this date from the first of the target month, which is midnight, and then
 add days — so a task due at 10am on the third Tuesday rolls over to midnight on the next third
-Tuesday. Same reasoning as D2: dropping the time is web's to fix, and until then matching matters
+Tuesday. Same reasoning D2 had while it was open: dropping the time is web's to fix, and until then matching matters
 more.
 
 Whose midnight, though, is D1's question. Web's is UTC midnight, which in California is Monday
