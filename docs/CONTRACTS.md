@@ -797,13 +797,14 @@ this way. iOS (`sortTasksByListSetting`) and this crate differ from web's `sortT
 | Order | Web | iOS / here |
 |---|---|---|
 | `priority` | priority only — a finished task can sit between open ones | completed sink, then priority, then due date |
-| `when` | reads the legacy `when` / `dueDate` fields, which v1 tasks do not carry, so it keeps the input order | due date (ties by priority), undated after, completed last |
 | `assignee`, `completed`, `incomplete` | sorts by them | not orders iOS has: read as auto |
 | `createdAt` | not an order web has: read as auto | newest first |
 | `manual`, tasks the arrangement does not name / nothing arranged | oldest first | newest first |
 
-`auto`, `completedAt`, an unknown order and an absent one agree and are fixture-locked. Web's
-`when` is the one worth fixing soonest: on web that sort currently does nothing.
+`auto`, `completedAt`, `when`, an unknown order and an absent one agree and are fixture-locked.
+`when` agreed in AWTD-1325 (2026-10-22): web used to read the legacy `when` / `dueDate` fields,
+which v1 tasks do not carry, so its sort did nothing; it now sorts by due date (ties by priority),
+undated after, completed last, as iOS and this crate do.
 
 ### D34 — a timed task due earlier today is overdue on web, not on iOS
 

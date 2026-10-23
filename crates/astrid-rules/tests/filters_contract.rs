@@ -218,11 +218,9 @@ fn d33_sort_orders_are_ios() {
     let auto = ["s3", "s2", "s5", "s4", "s9", "s1", "s6", "s8", "s7"];
     // Completed sink; then priority, then due date.
     assert_eq!(order("priority"), Value::from(auto.to_vec()));
-    // By due date (ties by priority), undated after, completed last.
-    assert_eq!(
-        order("when"),
-        Value::from(vec!["s4", "s3", "s9", "s2", "s5", "s1", "s6", "s8", "s7"])
-    );
+    // "when" is no longer disputed: web adopted this order in AWTD-1325 (by due date, ties by
+    // priority, undated after, completed last), so `sort/when` is an ordinary case that
+    // `every_undisputed_case_answers_as_web_does` checks.
     // Orders iOS does not have read as auto.
     for sort in ["assignee", "completed", "incomplete"] {
         assert_eq!(order(sort), Value::from(auto.to_vec()), "{sort}");
