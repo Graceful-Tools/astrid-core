@@ -9,7 +9,7 @@
 //! cannot use it — which is what happened on Mac before `ListPermissions.swift` existed. The rules
 //! themselves are in [`crate::permissions`], locked against web's own by a fixture.
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{Context, Result, ServiceError};
 use crate::api::endpoints;
@@ -286,6 +286,25 @@ pub struct ListService {
     context: Context,
 }
 
+/// The insight windows the server offers, in the order a picker shows them
+/// (`INSIGHT_WINDOW_DAYS` in astrid-web's `lib/list-insights.ts`).
+pub const INSIGHT_WINDOW_DAYS: [u32; 3] = [7, 30, 90];
+
+/// The window a picker starts on, and the one the route assumes when asked for none.
+pub const DEFAULT_INSIGHT_WINDOW_DAYS: u32 = 30;
+
+/// `days` as the route will accept it: anything it does not offer becomes the default.
+///
+/// Here rather than in each client so that three pickers cannot disagree about which windows
+/// exist — and so that a stale shell asking for 14 shows the 30-day answer instead of an error.
+pub fn insight_window_days(days: u32) -> u32 {
+    if INSIGHT_WINDOW_DAYS.contains(&days) {
+        days
+    } else {
+        DEFAULT_INSIGHT_WINDOW_DAYS
+    }
+}
+
 /// One of the public lists anybody may browse and copy (task f6bc59e8), as the v1 projection
 /// answers it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -526,6 +545,30 @@ impl ListService {
                 "the public lists could not be read: {error}"
             )))
         })
+    }
+
+    // ─── Insights (web AWTD-1329, AWTD-1333) ──────────────────────────────────────────────────
+
+    /// What the list has been doing over the last `days`, as the server computed it.
+    ///
+    /// Fetched, never counted here, and never cached. The series, the medians and the
+    /// contributors are read from task events and completions across the whole account, and a
+    /// client totalling its own rows would answer with whatever it happened to have synced —
+    /// two devices looking at one list would then disagree about it. The same reasoning as
+    /// [`crate::services::AccountService::stats`].
+    ///
+    /// `days` is normalised to a window the server offers rather than passed through: the
+    /// route answers 400 for anything else, and a picker that could 400 is a picker with a
+    /// broken option in it.
+    pub async fn insights(&self, list_id: &str, days: u32, time_zone: &str) -> Result<Value> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::list_insights(list_id))
+            .query("days", Some(insight_window_days(days).to_string()))
+            .query("tz", Some(time_zone.to_string()));
+        let answer = self.context.client.send(request).await?;
+        Ok(answer.get("insights").cloned().unwrap_or(answer))
     }
 
     /// A public list's tasks, straight from the server and not into the cache: somebody else's
@@ -1304,6 +1347,106 @@ mod tests {
         assert!(
             store.list("l1").expect("reads").is_none(),
             "the caller is no longer on the list, so the cache lets it go"
+        );
+    }
+
+    // ── Insights (web AWTD-1329, AWTD-1333; Windows task 48c624ad) ──────────────────────────
+
+    /// A service wired to a stub, keeping the stub so a test can read what was sent.
+    fn insights_fixture(transport: StubTransport) -> (ListService, Arc<StubTransport>) {
+        let transport = Arc::new(transport);
+        let context = Context::new(
+            Arc::new(ApiClient::new(
+                "https://astrid.cc",
+                transport.clone(),
+                Arc::new(MemorySecureStore::new()),
+            )),
+            Arc::new(Store::in_memory().expect("opens")),
+            Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
+        );
+        (context.lists(), transport)
+    }
+
+    fn insights_stub() -> StubTransport {
+        StubTransport::new().push_json(
+            "/insights",
+            200,
+            json!({ "insights": {
+                "window": { "days": 7, "timeZone": "America/Los_Angeles",
+                            "start": "2026-09-01", "end": "2026-09-07" },
+                "series": [ { "date": "2026-09-07", "created": 2, "completed": 3 } ],
+                "totals": { "created": 2, "completed": 3 },
+                "createToComplete": { "medianMs": null, "sampleSize": 0 },
+                "lanes": null,
+                "contributors": []
+            }}),
+        )
+    }
+
+    /// The window and the zone are the whole question the route is asked, so they have to reach
+    /// it. A zone left off would bucket a west-coast evening into the following day.
+    #[tokio::test]
+    async fn an_insights_request_carries_the_window_and_the_zone() {
+        let (service, transport) = insights_fixture(insights_stub());
+
+        service
+            .insights("l1", 7, "America/Los_Angeles")
+            .await
+            .expect("insights");
+
+        let sent = transport.requests();
+        let url = &sent.first().expect("a request").url;
+        assert!(url.contains("/api/v1/lists/l1/insights"), "{url}");
+        assert!(url.contains("days=7"), "{url}");
+        assert!(
+            url.contains("tz=America%2FLos_Angeles"),
+            "the zone is a path-shaped value and must survive escaping: {url}"
+        );
+    }
+
+    /// The route answers 400 for a window it does not offer. A client that passed one through
+    /// would turn a stale picker into an error screen, so the normalisation is here — where all
+    /// three clients share it — rather than in each shell.
+    #[tokio::test]
+    async fn an_unoffered_window_is_asked_for_as_the_default() {
+        assert_eq!(insight_window_days(14), DEFAULT_INSIGHT_WINDOW_DAYS);
+        assert_eq!(insight_window_days(0), DEFAULT_INSIGHT_WINDOW_DAYS);
+        for offered in INSIGHT_WINDOW_DAYS {
+            assert_eq!(insight_window_days(offered), offered);
+        }
+
+        let (service, transport) = insights_fixture(insights_stub());
+        service.insights("l1", 14, "UTC").await.expect("insights");
+
+        let sent = transport.requests();
+        assert!(
+            sent.first().expect("a request").url.contains("days=30"),
+            "{}",
+            sent[0].url
+        );
+    }
+
+    /// The answer is handed over as the server shaped it, `insights` unwrapped — a client that
+    /// re-shaped it here would be the fourth place the contract lived. In particular a null
+    /// median stays null: it means "nothing to take a median of", and a zero would read as
+    /// instantaneous.
+    #[tokio::test]
+    async fn the_servers_shape_is_passed_through_with_its_nulls_intact() {
+        let (service, _transport) = insights_fixture(insights_stub());
+
+        let insights = service.insights("l1", 7, "UTC").await.expect("insights");
+
+        assert_eq!(insights["window"]["days"], json!(7));
+        assert_eq!(insights["totals"]["completed"], json!(3));
+        assert_eq!(insights["createToComplete"]["medianMs"], Value::Null);
+        assert_eq!(
+            insights["lanes"],
+            Value::Null,
+            "a list that is not a board has no lanes, which is not the same as having none"
+        );
+        assert!(
+            insights.get("insights").is_none(),
+            "the envelope is unwrapped once, here, not by every caller"
         );
     }
 }

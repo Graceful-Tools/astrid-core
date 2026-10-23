@@ -289,6 +289,14 @@ pub fn manual_order(list_id: &str) -> String {
     format!("{}/manual-order", list(list_id))
 }
 
+/// What a list has been doing lately (web AWTD-1329): new and completed per day, the median time
+/// to complete, the median stay in each board lane, and who did the work. Takes `days` (7, 30 or
+/// 90) and `tz` (an IANA zone); computed on the server, because the history it reads lives only
+/// there.
+pub fn list_insights(list_id: &str) -> String {
+    format!("{}/insights", list(list_id))
+}
+
 pub fn project(id: &str) -> String {
     format!("{PROJECTS}/{}", escaped_path_component(id))
 }

@@ -641,6 +641,21 @@ pub enum Command {
     ListAgentOptions {
         list_id: String,
     },
+    /// What a list has been doing lately (web AWTD-1329, AWTD-1333): new and completed per day,
+    /// the median time to complete, the median stay in each board lane, and the top
+    /// contributors. Answers the route's `insights` object unchanged.
+    ///
+    /// `days` is 7, 30 or 90 — anything else, or none, is read as 30 rather than refused, so a
+    /// picker cannot hold an option the server answers 400 to. `timeZone` is an IANA zone and
+    /// should be the machine's, so that days bucket like the reader's own calendar; absent
+    /// means UTC.
+    ListInsights {
+        list_id: String,
+        #[serde(default)]
+        days: Option<u32>,
+        #[serde(default)]
+        time_zone: Option<String>,
+    },
     SetTaskStatusRole {
         task_id: String,
         #[serde(default)]

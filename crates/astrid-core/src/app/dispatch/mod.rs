@@ -528,6 +528,20 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             status_outcome(app.context.boards().remove_status(&list_id, &role).await)
         }
         Command::ListAgentOptions { list_id } => list_agent_options(app, &list_id).await,
+        Command::ListInsights {
+            list_id,
+            days,
+            time_zone,
+        } => answer(
+            app.context
+                .lists()
+                .insights(
+                    &list_id,
+                    days.unwrap_or(crate::services::list::DEFAULT_INSIGHT_WINDOW_DAYS),
+                    time_zone.as_deref().unwrap_or("UTC"),
+                )
+                .await,
+        ),
         Command::SetTaskStatusRole {
             task_id,
             status_role,

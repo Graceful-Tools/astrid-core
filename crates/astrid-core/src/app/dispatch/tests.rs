@@ -6926,3 +6926,64 @@ async fn aatd37_rows_say_whether_the_reader_may_add() {
     .await;
     assert_eq!(theirs["value"]["canAddTasks"], false, "{theirs}");
 }
+
+// ── listInsights (web AWTD-1329; Windows task 48c624ad) ─────────────────────────────────────
+
+/// The command reaches the route with the window and the zone it was given, and hands the
+/// server's object back untouched. A shell that had to unwrap `insights` itself, or that
+/// assembled the query, would be a second place the contract lived.
+#[tokio::test]
+async fn list_insights_asks_the_route_and_answers_what_it_said() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "/insights",
+        200,
+        json!({ "insights": {
+            "window": { "days": 90, "timeZone": "Europe/Berlin",
+                        "start": "2026-06-10", "end": "2026-09-07" },
+            "series": [ { "date": "2026-09-07", "created": 1, "completed": 0 } ],
+            "totals": { "created": 1, "completed": 0 },
+            "createToComplete": { "medianMs": null, "sampleSize": 0 },
+            "lanes": [ { "role": "doing", "name": "Doing", "medianMs": 3600000, "sampleSize": 2 } ],
+            "contributors": [ { "userId": "u1", "name": "Dana", "image": null, "isAIAgent": false,
+                                "completed": 3, "inspired": 1, "supported": 2,
+                                "created": 1, "edited": 4, "commented": 2, "total": 6 } ]
+        }}),
+    ));
+
+    let answer = call(
+        &app,
+        json!({ "kind": "listInsights", "listId": "l1", "days": 90, "timeZone": "Europe/Berlin" }),
+    )
+    .await;
+
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(answer["value"]["window"]["days"], 90);
+    assert_eq!(answer["value"]["lanes"][0]["name"], "Doing");
+    assert_eq!(answer["value"]["contributors"][0]["inspired"], 1);
+    assert!(
+        answer["value"]["createToComplete"]["medianMs"].is_null(),
+        "a null median is 'nothing to take a median of', and a zero would read as instant"
+    );
+
+    let url = &transport.requests()[0].url;
+    assert!(url.contains("/api/v1/lists/l1/insights"), "{url}");
+    assert!(url.contains("days=90"), "{url}");
+    assert!(url.contains("tz=Europe%2FBerlin"), "{url}");
+}
+
+/// Asked for nothing, the command asks for what the route would have assumed anyway — so a
+/// caller that has not resolved a zone yet still gets an answer rather than a 400.
+#[tokio::test]
+async fn list_insights_defaults_to_thirty_days_of_utc() {
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "/insights",
+        200,
+        json!({ "insights": { "totals": { "created": 0, "completed": 0 } } }),
+    ));
+
+    call(&app, json!({ "kind": "listInsights", "listId": "l1" })).await;
+
+    let url = &transport.requests()[0].url;
+    assert!(url.contains("days=30"), "{url}");
+    assert!(url.contains("tz=UTC"), "{url}");
+}
