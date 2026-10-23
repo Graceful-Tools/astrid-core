@@ -38,7 +38,7 @@ thiserror = "2"
 # URL that must be parsed rather than string-matched, and the verifier has to come
 # from the OS CSPRNG.
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 getrandom = "0.2"
 url = "2"
 # The HTTP stack, over the platform's own TLS: schannel on Windows, Security.framework on macOS,
