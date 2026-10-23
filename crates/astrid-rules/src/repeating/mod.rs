@@ -257,7 +257,7 @@ pub fn calculate_custom_next_occurrence(
         "weeks" => pattern
             .weekdays
             .as_deref()
-            .and_then(|weekdays| next_weekday_occurrence(anchor, weekdays, zone)),
+            .and_then(|weekdays| next_weekday_occurrence(anchor, weekdays, interval, zone)),
         "months" => next_month_occurrence(anchor, pattern, interval, zone),
         "years" => Some(next_year_occurrence(anchor, pattern, interval, zone)),
         _ => None,
@@ -388,28 +388,31 @@ fn is_after_date(candidate: DateTime<Utc>, end: DateTime<Utc>, zone: Tz) -> bool
     local(candidate, zone).date() > local(end, zone).date()
 }
 
-/// The next selected weekday strictly after `date`, by the zone's calendar.
+/// The next occurrence of a weekly pattern, by the zone's calendar (AITD-547, closing D2).
 ///
-/// Note that `interval` plays no part: web and the Swift port both ignore it for weekly patterns,
-/// so "every 2 weeks on Mon/Wed" advances weekly on all three clients. Reproduced deliberately —
-/// this is a shared quirk to fix everywhere at once, not a Windows bug to fix here. Recorded in
-/// `docs/CONTRACTS.md`.
+/// A later selected weekday in the same week comes next. Past the last one, the series jumps
+/// `interval` weeks and takes the first selected weekday of that week. Weeks start on Sunday, as
+/// web's `WEEKDAYS` does. With an interval of 1 this is "the next selected weekday", the answer
+/// every client gave before the interval was read. Recorded in `docs/CONTRACTS.md`.
 fn next_weekday_occurrence(
     date: DateTime<Utc>,
     weekdays: &[Weekday],
+    interval: i32,
     zone: Tz,
 ) -> Option<DateTime<Utc>> {
-    if weekdays.is_empty() {
-        return None;
-    }
-    // A non-empty selection always matches within seven days, so one pass is enough.
-    (1..=7)
-        .map(|offset| adding_days(date, offset, zone))
-        .find(|candidate| {
-            weekdays
-                .iter()
-                .any(|w| w.matches(local(*candidate, zone).weekday()))
-        })
+    let selected = |offset: i64| {
+        let candidate = adding_days(date, offset, zone);
+        weekdays
+            .iter()
+            .any(|w| w.matches(local(candidate, zone).weekday()))
+            .then_some(candidate)
+    };
+    let today = i64::from(local(date, zone).weekday().num_days_from_sunday());
+    // The rest of this week, then the week `interval` weeks on, from its Sunday.
+    let next_cycle = i64::from(interval) * 7 - today;
+    (1..7 - today)
+        .find_map(selected)
+        .or_else(|| (next_cycle..next_cycle + 7).find_map(selected))
 }
 
 fn next_month_occurrence(
@@ -911,6 +914,40 @@ mod tests {
         let next = result.next_due_date.unwrap();
         assert_eq!(next.day(), 22);
         assert_eq!(next.weekday(), chrono::Weekday::Mon);
+    }
+
+    /// AITD-547: "every 4 weeks on Friday, from the due date" rolled forward one week, because
+    /// the weekly step never read its interval (D2). It now skips to the cycle's Friday.
+    #[test]
+    fn aitd_547_every_four_weeks_on_friday_steps_four_weeks() {
+        let pattern = weekly_pattern(&[Weekday::Friday], 4);
+        let dates = progression(&pattern, utc(2026, 10, 23, 9, 0), RepeatFrom::DueDate, 3);
+        assert_eq!(
+            dates,
+            vec![
+                utc(2026, 11, 20, 9, 0),
+                utc(2026, 12, 18, 9, 0),
+                utc(2027, 1, 15, 9, 0)
+            ]
+        );
+    }
+
+    /// AITD-547: a later selected day in the same week comes first; past the last one, the series
+    /// skips `interval - 1` whole weeks. Sunday starts the week.
+    #[test]
+    fn aitd_547_every_two_weeks_on_sun_and_wed_walks_alternate_weeks() {
+        let pattern = weekly_pattern(&[Weekday::Sunday, Weekday::Wednesday], 2);
+        let dates = progression(&pattern, utc(2026, 10, 18, 9, 0), RepeatFrom::DueDate, 4);
+        // Sun 18 Oct: Wed 21, Sun 1 Nov, Wed 4 Nov, Sun 15 Nov.
+        assert_eq!(
+            dates,
+            vec![
+                utc(2026, 10, 21, 9, 0),
+                utc(2026, 11, 1, 9, 0),
+                utc(2026, 11, 4, 9, 0),
+                utc(2026, 11, 15, 9, 0)
+            ]
+        );
     }
 
     #[test]

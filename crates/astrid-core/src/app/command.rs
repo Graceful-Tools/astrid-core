@@ -1041,6 +1041,9 @@ pub enum Command {
     /// The public tasks a profile shares, as rows, with no `userId` meaning your own (task
     /// da326190 — iOS's `UserProfileView` draws this section beneath the three numbers).
     ///
+    /// Also answers who they are (`id`, `image`, `createdAt`, `isAIAgent`) and their `stats`, so
+    /// another person's whole profile is one request (AATD-69).
+    ///
     /// Answers `isOwnProfile` and the person's `name` rather than a heading: iOS's two titles
     /// ("Your Tasks" and "Shared tasks with <name>") are user-facing strings, and a client holds
     /// its own.
@@ -1102,6 +1105,14 @@ pub enum Command {
     Contacts,
     /// Remove every imported contact. Answers with how many went.
     ClearContacts,
+    /// Upload the device's contacts for collaborator suggestions, replacing what the server had
+    /// (AATD-68, iOS `ContactsService.syncContacts`). Each is `{email, name?, phoneNumber?}` as the
+    /// shell read it from the address book; the batching is here. Answers the server's stats, whose
+    /// `total` is the account's whole count. Online-only.
+    UploadContacts {
+        #[serde(default)]
+        contacts: Vec<serde_json::Value>,
+    },
     /// Delete the account for good. `confirmation` must be the phrase the web requires, typed
     /// exactly; anything else is refused without a request. Signs out afterwards.
     DeleteAccount {

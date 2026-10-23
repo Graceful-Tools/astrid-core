@@ -1103,6 +1103,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             Ok(deleted) => Response::ok(serde_json::json!({ "deleted": deleted })),
             Err(error) => Response::failed(error.into()),
         },
+        Command::UploadContacts { contacts } => {
+            match app.context.account().upload_contacts(&contacts).await {
+                Ok(stats) => Response::ok(stats),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::DeleteAccount { confirmation } => {
             // The server requires the phrase typed exactly, and so does this: a request that is
             // going to be refused is not worth sending, and a button that sends one looks like it
