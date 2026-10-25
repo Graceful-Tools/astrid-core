@@ -806,6 +806,21 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         Command::MintTransportCredentials { preset, agent } => {
             connections::mint_transport_credentials(app, &preset, &agent).await
         }
+        Command::MintAccessToken {
+            permissions,
+            expires_in_days,
+            description,
+            agent,
+        } => {
+            connections::mint_access_token(
+                app,
+                &permissions,
+                expires_in_days,
+                description.as_deref(),
+                agent.as_deref(),
+            )
+            .await
+        }
         Command::CustomAgents => answer(app.context.agents().custom_agents().await),
         Command::RegisterCustomAgent { name, list_ids } => answer(
             app.context

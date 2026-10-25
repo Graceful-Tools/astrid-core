@@ -83,6 +83,12 @@ pub fn custom_agent(id: &str) -> String {
 /// listed here as access tokens and revoked here, one at a time.
 pub const CONNECTIONS: &str = "/api/v1/users/me/connections";
 
+/// Mint a user-level access token (AWTD-1312). The replacement for the
+/// `/api/v1/auth/mobile-mcp-token` route named above: what it makes is listed and revoked through
+/// `CONNECTIONS` as an access token. Session-only, like OAuth client registration and revoke — an
+/// OAuth access token is answered 403, which is the server's decision and not ours to route around.
+pub const ACCESS_TOKENS: &str = "/api/v1/users/me/access-tokens";
+
 /// Revoke one connection: the kind and the id together, since ids repeat across kinds.
 pub fn connection(kind: &str, id: &str) -> String {
     format!(

@@ -5,7 +5,9 @@
 
 use super::*;
 use crate::app::command::OAuthClientDraftFields;
-use crate::services::connections::{ConnectionKind, OAuthClientPreset, REGISTERABLE_SCOPES};
+use crate::services::connections::{
+    expiry_in_range, ConnectionKind, OAuthClientPreset, ACCESS_TOKEN_DAYS, REGISTERABLE_SCOPES,
+};
 
 /// Stop one connection. A kind this build cannot name is refused before anything is sent: the
 /// path segment would be one the server cannot match, and a 404 on screen is a row that will not
@@ -59,6 +61,36 @@ pub(super) async fn update_client(
         app.context
             .connections()
             .update_oauth_client(client_id, &draft)
+            .await,
+    )
+}
+
+/// Mint a user-level access token. A lifetime outside the documented range is refused before
+/// anything is sent, the way an unknown preset is below: the route would answer 400, and a round
+/// trip to be told so is one the reader waits through for nothing.
+pub(super) async fn mint_access_token(
+    app: &App,
+    permissions: &[String],
+    expires_in_days: Option<i64>,
+    description: Option<&str>,
+    agent: Option<&str>,
+) -> Response {
+    if permissions.is_empty() {
+        return Response::failed(Failure::bad_request(
+            "an access token needs at least one permission",
+        ));
+    }
+    if !expiry_in_range(expires_in_days) {
+        return Response::failed(Failure::bad_request(format!(
+            "an access token lasts between {} and {} days",
+            ACCESS_TOKEN_DAYS.start(),
+            ACCESS_TOKEN_DAYS.end()
+        )));
+    }
+    answer(
+        app.context
+            .connections()
+            .mint_access_token(permissions, expires_in_days, description, agent)
             .await,
     )
 }
