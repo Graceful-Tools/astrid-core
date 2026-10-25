@@ -613,6 +613,74 @@ impl MintedClient {
     }
 }
 
+/// A user-level access token the server has just made, in the one form it will ever be readable.
+///
+/// The envelope is `POST /api/v1/users/me/access-tokens` (AWTD-1312). Read leniently, like every
+/// other decode in this module: a field the server stops sending must not blank the token a reader
+/// is about to be shown once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MintedAccessToken {
+    /// Plaintext, once. Never cached — see the module header.
+    pub token: String,
+    /// What the token may do, as the server recorded it.
+    pub permissions: Vec<String>,
+    /// Absent for a token that does not expire, which is what the route's `null` means.
+    pub expires_at: Option<String>,
+    pub description: Option<String>,
+}
+
+impl MintedAccessToken {
+    fn from_value(answer: &Value) -> Self {
+        MintedAccessToken {
+            token: string(answer, "token").unwrap_or_default(),
+            permissions: answer
+                .get("permissions")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            expires_at: string(answer, "expiresAt"),
+            description: string(answer, "description"),
+        }
+    }
+}
+
+/// The days an access token may be asked to last, as the route documents it. Outside this the
+/// route answers 400, so the caller is told before the round trip.
+pub const ACCESS_TOKEN_DAYS: std::ops::RangeInclusive<i64> = 1..=365;
+
+/// Whether an asked-for lifetime is one the route will take. `None` is "no expiry", not an error.
+pub fn expiry_in_range(expires_in_days: Option<i64>) -> bool {
+    expires_in_days.is_none_or(|days| ACCESS_TOKEN_DAYS.contains(&days))
+}
+
+/// The body the mint route takes. An optional the caller did not give is left out rather than
+/// sent null, because the route reads absence as "no opinion" and null as a bad body.
+fn access_token_body(
+    permissions: &[String],
+    expires_in_days: Option<i64>,
+    description: Option<&str>,
+    agent: Option<&str>,
+) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("permissions".to_string(), json!(permissions));
+    if let Some(days) = expires_in_days {
+        body.insert("expiresInDays".to_string(), json!(days));
+    }
+    if let Some(description) = description {
+        body.insert("description".to_string(), json!(description));
+    }
+    if let Some(agent) = agent {
+        body.insert("agent".to_string(), json!(agent));
+    }
+    Value::Object(body)
+}
+
 /// The client shapes the agents page mints for its own transports — see astrid-web
 /// `lib/oauth/oauth-client-presets.ts`. The server decides scopes and grant types from the preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -863,6 +931,37 @@ impl ConnectionsService {
             kind: "client",
             id: client_id.to_string(),
         })
+    }
+
+    /// A user-level access token, for a cloud agent that has to act as this account (AWTD-1312).
+    ///
+    /// Answers with the token in the one form it will ever be readable. **Nothing here caches it**
+    /// — not the store, not the secure store — so the shell draws it once and it is gone. Listing
+    /// and revoking it afterwards go through [`ConnectionsService::panel`] and
+    /// [`ConnectionsService::revoke`], where it appears as an access token.
+    ///
+    /// `None` for `expires_in_days` asks for a token that does not expire. The caller checks the
+    /// lifetime is one the route takes — [`expiry_in_range`] — as the other callers here check a
+    /// preset and a draft; this sends what it is given.
+    pub async fn mint_access_token(
+        &self,
+        permissions: &[String],
+        expires_in_days: Option<i64>,
+        description: Option<&str>,
+        agent: Option<&str>,
+    ) -> Result<MintedAccessToken> {
+        let request = self
+            .context
+            .client
+            .post(endpoints::ACCESS_TOKENS)
+            .value(access_token_body(
+                permissions,
+                expires_in_days,
+                description,
+                agent,
+            ));
+        let answer: Value = self.context.client.send(request).await?;
+        Ok(MintedAccessToken::from_value(&answer))
     }
 
     /// Client credentials for a transport the agents page configures. The body names only the
@@ -1589,6 +1688,79 @@ mod tests {
             draft.update_body(),
             json!({ "redirectUris": ["https://new.test/cb", "https://other.test/cb"] })
         );
+    }
+
+    /// A minted access token is read from the envelope the route documents, and absence of an
+    /// expiry means it never expires rather than expiring now (task 1c8bb8f4).
+    #[test]
+    fn a_minted_access_token_is_read_from_its_envelope_task_1c8bb8f4() {
+        let minted = MintedAccessToken::from_value(&json!({
+            "success": true,
+            "token": "astrid_mcp_abc123",
+            "permissions": ["read", "write"],
+            "expiresAt": "2027-01-01T00:00:00.000Z",
+            "description": "Copilot cloud agent",
+            "createdAt": "2026-10-24T00:00:00.000Z",
+        }));
+        assert_eq!(minted.token, "astrid_mcp_abc123");
+        assert_eq!(minted.permissions, vec!["read", "write"]);
+        assert_eq!(
+            minted.expires_at.as_deref(),
+            Some("2027-01-01T00:00:00.000Z")
+        );
+        assert_eq!(minted.description.as_deref(), Some("Copilot cloud agent"));
+
+        let forever = MintedAccessToken::from_value(&json!({
+            "token": "astrid_mcp_xyz",
+            "permissions": ["read"],
+            "expiresAt": null,
+            "description": null,
+        }));
+        assert_eq!(
+            forever.expires_at, None,
+            "a null expiry is a token that does not expire"
+        );
+        assert_eq!(forever.description, None);
+
+        // Leniently, like every other decode in this module: a server that stops sending a field
+        // must not blank the token the reader is about to be shown once.
+        let bare = MintedAccessToken::from_value(&json!({ "token": "astrid_mcp_only" }));
+        assert_eq!(bare.token, "astrid_mcp_only");
+        assert!(bare.permissions.is_empty());
+    }
+
+    /// The body the route is given, and the guard on its documented 1-365 day range
+    /// (task 1c8bb8f4).
+    #[test]
+    fn the_access_token_body_names_only_what_the_route_takes_task_1c8bb8f4() {
+        let full = access_token_body(
+            &["read".to_string(), "write".to_string()],
+            Some(30),
+            Some("Copilot cloud agent"),
+            Some("copilot"),
+        );
+        assert_eq!(
+            full,
+            json!({
+                "permissions": ["read", "write"],
+                "expiresInDays": 30,
+                "description": "Copilot cloud agent",
+                "agent": "copilot",
+            })
+        );
+
+        let minimal = access_token_body(&["read".to_string()], None, None, None);
+        assert_eq!(
+            minimal,
+            json!({ "permissions": ["read"] }),
+            "an optional the caller did not give is left out, not sent null"
+        );
+
+        assert!(!expiry_in_range(Some(0)));
+        assert!(!expiry_in_range(Some(366)));
+        assert!(expiry_in_range(Some(1)));
+        assert!(expiry_in_range(Some(365)));
+        assert!(expiry_in_range(None), "no expiry is not an error");
     }
 
     /// The row carries no secret field at all, and a minted pair is read from the envelope the

@@ -895,6 +895,23 @@ pub enum Command {
         preset: String,
         agent: String,
     },
+    /// A user-level access token, for a cloud agent that has to act as this account (AWTD-1312).
+    ///
+    /// Answers with the token in the one form it will ever be readable, so the shell shows it at
+    /// once and stores nothing. It is listed and revoked afterwards as an access token, through
+    /// `connections` and `revokeConnection`.
+    ///
+    /// `expiresInDays` is 1-365; absent asks for a token that does not expire. `agent` names the
+    /// cloud agent the token is for, such as `copilot`.
+    MintAccessToken {
+        permissions: Vec<String>,
+        #[serde(default)]
+        expires_in_days: Option<i64>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        agent: Option<String>,
+    },
     /// The agents this account has registered of its own.
     CustomAgents,
     /// Register one. Answers with the credentials the server will show only this once.
