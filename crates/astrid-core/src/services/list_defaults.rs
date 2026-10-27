@@ -18,7 +18,7 @@
 //! bug the task itself warns about ("an all-day default is `all_day_instant`, not a local
 //! midnight"), so this client stores the calendar day.
 
-use chrono::{DateTime, Duration, FixedOffset, NaiveTime, Utc};
+use chrono::{DateTime, Duration, NaiveTime, TimeZone, Utc};
 
 use super::TaskDraft;
 use crate::model::{Priority, Repeating, TaskList};
@@ -38,13 +38,13 @@ pub struct Given {
 ///
 /// `me` is the signed-in user's id, which is the fallback assignee for a list that has named no
 /// default — see the assignee arm below. `None` when nobody is signed in yet.
-pub fn apply(
+pub fn apply<Z: TimeZone + Copy>(
     draft: &mut TaskDraft,
     given: Given,
     list: &TaskList,
     me: Option<&str>,
     now: DateTime<Utc>,
-    offset: FixedOffset,
+    zone: Z,
 ) {
     if !given.priority {
         if let Some(priority) = list.default_priority {
@@ -96,16 +96,16 @@ pub fn apply(
         let time = list.default_due_time.as_deref().and_then(parse_time);
         match (days, time) {
             (Some(days), Some(time)) => {
-                draft.due_date_time = Some(at(days, time, now, offset));
+                draft.due_date_time = Some(at(days, time, now, zone));
                 draft.is_all_day = false;
             }
             (Some(days), None) => {
-                draft.due_date_time = Some(due_picks::all_day_pick(days, now, offset));
+                draft.due_date_time = Some(due_picks::all_day_pick(days, now, zone));
                 draft.is_all_day = true;
             }
             // A time with no day: the web makes it today at that time.
             (None, Some(time)) => {
-                draft.due_date_time = Some(at(0, time, now, offset));
+                draft.due_date_time = Some(at(0, time, now, zone));
                 draft.is_all_day = false;
             }
             (None, None) => {}
@@ -129,19 +129,22 @@ fn parse_time(value: &str) -> Option<NaiveTime> {
 }
 
 /// The reader's calendar day `days` on, at `time` in the reader's zone.
-fn at(days: i64, time: NaiveTime, now: DateTime<Utc>, offset: FixedOffset) -> DateTime<Utc> {
-    let day = now.with_timezone(&offset).date_naive() + Duration::days(days);
-    day.and_time(time)
-        .and_local_timezone(offset)
-        .single()
-        .map(|at| at.with_timezone(&Utc))
-        // The hour a daylight-saving jump skips: the day itself rather than no task.
-        .unwrap_or_else(|| crate::model::date::all_day_instant(day))
+/// The time on its own day's offset, so a default of "in a week at 09:00" is 09:00 across a
+/// daylight-saving change too (AITD-561).
+fn at<Z: TimeZone + Copy>(
+    days: i64,
+    time: NaiveTime,
+    now: DateTime<Utc>,
+    zone: Z,
+) -> DateTime<Utc> {
+    let day = now.with_timezone(&zone).date_naive() + Duration::days(days);
+    due_picks::local_time_on(day, time, zone)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::FixedOffset;
 
     fn california() -> FixedOffset {
         FixedOffset::west_opt(7 * 3600).expect("an offset")

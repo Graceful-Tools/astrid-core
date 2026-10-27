@@ -175,7 +175,7 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
             list,
             me.as_deref(),
             app.clock.now(),
-            app.clock.utc_offset(),
+            app.clock.time_zone(),
         );
     }
     app.context.tasks().create(&draft)
@@ -512,7 +512,7 @@ pub(super) fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
         day,
         task.due_date_time,
         task.is_all_day,
-        app.clock.utc_offset(),
+        app.clock.time_zone(),
     );
     Response::ok(serde_json::json!({
         "dueDateTime": date::format(picked),
@@ -528,11 +528,13 @@ pub(super) fn due_date_at_time(app: &App, task_id: &str, hour: u32, minute: u32)
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
         Err(error) => return Response::failed(error.into()),
     };
-    let offset = app.clock.utc_offset();
+    // The zone, not today's offset: a time on a day across a daylight-saving change takes that
+    // day's offset (AITD-561).
+    let zone = app.clock.time_zone();
     let anchor =
-        rows::due_picks::time_anchor(task.due_date_time, task.is_all_day, app.clock.now(), offset);
+        rows::due_picks::time_anchor(task.due_date_time, task.is_all_day, app.clock.now(), zone);
     Response::ok(serde_json::json!({
-        "dueDateTime": date::format(rows::due_picks::with_time(hour, minute, anchor, offset)),
+        "dueDateTime": date::format(rows::due_picks::with_time(hour, minute, anchor, zone)),
         "isAllDay": false,
     }))
 }
@@ -553,7 +555,7 @@ pub(super) fn due_date_all_day(app: &App, task_id: &str) -> Response {
     // A task with no date has no day to keep.
     let kept = match task.due_date_time {
         Some(due) if !task.is_all_day => {
-            Some(rows::due_picks::to_all_day(due, app.clock.utc_offset()))
+            Some(rows::due_picks::to_all_day(due, app.clock.time_zone()))
         }
         other => other,
     };
@@ -587,6 +589,9 @@ pub(super) fn due_date_options(
 
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
+    // Each pick resolves its local time with its own day's offset (AITD-561); `offset` is only
+    // for `day_offset`, which shares its reading with the rows.
+    let zone = app.clock.time_zone();
 
     let dates: Vec<serde_json::Value> = rows::due_picks::DATE_OPTIONS
         .iter()
@@ -595,7 +600,7 @@ pub(super) fn due_date_options(
             serde_json::json!({
                 "titleKey": option.title_key,
                 "daysFromToday": days,
-                "dueDateTime": date::format(rows::due_picks::all_day_pick(days, now, offset)),
+                "dueDateTime": date::format(rows::due_picks::all_day_pick(days, now, zone)),
                 "isAllDay": true,
                 "isSelected": due.is_some_and(|due| {
                     rows::day_offset(due, is_all_day, now, offset) == days
@@ -605,11 +610,11 @@ pub(super) fn due_date_options(
         .collect();
 
     // The hour goes on the task's own day.
-    let day_anchor = rows::due_picks::time_anchor(due, is_all_day, now, offset);
+    let day_anchor = rows::due_picks::time_anchor(due, is_all_day, now, zone);
     let times: Vec<serde_json::Value> = rows::due_picks::TIME_OPTIONS
         .iter()
         .map(|option| {
-            let picked = rows::due_picks::with_hour(option.hour, day_anchor, offset);
+            let picked = rows::due_picks::with_hour(option.hour, day_anchor, zone);
             serde_json::json!({
                 "titleKey": option.title_key,
                 "hour": option.hour,
@@ -617,7 +622,7 @@ pub(super) fn due_date_options(
                 // An all-day task has no time, so nothing is selected until one is chosen.
                 "isSelected": !is_all_day
                     && due.is_some_and(|due| {
-                        due.with_timezone(&offset).format("%H").to_string()
+                        due.with_timezone(&zone).format("%H").to_string()
                             == format!("{:02}", option.hour)
                     }),
             })
@@ -1050,7 +1055,7 @@ pub(super) fn quick_add_defaults(
             list,
             me.as_deref(),
             app.clock.now(),
-            app.clock.utc_offset(),
+            app.clock.time_zone(),
         );
     } else if !given.assignee {
         // A pseudo-list — My Tasks — has no defaults to apply, and the web falls back to the

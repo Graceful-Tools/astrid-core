@@ -6751,6 +6751,52 @@ async fn task_0616f2d1_clearing_a_time_on_an_unknown_task_says_not_found() {
     assert_eq!(missing["ok"], false, "{missing}");
 }
 
+/// AITD-561: the quick time picks and the time picker answer with the target day's offset. Read
+/// in Los Angeles on 2026-10-27 (PDT), "Morning" on a task due Sunday 2026-11-01 (PST) is
+/// 09:00 PST — 17:00Z — not 09:00 PDT, which the phone shows as 08:00.
+#[tokio::test]
+async fn aitd_561_morning_across_a_dst_change_is_nine_local() {
+    let app = App::with_parts(
+        &Config {
+            cache_path: ":memory:".into(),
+            base_url: "https://astrid.cc".into(),
+            platform: Default::default(),
+            url_scheme: crate::app::DEFAULT_URL_SCHEME.into(),
+            handoff_client_id: None,
+        },
+        std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+        std::sync::Arc::new(StubTransport::new()),
+        std::sync::Arc::new(
+            crate::platform::FixedClock::parsed("2026-10-27T19:00:00Z")
+                .in_named_zone(chrono_tz::America::Los_Angeles),
+        ),
+    )
+    .expect("starts");
+    let made = call(&app, json!({ "kind": "createTask", "title": "Dentist" })).await;
+    let id = made["value"]["id"].as_str().expect("an id").to_string();
+    // 03:37 PST on Sunday the 1st.
+    call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": id, "changes": { "dueDateTime": "2026-11-01T11:37:00Z", "isAllDay": false } }),
+    )
+    .await;
+
+    let options = call(&app, json!({ "kind": "dueDateOptions", "taskId": id })).await;
+    assert_eq!(
+        options["value"]["times"][0]["dueDateTime"], "2026-11-01T17:00:00Z",
+        "{options}"
+    );
+    let picked = call(
+        &app,
+        json!({ "kind": "dueDateAtTime", "taskId": id, "hour": 9, "minute": 0 }),
+    )
+    .await;
+    assert_eq!(
+        picked["value"]["dueDateTime"], "2026-11-01T17:00:00Z",
+        "{picked}"
+    );
+}
+
 /// AATD-55: Settings' "Last Sync" — outboxStats says when the last pass was, or null before one.
 #[tokio::test]
 async fn aatd55_outbox_stats_say_when_the_last_sync_was() {
