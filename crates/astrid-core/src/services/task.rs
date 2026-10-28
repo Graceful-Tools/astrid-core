@@ -647,9 +647,17 @@ impl TaskService {
     /// An id the cache has never heard of is kept: it may be a list this device has not synced
     /// yet, and dropping it would silently lose the filing. Only lists we know to be views or
     /// states are removed.
+    ///
+    /// "Know" is the whole difficulty. A cached row answers for itself, but the ids the core
+    /// synthesises — My Tasks, the two virtual board columns — have no row to find, so they used to
+    /// fall down the "not synced yet" arm and get filed. [`TaskList::is_synthesised_id`] decides
+    /// those without the cache (task fda15483).
     fn filed_in(&self, list_ids: &[String]) -> Result<Vec<String>> {
         let mut kept = Vec::with_capacity(list_ids.len());
         for id in list_ids {
+            if TaskList::is_synthesised_id(id) {
+                continue;
+            }
             match self.context.store.list(id)? {
                 Some(list) if list.is_virtual.unwrap_or(false) || list.is_status_list() => {}
                 _ => kept.push(id.clone()),
@@ -1306,6 +1314,62 @@ mod tests {
         assert_eq!(
             entries(&fixture.store)[0].payload["body"]["listIds"],
             serde_json::json!(["l1"])
+        );
+    }
+
+    /// The view the app OPENS on is synthesised, so the test above passes only because it put its
+    /// virtual list in the store first. `virtual:my-tasks` has no row to find and never will —
+    /// `ListService::my_tasks` says so — and the "keep what the cache does not know" rule then filed
+    /// the task into an id no list has.
+    ///
+    /// Not cosmetic: the server validates `listIds` by existence and answers
+    /// `400 Invalid list IDs: virtual:my-tasks` (`astrid-web/services/task.service.ts`), rejecting
+    /// the whole create. So the task stayed on the one device that made it.
+    #[test]
+    fn a_task_added_from_my_tasks_is_filed_nowhere_task_fda15483() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+
+        let created = fixture
+            .service
+            .create(
+                &TaskDraft::new("Buy milk")
+                    .in_list(crate::filters::my_tasks::VIRTUAL_ID)
+                    .in_list("l1"),
+            )
+            .expect("creates");
+
+        assert_eq!(
+            created.effective_list_ids(),
+            vec!["l1"],
+            "the view is not somewhere a task can be filed, cached or not"
+        );
+        assert_eq!(
+            entries(&fixture.store)[0].payload["body"]["listIds"],
+            serde_json::json!(["l1"]),
+            "and the id the server would 400 on never reaches the outbox"
+        );
+    }
+
+    /// The board's two columns are synthesised the same way and are the same mistake. The web says
+    /// so at its own door (`app/api/v1/tasks/route.ts`): the column id travels as `statusRole`, and
+    /// "must never travel inside listIds, where it reads as a nonexistent list and 400s the write".
+    #[test]
+    fn a_task_added_from_a_virtual_board_column_is_filed_nowhere_task_fda15483() {
+        let fixture = fixture("2026-09-07T12:00:00Z");
+
+        let created = fixture
+            .service
+            .create(
+                &TaskDraft::new("Buy milk")
+                    .in_list(crate::board::VIRTUAL_INBOX_COLUMN_ID)
+                    .in_list(crate::board::VIRTUAL_DONE_COLUMN_ID),
+            )
+            .expect("creates");
+
+        assert!(
+            created.effective_list_ids().is_empty(),
+            "got {:?}",
+            created.effective_list_ids()
         );
     }
 

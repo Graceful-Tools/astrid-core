@@ -4093,6 +4093,44 @@ async fn an_unassigned_pick_from_my_tasks_is_honoured_task_a2320078() {
     );
 }
 
+/// What the sidebar hands the shell for My Tasks is a view, not a destination, so the task it makes
+/// belongs to no list — which is exactly what the web sends from the same box
+/// (`components/quick-add.tsx` passes `listIds` only for a real list).
+///
+/// Found while fixing `a2320078` above and fixed separately. The task was filed into
+/// `virtual:my-tasks`, and the server validates `listIds` by existence: the outbox create came back
+/// `400 Invalid list IDs: virtual:my-tasks` and the task never left the device that made it.
+#[tokio::test]
+async fn a_task_made_from_my_tasks_is_not_filed_in_the_view_task_fda15483() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "listIds": ["virtual:my-tasks"] }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(
+        made["value"]["listIds"],
+        json!([]),
+        "the view is not a list the task can be in: {made}"
+    );
+
+    // The row still draws under My Tasks, because that view is "assigned to me" and never a filing.
+    let rows = call(
+        &app,
+        json!({ "kind": "rowsForList", "listId": "virtual:my-tasks" }),
+    )
+    .await;
+    assert_eq!(
+        rows["value"]["rows"][0]["title"], "Buy milk",
+        "dropping the id must not lose the task from the view it was added in: {rows}"
+    );
+}
+
 /// The other half of the same rule: a list that says `unassigned` means it. That is a choice
 /// somebody made on the list's admin tab, and overruling it with "well, you created it" would make
 /// the setting impossible to express.

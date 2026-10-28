@@ -487,6 +487,25 @@ impl TaskList {
         self.list_type.as_deref() == Some("status")
     }
 
+    /// True for an id this core **synthesises** rather than caches: the My Tasks view and the
+    /// board's two virtual columns.
+    ///
+    /// These are the ids a sidebar or a board hands back as "where I am", and a list flavour cannot
+    /// answer for them, because there is no row to ask. `ListService::my_tasks` says as much in its
+    /// own doc comment — "Not in the list collection and never will be" — so anything that decides
+    /// by looking an id up in the cache gets `None` for them and must not read that as "a list I
+    /// have not synced yet".
+    ///
+    /// Matched against the constants, not by the `virtual:`/`__virtual_` shape. The ids this core
+    /// mints are the ones it can speak for; a shape sweep would also drop ids it knows nothing
+    /// about, and the whole reason an unknown id is kept is that it is probably somebody's real
+    /// list (task fda15483).
+    pub fn is_synthesised_id(id: &str) -> bool {
+        id == crate::filters::my_tasks::VIRTUAL_ID
+            || id == crate::board::VIRTUAL_INBOX_COLUMN_ID
+            || id == crate::board::VIRTUAL_DONE_COLUMN_ID
+    }
+
     /// True for a label: a list that renders as a chip and never as a destination.
     ///
     /// The web's third flavour (`lib/list-flavors.ts`, task 60f5849d): multi-list membership
