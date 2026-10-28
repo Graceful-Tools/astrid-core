@@ -4000,6 +4000,99 @@ async fn a_task_i_just_made_has_a_checkbox_task_e2505d10() {
     );
 }
 
+/// The same thing again from **My Tasks**, which is where it was actually reported (task a2320078:
+/// *"when adding a task to windows task list the checkbox doesn't show up in the row immediately"*).
+///
+/// Task `e2505d10` resolved the creator locally, but only down the arm that finds a cached list to
+/// read defaults from. My Tasks has no such row — `ListService::my_tasks` synthesises it and says so
+/// ("Not in the list collection and never will be") — so a task added from the view the app OPENS
+/// ON fell past the whole `list_defaults` pass and stayed unassigned until a sync answered.
+///
+/// The tell that this is a bug rather than a policy is the control above the box: `quickAddDefaults`
+/// already has the pseudo-list arm and previews a checkbox here, so the preview and the create
+/// disagreed — the one thing the shared-draft preview exists to make impossible.
+#[tokio::test]
+async fn a_task_made_from_my_tasks_has_a_checkbox_task_a2320078() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    // What the sidebar hands the shell for My Tasks, and therefore what `createTask` is told.
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "listIds": ["virtual:my-tasks"] }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(
+        made["value"]["assigneeId"], "me",
+        "a task added from My Tasks is mine, with no list row to say so and no network: {made}"
+    );
+
+    let shown = call(
+        &app,
+        json!({ "kind": "quickAddDefaults", "listId": "virtual:my-tasks" }),
+    )
+    .await;
+    assert_eq!(
+        shown["value"]["assigneeId"], made["value"]["assigneeId"],
+        "the control above the box previewed the task that was made: {shown}"
+    );
+
+    let rows = call(
+        &app,
+        json!({ "kind": "rowsForList", "listId": "virtual:my-tasks" }),
+    )
+    .await;
+    assert_eq!(
+        rows["value"]["rows"][0]["leading"]["kind"], "checkbox",
+        "the row drawn straight after the tap carries the checkbox, not the unassigned mark: {rows}"
+    );
+}
+
+/// Nobody is signed in, so there is no creator to resolve and the pseudo-list arm must not invent
+/// one. Same shape as `signed_out_quick_add_shows_unassigned_task_8aa5732c`, kept beside the fix
+/// above so the two halves of the arm are read together.
+#[tokio::test]
+async fn signed_out_a_task_made_from_my_tasks_stays_unassigned_task_a2320078() {
+    let app = app_with(StubTransport::new());
+
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Buy milk", "listIds": ["virtual:my-tasks"] }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(made["value"]["assigneeId"].is_null(), "{made}");
+}
+
+/// A deliberate "nobody" from My Tasks is still nobody. The pick is said at the door and beats the
+/// fallback, exactly as it beats a list's own default.
+#[tokio::test]
+async fn an_unassigned_pick_from_my_tasks_is_honoured_task_a2320078() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "createTask",
+            "title": "Buy milk",
+            "listIds": ["virtual:my-tasks"],
+            "assigneeId": "unassigned",
+        }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(
+        made["value"]["assigneeId"].is_null(),
+        "the person chose nobody: {made}"
+    );
+}
+
 /// The other half of the same rule: a list that says `unassigned` means it. That is a choice
 /// somebody made on the list's admin tab, and overruling it with "well, you created it" would make
 /// the setting impossible to express.

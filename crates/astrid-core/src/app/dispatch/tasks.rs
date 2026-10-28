@@ -159,12 +159,13 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
     // The first of the task's lists the cache knows decides the defaults — a task filed
     // in two lists takes the first one's, as the web takes its target list's. Skipped when the
     // shell has applied them itself or is importing a task that must arrive as it was.
-    if let Some(list) = apply_list_defaults.then_some(()).and(
+    let known_list = apply_list_defaults.then_some(()).and(
         draft
             .list_ids
             .iter()
             .find_map(|id| lists.iter().find(|list| &list.id == id)),
-    ) {
+    );
+    if let Some(list) = known_list {
         // Who "me" is, for a list that names no default assignee: resolved here rather than left
         // to the server, so the row drawn straight after the tap already says it is mine and it
         // still holds with no network (task e2505d10).
@@ -177,6 +178,22 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
             app.clock.now(),
             app.clock.time_zone(),
         );
+    } else if apply_list_defaults && !given.assignee {
+        // Added from a VIEW rather than a list, which on every client is where the app opens: My
+        // Tasks is synthesised by `ListService::my_tasks` and deliberately never cached, so there is
+        // no row here to read defaults from and the arm above cannot run at all.
+        //
+        // The creator still has to be resolved, or the row drawn the instant somebody hits + carries
+        // the unassigned mark instead of a checkbox until a sync answers — task e2505d10's bug,
+        // reported again from My Tasks as task a2320078. `quick_add_defaults` already has this exact
+        // arm, so without it the control PREVIEWED a checkbox and then made an unassigned task,
+        // which is the disagreement the shared draft exists to prevent.
+        //
+        // This also catches a real list this device has not synced yet, as `TaskService::filed_in`
+        // keeps one: the server's `resolveAssignee` is still authoritative and corrects it on sync if
+        // that list names someone else, and until then "mine" is a better guess than "nobody's" —
+        // it is what the same unsynced list's quick-add control is showing.
+        draft.assignee_id = app.context.account().current_user_id().ok().flatten();
     }
     app.context.tasks().create(&draft)
 }
