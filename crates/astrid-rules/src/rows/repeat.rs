@@ -165,10 +165,18 @@ fn custom_parts(pattern: &CustomRepeatingPattern) -> Vec<SummaryPart> {
             }
             Some("same_weekday") => {
                 if let Some(weekday) = &pattern.month_weekday {
-                    parts.push(SummaryPart {
-                        count: Some(weekday.week_of_month),
-                        values: vec![weekday.weekday.clone()],
-                        ..SummaryPart::key("repeat.on_nth_weekday")
+                    // "on the last Thursday" has no ordinal to count (AWTD-1295).
+                    parts.push(if weekday.week_of_month == -1 {
+                        SummaryPart {
+                            values: vec![weekday.weekday.clone()],
+                            ..SummaryPart::key("repeat.on_last_weekday")
+                        }
+                    } else {
+                        SummaryPart {
+                            count: Some(weekday.week_of_month),
+                            values: vec![weekday.weekday.clone()],
+                            ..SummaryPart::key("repeat.on_nth_weekday")
+                        }
                     });
                 }
             }
@@ -317,6 +325,21 @@ mod tests {
         assert_eq!(parts[1].key, "repeat.on_nth_weekday");
         assert_eq!(parts[1].count, Some(3));
         assert_eq!(parts[1].values, vec!["tuesday"]);
+
+        // "The last Thursday" has no ordinal, so it is its own key rather than a count of -1.
+        let by_last = CustomRepeatingPattern {
+            unit: Some("months".into()),
+            month_repeat_type: Some("same_weekday".into()),
+            month_weekday: Some(MonthWeekday {
+                weekday: "thursday".into(),
+                week_of_month: -1,
+            }),
+            ..Default::default()
+        };
+        let parts = summary(Some(Repeating::Custom), Some(&by_last), None);
+        assert_eq!(parts[1].key, "repeat.on_last_weekday");
+        assert_eq!(parts[1].count, None);
+        assert_eq!(parts[1].values, vec!["thursday".to_string()]);
     }
 
     #[test]

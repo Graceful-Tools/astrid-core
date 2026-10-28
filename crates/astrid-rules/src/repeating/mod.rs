@@ -90,13 +90,17 @@ pub enum MonthRepeatType {
     SameWeekday,
 }
 
+/// `week_of_month` for "the last <weekday> of the month", after iCalendar's BYDAY=-1MO (AWTD-1295).
+/// `5` is NOT the same thing: a month with four Mondays has no 5th, and `5` walks into the next one.
+pub const LAST_WEEK_OF_MONTH: i32 = -1;
+
 /// "The third Tuesday", as stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonthWeekday {
     pub weekday: Weekday,
-    /// 1-5 (first through fifth week of the month).
-    pub week_of_month: u32,
+    /// 1-5 (first through fifth week of the month), or [`LAST_WEEK_OF_MONTH`].
+    pub week_of_month: i32,
 }
 
 /// The stored custom pattern.
@@ -434,6 +438,15 @@ fn next_month_occurrence(
         MonthRepeatType::SameDate => Some(adding_months_overflowing(date, months, zone)),
         MonthRepeatType::SameWeekday => {
             let month_weekday = pattern.month_weekday?;
+            if month_weekday.week_of_month == LAST_WEEK_OF_MONTH {
+                return last_weekday_of_month(date, month_weekday.weekday, months, zone);
+            }
+            // Any other negative names no week, which ends the series — the same answer web's reader
+            // gives, enforced here too because serde can hand this struct a value the wire read
+            // would have dropped.
+            if month_weekday.week_of_month < 0 {
+                return None;
+            }
             // The intermediate step decides only WHICH month to search, but it overflows too — so
             // a fifth weekday sitting on the 31st searches the month after next. Matching web
             // matters more than being right on its own here.
@@ -444,7 +457,7 @@ fn next_month_occurrence(
                 - i64::from(first_of_month.weekday().num_days_from_sunday())
                 + 7)
                 % 7
-                + i64::from(month_weekday.week_of_month.saturating_sub(1)) * 7;
+                + i64::from((month_weekday.week_of_month - 1).max(0)) * 7;
             // The time of day is lost here rather than carried, matching web and Swift: both build
             // this date from the first of the month, which is midnight — the zone's midnight, so
             // the day is the one the person sees (D3).
@@ -454,6 +467,37 @@ fn next_month_occurrence(
             ))
         }
     }
+}
+
+/// The last `weekday` of the month `months` on from `date` (AWTD-1295).
+///
+/// Plain calendar months, not the overflowing step the numbered weeks use: last-weekday dates sit
+/// on the 22nd-31st, so "the 31st, a month on" would routinely roll past the month it means, and
+/// "the last Wednesday" from January 31 would land in March. Counts back from the month's last
+/// day, so it never leaves the month. Midnight in the zone, like the numbered weeks (D3).
+fn last_weekday_of_month(
+    date: DateTime<Utc>,
+    weekday: Weekday,
+    months: u32,
+    zone: Tz,
+) -> Option<DateTime<Utc>> {
+    let reading = local(date, zone);
+    let month_index = i64::from(reading.month0()) + i64::from(months);
+    let year = reading.year() + i32::try_from(month_index / 12).ok()?;
+    let month = u32::try_from(month_index % 12).ok()? + 1;
+    let first_of_next = if month == 12 {
+        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)?
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)?
+    };
+    let last_day = first_of_next.pred_opt()?;
+    let back = (i64::from(last_day.weekday().num_days_from_sunday()) - i64::from(weekday.number())
+        + 7)
+        % 7;
+    Some(instant(
+        (last_day - chrono::Duration::days(back)).and_time(chrono::NaiveTime::MIN),
+        zone,
+    ))
 }
 
 fn next_year_occurrence(
@@ -537,7 +581,13 @@ pub fn pattern_from_wire(wire: &crate::model::CustomRepeatingPattern) -> CustomR
             let weekday = known(&Some(value.weekday.clone()))?;
             Some(MonthWeekday {
                 weekday,
-                week_of_month: u32::try_from(value.week_of_month).ok()?,
+                // -1 is "last" (AWTD-1295). Any other negative names no week, which ends the
+                // series, as it always has.
+                week_of_month: if value.week_of_month == i64::from(LAST_WEEK_OF_MONTH) {
+                    LAST_WEEK_OF_MONTH
+                } else {
+                    i32::try_from(u32::try_from(value.week_of_month).ok()?).ok()?
+                },
             })
         }),
         month: wire.month.and_then(|value| u32::try_from(value).ok()),
@@ -974,6 +1024,40 @@ mod tests {
                 i + 1
             );
         }
+    }
+
+    /// "The last Wednesday" from January 31 is in February, not March (AWTD-1295). The numbered
+    /// weeks pick their month with the overflowing step; `-1` uses plain calendar months, because
+    /// last-weekday dates sit at the end of the month where the overflow bites.
+    #[test]
+    fn the_last_weekday_stays_in_the_next_calendar_month() {
+        let pattern = CustomRepeatingPattern {
+            r#type: Some("custom".into()),
+            unit: Some("months".into()),
+            interval: Some(1),
+            end_condition: Some(EndCondition::Never),
+            month_repeat_type: Some(MonthRepeatType::SameWeekday),
+            month_weekday: Some(MonthWeekday {
+                weekday: Weekday::Wednesday,
+                week_of_month: LAST_WEEK_OF_MONTH,
+            }),
+            ..Default::default()
+        };
+        let next = calculate_custom_next_occurrence(
+            &pattern,
+            Some(utc(2024, 1, 31, 9, 0)),
+            utc(2024, 1, 31, 9, 0),
+            RepeatFrom::DueDate,
+            0,
+            Tz::UTC,
+        )
+        .next_due_date
+        .unwrap();
+        assert_eq!(
+            (next.month(), next.day()),
+            (2, 28),
+            "2024-02-28 is February's last Wednesday"
+        );
     }
 
     /// A custom monthly pattern on the 31st **skips February**, because web overflows here rather
