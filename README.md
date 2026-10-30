@@ -5,25 +5,37 @@ offline SQLite cache, the Outbox write journal, sync, and every rule that must r
 web, Apple and Windows — repeating-task rollover, permissions, the keyboard scheme, search and
 smart-task parsing, the editing session, board columns, connections.
 
-**Web app and API (canonical for shared behaviour, except where it disagrees with iOS — README rule 6):** https://github.com/Graceful-Tools/astrid-web
-**Windows app (first consumer):** https://github.com/Graceful-Tools/astrid-windows
-**iOS and Mac apps (consume it; see astrid-ios `docs/CORE_MIGRATION.md`):** https://github.com/Graceful-Tools/astrid-ios
+Who uses it, and how:
+
+| Repository | Uses | Through |
+|---|---|---|
+| [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules` only (the pure rules), on its Node server | WebAssembly committed to `packages/astrid-rules`, pinned in its `REVISION` file |
+| [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) (iOS, iPadOS, Mac) | the whole core | UniFFI (`core/astrid-apple`), pinned by revision; see its `docs/CORE_MIGRATION.md` |
+| [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) (the first consumer) | the whole core | a C ABI (`crates/astrid-ffi`), pinned by revision |
+| [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core | UniFFI (`core/`), pinned by revision |
+
+astrid-web is also where the rules are **defined**: its TypeScript is canonical and generates the
+fixtures this crate is tested against. The one exception is a case where web disagrees with iOS
+(rule 6).
 
 ## How it fits
 
 ```
-astrid-windows   app/Astrid.App (WinUI, C#)  ──  crates/astrid-ffi (C ABI)  ──┐
-astrid-ios       Astrid App / Astrid Mac (Swift)  ──  UniFFI (astrid-ios/core) ──┤──  astrid-core
-                                                                                 │
-                                                        HTTPS /api/v1/*  ◄───────┘
+astrid-windows   app/Astrid.App (WinUI, C#)  ──  crates/astrid-ffi (C ABI)  ──────┐
+astrid-ios       Astrid App / Astrid Mac (Swift)  ──  UniFFI (astrid-ios/core) ────┤
+astrid-android   app/ (Kotlin, Compose)  ──  UniFFI (astrid-android/core)  ────────┤──  astrid-core
+                                                                                   │
+                                                        HTTPS /api/v1/*  ◄─────────┘
                                                         astrid-web (astrid.cc)
+                                                          └─ runs astrid-rules as wasm (packages/astrid-rules)
+                                                          └─ generates contracts/fixtures ──▶ here
 ```
 
 The core has no platform dependency. A shell hands it three things through traits — a secure
 store for the session, a clock, and reachability — and a cache directory, and drives it through
 one door: JSON commands to `astrid_core::app::App::run_json`, answered with JSON. The shell renders
 and dispatches; **it decides nothing**. That split was built once for Windows (which cannot
-compile Swift) and is what lets the Apple apps retire their second copy of every rule.
+compile Swift) and is what lets the Apple apps retire their second copy of every rule and let Android start without one.
 
 ## The rules
 
