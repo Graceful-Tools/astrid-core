@@ -155,35 +155,62 @@ pub fn search(query: &str, lists: &[TaskList], tasks: &[Task]) -> Vec<PaletteRow
     matched_lists.sort_by_key(|(score, _)| -score);
     rows.extend(matched_lists.into_iter().take(PER_KIND).map(|(_, row)| row));
 
+    let row_for = |task: &Task| {
+        let list = task
+            .effective_list_ids()
+            .first()
+            .and_then(|id| lists.iter().find(|list| &list.id == id))
+            .map(|list| list.name.clone());
+        PaletteRow {
+            kind: RowKind::Task,
+            id: task.id.clone(),
+            title: task.title.clone(),
+            keys: None,
+            subtitle: list,
+        }
+    };
+
+    // A query that IS an identifier is a lookup, not a search: `awtd-1405` is the task, and no
+    // ranking of titles should come between somebody and the thing they named exactly. The search
+    // box has always read a bare identifier this way (`services::search::search_tasks`); the
+    // palette used to match titles only, so a task id typed here found nothing (task 56bf4598).
+    //
+    // Compared the way that box compares it — the typed id against `task.identifier`, ASCII-case
+    // insensitively — rather than against the canonical form `format_identifier` would build. The
+    // two differ only for a padded sequence (`AWTD-01405`), and resolving one here that the search
+    // box does not would be two answers to one question.
+    let exact = crate::identifier::parse_identifier(query).and_then(|_| {
+        let typed = query.trim();
+        tasks
+            .iter()
+            .filter(|task| !task.completed)
+            .find(|task| {
+                task.identifier
+                    .as_deref()
+                    .is_some_and(|own| own.eq_ignore_ascii_case(typed))
+            })
+            .map(row_for)
+    });
+
     let mut matched_tasks: Vec<(i32, PaletteRow)> = tasks
         .iter()
         // Finished tasks are not what somebody is looking for in a palette; search is where those
         // live.
         .filter(|task| !task.completed)
-        .filter_map(|task| {
-            score(query, &task.title).map(|score| {
-                let list = task
-                    .effective_list_ids()
-                    .first()
-                    .and_then(|id| lists.iter().find(|list| &list.id == id))
-                    .map(|list| list.name.clone());
-                (
-                    score,
-                    PaletteRow {
-                        kind: RowKind::Task,
-                        id: task.id.clone(),
-                        title: task.title.clone(),
-                        keys: None,
-                        subtitle: list,
-                    },
-                )
-            })
-        })
+        // The exact hit is already the first row; a title that also carries the id is one task,
+        // not two rows.
+        .filter(|task| exact.as_ref().is_none_or(|row| row.id != task.id))
+        .filter_map(|task| score(query, &task.title).map(|score| (score, row_for(task))))
         .collect();
     // Best first. Reversed by negating rather than by comparing backwards, which reads the
     // same and keeps a stable sort — two equal scores stay in the order they were found.
     matched_tasks.sort_by_key(|(score, _)| -score);
-    rows.extend(matched_tasks.into_iter().take(PER_KIND).map(|(_, row)| row));
+
+    // The exact hit takes one of the task kind's places rather than being extra, so the palette
+    // stays the same length however the query was read.
+    let titles = PER_KIND - usize::from(exact.is_some());
+    rows.extend(exact);
+    rows.extend(matched_tasks.into_iter().take(titles).map(|(_, row)| row));
 
     rows
 }
@@ -305,6 +332,65 @@ mod tests {
         .expect("decodes");
         let rows = search("doing", &[status], &[]);
         assert!(!rows.iter().any(|row| row.kind == RowKind::List));
+    }
+
+    /// Task `56bf4598`: typing a task's own id finds that task, as the search box already does.
+    /// `awtd-1405` shares no letters with the title, so fuzzy matching alone finds nothing.
+    #[test]
+    fn task_56bf4598_an_identifier_finds_its_task() {
+        let mut numbered = task("t1", "Reply routing");
+        numbered.identifier = Some("AWTD-1405".into());
+
+        let rows = search("awtd-1405", &[], &[numbered]);
+        let found = rows
+            .iter()
+            .find(|row| row.kind == RowKind::Task)
+            .expect("the task with that identifier");
+        assert_eq!(found.id, "t1");
+    }
+
+    /// Task `56bf4598`: the exact id is the answer, so it outranks a title that merely happens to
+    /// contain those characters — `AWTD-14050` fuzzy-matches `awtd-1405` as a subsequence.
+    #[test]
+    fn task_56bf4598_an_identifier_outranks_a_title_that_looks_like_one() {
+        let lookalike = task("t1", "AWTD-14050 follow-up");
+        let mut numbered = task("t2", "Reply routing");
+        numbered.identifier = Some("AWTD-1405".into());
+
+        let rows = search("awtd-1405", &[], &[lookalike, numbered]);
+        let tasks: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.kind == RowKind::Task)
+            .map(|row| row.id.as_str())
+            .collect();
+        assert_eq!(tasks.first(), Some(&"t2"), "the exact id comes first");
+        assert!(tasks.contains(&"t1"), "the title match is still offered");
+    }
+
+    /// Task `56bf4598`: a task whose title also carries its id is one task, not two rows.
+    #[test]
+    fn task_56bf4598_an_identifier_hit_is_not_listed_twice() {
+        let mut numbered = task("t1", "AWTD-1405 reply routing");
+        numbered.identifier = Some("AWTD-1405".into());
+
+        let rows = search("awtd-1405", &[], &[numbered]);
+        let hits = rows
+            .iter()
+            .filter(|row| row.kind == RowKind::Task && row.id == "t1")
+            .count();
+        assert_eq!(hits, 1);
+    }
+
+    /// Task `56bf4598`: a finished task stays out, whichever way it was found. The palette is for
+    /// reaching live work; search is where completed work lives.
+    #[test]
+    fn task_56bf4598_a_finished_task_is_not_found_by_its_identifier_either() {
+        let mut done = task("t1", "Reply routing");
+        done.identifier = Some("AWTD-1405".into());
+        done.completed = true;
+
+        let rows = search("awtd-1405", &[], &[done]);
+        assert!(!rows.iter().any(|row| row.kind == RowKind::Task));
     }
 
     /// An empty query fills the palette rather than emptying it: a blank box teaches nobody what

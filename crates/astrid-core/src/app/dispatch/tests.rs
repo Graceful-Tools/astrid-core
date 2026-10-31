@@ -1313,6 +1313,30 @@ async fn aitd459_search_leaves_subtasks_out_as_ios_does() {
     assert_eq!(found["value"]["rows"][0]["title"], "Flights home");
 }
 
+/// Task `56bf4598`: the command resolves a bare identifier, which only `search_tasks` was tested
+/// for. The server is the only minter of an id, so the cache is seeded rather than `createTask`
+/// being asked for one.
+#[tokio::test]
+async fn task_56bf4598_search_resolves_a_bare_identifier() {
+    let app = app_with(StubTransport::new());
+    let mut numbered = crate::model::Task::new("t1", "Reply routing");
+    numbered.identifier = Some("AWTD-1405".into());
+    app.store.upsert_task(&numbered).expect("stores");
+    app.store
+        .upsert_task(&crate::model::Task::new("t2", "Buy milk"))
+        .expect("stores");
+
+    // Lowercase in: one identifier must not resolve two different ways.
+    let found = call(&app, json!({ "kind": "searchTasks", "query": "awtd-1405" })).await;
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["value"]["total"], 1);
+    assert_eq!(found["value"]["rows"][0]["title"], "Reply routing");
+
+    // An id nobody minted is not a search for the words either.
+    let missing = call(&app, json!({ "kind": "searchTasks", "query": "awtd-9999" })).await;
+    assert_eq!(missing["value"]["total"], 0);
+}
+
 /// An app whose conversation the test can read back.
 fn app_and_transport(transport: StubTransport) -> (App, std::sync::Arc<StubTransport>) {
     let transport = std::sync::Arc::new(transport);
@@ -2769,6 +2793,28 @@ async fn the_palette_finds_commands_lists_and_tasks() {
         .expect("rows")
         .iter()
         .any(|row| row["title"] == "Home"));
+}
+
+/// Task `56bf4598`: typing a task's id into the palette finds that task. It used to match titles
+/// only, so an id — which shares no letters with the title — found nothing, while the search box
+/// right next to it resolved the same text.
+#[tokio::test]
+async fn task_56bf4598_the_palette_finds_a_task_by_its_identifier() {
+    let app = app_with(StubTransport::new());
+    let mut numbered = crate::model::Task::new("t1", "Reply routing");
+    numbered.identifier = Some("AWTD-1405".into());
+    app.store.upsert_task(&numbered).expect("stores");
+
+    let found = call(&app, json!({ "kind": "palette", "query": "awtd-1405" })).await;
+    assert_eq!(found["ok"], true, "{found}");
+    let tasks: Vec<&serde_json::Value> = found["value"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter(|row| row["kind"] == "task")
+        .collect();
+    assert_eq!(tasks.len(), 1, "{found}");
+    assert_eq!(tasks[0]["id"], "t1");
 }
 
 /// The settings screen draws from the cache and offers the same reminder offsets the per-task
