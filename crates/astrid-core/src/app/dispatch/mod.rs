@@ -1376,6 +1376,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
             answer(app.context.boards().delete_project(&project_id).await)
         }
         Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
+        Command::FeedbackListId => answer(app.context.account().feedback_list_id()),
         Command::Notifications => inbox_response(app.context.notifications().inbox()),
         Command::RefreshNotifications => {
             inbox_response(app.context.notifications().refresh().await)

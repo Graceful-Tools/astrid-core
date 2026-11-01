@@ -1442,6 +1442,9 @@ pub enum Command {
     },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
+    /// The public list this deployment's Report an Issue opens, from the cached capabilities, or
+    /// `null` when it names none — then the shell opens the web instead (task `a4352b30`).
+    FeedbackListId,
     /// The inbox, from the cache: assigned, mentioned, replied, commented, status changed,
     /// completed (web task ab0572cb).
     Notifications,

@@ -657,6 +657,36 @@ impl AccountService {
         Ok(direct.or_else(grouped).unwrap_or(false))
     }
 
+    /// The public list this deployment's **Report an Issue** opens, if it names one.
+    ///
+    /// Brand config, and deliberately read at runtime rather than built in (task `a4352b30`). The
+    /// sign-in scheme is the other kind: the installer registers it with the OS, so it has to be
+    /// known before the app talks to anything, and it lives on [`crate::app::Config`]. A feedback
+    /// list id is a **row in this deployment's database**, so a value compiled into the binary is
+    /// only right for whichever server it was built against. iOS had Astrid's own production id in
+    /// `Constants.swift`, which sent a white-label build's users to Astrid's feedback list.
+    ///
+    /// **`None` means this deployment has no in-app feedback list** — open the web instead, which
+    /// is what Android already does. That is the answer on every deployment that has not shipped
+    /// `brand.feedbackListId` yet, so it is the case worth getting right, and it is also what a
+    /// white-label brand profile sets the value to the empty string to say. A blank id is not an
+    /// id: it would have the shell open a list that cannot exist.
+    ///
+    /// Read from the `brand` block, not from anywhere a key of that name happens to appear.
+    /// [`Self::supports`] searches every group because a capability is a bare boolean wherever it
+    /// sits; a list id is a specific field of a specific block, and finding it loose at the top
+    /// level would mean reading something else.
+    pub fn feedback_list_id(&self) -> Result<Option<String>> {
+        Ok(self
+            .capabilities()?
+            .get("brand")
+            .and_then(|brand| brand.get("feedbackListId"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned))
+    }
+
     pub fn capabilities(&self) -> Result<serde_json::Value> {
         Ok(self
             .context
@@ -948,6 +978,71 @@ mod tests {
             !fixture.service.supports("somethingLater").expect("reads"),
             "a capability nobody has heard of is not a capability"
         );
+    }
+
+    /// Report an Issue opens the deployment's OWN feedback list, never a hardcoded one (task
+    /// `a4352b30`). iOS carried Astrid's production list id in `Constants.swift`, so a white-label
+    /// build sent a partner's users to Astrid's feedback list — filing bugs onto someone else's
+    /// board and reading other people's. The id is brand config now, and a list id is a row in the
+    /// deployment's database, so the deployment is the only thing that can name it: it arrives in
+    /// the `brand` block of `/api/v1/capabilities` rather than being built in.
+    #[tokio::test]
+    async fn a4352b30_the_feedback_list_is_the_deployments_own_or_there_is_none() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/capabilities",
+            200,
+            json!({ "capabilities": {
+                "auth": { "google": true },
+                "brand": { "appName": "Acme Tasks", "feedbackListId": "list-acme-feedback" }
+            } }),
+        ));
+        assert_eq!(
+            fixture.service.feedback_list_id().expect("reads"),
+            None,
+            "before the first refresh nothing is known, and guessing would be Astrid's own list"
+        );
+
+        fixture
+            .service
+            .refresh_capabilities()
+            .await
+            .expect("refreshes");
+        assert_eq!(
+            fixture
+                .service
+                .feedback_list_id()
+                .expect("reads")
+                .as_deref(),
+            Some("list-acme-feedback")
+        );
+    }
+
+    /// **Absent means there is no in-app feedback list**, which is what every deployment running
+    /// today answers, and the shells open the web instead. Blank is the same fact said differently
+    /// — it is how a white-label brand profile turns the feature off — and must not become a list
+    /// id of `""` that the shell then tries to open.
+    #[tokio::test]
+    async fn a4352b30_a_deployment_that_names_no_feedback_list_has_none() {
+        let fixture = fixture(StubTransport::new());
+
+        for capabilities in [
+            json!({ "auth": { "google": true } }),
+            json!({ "brand": { "appName": "Astrid" } }),
+            json!({ "brand": { "feedbackListId": "" } }),
+            json!({ "brand": { "feedbackListId": "   " } }),
+            json!({ "brand": { "feedbackListId": false } }),
+            json!({ "feedbackListId": "not-in-the-brand-block" }),
+        ] {
+            fixture
+                .store
+                .set_metadata(CAPABILITIES_KEY, &capabilities.to_string())
+                .expect("stores");
+            assert_eq!(
+                fixture.service.feedback_list_id().expect("reads"),
+                None,
+                "{capabilities} names no feedback list"
+            );
+        }
     }
 
     /// The settings set grows on the server between client releases. A typed struct would drop
