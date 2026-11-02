@@ -48,7 +48,7 @@ jobs:
           - advisories
           - licenses bans sources
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.checks }}
@@ -71,7 +71,7 @@ jobs:
           - name: windows
             runner: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The toolchain and its components come from rust-toolchain.toml, so there is one place
       # that decides which Rust this crate builds with.
@@ -101,7 +101,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Add the wasm target
         run: rustup target add wasm32-unknown-unknown
@@ -128,7 +128,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Packages named explicitly: the action's default list still includes the retired `tools`.
       - uses: android-actions/setup-android@v3
         with:
@@ -159,7 +159,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: The two files must name one version
         id: msrv
@@ -211,13 +211,13 @@ jobs:
     steps:
       # The whole history: `merge-base --is-ancestor` cannot be answered from a shallow clone, and
       # answering it wrong would fail every pin at once.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: astrid-core
 
       # Public, so this one needs no token.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
@@ -231,21 +231,21 @@ jobs:
       # Each step is skipped when the secret is absent, and `check-pins` then reports those rows as
       # unchecked rather than failing — a fork's pull request gets no secrets at all, and a gate
       # that goes red for a reason the contributor cannot fix is worse than the gap it closed.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
         with:
           repository: Graceful-Tools/astrid-windows
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-windows
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
         with:
           repository: Graceful-Tools/astrid-ios
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-ios
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
         with:
           repository: Graceful-Tools/astrid-android
@@ -269,11 +269,11 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: astrid-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
