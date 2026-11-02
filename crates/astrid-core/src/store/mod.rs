@@ -12,9 +12,35 @@
 //!
 //! ## Threading
 //!
-//! One connection behind a mutex, and every method is synchronous. SQLite calls here are
-//! sub-millisecond; a pool would buy contention and an async API would buy await points, and
-//! neither buys speed. The mutex is never held across anything that can block.
+//! Two connections, and every method is still synchronous.
+//!
+//! **A writer** behind a mutex, which every write and every transaction takes, and **a reader**
+//! opened `SQLITE_OPEN_READ_ONLY` behind its own, which every read takes. The split is the point:
+//! with WAL on, a reader on its own connection sees the last committed snapshot and never waits
+//! for a writer, so a sync pass applying a fetched page inside one transaction
+//! (`sync/mod.rs`, AITD-454) no longer stalls the list being drawn at the time. With one shared
+//! connection it did, for as long as the pass took — task `bb20ca56`, and the reason WAL bought
+//! nothing before.
+//!
+//! An in-memory cache has **no** reader: two connections to `:memory:` are two separate, empty
+//! databases, so [`Store::in_memory`] leaves `reader` as `None` and reads fall back to the
+//! writer. Every test that does not need the contention therefore behaves exactly as before.
+//!
+//! **Why the methods stay synchronous, and where `spawn_blocking` goes.** A cache read is
+//! sub-millisecond and, now, uncontended; handing each one to `tokio::task::spawn_blocking` would
+//! add a thread hop and a `Send` bound per call and make `rowsForList` slower, against the one
+//! bound `tests/performance.rs` calls "not generous". So the store keeps a plain blocking API and
+//! the *caller* decides: the long, genuinely blocking store work — sync's per-phase apply — is
+//! what runs on `spawn_blocking`, at the one place that work is issued from async code. A
+//! dedicated store thread fed by a channel was the alternative; it was rejected because every
+//! call site here is synchronous, so a channel would make each one block on `recv` from a tokio
+//! worker — the same stall with an extra hop — unless the whole API went async, which the FFI
+//! door (`run_json`) is explicitly not allowed to change.
+//!
+//! The mutex is never held across anything that can block, `busy_timeout` covers the case where
+//! another process has the write lock, and a poisoned mutex is [`StoreError::Lock`] rather than a
+//! panic — this code runs inside an FFI call, and unwinding across that boundary takes the shell
+//! down with nothing to report.
 
 pub mod schema;
 pub mod session;
@@ -36,6 +62,12 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("a cached row could not be read back: {0}")]
     Corrupt(String),
+    /// A write panicked while it held the connection, so the mutex is poisoned and nothing can be
+    /// trusted to read it. An error rather than a panic of its own: this is reached from inside an
+    /// FFI call, and unwinding across that boundary takes the shell down with no diagnosis
+    /// (task bb20ca56).
+    #[error("the cache is unusable because an earlier write failed part-way")]
+    Lock,
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -69,7 +101,13 @@ pub struct TaskSummary {
 }
 
 pub struct Store {
+    /// Every write and every transaction. One at a time, by the mutex.
     connection: Mutex<Connection>,
+    /// Every read, on a connection that cannot write and so never waits for the writer.
+    ///
+    /// `None` for an in-memory cache, where a second connection would be a second database; reads
+    /// then fall back to [`Store::connection`]. See the module header.
+    reader: Option<Mutex<Connection>>,
     /// Who may write the signed-in account's data, and when sign-out has closed that — see
     /// [`session`].
     session: session::SessionGate,
@@ -81,30 +119,57 @@ impl Store {
         &self.session
     }
 
+    /// How long a statement waits for another connection's write lock before giving up.
+    ///
+    /// Within this process the mutex already serialises writers, so this is for the case the
+    /// mutex cannot see: a second process on the same cache file — the app and its UI-test build,
+    /// or two copies started at once. Without it such a statement failed instantly with
+    /// `SQLITE_BUSY` (task `bb20ca56`).
+    const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
     /// Open (and migrate) the cache at `path`, creating it if it is not there.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
         let connection = Connection::open(path)?;
-        Self::prepare(connection)
+        let mut store = Self::prepare(connection)?;
+        // After `prepare`, so the file and its schema exist and WAL is on before anything tries
+        // to read them. A read-only connection to a WAL database needs the `-shm` file, which the
+        // writer above has now created and keeps alive.
+        let reader = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        reader.busy_timeout(Self::BUSY_TIMEOUT)?;
+        reader.pragma_update(None, "foreign_keys", "ON")?;
+        store.reader = Some(Mutex::new(reader));
+        Ok(store)
     }
 
     /// A cache that lives only as long as the process. Used by every test, and by the shell's
     /// UI-test build, which must never touch the real user's data.
+    ///
+    /// Single-connection by necessity: a second connection to `:memory:` is a second, empty
+    /// database, so there is no reader to open and reads go to the writer.
     pub fn in_memory() -> Result<Self> {
         Self::prepare(Connection::open_in_memory()?)
     }
 
     fn prepare(mut connection: Connection) -> Result<Self> {
         // WAL so a read never blocks behind a write: sync writes while the user is scrolling is
-        // the normal case, not the exceptional one.
+        // the normal case, not the exceptional one. It buys that only in company with the
+        // read-only connection `open` adds — on one shared connection the mutex serialised them
+        // anyway (task `bb20ca56`).
         connection.pragma_update(None, "journal_mode", "WAL")?;
         // NORMAL rather than FULL. The cache is a cache: the Outbox is what makes a write durable,
         // and paying an fsync per statement to protect data the server already has is the wrong
         // trade on a laptop with a spinning disk.
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
+        connection.busy_timeout(Self::BUSY_TIMEOUT)?;
         schema::migrate(&mut connection)?;
         Ok(Store {
             connection: Mutex::new(connection),
+            reader: None,
             session: session::SessionGate::default(),
         })
     }
@@ -112,16 +177,31 @@ impl Store {
     /// Run `work` inside a transaction. Used by sync, which must never leave half a snapshot
     /// visible to a list that is being drawn at the time.
     pub fn transaction<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let mut guard = self.connection.lock().expect("cache lock");
+        let mut guard = self.connection.lock().map_err(|_| StoreError::Lock)?;
         let transaction = guard.transaction()?;
         let value = work(&transaction)?;
         transaction.commit()?;
         Ok(value)
     }
 
+    /// The writer. Every method that changes a row goes through here.
     fn with<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let guard = self.connection.lock().expect("cache lock");
+        let guard = self.connection.lock().map_err(|_| StoreError::Lock)?;
         work(&guard)
+    }
+
+    /// The reader, falling back to the writer when there is none (an in-memory cache).
+    ///
+    /// Reads must come through here rather than [`Store::with`] so that drawing a list does not
+    /// wait for a sync pass to commit — see the module header.
+    fn read<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        match &self.reader {
+            Some(reader) => {
+                let guard = reader.lock().map_err(|_| StoreError::Lock)?;
+                work(&guard)
+            }
+            None => self.with(work),
+        }
     }
 
     // ─── Tasks ────────────────────────────────────────────────────────────────────────────────
@@ -145,11 +225,11 @@ impl Store {
     }
 
     pub fn task(&self, id: &str) -> Result<Option<Task>> {
-        self.with(|connection| task_in(connection, id))
+        self.read(|connection| task_in(connection, id))
     }
 
     pub fn tasks(&self) -> Result<Vec<Task>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare("SELECT json FROM tasks")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
@@ -159,11 +239,11 @@ impl Store {
     /// The tasks made here that the server has not answered for yet — a range on the primary
     /// key, so a pass does not decode every task to find the few it wants.
     pub fn temp_tasks(&self) -> Result<Vec<Task>> {
-        self.with(temp_tasks_in)
+        self.read(temp_tasks_in)
     }
 
     pub fn tasks_in_list(&self, list_id: &str) -> Result<Vec<Task>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare(
                 "SELECT t.json FROM tasks t
                  JOIN task_lists_membership m ON m.task_id = t.id
@@ -177,7 +257,7 @@ impl Store {
     /// Every cached task that has a parent — what a list splices under its rows. On the parent
     /// index, so a list does not decode the whole account to find a handful of subtasks.
     pub fn subtasks(&self) -> Result<Vec<Task>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement =
                 connection.prepare("SELECT json FROM tasks WHERE parent_task_id IS NOT NULL")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
@@ -187,7 +267,7 @@ impl Store {
 
     /// The list view's read: columns only, no JSON.
     pub fn summaries_in_list(&self, list_id: &str) -> Result<Vec<TaskSummary>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare(&format!(
                 "SELECT {SUMMARY_COLUMNS} FROM tasks t
                  JOIN task_lists_membership m ON m.task_id = t.id
@@ -199,7 +279,7 @@ impl Store {
     }
 
     pub fn summaries(&self) -> Result<Vec<TaskSummary>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement =
                 connection.prepare(&format!("SELECT {SUMMARY_COLUMNS} FROM tasks t"))?;
             let rows = statement.query_map([], read_summary)?;
@@ -209,7 +289,7 @@ impl Store {
 
     /// The ids of the lists a task belongs to.
     pub fn list_ids_for_task(&self, task_id: &str) -> Result<Vec<String>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection
                 .prepare("SELECT list_id FROM task_lists_membership WHERE task_id = ?1")?;
             let rows = statement.query_map([task_id], |row| row.get::<_, String>(0))?;
@@ -237,11 +317,11 @@ impl Store {
     }
 
     pub fn list(&self, id: &str) -> Result<Option<TaskList>> {
-        self.with(|connection| list_in(connection, id))
+        self.read(|connection| list_in(connection, id))
     }
 
     pub fn lists(&self) -> Result<Vec<TaskList>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare("SELECT json FROM lists")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
@@ -282,7 +362,7 @@ impl Store {
     }
 
     pub fn projects(&self) -> Result<Vec<Project>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare("SELECT json FROM projects")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
@@ -302,7 +382,7 @@ impl Store {
     }
 
     pub fn user(&self, id: &str) -> Result<Option<User>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let json: Option<String> = connection
                 .query_row("SELECT json FROM users WHERE id = ?1", [id], |row| {
                     row.get(0)
@@ -314,7 +394,7 @@ impl Store {
 
     /// Every user we hold. Small by construction — the people on your lists, not a directory.
     pub fn users(&self) -> Result<Vec<User>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare("SELECT json FROM users")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
@@ -353,7 +433,7 @@ impl Store {
 
     /// A task's comments, oldest first — the order they are read in.
     pub fn comments_for_task(&self, task_id: &str) -> Result<Vec<Comment>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare(
                 "SELECT json FROM comments WHERE task_id = ?1 ORDER BY created_at ASC, id ASC",
             )?;
@@ -363,7 +443,7 @@ impl Store {
     }
 
     pub fn comment(&self, id: &str) -> Result<Option<Comment>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let json: Option<String> = connection
                 .query_row("SELECT json FROM comments WHERE id = ?1", [id], |row| {
                     row.get(0)
@@ -399,7 +479,7 @@ impl Store {
     }
 
     pub fn channels(&self) -> Result<Vec<ChatChannel>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare("SELECT json FROM chat_channels")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
@@ -439,7 +519,7 @@ impl Store {
 
     /// A channel's messages, oldest first.
     pub fn messages_in_channel(&self, channel_id: &str) -> Result<Vec<ChatMessage>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection.prepare(
                 "SELECT json FROM chat_messages WHERE channel_id = ?1
                  ORDER BY created_at ASC, id ASC",
@@ -475,7 +555,7 @@ impl Store {
     /// The server id for a temporary one, if it has been delivered. Follows a chain, because a
     /// temporary id can in principle be remapped twice; a cycle stops rather than hangs.
     pub fn resolve_id(&self, id: &str) -> Result<String> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut current = id.to_string();
             for _ in 0..8 {
                 let next: Option<String> = connection
@@ -544,7 +624,7 @@ impl Store {
     }
 
     pub fn metadata(&self, key: &str) -> Result<Option<String>> {
-        self.with(|connection| {
+        self.read(|connection| {
             Ok(connection
                 .query_row("SELECT value FROM metadata WHERE key = ?1", [key], |row| {
                     row.get(0)
@@ -558,7 +638,7 @@ impl Store {
     /// For per-task marks read in one pass rather than one query per task — the reminder loop
     /// reads the snooze marks this way on every tick.
     pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
-        self.with(|connection| {
+        self.read(|connection| {
             let mut statement = connection
                 .prepare("SELECT key, value FROM metadata WHERE substr(key, 1, length(?1)) = ?1")?;
             let rows = statement
@@ -858,11 +938,209 @@ fn replace_echoed(
 mod tests {
     use super::*;
     use crate::model::Repeating;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     fn task_in_lists(id: &str, lists: &[&str]) -> Task {
         let mut task = Task::new(id, format!("Task {id}"));
         task.list_ids = Some(lists.iter().map(|l| l.to_string()).collect());
         task
+    }
+
+    /// A directory for a test that needs the cache to be a real file.
+    ///
+    /// The contention these tests measure cannot exist on `:memory:`, where a second connection is
+    /// a second, empty database. Hand-rolled rather than `tempfile`, which would be a dependency
+    /// (and a `cargo deny` entry) bought for four lines.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn named(label: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("a clock set after 1970")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("astrid-store-{label}-{nanos}"));
+            std::fs::create_dir_all(&path).expect("a temporary directory");
+            TempDir(path)
+        }
+
+        fn cache(&self) -> std::path::PathBuf {
+            self.0.join("cache.sqlite")
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            // Best effort: on Windows the WAL sidecars may still be held for an instant after the
+            // connections close, and a test that failed to clean its temp directory has not found
+            // a bug worth failing for.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn list_named(id: &str, name: &str) -> TaskList {
+        serde_json::from_value(serde_json::json!({ "id": id, "name": name })).expect("a list")
+    }
+
+    /// Task `bb20ca56`: every write still goes to the writer, and the reader sees what it commits.
+    ///
+    /// This is the guard the rest of the suite cannot be: every other test opens
+    /// [`Store::in_memory`], which has no reader and sends reads back to the writer, so a write
+    /// method accidentally pointed at the read-only connection would pass all 800 of them and
+    /// fail only on a real user's disk — with `SQLITE_READONLY` on something as ordinary as
+    /// ticking a task off. It walks the single-statement writers, which are the ones at risk,
+    /// and reads each back through the reader.
+    #[test]
+    fn bb20ca56_every_write_reaches_the_writer_on_a_real_file() {
+        let directory = TempDir::named("bb20ca56-writes");
+        let store = Store::open(directory.cache()).expect("opens");
+        assert!(store.reader.is_some(), "an on-disk cache has a reader");
+
+        // Writes through `with`, one statement each.
+        store
+            .upsert_list(&list_named("l1", "Everything"))
+            .expect("stores a list");
+        store
+            .upsert_task(&task_in_lists("t1", &["l1"]))
+            .expect("stores a task");
+        store.set_metadata("cursor", "1").expect("stores metadata");
+        store
+            .record_id_mapping(
+                "temp_1",
+                "t1",
+                date::parse("2026-09-07T12:00:00Z").expect("a date"),
+            )
+            .expect("stores a mapping");
+        // And a write through `transaction`.
+        store
+            .upsert_tasks(&[task_in_lists("t2", &["l1"]), task_in_lists("t3", &["l1"])])
+            .expect("stores tasks in a transaction");
+
+        // Read back through the reader: a committed write has to be visible on the other
+        // connection, which is the half of WAL that a single connection never exercised.
+        assert_eq!(
+            store.metadata("cursor").expect("reads").as_deref(),
+            Some("1")
+        );
+        assert_eq!(store.resolve_id("temp_1").expect("reads"), "t1");
+        assert!(store.list("l1").expect("reads").is_some());
+        let mut ids: Vec<String> = store
+            .summaries_in_list("l1")
+            .expect("reads")
+            .into_iter()
+            .map(|summary| summary.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["t1", "t2", "t3"]);
+
+        // The deletes are writes too, and the reader must see them go.
+        store.delete_task("t2").expect("deletes a task");
+        store.delete_list("l1").expect("deletes a list");
+        assert!(store.task("t2").expect("reads").is_none());
+        assert!(store.list("l1").expect("reads").is_none());
+    }
+
+    /// How long a read may take while a thousand-row apply holds the write transaction open.
+    ///
+    /// The bound task `bb20ca56` names. Generous for a read that does not wait at all — this one
+    /// is sub-millisecond on any machine — and impossible for one that does.
+    const READ_BUDGET: Duration = Duration::from_millis(50);
+
+    /// Task `bb20ca56`: drawing a list must not wait for a sync pass to finish writing.
+    ///
+    /// Sync applies a whole fetched page inside one transaction (`sync/mod.rs`, AITD-454). With a
+    /// single connection behind one mutex that meant `rowsForList` queued behind every row of it,
+    /// so a pass arriving while somebody scrolled stalled the list for as long as the pass took.
+    ///
+    /// The apply here holds its transaction open deliberately. A real one is slow because it is
+    /// slow; a test that raced a genuinely fast apply would pass whether or not the reader waits.
+    #[test]
+    fn bb20ca56_a_read_does_not_wait_for_a_sync_apply() {
+        const ROWS: usize = 1_000;
+        /// Long enough that a read which queues behind the apply cannot come in under the budget.
+        const HELD: Duration = Duration::from_millis(400);
+
+        let directory = TempDir::named("bb20ca56-apply");
+        let store = Arc::new(Store::open(directory.cache()).expect("opens"));
+        store
+            .upsert_list(&list_named("l1", "Everything"))
+            .expect("stores");
+
+        let (applying, apply_started) = std::sync::mpsc::channel();
+        let apply = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let tasks: Vec<Task> = (0..ROWS)
+                    .map(|index| task_in_lists(&format!("t{index}"), &["l1"]))
+                    .collect();
+                store
+                    .transaction(|connection| {
+                        for task in &tasks {
+                            upsert_task_in(connection, task)?;
+                        }
+                        // Every row is in and the transaction is still open: this is the instant
+                        // at which somebody scrolling used to be stalled.
+                        applying.send(()).expect("a reader waiting to be let go");
+                        std::thread::sleep(HELD);
+                        Ok(())
+                    })
+                    .expect("applies");
+            })
+        };
+
+        apply_started.recv().expect("the apply to reach its rows");
+        let at = Instant::now();
+        let rows = store.summaries_in_list("l1").expect("reads");
+        let elapsed = at.elapsed();
+        apply.join().expect("the apply to finish");
+
+        // Printed like the performance suite's numbers, so `--nocapture` says what this machine
+        // actually does.
+        println!("summaries_in_list during a {ROWS}-row apply: {elapsed:?}");
+        assert!(
+            elapsed < READ_BUDGET,
+            "a read took {elapsed:?} while a {ROWS}-row apply held the write transaction, \
+             which is more than the {READ_BUDGET:?} budget"
+        );
+        // The apply had not committed, so a reader correctly sees the account as it was. What is
+        // being asserted is that it got an answer at all, not which answer.
+        assert!(
+            rows.is_empty(),
+            "an uncommitted apply is not visible to a reader"
+        );
+    }
+
+    /// Task `bb20ca56`: a poisoned cache lock is an error, not a panic inside the FFI call.
+    ///
+    /// `lock().expect("cache lock")` unwound across the language boundary, which is undefined
+    /// behaviour on the shell's side of it and takes the app down with no diagnosis. One write
+    /// that panicked used to make every later read do the same.
+    #[test]
+    fn bb20ca56_a_poisoned_cache_lock_is_an_error_not_a_panic() {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+
+        let poisoner = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                store.transaction(|_| -> Result<()> { panic!("a write that panics mid-statement") })
+            })
+        };
+        // The panic is this test's own doing; the default hook would print its backtrace and read
+        // like a failure.
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let panicked = poisoner.join().is_err();
+        std::panic::set_hook(hook);
+        assert!(
+            panicked,
+            "the writing thread panicked and poisoned the lock"
+        );
+
+        match store.tasks() {
+            Err(StoreError::Lock) => {}
+            other => panic!("a read after a poisoned lock answered {other:?}"),
+        }
     }
 
     /// The cache stores what this build understood, not the bytes that arrived. Stated as a test

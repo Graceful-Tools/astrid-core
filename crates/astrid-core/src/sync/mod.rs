@@ -103,6 +103,45 @@ impl SyncReport {
     pub fn changed_anything(&self) -> bool {
         !self.changed_task_ids.is_empty() || !self.changed_list_ids.is_empty()
     }
+
+    /// Fold one phase's counts into the pass's.
+    ///
+    /// Each apply phase runs on a blocking thread (task `bb20ca56`) and so cannot hold a borrow of
+    /// the pass's report; it fills its own and the pass absorbs it. Only the fields an apply sets
+    /// are folded — `fetched`, `skipped`, `delta` and `delivered` are the pass's own answer about
+    /// itself, not any one phase's.
+    fn absorb(&mut self, phase: SyncReport) {
+        self.lists_added += phase.lists_added;
+        self.lists_updated += phase.lists_updated;
+        self.lists_deleted += phase.lists_deleted;
+        self.tasks_added += phase.tasks_added;
+        self.tasks_updated += phase.tasks_updated;
+        self.tasks_deleted += phase.tasks_deleted;
+        self.tasks_unchanged += phase.tasks_unchanged;
+        self.changed_task_ids.extend(phase.changed_task_ids);
+        self.changed_list_ids.extend(phase.changed_list_ids);
+    }
+}
+
+/// Run one apply phase on a blocking thread, off the tokio worker.
+///
+/// Task `bb20ca56`: an apply spans every row of every fetched page inside one transaction
+/// (AITD-454), which is the one piece of store work long enough to matter — a read is
+/// sub-millisecond and has its own connection, so neither is worth a thread hop. See the
+/// `store` module header for why the split falls here and not inside `Store`.
+///
+/// A `JoinError` means the apply panicked while it held the connection, which is exactly the state
+/// [`crate::store::StoreError::Lock`] describes: the mutex is poisoned and the cache cannot be
+/// trusted. It is reported as that rather than re-panicked, because this unwinds through an FFI
+/// call.
+async fn applying<F>(work: F) -> Result<SyncReport, ServiceError>
+where
+    F: FnOnce() -> crate::store::Result<SyncReport> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(applied) => Ok(applied?),
+        Err(_) => Err(crate::store::StoreError::Lock.into()),
+    }
 }
 
 /// How many rows a full pass asks about one by one before deleting them. More wait for the next.
@@ -302,117 +341,150 @@ impl SyncManager {
         // is read too. Read under the wrong name, a list deleted elsewhere stayed for a day.
         let mut deleted_lists = ids_named(&body, endpoints::envelope::DELETED_TASKS);
         deleted_lists.extend(ids_named(&body, endpoints::envelope::DELETED_LISTS));
-        let lists =
-            crate::model::lenient::<TaskList>(unwrap_envelope(body, endpoints::envelope::LISTS));
+        let lists = Arc::new(crate::model::lenient::<TaskList>(unwrap_envelope(
+            body,
+            endpoints::envelope::LISTS,
+        )));
         report_skips("lists", &lists.skipped);
         // One transaction for the lists, with nothing awaited inside it: the lock is never held
         // across the network (AITD-454). Row by row, each statement committed on its own, and a
         // list being drawn could see half a pass.
-        self.store.transaction(|connection| {
-            // Read once, and only when a list is to be updated — the overlay of membership
-            // changes this device has not sent yet.
-            let mut journal: Option<Vec<crate::outbox::Entry>> = None;
-            for list in &lists.items {
-                if deleting_lists.contains(&list.id) {
-                    continue;
-                }
-                match store::list_in(connection, &list.id)? {
-                    Some(cached) => {
-                        if is_newer(list.updated_at, cached.updated_at) {
-                            // The collection never carries the default due time (the single-list
-                            // read does); its absence here is not a cleared one.
-                            let mut list = list.clone();
-                            if list.default_due_time.is_none() {
-                                list.default_due_time = cached.default_due_time.clone();
+        //
+        // On a blocking thread, because it spans every fetched row (task bb20ca56). The rows are
+        // shared by `Arc` rather than moved: the absence pruning below still needs them.
+        let applied = applying({
+            let store = self.store.clone();
+            let lists = lists.clone();
+            let deleting_lists = deleting_lists.clone();
+            move || {
+                let mut report = SyncReport::default();
+                store.transaction(|connection| {
+                    // Read once, and only when a list is to be updated — the overlay of membership
+                    // changes this device has not sent yet.
+                    let mut journal: Option<Vec<crate::outbox::Entry>> = None;
+                    for list in &lists.items {
+                        if deleting_lists.contains(&list.id) {
+                            continue;
+                        }
+                        match store::list_in(connection, &list.id)? {
+                            Some(cached) => {
+                                if is_newer(list.updated_at, cached.updated_at) {
+                                    // The collection never carries the default due time (the
+                                    // single-list read does); its absence here is not a cleared one.
+                                    let mut list = list.clone();
+                                    if list.default_due_time.is_none() {
+                                        list.default_due_time = cached.default_due_time.clone();
+                                    }
+                                    if journal.is_none() {
+                                        journal = Some(journal::all_in(connection)?);
+                                    }
+                                    let list = crate::services::members::with_pending_from(
+                                        journal.as_deref().unwrap_or_default(),
+                                        list,
+                                    );
+                                    store::upsert_list_in(connection, &list)?;
+                                    report.lists_updated += 1;
+                                    report.changed_list_ids.push(list.id.clone());
+                                }
                             }
-                            if journal.is_none() {
-                                journal = Some(journal::all_in(connection)?);
+                            None => {
+                                store::upsert_list_in(connection, list)?;
+                                report.lists_added += 1;
+                                report.changed_list_ids.push(list.id.clone());
                             }
-                            let list = crate::services::members::with_pending_from(
-                                journal.as_deref().unwrap_or_default(),
-                                list,
-                            );
-                            store::upsert_list_in(connection, &list)?;
-                            report.lists_updated += 1;
-                            report.changed_list_ids.push(list.id.clone());
                         }
                     }
-                    None => {
-                        store::upsert_list_in(connection, list)?;
-                        report.lists_added += 1;
-                        report.changed_list_ids.push(list.id.clone());
+                    for id in deleted_lists {
+                        if store::list_in(connection, &id)?.is_some() {
+                            store::delete_list_in(connection, &id)?;
+                            report.lists_deleted += 1;
+                            report.changed_list_ids.push(id);
+                        }
                     }
-                }
+                    Ok(())
+                })?;
+                Ok(report)
             }
-            for id in deleted_lists {
-                if store::list_in(connection, &id)?.is_some() {
-                    store::delete_list_in(connection, &id)?;
-                    report.lists_deleted += 1;
-                    report.changed_list_ids.push(id);
-                }
-            }
-            Ok(())
-        })?;
+        })
+        .await?;
+        report.absorb(applied);
 
         // Tasks come a page at a time, and the walk stops on a short page rather than on the
         // server's count — see `api::pagination` for why that count cannot be trusted.
         let (tasks, deleted_tasks, tasks_whole) = self.fetch_all_tasks(since_param).await?;
-        // The tasks, likewise in one transaction once every page is in hand.
-        self.store.transaction(|connection| {
-            // Tasks made here that the server has not answered for yet, by the idempotency key
-            // their create carries — so a pull that brings one's server copy first replaces it
-            // rather than showing it twice.
-            let made_here: std::collections::HashMap<String, String> =
-                store::temp_tasks_in(connection)?
-                    .into_iter()
-                    .filter_map(|task| task.client_request_id.clone().map(|key| (key, task.id)))
-                    .collect();
-            for task in &tasks {
-                if deleting_tasks.contains(&task.id) {
-                    continue;
-                }
-                if let Some(temp_id) = task
-                    .client_request_id
-                    .as_ref()
-                    .and_then(|key| made_here.get(key))
-                {
-                    store::record_id_mapping_in(
-                        connection,
-                        temp_id,
-                        &task.id,
-                        task.updated_at.unwrap_or(started_at),
-                    )?;
-                    store::delete_task_in(connection, temp_id)?;
-                    report.changed_task_ids.push(temp_id.clone());
-                }
-                match store::task_in(connection, &task.id)? {
-                    Some(cached) => {
-                        if is_newer(task.updated_at, cached.updated_at) {
-                            // Both sides may have moved. The resolver decides field by field.
-                            let resolved = conflict::resolve(&cached, task);
-                            store::upsert_task_in(connection, &resolved)?;
-                            report.tasks_updated += 1;
-                            report.changed_task_ids.push(task.id.clone());
-                        } else {
-                            report.tasks_unchanged += 1;
+        let tasks = Arc::new(tasks);
+        // The tasks, likewise in one transaction once every page is in hand — and likewise on a
+        // blocking thread, which for the task phase is the one that matters: this is the apply a
+        // thousand-row first pass spends its time in (task bb20ca56).
+        let applied = applying({
+            let store = self.store.clone();
+            let tasks = tasks.clone();
+            let deleting_tasks = deleting_tasks.clone();
+            move || {
+                let mut report = SyncReport::default();
+                store.transaction(|connection| {
+                    // Tasks made here that the server has not answered for yet, by the idempotency
+                    // key their create carries — so a pull that brings one's server copy first
+                    // replaces it rather than showing it twice.
+                    let made_here: std::collections::HashMap<String, String> =
+                        store::temp_tasks_in(connection)?
+                            .into_iter()
+                            .filter_map(|task| {
+                                task.client_request_id.clone().map(|key| (key, task.id))
+                            })
+                            .collect();
+                    for task in tasks.iter() {
+                        if deleting_tasks.contains(&task.id) {
+                            continue;
+                        }
+                        if let Some(temp_id) = task
+                            .client_request_id
+                            .as_ref()
+                            .and_then(|key| made_here.get(key))
+                        {
+                            store::record_id_mapping_in(
+                                connection,
+                                temp_id,
+                                &task.id,
+                                task.updated_at.unwrap_or(started_at),
+                            )?;
+                            store::delete_task_in(connection, temp_id)?;
+                            report.changed_task_ids.push(temp_id.clone());
+                        }
+                        match store::task_in(connection, &task.id)? {
+                            Some(cached) => {
+                                if is_newer(task.updated_at, cached.updated_at) {
+                                    // Both sides may have moved. The resolver decides field by
+                                    // field.
+                                    let resolved = conflict::resolve(&cached, task);
+                                    store::upsert_task_in(connection, &resolved)?;
+                                    report.tasks_updated += 1;
+                                    report.changed_task_ids.push(task.id.clone());
+                                } else {
+                                    report.tasks_unchanged += 1;
+                                }
+                            }
+                            None => {
+                                store::upsert_task_in(connection, task)?;
+                                report.tasks_added += 1;
+                                report.changed_task_ids.push(task.id.clone());
+                            }
                         }
                     }
-                    None => {
-                        store::upsert_task_in(connection, task)?;
-                        report.tasks_added += 1;
-                        report.changed_task_ids.push(task.id.clone());
+                    for id in deleted_tasks {
+                        if store::task_in(connection, &id)?.is_some() {
+                            store::delete_task_in(connection, &id)?;
+                            report.tasks_deleted += 1;
+                            report.changed_task_ids.push(id);
+                        }
                     }
-                }
+                    Ok(())
+                })?;
+                Ok(report)
             }
-            for id in deleted_tasks {
-                if store::task_in(connection, &id)?.is_some() {
-                    store::delete_task_in(connection, &id)?;
-                    report.tasks_deleted += 1;
-                    report.changed_task_ids.push(id);
-                }
-            }
-            Ok(())
-        })?;
+        })
+        .await?;
+        report.absorb(applied);
 
         // A full pass carries no tombstones, so what the server no longer has is known only by
         // its absence. Left alone it would stay forever — a list deleted on the web while this
