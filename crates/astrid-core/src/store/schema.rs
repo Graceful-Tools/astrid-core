@@ -9,9 +9,17 @@
 //! Each row keeps its whole model in `json`, and lifts out only the fields something queries,
 //! sorts or draws. That is not redundancy, it buys two different things:
 //!
-//! - **Speed.** The list view reads its columns and never touches `json`, so drawing 10,000 rows
-//!   costs one indexed scan rather than 10,000 JSON decodes. The M0 spike put a number on what
-//!   that has to fit inside; see `docs/M0_NOTES.md`.
+//! - **Speed.** A read that can be expressed in the columns costs an indexed lookup whatever the
+//!   account holds, where the same read over `json` costs a full parse per row. The M0 spike put a
+//!   number on what that has to fit inside; see `docs/M0_NOTES.md`.
+//!
+//!   **The list view is not yet one of those reads**, though this file claimed it was until task
+//!   `71ddacb8`. [`super::Store::summaries_in_list`] does read columns and nothing else, but its
+//!   only callers are tests: the filter and sort pipeline the list actually goes through
+//!   (`astrid_rules::filters`) takes whole `Task`s, so drawing a list still decodes every row it
+//!   considers and slices to the window afterwards. What the columns buy today is the bounded
+//!   reads around it — reminders, membership, the `temp_` range. Moving the list view itself onto
+//!   them is its own task.
 //! - **Room to move.** A field the models grow needs a model change and nothing else — it is
 //!   already in `json`, and the cache only needs a migration when something has to be *queried*
 //!   by it. Core Data made the opposite trade on Apple and every field cost a model version.
@@ -161,6 +169,22 @@ const MIGRATIONS: &[&str] = &[
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    "#,
+    // 2 — `reminderTime` lifted out of the JSON (task 71ddacb8).
+    //
+    // Migration 1 lifted out `due_date_time` but not this, and they are not the same field: a
+    // reminder fires on `reminderTime`, not on the due date (`astrid_rules::reminders`). Without a
+    // column the reminder loop had no way to ask "anything in the next half minute?" except to
+    // decode every task in the account, which it did every thirty seconds.
+    //
+    // The index is partial because the column is: most tasks have no reminder, and an index over
+    // ten thousand NULLs to find the four rows that matter is the thing being fixed. A query must
+    // say `reminder_time IS NOT NULL` itself for the planner to use it — the reads in
+    // `store::mod` do.
+    r#"
+    ALTER TABLE tasks ADD COLUMN reminder_time TEXT;
+    UPDATE tasks SET reminder_time = json_extract(json, '$.reminderTime');
+    CREATE INDEX tasks_by_reminder ON tasks(reminder_time) WHERE reminder_time IS NOT NULL;
     "#,
 ];
 

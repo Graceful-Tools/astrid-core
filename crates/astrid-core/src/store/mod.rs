@@ -72,10 +72,12 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-/// What the list view needs, and nothing else.
+/// What the list view needs, and nothing else — read straight from the indexed columns.
 ///
-/// Read straight from indexed columns, so drawing a list never decodes JSON. Anything a detail
-/// view needs comes from [`Store::task`], which does.
+/// **Not yet what the list view reads**, though this said it was until task `71ddacb8`:
+/// [`Store::summaries_in_list`] has only ever had test callers, because the filter and sort rules
+/// the list goes through (`astrid_rules::filters`) take whole `Task`s. Anything a detail view
+/// needs comes from [`Store::task`], which decodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSummary {
     pub id: String,
@@ -184,6 +186,16 @@ impl Store {
         Ok(value)
     }
 
+    /// Run `work` on the read connection.
+    ///
+    /// For the modules that own a table of their own — the Outbox's journal — so that a question
+    /// about one row can be asked without [`Store::transaction`], which takes the writer's lock
+    /// and opens a transaction to do it (task `71ddacb8`). Read-only by construction: on a real
+    /// cache this connection is `SQLITE_OPEN_READ_ONLY` and a write through it fails.
+    pub fn reading<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.read(work)
+    }
+
     /// The writer. Every method that changes a row goes through here.
     fn with<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let guard = self.connection.lock().map_err(|_| StoreError::Lock)?;
@@ -236,10 +248,115 @@ impl Store {
         })
     }
 
+    /// Whether the cache holds any task at all.
+    ///
+    /// `EXISTS`, so asking stops at the first row. The callers only ever wanted the question —
+    /// "is this cache empty?" — and answered it by decoding the account to call `.is_empty()` on
+    /// it (task `71ddacb8`).
+    pub fn has_any_tasks(&self) -> Result<bool> {
+        self.read(|connection| {
+            Ok(
+                connection.query_row("SELECT EXISTS (SELECT 1 FROM tasks)", [], |row| {
+                    row.get::<_, i64>(0)
+                })? != 0,
+            )
+        })
+    }
+
     /// The tasks made here that the server has not answered for yet — a range on the primary
     /// key, so a pass does not decode every task to find the few it wants.
     pub fn temp_tasks(&self) -> Result<Vec<Task>> {
         self.read(temp_tasks_in)
+    }
+
+    /// The unfinished tasks whose reminder falls in `from..=to`.
+    ///
+    /// What a reminder tick asks, in place of the whole account (task `71ddacb8`). On the partial
+    /// index from migration 2, which is why `IS NOT NULL` is spelled out: the planner only uses a
+    /// partial index for a query whose own `WHERE` implies its predicate.
+    ///
+    /// Completed tasks are excluded here rather than afterwards because
+    /// [`astrid_rules::reminders::due_now`] drops them anyway — the filter belongs wherever it can
+    /// be applied before a row is decoded.
+    pub fn tasks_with_reminder_between(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<Task>> {
+        self.read(|connection| {
+            let mut statement = connection.prepare_cached(
+                "SELECT json FROM tasks
+                 WHERE reminder_time IS NOT NULL AND completed = 0
+                   AND reminder_time >= ?1 AND reminder_time <= ?2",
+            )?;
+            let rows = statement.query_map([date::format(from), date::format(to)], |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
+    /// The unfinished tasks whose reminder is still to come after `after`.
+    ///
+    /// Unbounded above on purpose: the caller wants the earliest, and which row that is depends on
+    /// a snooze and on what has already been shown — neither of which SQL can see — so a `LIMIT 1`
+    /// here would answer with a row the caller then discards and no way to ask for the next.
+    /// Bounding it to "has a future reminder" is what takes this off the size of the account.
+    pub fn tasks_with_reminder_after(&self, after: DateTime<Utc>) -> Result<Vec<Task>> {
+        self.read(|connection| {
+            let mut statement = connection.prepare_cached(
+                "SELECT json FROM tasks
+                 WHERE reminder_time IS NOT NULL AND completed = 0 AND reminder_time > ?1
+                 ORDER BY reminder_time",
+            )?;
+            let rows = statement.query_map([date::format(after)], |row| row.get::<_, String>(0))?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
+    /// The tasks with these ids, in no particular order; ids the cache does not hold are absent.
+    ///
+    /// For a caller holding a small known set — the tasks with a snooze mark on this device —
+    /// which would otherwise read the account to find them.
+    pub fn tasks_with_ids(&self, ids: &[String]) -> Result<Vec<Task>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.read(|connection| {
+            let placeholders = vec!["?"; ids.len()].join(", ");
+            let mut statement = connection.prepare(&format!(
+                "SELECT json FROM tasks WHERE id IN ({placeholders})"
+            ))?;
+            let rows = statement.query_map(rusqlite::params_from_iter(ids), |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
+    /// Every task in any of `list_ids`, each task once however many of them it is in.
+    ///
+    /// On `membership_by_list`. For the reads whose scope is a known set of lists — a project's
+    /// board, a provider's linked list — which read the whole account and filtered afterwards
+    /// (task `71ddacb8`).
+    pub fn tasks_in_lists(&self, list_ids: &[String]) -> Result<Vec<Task>> {
+        if list_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.read(|connection| {
+            let placeholders = vec!["?"; list_ids.len()].join(", ");
+            let mut statement = connection.prepare(&format!(
+                "SELECT t.json FROM tasks t
+                 WHERE EXISTS (
+                     SELECT 1 FROM task_lists_membership m
+                     WHERE m.task_id = t.id AND m.list_id IN ({placeholders})
+                 )"
+            ))?;
+            let rows = statement.query_map(rusqlite::params_from_iter(list_ids), |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.map(|json| decode(&json?)).collect()
+        })
     }
 
     pub fn tasks_in_list(&self, list_id: &str) -> Result<Vec<Task>> {
@@ -804,9 +921,9 @@ pub(crate) fn upsert_task_in(connection: &Connection, task: &Task) -> Result<()>
             id, title, completed, completed_at, due_date_time, is_all_day, priority, repeating,
             parent_task_id, assignee_id, creator_id, status_role, is_private, description,
             timer_duration, occurrence_count, comment_count, attachment_count,
-            created_at, updated_at, json
+            created_at, updated_at, reminder_time, json
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                   ?18, ?19, ?20, ?21)",
+                   ?18, ?19, ?20, ?21, ?22)",
         )?
         .execute(rusqlite::params![
             task.id,
@@ -833,6 +950,9 @@ pub(crate) fn upsert_task_in(connection: &Connection, task: &Task) -> Result<()>
             task.all_secure_files().len() as i64,
             task.created_at.map(date::format),
             task.updated_at.map(date::format),
+            // Lifted out so a reminder tick can ask for a window rather than the account
+            // (task 71ddacb8). Not the due date: the two move independently.
+            task.reminder_time.map(date::format),
             encode(task)?,
         ])?;
 
@@ -886,7 +1006,43 @@ fn encode<T: Serialize>(value: &T) -> Result<String> {
 }
 
 fn decode<T: DeserializeOwned>(json: &str) -> Result<T> {
+    decodes::record();
     serde_json::from_str(json).map_err(|error| StoreError::Corrupt(error.to_string()))
+}
+
+/// How many cached rows this thread has decoded from `json`.
+///
+/// The cache's one cost that grows with the size of the account: a column read is an indexed
+/// lookup whatever the account holds, and a `json` decode is a full parse per row. So "how many
+/// rows did that cost" is the number worth asserting on, and task `71ddacb8` — a reminder tick
+/// decoding the whole table every thirty seconds — is what it was added for. A read bounded in SQL
+/// shows up here as a smaller number; one bounded in Rust after the fact does not.
+///
+/// **Per thread, and deliberately.** A process-wide counter would make any two tests that assert
+/// on it flaky the moment `cargo test` ran them on different threads at the same time, and a
+/// counter nobody can trust is worse than none. Each test therefore sees only its own decodes; a
+/// read handed to `spawn_blocking` is counted on the thread that runs it, not on the one that
+/// asked.
+pub mod decodes {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The count so far on this thread.
+    pub fn count() -> u64 {
+        COUNT.with(Cell::get)
+    }
+
+    /// Start counting again from zero — what a test calls before the read it is bounding.
+    pub fn reset() {
+        COUNT.with(|count| count.set(0));
+    }
+
+    pub(super) fn record() {
+        COUNT.with(|count| count.set(count.get().saturating_add(1)));
+    }
 }
 
 /// Drop the optimistic rows (`temp_` ids) in `table` whose `clientRequestId` the server's row

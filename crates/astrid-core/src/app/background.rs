@@ -174,8 +174,13 @@ fn next_delivery_wait(app: &App) -> Duration {
 /// How often to look for a reminder that has come due.
 ///
 /// Half a minute. A reminder is a promise about a time, and a minute's slack on "9:00" is the
-/// difference between useful and annoying; polling the cache is a SQLite read of tasks already in
-/// memory, so this costs nothing to do often.
+/// difference between useful and annoying.
+///
+/// This is only cheap enough to do that often because the read is bounded: an index range over
+/// `reminder_time` plus this device's snooze marks, which on an account with no reminder coming up
+/// decodes nothing at all. Until task `71ddacb8` the comment here said it was "a SQLite read of
+/// tasks already in memory" — it was neither. Nothing is held in memory between ticks, and it
+/// decoded every task in the account, twice a minute, for as long as the app was open.
 pub const REMINDER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Watch for reminders coming due while the app runs.
@@ -194,10 +199,9 @@ pub async fn reminder_loop(
         if !should_continue() {
             return;
         }
-        let Ok(tasks) = app.store.tasks() else {
+        let Ok(due) = super::dispatch::due_reminders(&app) else {
             continue;
         };
-        let due = super::dispatch::due_reminders(&app, &tasks);
         if !due.is_empty() {
             app.realtime()
                 .publish(crate::realtime::Change::RemindersDue);

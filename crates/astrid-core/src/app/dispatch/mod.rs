@@ -121,16 +121,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
                 )));
             }
             // Imported once: an upgrade that runs again after a partial failure must not queue a
-            // write it already moved.
-            match crate::outbox::journal::all(&app.store) {
-                Ok(entries)
-                    if entries.iter().any(|entry| {
-                        entry.kind == entry_kind && entry.client_request_id == client_request_id
-                    }) =>
-                {
-                    return Response::done();
-                }
-                Ok(_) => {}
+            // write it already moved. One `EXISTS` for the pair, rather than reading and decoding
+            // the whole journal to scan for it — this is asked once per entry of a migrating
+            // client's journal, so the scan was quadratic in the size of it (task 71ddacb8).
+            match crate::outbox::journal::holds(&app.store, &entry_kind, &client_request_id) {
+                Ok(true) => return Response::done(),
+                Ok(false) => {}
                 Err(error) => return Response::failed(error.into()),
             }
             let entry =
@@ -156,10 +152,12 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         } => {
             let store = &app.store;
             // Only into an empty cache: a seed over one this crate already filled would put a
-            // stale copy over what the server said.
-            match store.tasks().map(|cached| cached.is_empty()) {
-                Ok(true) => {}
-                Ok(false) => return Response::ok(serde_json::json!({ "seeded": false })),
+            // stale copy over what the server said. `EXISTS`, so the usual answer — a cache that
+            // is not empty, on every launch after the first — stops at one row instead of
+            // decoding the account to call `.is_empty()` on it (task 71ddacb8).
+            match store.has_any_tasks() {
+                Ok(false) => {}
+                Ok(true) => return Response::ok(serde_json::json!({ "seeded": false })),
                 Err(error) => return Response::failed(Failure::from(error)),
             }
             let written = store

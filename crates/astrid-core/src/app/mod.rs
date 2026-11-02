@@ -21,6 +21,11 @@
 //!
 //! The cost is a JSON encode per call. That is real, and it is why the read commands the list view
 //! uses return only the rows in view — see [`Command::RowsForList`] — rather than a whole account.
+//!
+//! Note what that does and does not claim, because this said more than it should until task
+//! `71ddacb8`: what crosses the FFI boundary is the window. What the core *reads* to decide which
+//! rows those are is still every task the view could match, decoded from `json`, because the
+//! filter and sort rules take whole `Task`s. The window bounds the boundary, not the cache read.
 
 pub mod background;
 mod command;

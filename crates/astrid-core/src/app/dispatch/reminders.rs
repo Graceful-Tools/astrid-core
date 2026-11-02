@@ -46,13 +46,59 @@ fn snoozes(app: &App) -> std::collections::HashMap<String, chrono::DateTime<chro
         .collect()
 }
 
+/// The tasks a reminder read has to consider, and only those (task `71ddacb8`).
+///
+/// Two sources, because [`crate::reminders::reminder_at`] has two: the `reminder_time` column
+/// migration 2 lifted out, in the window the caller asks for, **and** the tasks carrying a snooze
+/// mark made on this device. The second is not optional — a snooze alone qualifies a task whose
+/// own `reminderTime` is `None` (`at.or(snoozed)`), so a read bounded on the column alone would
+/// silently stop showing snoozed reminders.
+///
+/// Both are bounded: the window is an index range, and the snooze marks are a handful of rows
+/// somebody tapped. Deduplicated by id, since a snoozed task may also be in the window.
+fn candidates(
+    app: &App,
+    snoozes: &std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
+    window: impl FnOnce() -> crate::store::Result<Vec<crate::model::Task>>,
+) -> crate::store::Result<Vec<crate::model::Task>> {
+    let mut tasks = window()?;
+    let held: std::collections::HashSet<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
+    let missing: Vec<String> = snoozes
+        .keys()
+        .filter(|id| !held.contains(id.as_str()))
+        .cloned()
+        .collect();
+    let snoozed = app.store.tasks_with_ids(&missing)?;
+    tasks.extend(snoozed);
+    Ok(tasks)
+}
+
 /// The reminders whose time has come and which have not been shown — for the command and for the
 /// background loop, which must agree.
+///
+/// Reads its own candidates rather than taking the account: the loop behind it runs every thirty
+/// seconds for as long as the app is open, and it used to decode every task in the cache each time
+/// to find the nothing that was usually there (task `71ddacb8`).
 pub(in crate::app) fn due_reminders(
     app: &App,
-    tasks: &[crate::model::Task],
-) -> Vec<crate::reminders::Reminder> {
+) -> crate::store::Result<Vec<crate::reminders::Reminder>> {
     let snoozes = snoozes(app);
+    let now = app.clock.now();
+    // The same window `due_now` keeps: not yet due is not due, and older than GRACE is history.
+    // Snoozes can only move a reminder later, so the window's lower edge is safe to apply in SQL.
+    let tasks = candidates(app, &snoozes, || {
+        app.store
+            .tasks_with_reminder_between(now - crate::reminders::GRACE, now)
+    })?;
+    Ok(due_now_among(app, &tasks, &snoozes))
+}
+
+/// [`crate::reminders::due_now`] over tasks already gathered, with this device's marks.
+fn due_now_among(
+    app: &App,
+    tasks: &[crate::model::Task],
+    snoozes: &std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
+) -> Vec<crate::reminders::Reminder> {
     crate::reminders::due_now(
         tasks,
         app.clock.now(),
@@ -69,11 +115,14 @@ pub(in crate::app) fn due_reminders(
 
 /// The earliest reminder still to come, by the same reading as [`due_reminders`] (AATD-21).
 pub(super) fn next_reminder(app: &App) -> Response {
-    let tasks = match app.store.tasks() {
+    let snoozes = snoozes(app);
+    let now = app.clock.now();
+    // Everything with a reminder still ahead of it, rather than everything. Not a `LIMIT 1`: a
+    // snooze or an already-shown mark can disqualify the earliest row, and SQL can see neither.
+    let tasks = match candidates(app, &snoozes, || app.store.tasks_with_reminder_after(now)) {
         Ok(tasks) => tasks,
         Err(error) => return Response::failed(error.into()),
     };
-    let snoozes = snoozes(app);
     let next = crate::reminders::next_after(
         &tasks,
         app.clock.now(),
@@ -91,12 +140,10 @@ pub(super) fn next_reminder(app: &App) -> Response {
 
 /// Reminders whose time has come and which have not been shown.
 pub(super) fn reminders_due(app: &App) -> Response {
-    let tasks = match app.store.tasks() {
-        Ok(tasks) => tasks,
-        Err(error) => return Response::failed(error.into()),
-    };
-    let due = due_reminders(app, &tasks);
-    Response::ok(serde_json::json!({ "reminders": due }))
+    match due_reminders(app) {
+        Ok(due) => Response::ok(serde_json::json!({ "reminders": due })),
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 pub(super) fn mark_reminder_shown(app: &App, task_id: &str) -> Response {

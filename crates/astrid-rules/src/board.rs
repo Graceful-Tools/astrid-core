@@ -269,12 +269,21 @@ pub fn resolve_create(target: &BoardColumn, domain_list_id: Option<&str>) -> Col
 ///
 /// Those in at least one of the project's domain lists. A task with only a status membership and no
 /// domain list is not a project task.
-pub fn domain_tasks<'a>(tasks: &'a [Task], lists: &[TaskList], project_id: &str) -> Vec<&'a Task> {
-    let domain: Vec<&str> = lists
+/// The lists whose tasks a board draws: the project's own, less its status lists.
+///
+/// Split out of [`domain_tasks`] so a caller can *fetch* only these lists' tasks rather than fetch
+/// the account and hand it here to be filtered down (task `71ddacb8`). One definition either way —
+/// `domain_tasks` reads it too, so the two cannot drift.
+pub fn domain_list_ids<'a>(lists: &'a [TaskList], project_id: &str) -> Vec<&'a str> {
+    lists
         .iter()
         .filter(|list| list.project_id.as_deref() == Some(project_id) && !list.is_status_list())
         .map(|list| list.id.as_str())
-        .collect();
+        .collect()
+}
+
+pub fn domain_tasks<'a>(tasks: &'a [Task], lists: &[TaskList], project_id: &str) -> Vec<&'a Task> {
+    let domain = domain_list_ids(lists, project_id);
     tasks
         .iter()
         .filter(|task| {

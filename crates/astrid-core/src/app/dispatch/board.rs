@@ -9,6 +9,24 @@ use super::*;
 /// that draws the core's rows (Windows), never a limit on what the board holds (D43).
 pub(super) const BOARD_COLUMN_LIMIT: usize = 50;
 
+/// The tasks a board can draw: the ones in the project's own lists, and no others.
+///
+/// Read by membership rather than read whole and filtered. `board_cards::cards` keeps exactly the
+/// tasks in `board::domain_list_ids`, so this narrows the *fetch* to what the rule was going to
+/// keep anyway and changes no answer — but a board in one project no longer costs every task in
+/// the account, which it did on every open and on every card moved (task `71ddacb8`).
+fn domain_tasks(
+    app: &App,
+    lists: &[crate::model::TaskList],
+    project_id: &str,
+) -> Vec<crate::model::Task> {
+    let domain: Vec<String> = crate::board::domain_list_ids(lists, project_id)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    app.store.tasks_in_lists(&domain).unwrap_or_default()
+}
+
 /// The board a list belongs to.
 ///
 /// Answers with rows so a card draws like a row: the same due labels, the same leading control,
@@ -47,7 +65,7 @@ pub(super) fn board(
     };
 
     let columns = board_columns_with_rows(app, Some(&project_id), &lists);
-    let tasks = app.store.tasks().unwrap_or_default();
+    let tasks = domain_tasks(app, &lists, &project_id);
     // Borrowed, like the row pipeline: a board of ten thousand cards has no use for a second copy
     // of itself every time somebody moves one.
     let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
@@ -388,7 +406,7 @@ pub(super) fn drop_board_card(
         return Response::failed(Failure::bad_request("that column is not on this board"));
     };
 
-    let tasks = app.store.tasks().unwrap_or_default();
+    let tasks = domain_tasks(app, &lists, &project_id);
     let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
     let placed = crate::board_cards::reorder(
         &task,

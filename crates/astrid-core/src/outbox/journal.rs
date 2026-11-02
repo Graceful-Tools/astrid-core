@@ -42,6 +42,23 @@ pub fn all(store: &Store) -> Result<Vec<Entry>> {
     store.transaction(read_all)
 }
 
+/// Whether the journal already holds an entry of `kind` for `client_request_id`.
+///
+/// `EXISTS` on the read connection. The import that asks this (`ImportJournalEntry`) asks it once
+/// per entry of a migrating client's whole journal, and it used to ask by reading and decoding
+/// every entry in the Outbox to scan for one pair (task `71ddacb8`).
+pub fn holds(store: &Store, kind: &str, client_request_id: &str) -> Result<bool> {
+    store.reading(|connection| {
+        Ok(connection.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM outbox WHERE kind = ?1 AND client_request_id = ?2
+             )",
+            rusqlite::params![kind, client_request_id],
+            |row| row.get::<_, i64>(0),
+        )? != 0)
+    })
+}
+
 pub fn enqueue(store: &Store, entry: &Entry) -> Result<Entry> {
     store.transaction(|connection| {
         connection.execute(

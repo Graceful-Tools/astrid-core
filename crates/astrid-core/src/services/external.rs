@@ -1045,8 +1045,8 @@ impl ExternalSyncService {
         // Same-title adoption: a local task with no twin, the only one of its title, is the
         // item's twin rather than a reason to make a second. (Apple's adopt-candidates.)
         let mut adoptable = decisions::TitleIndex::new(
-            store
-                .tasks()?
+            scope
+                .candidates(store)?
                 .into_iter()
                 .filter(|task| {
                     scope.holds(task)
@@ -1190,10 +1190,8 @@ impl ExternalSyncService {
     ) -> Result<usize> {
         let container = scope.container_id;
         let zone = self.context.clock.time_zone();
-        let mut held: Vec<Task> = self
-            .context
-            .store
-            .tasks()?
+        let mut held: Vec<Task> = scope
+            .candidates(&self.context.store)?
             .into_iter()
             // A task that has never reached astrid-web has a temporary id, and linking a twin to
             // it would attach the twin to something about to be given a different id.
@@ -1568,8 +1566,8 @@ impl ExternalSyncService {
         }
 
         let mut adoptable = decisions::TitleIndex::new(
-            store
-                .tasks()?
+            scope
+                .candidates(store)?
                 .into_iter()
                 .filter(|task| {
                     scope.holds(task)
@@ -1909,6 +1907,25 @@ impl Scope<'_> {
         match self.link {
             Some(link) => ("linkId", link.id.clone()),
             None => ("tasklistId", self.container_id.to_string()),
+        }
+    }
+
+    /// The local tasks this pass could be mirroring — read bounded where the placement allows.
+    ///
+    /// [`Scope::holds`] still decides; this only narrows what has to be decoded to ask it, which
+    /// was the whole account on every pass, per linked list, every five minutes (task `71ddacb8`).
+    ///
+    /// **In a list, membership answers it exactly**: `holds` wants `list_ids` to contain the list,
+    /// and membership is written from `effective_list_ids`, which *is* `list_ids` whenever that is
+    /// set. **My Tasks still reads the account**, and deliberately: it wants the tasks with no list
+    /// at all, and a task carrying `lists` but no `list_ids` has membership rows while
+    /// [`is_my_task`] still counts it unlisted — so a query on "has no membership" would quietly
+    /// stop mirroring a task this pass owns. Bounding that one needs the two notions of "in a
+    /// list" reconciled first, which is more than a read change.
+    fn candidates(&self, store: &crate::store::Store) -> crate::store::Result<Vec<Task>> {
+        match &self.placement {
+            Placement::InList(list_id) => store.tasks_in_list(list_id),
+            Placement::MyTasks(_) => store.tasks(),
         }
     }
 
