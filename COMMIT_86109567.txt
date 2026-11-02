@@ -1,0 +1,28 @@
+The sync cursor is the server's clock, and the walk follows its cursor (task 86109567)
+
+A delta pass asked from this machine's clock, less a five-minute margin guessing at how wrong
+that clock might be. A device two hours fast skipped two hours of everyone else's edits,
+silently, with nothing to raise. The server has sent `serverTime` on `/api/v1/tasks` and
+`/api/v1/lists` since AWTD-1470 - read before it runs the query, so a write that lands while it
+runs is newer than the stamp - and that goes back as `updatedSince` verbatim, with no margin at
+all.
+
+Stored separately from `sync.last-completed`, which keeps its job: how long THIS machine has been
+away is a question about this machine, and comparing a server stamp against a local `now` would
+be the same skew one layer along. The stamp kept is the EARLIEST of the pass - the lists query
+runs before the tasks query, so storing the later one would skip a list edited between the two.
+
+The task walk now follows the server's opaque `nextCursor` over `(updatedAt, id)` instead of
+counting offsets. Under the default order a row reprioritised mid-walk pushed another off a page
+and out of the pass entirely; under the cursor an edit moves its row to the tail, so a row not
+yet returned still comes once and one already returned comes again and upserts by id.
+
+A deployment that sends no `serverTime` keeps the old behaviour exactly, including the margin:
+the two shipped together, so its absence means `cursor` was ignored too, and a full page with no
+`nextCursor` then falls back to offset paging rather than reading as "one page and done" - which
+would have truncated every library over a thousand tasks.
+
+Still to do, and not blocked by anything: the apply still holds every page in one `Vec<Task>`
+before it writes, so a 10k-task first pull peaks at ten pages rather than one.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
