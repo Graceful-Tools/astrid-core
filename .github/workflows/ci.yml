@@ -216,21 +216,53 @@ jobs:
           fetch-depth: 0
           path: astrid-core
 
-      # Public, and its `REVISION` file is the one consumer manifest this workflow can read, so
-      # that row is compared against reality rather than merely checked for shape.
+      # Public, so this one needs no token.
       - uses: actions/checkout@v4
         with:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
+
+      # The other three are PRIVATE, and `secrets.GITHUB_TOKEN` is scoped to this repository
+      # alone — so reading their manifests needs a token with read access to all three
+      # (`CONSUMER_PINS_TOKEN`). Until 4c891314 the workflow had none, and those rows were checked
+      # for shape and history while nothing compared them to the manifests they claim to describe:
+      # all three could drift silently, which is the exact failure CONSUMERS.md was written to end.
+      #
+      # Each step is skipped when the secret is absent, and `check-pins` then reports those rows as
+      # unchecked rather than failing — a fork's pull request gets no secrets at all, and a gate
+      # that goes red for a reason the contributor cannot fix is worse than the gap it closed.
+      - uses: actions/checkout@v4
+        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        with:
+          repository: Graceful-Tools/astrid-windows
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-windows
+
+      - uses: actions/checkout@v4
+        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        with:
+          repository: Graceful-Tools/astrid-ios
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-ios
+
+      - uses: actions/checkout@v4
+        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        with:
+          repository: Graceful-Tools/astrid-android
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-android
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: astrid-core
           key: pins
 
+      # All four paths, every run. A path that is not there is reported unchecked, so the same
+      # command is right with the secret and without it — one invocation rather than two that can
+      # disagree.
       - name: Check the pins table
         working-directory: astrid-core
-        run: cargo xtask check-pins ../astrid-web
+        run: cargo xtask check-pins ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
 
   contracts:
     name: cross-platform contracts

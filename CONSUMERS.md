@@ -31,24 +31,41 @@ schedule. It fails when:
   away;
 - a revision is not an **ancestor of `main`** — a pin at an abandoned branch, which is how a
   client ends up running code that was never reviewed;
-- an astrid-web checkout is available and its `packages/astrid-rules/REVISION` disagrees with the
-  row above.
+- a consumer's own checkout is available, was named on the command line, and the manifest in it
+  disagrees with the row above. All four are compared, not just astrid-web's:
+
+  | Repository | Manifest read |
+  |---|---|
+  | astrid-web | `packages/astrid-rules/REVISION` — the sha alone |
+  | astrid-windows | `crates/astrid-ffi/Cargo.toml` — the `rev =` on the `astrid-core` dependency |
+  | astrid-ios | `core/Cargo.toml` — likewise |
+  | astrid-android | `core/Cargo.toml` — likewise |
 
 It also prints how far behind `main` each pin is. **Being behind is not a failure.** A client
 bumps when it is ready to take the change, and a pin that lags by a few commits is the system
 working; the gate exists so that a pin which lags by a hundred commits is *visible* rather than
 discovered in an audit.
 
-### What it cannot check from here, and why
+### What a comparison needs, and when it is skipped
 
-The other three manifests live in **private** repositories. Reading them in CI needs a token with
-cross-repository access, which this workflow does not have, so the `astrid-windows`, `astrid-ios`
-and `astrid-android` rows are checked for shape and history but not compared against the
-manifests they claim to describe. astrid-web is public and *is* compared.
+**Three of the four manifests live in private repositories**, and `secrets.GITHUB_TOKEN` is scoped
+to this repository alone. So the `pins` job checks `astrid-windows`, `astrid-ios` and
+`astrid-android` out with a **`CONSUMER_PINS_TOKEN`** secret — a token with read access to all
+three — and those three steps are skipped when it is not set.
 
-Closing that gap is tracked as task `4c891314` on the Astrid Windows board: give the workflow a
-`CONSUMER_PINS_TOKEN` secret and the check compares all four. The alternative — each client asserting its own pin against this
-file — has the same auth problem pointing the other way.
+`check-pins` then reports an unobtainable row as **unchecked**, under *Reported, not failed*, and
+still passes. That matters in two ordinary cases: a fork's pull request gets no secrets at all, and
+a gate that goes red for a reason the contributor cannot fix is worse than the gap it closed; and
+the rows are still checked for shape and history, which is what they were before task `4c891314`.
+
+A row is only ever *failed* on a manifest that is present **and** was named on the command line.
+On a development machine the three siblings are found beside this repository without being named,
+and a working copy there is routinely a few days behind its own remote — so a difference against
+one of those is printed, with a note that it may just need a pull, and does not fail. CI clones
+fresh and names every path, so there a difference is real.
+
+The alternative — each client asserting its own pin against this file — has the same auth problem
+pointing the other way, so it is not a cheaper route.
 
 ## Bumping a pin
 

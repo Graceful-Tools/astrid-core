@@ -12,7 +12,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "check-pins",
-        "verify CONSUMERS.md's revisions are real, merged commits [astrid-web path for its row]",
+        "verify CONSUMERS.md's revisions are real, merged commits [consumer checkout paths]",
     ),
 ];
 
@@ -172,6 +172,24 @@ const CONSUMERS: &[&str] = &[
     "astrid-android",
 ];
 
+/// Where each consumer records its pin, relative to the root of its own checkout, and in the order
+/// to try. The first candidate that exists is the one read.
+///
+/// Two shapes, not four: astrid-web keeps the sha alone in a file, and the other three take this
+/// core as a Cargo git dependency, so their sha is the `rev =` beside `astrid-core` in a
+/// `Cargo.toml`. More than one candidate is allowed because a repository is free to move its
+/// wrapper crate, and a path that has moved should report the row as *unchecked* rather than fail a
+/// pin that is perfectly good.
+const MANIFESTS: &[(&str, &[&str])] = &[
+    ("astrid-web", &["packages/astrid-rules/REVISION"]),
+    ("astrid-windows", &["crates/astrid-ffi/Cargo.toml"]),
+    (
+        "astrid-ios",
+        &["core/Cargo.toml", "core/astrid-apple/Cargo.toml"],
+    ),
+    ("astrid-android", &["core/Cargo.toml"]),
+];
+
 /// Checks `CONSUMERS.md` against this repository's history.
 ///
 /// Three questions, and only the third can fail for a reason outside this repo:
@@ -182,9 +200,11 @@ const CONSUMERS: &[&str] = &[
 /// 2. Is each revision a commit here, and an **ancestor of `main`**? Being *behind* main is fine
 ///    and is only reported — a client bumps when it is ready. Being on a commit that is not in
 ///    main is a pin at a branch nobody merged.
-/// 3. Does astrid-web's `REVISION` file agree with its row? That repo is public and CI already
-///    checks it out, so that one row is compared against the manifest it describes. The other
-///    three are private; see `CONSUMERS.md`.
+/// 3. Does each consumer's own manifest agree with its row? Every checkout that is here is
+///    compared against the file the table claims to describe; a consumer that is not here is
+///    reported *unchecked*, never failed. CI has only the public astrid-web checkout unless
+///    `CONSUMER_PINS_TOKEN` is set, and a fork's pull request has no secrets at all (task
+///    4c891314).
 fn check_pins() -> ExitCode {
     let root = repo_root();
     let table_path = root.join("CONSUMERS.md");
@@ -211,7 +231,10 @@ fn check_pins() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
+    let checkouts = consumer_checkouts(&root);
+
     let mut failed = Vec::new();
+    let mut unchecked = Vec::new();
     println!("Consumer pins, against {main}:\n");
 
     for consumer in CONSUMERS {
@@ -254,35 +277,46 @@ fn check_pins() -> ExitCode {
         )
         .unwrap_or_default();
         let dated = git(&root, &["log", "-1", "--format=%cs", &revision]).unwrap_or_default();
-        println!(
-            "  {consumer:<16} {} {dated}  {behind} behind",
+        let shape = format!(
+            "  {consumer:<16} {} {dated}  {behind:>3} behind",
             &revision[..7]
         );
-    }
 
-    println!();
-
-    let web = std::env::args()
-        .nth(2)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("../astrid-web"));
-    let revision_file = web.join("packages/astrid-rules/REVISION");
-    match std::fs::read_to_string(&revision_file) {
-        Ok(contents) => {
-            let actual = contents.trim();
-            let recorded = row_revision(&table, "astrid-web").unwrap_or_default();
-            if actual == recorded {
-                println!("astrid-web's REVISION file agrees with the table.");
-            } else {
-                failed.push(format!(
-                    "astrid-web pins {actual} but CONSUMERS.md says {recorded}."
-                ));
+        let fallback = Checkout {
+            path: root.join("..").join(consumer),
+            named: false,
+        };
+        let checkout = checkouts.get(consumer).unwrap_or(&fallback);
+        match read_manifest(consumer, &checkout.path, &revision) {
+            Manifest::Agrees(path) => println!("{shape}  compared against {}", path.display()),
+            Manifest::Disagrees { path, found } => {
+                let problem = format!(
+                    "{consumer} pins {found} in {} but CONSUMERS.md says {revision}.",
+                    path.display()
+                );
+                if checkout.named {
+                    println!("{shape}  MISMATCH");
+                    failed.push(problem);
+                } else {
+                    println!("{shape}  differs from the checkout beside this one");
+                    unchecked.push(format!("{problem} That checkout was not named on the command line, so it may simply need a pull."));
+                }
+            }
+            Manifest::Unread(why) => {
+                println!("{shape}  UNCHECKED");
+                unchecked.push(format!("{consumer}: {why}"));
             }
         }
-        Err(_) => println!(
-            "No astrid-web checkout at {} — its row was checked for shape only.",
-            web.display()
-        ),
+    }
+
+    if !unchecked.is_empty() {
+        println!("\nReported, not failed:");
+        for row in &unchecked {
+            println!("  {row}");
+        }
+        println!("\nNone of these is a failure. CI holds the three private checkouts only when");
+        println!("CONSUMER_PINS_TOKEN is set, a fork's pull request has no secrets at all, and a");
+        println!("checkout found beside this one is a working copy that may just be behind.");
     }
 
     if failed.is_empty() {
@@ -296,6 +330,183 @@ fn check_pins() -> ExitCode {
     eprintln!("\nThe pins table is out of date. Fix the row, or fix the pin — CONSUMERS.md says");
     eprintln!("which, and how a bump is supposed to go.");
     ExitCode::FAILURE
+}
+
+/// What asking a consumer's own manifest produced.
+enum Manifest {
+    /// The manifest at this path records the revision the table does.
+    Agrees(std::path::PathBuf),
+    /// It records a different one. The table and the client disagree, which is the failure
+    /// `CONSUMERS.md` exists to prevent.
+    Disagrees {
+        path: std::path::PathBuf,
+        found: String,
+    },
+    /// No comparison was possible, and why. **Never a failure.** CI without
+    /// `CONSUMER_PINS_TOKEN` cannot clone the three private repositories, and neither can a fork's
+    /// pull request — failing there would make every outside contribution red for a reason the
+    /// contributor cannot fix.
+    Unread(String),
+}
+
+/// Compares `consumer`'s row against the manifest in its own checkout.
+///
+/// A checkout that is absent, holds none of the candidate manifests, or holds one this cannot read
+/// a revision out of, is `Unread` with that said plainly. The last of those is a defect in this
+/// parser rather than in the pin, and the printed line is how anyone finds out — so it is loud, but
+/// it is not red.
+fn read_manifest(consumer: &str, checkout: &std::path::Path, recorded: &str) -> Manifest {
+    let Some((_, candidates)) = MANIFESTS.iter().find(|(name, _)| name == &consumer) else {
+        return Manifest::Unread(format!("no manifest is recorded for {consumer}"));
+    };
+
+    if !checkout.is_dir() {
+        return Manifest::Unread(format!("no checkout at {}", checkout.display()));
+    }
+
+    let Some(path) = candidates
+        .iter()
+        .map(|candidate| checkout.join(candidate))
+        .find(|path| path.is_file())
+    else {
+        return Manifest::Unread(format!(
+            "none of {} under {}",
+            candidates.join(", "),
+            checkout.display()
+        ));
+    };
+
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Manifest::Unread(format!("{} could not be read", path.display()));
+    };
+
+    match manifest_revision(&path, &contents) {
+        Some(found) if found == recorded => Manifest::Agrees(path),
+        Some(found) => Manifest::Disagrees { path, found },
+        None => Manifest::Unread(format!("no revision found in {}", path.display())),
+    }
+}
+
+/// A consumer's checkout, and whether the caller named it.
+struct Checkout {
+    path: std::path::PathBuf,
+    /// A checkout named on the command line is a deliberate statement that it is the right one, so
+    /// a mismatch against it FAILS. One merely found beside this repository is a developer's
+    /// working copy, which is routinely a few days behind its own remote, so a mismatch there is
+    /// reported and no more. CI clones fresh and names every path; a sibling cannot be told from a
+    /// stale one from in here, and a gate that says "the pins table is out of date" about a
+    /// checkout nobody pulled is a gate people learn to ignore.
+    named: bool,
+}
+
+/// Where each consumer's checkout is.
+///
+/// A positional argument is matched to a consumer by its directory name, so one invocation names
+/// all four in any order and `cargo xtask check-pins ../astrid-web` — what CI ran while web was
+/// the only row it could compare — still means exactly what it meant. Anything left unnamed is
+/// looked for beside this repository, which is how a development machine with the siblings checked
+/// out compares every row for free.
+fn consumer_checkouts(root: &std::path::Path) -> std::collections::HashMap<&'static str, Checkout> {
+    let mut checkouts: std::collections::HashMap<&'static str, Checkout> = CONSUMERS
+        .iter()
+        .map(|consumer| {
+            (
+                *consumer,
+                Checkout {
+                    path: root.join("..").join(consumer),
+                    named: false,
+                },
+            )
+        })
+        .collect();
+
+    for argument in std::env::args().skip(2) {
+        let path = std::path::PathBuf::from(&argument);
+        let named = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| CONSUMERS.iter().find(|consumer| **consumer == name));
+        match named {
+            Some(consumer) => {
+                checkouts.insert(*consumer, Checkout { path, named: true });
+            }
+            // Silently ignoring this is how a typo stops a row being compared while the check
+            // still says OK — the exact shape of the problem this check exists to catch.
+            None => eprintln!(
+                "warning: '{argument}' does not name a consumer, so it was not used. The directory\n\
+                 must be named for the consumer it holds (one of {}).",
+                CONSUMERS.join(", ")
+            ),
+        }
+    }
+
+    checkouts
+}
+
+/// The revision a manifest records, by the kind of file it is.
+///
+/// A `REVISION` file is the sha and nothing else. A `Cargo.toml` carries it as the `rev =` on the
+/// `astrid-core` git dependency — and a `rev` belonging to some OTHER git dependency must not be
+/// mistaken for the core's, so the line (or the `[dependencies.astrid-core]` section it sits in)
+/// has to name `astrid-core` too.
+fn manifest_revision(path: &std::path::Path, contents: &str) -> Option<String> {
+    if path.file_name().is_some_and(|name| name == "Cargo.toml") {
+        return cargo_core_revision(contents);
+    }
+    let revision = contents.trim();
+    (!revision.is_empty()).then(|| revision.to_string())
+}
+
+/// The `rev = "<sha>"` on the `astrid-core` git dependency, inline or sectioned.
+///
+/// Both forms, because nothing stops a consumer writing it either way and reading the wrong one
+/// would report a pin that is fine as unreadable. Comments are dropped first: the Windows manifest
+/// explains its own `rev` in four lines of prose above it, and a parser that read those would find
+/// the word before the value.
+fn cargo_core_revision(contents: &str) -> Option<String> {
+    let mut in_core_section = false;
+    for line in contents.lines() {
+        // Naive, and sufficient: a `#` inside a value would have to be in a quoted string, and no
+        // consumer's git URL or sha contains one.
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            in_core_section = line.trim_end_matches(']').ends_with("astrid-core");
+            continue;
+        }
+        if !in_core_section && !line.contains("astrid-core") {
+            continue;
+        }
+        if let Some(revision) = rev_value(line) {
+            return Some(revision);
+        }
+    }
+    None
+}
+
+/// The value of a `rev` key on one line of TOML, whether it is the only key or one of several.
+///
+/// `rev` has to be a key and not the tail of another word, or `prev = "…"` would answer.
+fn rev_value(line: &str) -> Option<String> {
+    let mut rest = line;
+    while let Some(at) = rest.find("rev") {
+        let is_own_word = !rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        let after = rest[at + 3..].trim_start();
+        if is_own_word {
+            if let Some(value) = after
+                .strip_prefix('=')
+                .map(str::trim_start)
+                .and_then(|after| after.strip_prefix('"'))
+                .and_then(|after| after.split('"').next())
+            {
+                return Some(value.to_string());
+            }
+        }
+        rest = &rest[at + 3..];
+    }
+    None
 }
 
 /// A revision read out of `CONSUMERS.md`'s table: the last backticked cell of the row whose first
@@ -366,7 +577,10 @@ fn repo_root() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_full_sha, row_revision, same_fixture, CONSUMERS};
+    use super::{
+        is_full_sha, manifest_revision, read_manifest, row_revision, same_fixture, Manifest,
+        CONSUMERS, MANIFESTS,
+    };
 
     const TABLE: &str = "\
 | Repository | Takes | Pinned in | Revision |
@@ -426,6 +640,115 @@ mod tests {
                 is_full_sha(&revision),
                 "{consumer} is pinned at '{revision}', which is not a full forty-character sha"
             );
+        }
+    }
+
+    /// Task 4c891314. The three private consumers take this core as a Cargo git dependency, so
+    /// their pin is the `rev =` on it — written inline with `git` and `version` on the same line,
+    /// which is how astrid-windows writes it.
+    #[test]
+    fn a_cargo_manifest_pin_is_the_rev_on_the_core_4c891314() {
+        let manifest = "\
+[dependencies]
+# The shared core, by revision. `cargo update -p astrid-core` after changing the rev.
+astrid-core = { git = \"https://github.com/Graceful-Tools/astrid-core.git\", version = \"0.1\", rev = \"3e13a78b14b734de83c793124bf150aea637c7b3\" }
+serde_json = { workspace = true }
+";
+        assert_eq!(
+            manifest_revision(
+                std::path::Path::new("crates/astrid-ffi/Cargo.toml"),
+                manifest
+            )
+            .as_deref(),
+            Some("3e13a78b14b734de83c793124bf150aea637c7b3")
+        );
+    }
+
+    /// The sectioned form answers too, since nothing stops a consumer writing it that way and
+    /// reading only the inline form would report a perfectly good pin as unreadable.
+    #[test]
+    fn the_sectioned_cargo_form_answers_too_4c891314() {
+        let manifest = "\
+[dependencies.astrid-core]
+git = \"https://github.com/Graceful-Tools/astrid-core.git\"
+rev = \"2cf2b5fb202ce99147d6a00c01e3041b1cdccf0a\"
+";
+        assert_eq!(
+            manifest_revision(std::path::Path::new("core/Cargo.toml"), manifest).as_deref(),
+            Some("2cf2b5fb202ce99147d6a00c01e3041b1cdccf0a")
+        );
+    }
+
+    /// Another git dependency's `rev` is not this core's. Answering with it would compare the table
+    /// against an unrelated repository's sha and report a mismatch nobody could act on — worse than
+    /// the gap this task closes, because it would look like an answer.
+    #[test]
+    fn another_dependencys_rev_is_not_the_cores_4c891314() {
+        let manifest = "\
+[dependencies]
+uniffi = { git = \"https://github.com/mozilla/uniffi-rs.git\", rev = \"1111111111111111111111111111111111111111\" }
+";
+        assert_eq!(
+            manifest_revision(std::path::Path::new("core/Cargo.toml"), manifest),
+            None
+        );
+
+        // And a key that merely ENDS in `rev` is not the key.
+        let shadowed =
+            "astrid-core = { git = \"x\", prev = \"2222222222222222222222222222222222222222\" }";
+        assert_eq!(
+            manifest_revision(std::path::Path::new("core/Cargo.toml"), shadowed),
+            None
+        );
+    }
+
+    /// astrid-web's manifest is the sha alone in a file, and that form still reads — this task
+    /// generalised the comparison rather than replacing it.
+    #[test]
+    fn a_revision_file_is_the_sha_alone_4c891314() {
+        assert_eq!(
+            manifest_revision(
+                std::path::Path::new("packages/astrid-rules/REVISION"),
+                "52a371d21781f59dd4814d68794f533df85587ae\n"
+            )
+            .as_deref(),
+            Some("52a371d21781f59dd4814d68794f533df85587ae")
+        );
+    }
+
+    /// **An absent checkout is UNCHECKED, never a failure.** CI holds the three private
+    /// repositories only when `CONSUMER_PINS_TOKEN` is set, and a fork's pull request gets no
+    /// secrets at all — so failing here would turn every outside contribution red for a reason the
+    /// contributor cannot fix, and the check would be worse than the gap it closed.
+    #[test]
+    fn an_absent_checkout_is_unchecked_not_failed_4c891314() {
+        let nowhere = std::env::temp_dir().join("astrid-core-check-pins-4c891314-absent");
+        let outcome = read_manifest(
+            "astrid-ios",
+            &nowhere,
+            "3677cfb631d6fe415db5a77403e2c79f4e0b8c2b",
+        );
+        match outcome {
+            Manifest::Unread(why) => assert!(
+                why.contains("no checkout"),
+                "an absent checkout should say so, said: {why}"
+            ),
+            Manifest::Agrees(_) | Manifest::Disagrees { .. } => {
+                panic!("a directory that is not there cannot have been compared")
+            }
+        }
+    }
+
+    /// Every consumer needs somewhere to read its pin from, or `check-pins` would report it
+    /// unchecked forever while looking like it had asked. The two tables are edited together.
+    #[test]
+    fn every_consumer_has_a_manifest_4c891314() {
+        for consumer in CONSUMERS {
+            let (_, candidates) = MANIFESTS
+                .iter()
+                .find(|(name, _)| name == consumer)
+                .unwrap_or_else(|| panic!("{consumer} has no entry in MANIFESTS"));
+            assert!(!candidates.is_empty(), "{consumer} has no candidate paths");
         }
     }
 
