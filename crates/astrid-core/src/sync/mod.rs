@@ -593,17 +593,23 @@ impl SyncManager {
             };
             // A row that would not decode is still on the server; with one, the listing cannot say
             // what is missing, so nothing is taken on its word this pass.
+            //
+            // An id and a stamp per row, from their own columns — not the decoded row (task
+            // `c8457e0f`). Nothing below reads anything else from a cached task, and decoding the
+            // account to learn which of it is missing was the costliest half of this walk: the
+            // requests are capped at [`MAX_CONFIRMED_PER_PASS`] and the decode was not capped at
+            // all.
             let absent_tasks: Vec<String> = if tasks_whole {
                 self.store
-                    .tasks()?
+                    .task_stamps()?
                     .into_iter()
-                    .filter(|cached| {
-                        !seen_tasks.contains(&cached.id)
-                            && !crate::model::is_temp_id(&cached.id)
-                            && !unsent_tasks.contains(&cached.id)
-                            && !fresh(cached.updated_at)
+                    .filter(|(id, updated_at)| {
+                        !seen_tasks.contains(id)
+                            && !crate::model::is_temp_id(id)
+                            && !unsent_tasks.contains(id)
+                            && !fresh(*updated_at)
                     })
-                    .map(|cached| cached.id)
+                    .map(|(id, _)| id)
                     .collect()
             } else {
                 Vec::new()
@@ -621,18 +627,19 @@ impl SyncManager {
             }
             let seen_lists: std::collections::HashSet<&str> =
                 lists.items.iter().map(|list| list.id.as_str()).collect();
+            // The same, and the virtual lists are left out by the read rather than filtered here:
+            // see [`Store::real_list_stamps`].
             let absent_lists: Vec<String> = if lists.skipped.is_empty() {
                 self.store
-                    .lists()?
+                    .real_list_stamps()?
                     .into_iter()
-                    .filter(|cached| {
-                        !seen_lists.contains(cached.id.as_str())
-                            && !crate::model::is_temp_id(&cached.id)
-                            && !unsent_lists.contains(&cached.id)
-                            && !cached.is_virtual.unwrap_or(false)
-                            && !fresh(cached.updated_at)
+                    .filter(|(id, updated_at)| {
+                        !seen_lists.contains(id.as_str())
+                            && !crate::model::is_temp_id(id)
+                            && !unsent_lists.contains(id)
+                            && !fresh(*updated_at)
                     })
-                    .map(|cached| cached.id)
+                    .map(|(id, _)| id)
                     .collect()
             } else {
                 Vec::new()
@@ -663,14 +670,28 @@ impl SyncManager {
 
     /// Fetch the projects. Separate from the main pass because a deployment without boards answers
     /// 404, and a pass that treated that as a failure would stop syncing tasks on an older server.
+    ///
+    /// Conditionally, since task `c8457e0f`. `app/api/v1/projects/route.ts` discards its request:
+    /// there is no `updatedSince` and no cursor of any shape to ask the boards for a delta with,
+    /// so a validator is the only way for a tick to stop paying for a table it already holds. A
+    /// deployment that answers without an `ETag` is recorded as untagged by
+    /// [`crate::services::conditional::get_conditional`] and asked unconditionally ever after, so
+    /// this behaves exactly as the unconditional read did until web tags the route.
     pub async fn sync_projects(&self) -> Result<usize, ServiceError> {
-        let projects = self
-            .client
-            .send_collection::<Project>(
-                self.client.get(endpoints::PROJECTS),
-                Some(endpoints::envelope::PROJECTS),
-            )
-            .await?;
+        let fresh = crate::services::conditional::get_conditional(
+            &self.client,
+            &self.store,
+            endpoints::envelope::PROJECTS,
+            self.client.get(endpoints::PROJECTS),
+        )
+        .await?;
+        // Unchanged. The boards on screen are already right, and the one thing that must not
+        // happen here is writing "nothing" over them — see `get_conditional`'s own note.
+        let Some(body) = fresh else {
+            return Ok(0);
+        };
+        let projects =
+            crate::model::lenient::<Project>(unwrap_envelope(body, endpoints::envelope::PROJECTS));
         report_skips("projects", &projects.skipped);
         let items = projects.into_items();
         self.store.upsert_projects(&items)?;
@@ -1662,6 +1683,158 @@ mod tests {
         assert!(
             store.task("just-confirmed").expect("reads").is_some(),
             "moved after the pass began"
+        );
+    }
+
+    /// Answers 404 to anything not explicitly queued — which, once the pages are consumed, is
+    /// every absence confirmation the walk makes. See [`StubTransport::fallback`]: without one an
+    /// unscripted request fails the test, and "gone" is what these tests want it to mean.
+    fn gone() -> Result<crate::api::HttpResponse, TransportError> {
+        Ok(crate::api::HttpResponse {
+            status: 404,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: br#"{"error":"not found"}"#.to_vec(),
+        })
+    }
+
+    /// An empty full pass whose every confirmation answers gone.
+    fn empty_pass_over_a_forgotten_cache() -> StubTransport {
+        StubTransport::new()
+            .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+            .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+            .fallback(gone())
+    }
+
+    /// Task `c8457e0f`, finding C3 of the November platform assessment: the walk asks about one
+    /// row per request, so the only thing between a cache the server has forgotten and a request
+    /// per cached row is [`MAX_CONFIRMED_PER_PASS`] — and no test said so.
+    ///
+    /// Twice the cap costs the cap. The rest are not lost: they are absent on the next full pass
+    /// too, and confirmed then.
+    #[tokio::test]
+    async fn task_c8457e0f_a_full_pass_confirms_a_capped_number_of_absences() {
+        let (fixture, transport) = fixture_with_transport(empty_pass_over_a_forgotten_cache());
+        for index in 0..(MAX_CONFIRMED_PER_PASS * 2) {
+            fixture
+                .store
+                .upsert_task(&task(&format!("gone-{index}"), "2026-09-01T00:00:00Z"))
+                .expect("stores");
+        }
+
+        let report = fixture.sync.sync().await;
+        assert!(!report.delta, "no stamp: a full pass");
+        let confirmations = transport
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("/api/v1/tasks/"))
+            .count();
+        assert_eq!(
+            confirmations, MAX_CONFIRMED_PER_PASS,
+            "a full pass asked about {confirmations} absent rows in one go"
+        );
+        assert_eq!(
+            report.tasks_deleted, MAX_CONFIRMED_PER_PASS,
+            "only what was confirmed is forgotten"
+        );
+    }
+
+    /// Task `c8457e0f`: and it works out which rows are absent without decoding the account.
+    ///
+    /// The scan wants each cached row's `id` and `updatedAt`, both of which are indexed columns.
+    /// It read them by decoding every row's `json` — task `71ddacb8`'s shape, in the one read that
+    /// grows with how long the app has been installed. [`crate::store::decodes`] is per thread and
+    /// the apply phases run on blocking threads, so what is counted here is the pass's own reads.
+    #[tokio::test]
+    async fn task_c8457e0f_the_absence_scan_does_not_decode_the_account() {
+        /// Big enough that "it decoded the account" and "it decoded what it needed" cannot be
+        /// confused.
+        const CACHED: usize = 200;
+
+        let (fixture, _transport) = fixture_with_transport(empty_pass_over_a_forgotten_cache());
+        for index in 0..CACHED {
+            fixture
+                .store
+                .upsert_task(&task(&format!("gone-{index}"), "2026-09-01T00:00:00Z"))
+                .expect("stores");
+        }
+        for index in 0..20 {
+            fixture
+                .store
+                .upsert_list(&TaskList::new(
+                    format!("gone-list-{index}"),
+                    "Deleted on the web",
+                ))
+                .expect("stores");
+        }
+
+        crate::store::decodes::reset();
+        fixture.sync.sync().await;
+        let decoded = crate::store::decodes::count();
+        assert!(
+            decoded < CACHED as u64,
+            "the absence scan decoded {decoded} rows over a cache of {CACHED}"
+        );
+    }
+
+    /// Task `c8457e0f`: the boards were refetched in full on every pass that ran.
+    ///
+    /// `astrid-web app/api/v1/projects/route.ts` discards its request, so there is no
+    /// `updatedSince` and no cursor to ask with — a validator is the only way for a tick to stop
+    /// paying for a table it already holds. The tag from one pass conditions the next, and a 304
+    /// leaves the cache exactly as it was.
+    #[tokio::test]
+    async fn task_c8457e0f_the_boards_are_refetched_conditionally() {
+        let tagged = |etag: &str, body: serde_json::Value| {
+            Ok(crate::api::HttpResponse {
+                status: 200,
+                headers: vec![
+                    ("content-type".into(), "application/json".into()),
+                    ("etag".into(), etag.into()),
+                ],
+                body: body.to_string().into_bytes(),
+            })
+        };
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push(
+                    "/api/v1/projects",
+                    tagged(
+                        "W/\"boards-1\"",
+                        json!({ "projects": [{ "id": "p1", "name": "Work" }] }),
+                    ),
+                )
+                .push_json("/api/v1/projects", 304, json!({})),
+        );
+
+        fixture.sync.sync().await;
+        assert_eq!(
+            fixture.store.projects().expect("reads").len(),
+            1,
+            "the first pass has no tag and fetches"
+        );
+
+        fixture.sync.sync().await;
+        let asked = requests_to(&transport, "/api/v1/projects");
+        assert_eq!(asked.len(), 2, "one read of the boards per pass");
+        let conditional = transport
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("/api/v1/projects"))
+            .filter_map(|request| request.header("if-none-match").map(str::to_string))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            conditional,
+            vec!["W/\"boards-1\"".to_string()],
+            "the second pass did not quote back the tag the first was given"
+        );
+        assert_eq!(
+            fixture.store.projects().expect("reads").len(),
+            1,
+            "a 304 is `nothing changed`, not `nothing` — the boards must survive it"
         );
     }
 

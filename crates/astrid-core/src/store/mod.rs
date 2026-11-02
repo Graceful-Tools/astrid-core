@@ -251,6 +251,22 @@ impl Store {
         })
     }
 
+    /// Every cached task as `(id, updated_at)`.
+    ///
+    /// The whole of what a full pass's absence scan needs (task `c8457e0f`): it compares each
+    /// cached id against what the listing returned and each stamp against the moment the pass
+    /// began, and wants nothing else from the row. It asked [`Store::tasks`] for that — `SELECT
+    /// json` plus a full decode per row — which is task `71ddacb8`'s shape in the one read that
+    /// grows with how long the app has been installed. Both columns are their own, and
+    /// `updated_at` is indexed.
+    pub fn task_stamps(&self) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
+        self.read(|connection| {
+            let mut statement = connection.prepare_cached("SELECT id, updated_at FROM tasks")?;
+            let rows = statement.query_map([], read_stamp)?;
+            Ok(rows.collect::<SqlResult<Vec<_>>>()?)
+        })
+    }
+
     /// Whether the cache holds any task at all.
     ///
     /// `EXISTS`, so asking stops at the first row. The callers only ever wanted the question —
@@ -445,6 +461,20 @@ impl Store {
             let mut statement = connection.prepare("SELECT json FROM lists")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
+    /// Every cached list a server could be asked about, as `(id, updated_at)`.
+    ///
+    /// [`Store::task_stamps`]'s counterpart for the same scan, and virtual lists are left out
+    /// here rather than filtered afterwards: a virtual list is this client's own — no server has
+    /// one, so no server can confirm it gone.
+    pub fn real_list_stamps(&self) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
+        self.read(|connection| {
+            let mut statement = connection
+                .prepare_cached("SELECT id, updated_at FROM lists WHERE is_virtual = 0")?;
+            let rows = statement.query_map([], read_stamp)?;
+            Ok(rows.collect::<SqlResult<Vec<_>>>()?)
         })
     }
 
@@ -826,6 +856,17 @@ const SUMMARY_COLUMNS: &str = "t.id, t.title, t.completed, t.completed_at, t.due
      t.is_all_day, t.priority, t.repeating, t.parent_task_id, t.assignee_id, t.creator_id, \
      t.status_role, t.is_private, t.description, t.timer_duration, t.occurrence_count, \
      t.comment_count, t.attachment_count, t.created_at, t.updated_at";
+
+/// An `(id, updated_at)` pair, for the reads that want a row's identity and age and nothing else.
+/// See [`Store::task_stamps`].
+fn read_stamp(row: &rusqlite::Row<'_>) -> SqlResult<(String, Option<DateTime<Utc>>)> {
+    Ok((
+        row.get(0)?,
+        row.get::<_, Option<String>>(1)?
+            .as_deref()
+            .and_then(date::parse),
+    ))
+}
 
 fn read_summary(row: &rusqlite::Row<'_>) -> SqlResult<TaskSummary> {
     let instant = |value: Option<String>| value.as_deref().and_then(date::parse);
