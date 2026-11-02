@@ -711,6 +711,18 @@ pub enum Command {
     CopyList {
         list_id: String,
     },
+    /// Open **one** public list by its id, for somebody who is not a member of it (task
+    /// c5f7d870) — what [`Command::FeedbackListId`] left every client unable to act on, since
+    /// [`Command::PublicLists`] is a catalogue with no id argument and [`Command::CopyList`]
+    /// leaves a copy in the sidebar.
+    ///
+    /// Answers `{ list, role, canAddTask, canComment }`: the list, and what this reader may do
+    /// in it, so a client does not have to work the rule out. Online-only, and **not cached** —
+    /// see [`crate::services::ListService::public_list`]. Pair it with
+    /// [`Command::FeaturedRows`] for the tasks.
+    PublicList {
+        list_id: String,
+    },
     SetListFavorite {
         list_id: String,
         favorite: bool,

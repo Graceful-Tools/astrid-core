@@ -547,6 +547,30 @@ impl ListService {
         })
     }
 
+    /// One public list, by its id, for somebody who is not a member of it (task c5f7d870).
+    ///
+    /// [`Self::public_lists`] is the catalogue and [`Self::copy`] takes a copy; neither opens a
+    /// *named* list, which is what `Command::FeedbackListId` left every client unable to act on.
+    /// The route is the ordinary one — `GET /api/v1/lists/:id` admits a non-member when the list
+    /// is `PUBLIC` (astrid-web `app/api/v1/lists/[id]/route.ts`, the `privacy: 'PUBLIC'` arm of
+    /// its `where`) — so there is no public-by-id endpoint to add and none is wanted.
+    ///
+    /// **Deliberately not cached**, like [`Self::public_list_tasks`]. Report an Issue must not
+    /// leave the Bugs & Feedback list in somebody's sidebar, and a cached copy of a list this
+    /// account is not in would be swept into My Tasks, search and the next sync's diff. Online
+    /// only, for the same reason the catalogue is: a list made private last week should stop
+    /// opening.
+    pub async fn public_list(&self, id: &str) -> Result<TaskList> {
+        let request = self.context.client.get(endpoints::list(id));
+        let answer = self.context.client.send(request).await?;
+        let list = answer.get("list").cloned().unwrap_or(answer);
+        serde_json::from_value(list).map_err(|error| {
+            ServiceError::Api(crate::api::ApiError::Decode(format!(
+                "the public list could not be read: {error}"
+            )))
+        })
+    }
+
     // ─── Insights (web AWTD-1329, AWTD-1333) ──────────────────────────────────────────────────
 
     /// What the list has been doing over the last `days`, as the server computed it.

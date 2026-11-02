@@ -603,6 +603,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         ),
         Command::PublicLists => answer(app.context.lists().public_lists().await),
         Command::CopyList { list_id } => answer(app.context.lists().copy(&list_id).await),
+        Command::PublicList { list_id } => public_list(app, &list_id).await,
         Command::PostComment {
             task_id,
             content,
@@ -1430,6 +1431,43 @@ fn answer<T: serde::Serialize>(result: crate::services::Result<T>) -> Response {
         Ok(value) => Response::ok(value),
         Err(error) => Response::failed(error.into()),
     }
+}
+
+/// One public list by its id, with what the reader may do in it (task c5f7d870).
+///
+/// The projection is here rather than in `permissions` because it adds no rule: `role` and
+/// `canAddTask` are [`crate::permissions::role_in_list`] and
+/// [`crate::permissions::can_edit_tasks`] verbatim, which the `permissions.json` fixture already
+/// pins against web (the named case "viewer membership on a public collaborative list"), and
+/// `canComment` reads the same `collaborative` gate the comments route enforces
+/// (astrid-web `app/api/v1/tasks/[id]/comments/route.ts` — standard access, *or* the task is in a
+/// public collaborative list). Projecting it in dispatch is what `canAddTasks` already does for
+/// the rows answer.
+///
+/// A reader we cannot name — signed out, so there is no current user — is told `null` and `false`
+/// rather than refused: the list is public and still worth drawing, and the honest answer to "may
+/// you add to it" is no.
+async fn public_list(app: &App, list_id: &str) -> Response {
+    let list = match app.context.lists().public_list(list_id).await {
+        Ok(list) => list,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let access = crate::permissions::access_of(&list);
+    let me = app.context.account().current_user_id().ok().flatten();
+    let (role, can_write) = match me.as_deref() {
+        Some(me) => (
+            crate::permissions::role_in_list(me, &access),
+            crate::permissions::can_edit_tasks(me, &access),
+        ),
+        None => (None, false),
+    };
+    Response::ok(serde_json::json!({
+        "list": list,
+        "role": role,
+        // May the reader file something here — the whole point of opening a feedback list.
+        "canAddTask": can_write,
+        "canComment": can_write,
+    }))
 }
 
 /// What a list permits, as the shells read it (task 897e25c5, astrid-web's

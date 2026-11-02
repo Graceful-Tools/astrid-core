@@ -5971,6 +5971,73 @@ async fn public_lists_are_browsed_and_one_is_copied_task_f6bc59e8() {
     assert_eq!(rows["value"]["rows"][0]["title"], "Bake bread");
 }
 
+/// One public list is opened by its id, for somebody who is not a member of it (task c5f7d870) —
+/// the read Report an Issue needs and `publicLists` (a catalogue) and `copyList` (which leaves a
+/// copy in the sidebar) could not give it.
+///
+/// Three things are asserted, and the third is the point: the answer carries the reader's
+/// permissions beside the list, those permissions follow `publicListType`, and the list **does not
+/// enter the cache**. Filing a bug must not put the Bugs & Feedback list in somebody's sidebar.
+#[tokio::test]
+async fn one_public_list_is_opened_by_id_and_not_cached_task_c5f7d870() {
+    let transport = StubTransport::new()
+        .push_json(
+            "/api/v1/lists/collab",
+            200,
+            json!({ "list": {
+                "id": "collab", "name": "Bugs & Feedback", "ownerId": "them",
+                "privacy": "PUBLIC", "publicListType": "collaborative",
+                "owner": { "id": "them", "name": "Dana" },
+            } }),
+        )
+        .push_json(
+            "/api/v1/lists/readonly",
+            200,
+            json!({ "list": {
+                "id": "readonly", "name": "Recipes", "ownerId": "them",
+                "privacy": "PUBLIC", "publicListType": "copy_only",
+            } }),
+        );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    // A collaborative public list: a stranger is a viewer, and that viewer may write.
+    let collab = call(&app, json!({ "kind": "publicList", "listId": "collab" })).await;
+    assert_eq!(collab["ok"], true, "{collab}");
+    assert_eq!(collab["value"]["list"]["id"], "collab");
+    assert_eq!(collab["value"]["list"]["name"], "Bugs & Feedback");
+    assert_eq!(collab["value"]["role"], "viewer");
+    assert_eq!(collab["value"]["canAddTask"], true, "{collab}");
+    assert_eq!(collab["value"]["canComment"], true, "{collab}");
+
+    // It asked the by-id route, not the catalogue.
+    let read = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.url.contains("/api/v1/lists/collab"))
+        .expect("a read of the list");
+    assert!(read.url.ends_with("/api/v1/lists/collab"), "{}", read.url);
+
+    // A copy_only public list: still a viewer, but read-only — the point of the type.
+    let readonly = call(&app, json!({ "kind": "publicList", "listId": "readonly" })).await;
+    assert_eq!(readonly["ok"], true, "{readonly}");
+    assert_eq!(readonly["value"]["role"], "viewer");
+    assert_eq!(readonly["value"]["canAddTask"], false, "{readonly}");
+    assert_eq!(readonly["value"]["canComment"], false, "{readonly}");
+
+    // Neither one is in the cache: opening somebody else's list is not joining it.
+    let lists = call(&app, json!({ "kind": "lists" })).await;
+    let cached = lists["value"].as_array().expect("an array");
+    assert!(
+        !cached
+            .iter()
+            .any(|list| list["id"] == "collab" || list["id"] == "readonly"),
+        "a public list opened by id must not be cached, got {lists}"
+    );
+}
+
 /// A task in a public list the reader may not edit — a passer-by's view of it — answers a copy
 /// control on its row and in its detail (task f6bc59e8); the reader's own list answers the
 /// checkbox.
