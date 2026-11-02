@@ -25,6 +25,7 @@ futures-util = { workspace = true }
 rusqlite = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+strum = { workspace = true }
 
 # The HTTP stack. Everywhere but Android it speaks the platform's own TLS (see the workspace
 # manifest). Android has no system OpenSSL for an NDK build to link — native-tls there means

@@ -65,6 +65,12 @@ tracing = "0.1"
 # Markdown, for task descriptions, comments and chat: the same GFM the web renders through
 # `marked`, turned into blocks a shell draws. No HTML output is wanted, so no `html` feature.
 pulldown-cmark = { version = "0.13", default-features = false }
+# An enum's own variant names, as a list the compiler writes. `Command::kinds()` — which every
+# shell's bindings gate reads its own vocabulary against — used to read `command.rs` through
+# `include_str!` and parse the variant names out by indentation: a contract check whose input was
+# the formatting of the file it lived in. `derive` is the only feature wanted; the name conversions
+# are deliberately NOT used (see `command.rs`), so nothing here needs `std`.
+strum = { version = "0.27", default-features = false, features = ["derive"] }
 
 [profile.release]
 lto = "thin"

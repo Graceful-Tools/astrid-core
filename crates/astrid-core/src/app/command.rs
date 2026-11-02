@@ -30,7 +30,7 @@ pub(crate) fn yes() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, strum::VariantNames)]
 // `rename_all` names the variants, `rename_all_fields` names the fields inside them. Both are
 // needed: without the second, `{"kind":"list","listId":"l1"}` reads as a command with no id and
 // every screen that uses it fails as "bad request" with nothing to say why.
@@ -39,6 +39,11 @@ pub(crate) fn yes() -> bool {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+// `VariantNames` supplies the variant list for [`kinds`], in Rust's spelling. Deliberately
+// WITHOUT `#[strum(serialize_all = "camelCase")]`: strum's conversion normalises acronyms, so it
+// would spell `CreateOAuthClient` as `createOauthClient`, where serde's `rename_all` lowercases
+// the first letter and nothing else. `kinds` applies serde's rule itself, and a test holds the
+// two spellings together.
 pub enum Command {
     // ── Reads. These never touch the network. ────────────────────────────────────────────────
     /// Every list, for the sidebar.
@@ -1582,53 +1587,28 @@ impl From<crate::store::StoreError> for Failure {
 /// there, is a command the core answers with "bad request", which a shell shows as a button that
 /// does nothing. So every shell reads its own list against this one, in its own gate.
 ///
-/// Read off this file's source rather than derived at runtime: `serde` names the variants and
-/// Rust cannot enumerate them without a dependency. The scan is anchored on shapes the enum has
-/// had since M2 and fails loudly if they stop matching, so "the parser broke" cannot read as "the
-/// contract holds".
+/// Derived from the enum, by the compiler. Until 2026-11-02 this read `command.rs` through
+/// `include_str!` and recovered the variant names by indentation and a bare `}` — a contract
+/// check whose input was the formatting of the file it lived in, and which could only ever fail
+/// *open*, by finding fewer variants than exist. `strum::VariantNames` writes the list instead,
+/// so a variant cannot be missed and `cargo fmt` cannot change the answer. The old scan survives
+/// as a test, where it is an independent oracle rather than the thing being trusted.
 pub fn kinds() -> std::collections::BTreeSet<String> {
-    // A checkout on Windows may carry CRLF; the scan reads lines, not bytes.
-    let source = include_str!("command.rs").replace("\r\n", "\n");
-    let start = source
-        .find("pub enum Command {")
-        .expect("command.rs declares `pub enum Command {`");
-    let body = &source[start..];
-    let end = body
-        .find("\n}\n")
-        .expect("the Command enum closes with a bare `}`");
-    let kinds: std::collections::BTreeSet<String> = body[..end]
-        .lines()
-        .filter_map(|line| {
-            // A variant is a four-space-indented capitalised identifier, followed by `{`, `,` or
-            // `(`. Doc comments, attributes and fields are all indented differently or start
-            // with something else.
-            let rest = line.strip_prefix("    ")?;
-            if rest.starts_with(' ') {
-                return None;
-            }
-            let name: String = rest
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric())
-                .collect();
-            let after = rest[name.len()..].trim_start();
-            let is_variant = !name.is_empty()
-                && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-                && (after.starts_with('{') || after.starts_with(',') || after.starts_with('('));
-            is_variant.then(|| {
-                let mut chars = name.chars();
-                match chars.next() {
-                    Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
-                    None => String::new(),
-                }
-            })
-        })
-        .collect();
-    assert!(
-        kinds.len() >= 100,
-        "found only {} Command variants; the scan has stopped working",
-        kinds.len()
-    );
-    kinds
+    <Command as strum::VariantNames>::VARIANTS
+        .iter()
+        .map(|variant| wire_spelling(variant))
+        .collect()
+}
+
+/// `rename_all = "camelCase"`, exactly: the first letter down, the rest untouched. Serde does not
+/// split an identifier into words for this, which is why `CreateOAuthClient` is
+/// `createOAuthClient` and not `createOauthClient`.
+fn wire_spelling(variant: &str) -> String {
+    let mut chars = variant.chars();
+    match chars.next() {
+        Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 /// The due date an editor holds, ahead of the cache (AITD-461).
@@ -1643,6 +1623,101 @@ pub struct DueDraft {
 
 #[cfg(test)]
 mod tests {
+    /// Today's wire vocabulary, one name per line, sorted — the same order [`super::kinds`]
+    /// answers in.
+    ///
+    /// `kinds()` is what every shell's bindings gate reads its own list against, so a change to
+    /// it is a change to what the shells may say. That is a deliberate act: a new command adds a
+    /// line here, and nothing else ever should. The point is the negative case — a refactor of
+    /// HOW the list is produced must not move a single byte of WHAT it contains.
+    const KINDS_SNAPSHOT: &str = include_str!("command_kinds.snapshot");
+
+    /// What `kinds()` used to be: the variant names recovered from this file's own source.
+    ///
+    /// Kept as a SECOND opinion, which is the one job it is good at. It reads the same enum
+    /// `serde` reads — four-space-indented capitalised identifiers inside `pub enum Command {`,
+    /// which is where the `kind` tags come from — and it fails loudly rather than quietly short
+    /// if the shapes it anchors on stop matching. As production code that quiet-short case was
+    /// the whole problem; as a test it is the thing being compared against.
+    fn kinds_by_reading_the_source() -> std::collections::BTreeSet<String> {
+        // A checkout on Windows may carry CRLF; the scan reads lines, not bytes.
+        let source = include_str!("command.rs").replace("\r\n", "\n");
+        let start = source
+            .find("pub enum Command {")
+            .expect("command.rs declares `pub enum Command {`");
+        let body = &source[start..];
+        let end = body
+            .find("\n}\n")
+            .expect("the Command enum closes with a bare `}`");
+        let kinds: std::collections::BTreeSet<String> = body[..end]
+            .lines()
+            .filter_map(|line| {
+                // Doc comments, attributes and fields are all indented differently or start with
+                // something else.
+                let rest = line.strip_prefix("    ")?;
+                if rest.starts_with(' ') {
+                    return None;
+                }
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric())
+                    .collect();
+                let after = rest[name.len()..].trim_start();
+                let is_variant = !name.is_empty()
+                    && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                    && (after.starts_with('{') || after.starts_with(',') || after.starts_with('('));
+                is_variant.then(|| super::wire_spelling(&name))
+            })
+            .collect();
+        assert!(
+            kinds.len() >= 100,
+            "found only {} Command variants; the scan has stopped working",
+            kinds.len()
+        );
+        kinds
+    }
+
+    /// The derived list and the serde tag set are the same set.
+    ///
+    /// `serde`'s tags are not enumerable from outside the derive, so the enum's own source — the
+    /// text `serde_derive` was handed — stands in for them. If `strum` ever disagreed with it,
+    /// one of the two is not seeing a variant, and `kinds()` would be answering a shell's
+    /// bindings gate with a vocabulary the core does not actually accept.
+    #[test]
+    fn the_derived_kinds_are_the_serde_tag_set() {
+        assert_eq!(
+            super::kinds(),
+            kinds_by_reading_the_source(),
+            "`strum::VariantNames` and the `Command` enum's own source disagree about the variants"
+        );
+    }
+
+    /// Serde lowercases the first letter and stops. Two variants in this enum are the whole
+    /// reason `kinds()` does the conversion itself instead of asking `strum` for it.
+    #[test]
+    fn an_acronym_keeps_its_capitals_after_the_first_letter() {
+        assert_eq!(
+            super::wire_spelling("CreateOAuthClient"),
+            "createOAuthClient"
+        );
+        assert_eq!(super::wire_spelling("Lists"), "lists");
+    }
+
+    #[test]
+    fn the_command_kinds_still_match_the_recorded_snapshot() {
+        let recorded: Vec<&str> = KINDS_SNAPSHOT
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        let produced: Vec<String> = super::kinds().into_iter().collect();
+        assert_eq!(
+            produced, recorded,
+            "the wire vocabulary moved. If a command was added or renamed on purpose, update \
+             src/app/command_kinds.snapshot in the same commit — and expect every shell's \
+             bindings gate to need the same change."
+        );
+    }
+
     /// The list a shell's bindings are checked against: every variant, spelled as the wire
     /// spells it, and a scan that would rather fail than answer with a short list.
     #[test]
