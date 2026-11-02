@@ -41,6 +41,17 @@ pub const DEFAULT_BASE_URL: &str = "https://astrid.cc";
 /// of in production.
 pub const API_PREFIX: &str = "/api/v1/";
 
+/// The header that names which running client made a request (astrid-web AWTD-1497,
+/// `lib/realtime/client-id.ts`). The live stream names the same client as `?clientId=`.
+///
+/// The server tags the event a task update causes with it and drops that event on the one
+/// connection that names the same client. So the actor's *other* devices hear their own edit live,
+/// and the device that made it never gets an echo that could spring a checkbox back mid-run of
+/// quick toggles (the 2026-09-08 completion storm). A write with no id leaves the actor out
+/// entirely — which is why an edit on the iPhone reached the open Mac list only on the 60-second
+/// sync (AITD-574).
+pub const CLIENT_ID_HEADER: &str = "x-astrid-client-id";
+
 /// The paths outside `/api/v1/` this client is allowed to reach.
 ///
 /// None has a v1 equivalent. An allow-list rather than a loosened rule: a new legacy path has to
@@ -209,6 +220,9 @@ pub struct ApiClient {
     session_cookie: std::sync::RwLock<CachedCookie>,
     /// What this build states in `x-platform` — see [`platform_header`].
     platform: platform_header::Platform,
+    /// Which running client this is — see [`CLIENT_ID_HEADER`]. New for every client, never
+    /// persisted: two app instances that shared one would each miss the other's edits.
+    client_id: String,
 }
 
 impl ApiClient {
@@ -223,7 +237,13 @@ impl ApiClient {
             secure_store,
             session_cookie: std::sync::RwLock::new(CachedCookie::Unknown),
             platform: platform_header::Platform::default(),
+            client_id: format!("core_{}", uuid::Uuid::new_v4().simple()),
         }
+    }
+
+    /// Which running client this is: sent on every request and on the live stream's URL.
+    pub fn client_id(&self) -> &str {
+        &self.client_id
     }
 
     /// State a different platform on every request — the Apple apps' shells set theirs.
@@ -525,6 +545,7 @@ impl ApiClient {
                 platform_header::HEADER_NAME.to_string(),
                 self.platform.wire().to_string(),
             ),
+            (CLIENT_ID_HEADER.to_string(), self.client_id.clone()),
         ];
         if let Some(cookie) = self.session_cookie().await {
             headers.push(("cookie".to_string(), cookie));
@@ -588,6 +609,46 @@ mod tests {
         assert_eq!(sent.header("x-platform"), Some("windows-app"));
         assert_eq!(sent.header("cookie"), Some("next-auth.session-token=abc"));
         assert_eq!(sent.header("accept"), Some("application/json"));
+    }
+
+    /// AITD-574: a task edited on the iPhone reached the open Mac list only on the 60-second sync.
+    /// The server leaves the actor's own devices out of an update unless the write names the
+    /// client that made it (astrid-web AWTD-1497, `lib/realtime/client-id.ts`). So every request
+    /// names this running client, with one id for its lifetime, in the shape the server accepts;
+    /// and another client — another app on the same account — has its own.
+    #[tokio::test]
+    async fn aitd_574_every_request_names_this_client_with_one_id() {
+        let (client, transport) = client_with(
+            StubTransport::new()
+                .push_json("/api/v1/tasks", 200, serde_json::json!([]))
+                .push_json("/api/v1/tasks", 200, serde_json::json!([])),
+        );
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+
+        let sent = transport.requests();
+        let first = sent[0]
+            .header(CLIENT_ID_HEADER)
+            .expect("names the client")
+            .to_string();
+        assert_eq!(sent[1].header(CLIENT_ID_HEADER), Some(first.as_str()));
+        assert_eq!(first, client.client_id());
+        assert!(
+            (8..=64).contains(&first.len())
+                && first
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "the server ignores an id outside [A-Za-z0-9_-]{{8,64}}: {first}"
+        );
+
+        let (other, _) = client_with(StubTransport::new());
+        assert_ne!(other.client_id(), client.client_id());
     }
 
     /// Signed out is not an error state for the client to invent a credential around — it simply

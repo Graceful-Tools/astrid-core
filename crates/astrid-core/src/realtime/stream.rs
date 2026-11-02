@@ -47,7 +47,12 @@ pub async fn run(
         }
 
         let mut woken = false;
-        match client.open_stream(client.get(SSE_PATH)).await {
+        // Named, so the server can skip this device's own echo and send it everyone else's
+        // edits, the actor's other devices included (AITD-574).
+        let request = client
+            .get(SSE_PATH)
+            .query("clientId", client.client_id().to_string());
+        match client.open_stream(request).await {
             Ok(mut frames) => {
                 // It connected: whatever failed before describes a world that is gone.
                 policy.connected();
@@ -136,6 +141,7 @@ mod tests {
     struct StreamingStub {
         attempts: Mutex<Vec<Result<Vec<String>, TransportError>>>,
         opened: Mutex<usize>,
+        urls: Mutex<Vec<String>>,
     }
 
     impl StreamingStub {
@@ -143,6 +149,7 @@ mod tests {
             StreamingStub {
                 attempts: Mutex::new(attempts),
                 opened: Mutex::new(0),
+                urls: Mutex::new(Vec::new()),
             }
         }
     }
@@ -153,8 +160,9 @@ mod tests {
             Err(TransportError::Invalid("this stub only streams".into()))
         }
 
-        async fn open_stream(&self, _request: HttpRequest) -> Result<FrameStream, TransportError> {
+        async fn open_stream(&self, request: HttpRequest) -> Result<FrameStream, TransportError> {
             *self.opened.lock().expect("lock") += 1;
+            self.urls.lock().expect("lock").push(request.url.clone());
             let mut attempts = self.attempts.lock().expect("lock");
             if attempts.is_empty() {
                 return Err(TransportError::Unreachable("nothing left".into()));
@@ -198,6 +206,29 @@ mod tests {
         assert_eq!(
             store.task("t1").expect("reads").expect("present").title,
             "Buy milk"
+        );
+    }
+
+    /// AITD-574: the server drops an event tagged with the client that made the write only on
+    /// the connection that names the same client (astrid-web AWTD-1497). Without `clientId` the
+    /// stream is anonymous, so the server cannot tell this device's echo from another's, and
+    /// the actor's edits never reached their other devices live.
+    #[tokio::test(start_paused = true)]
+    async fn aitd_574_the_stream_names_the_client_its_writes_do() {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let sink = Arc::new(RealtimeSink::new(store));
+        let stub = Arc::new(StreamingStub::new(vec![Err(TransportError::Refused(401))]));
+        let client = client(stub.clone());
+
+        run(client.clone(), sink, || true).await;
+
+        let urls = stub.urls.lock().expect("lock");
+        assert_eq!(
+            urls[0],
+            format!(
+                "https://astrid.cc/api/v1/sse?clientId={}",
+                client.client_id()
+            )
         );
     }
 
