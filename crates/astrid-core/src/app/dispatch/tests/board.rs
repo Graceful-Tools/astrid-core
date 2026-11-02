@@ -428,6 +428,95 @@ async fn a_card_typed_into_a_column_is_born_in_it_task_95c7a68f() {
     assert_eq!(columns[0]["total"], 0, "and not in the Inbox");
 }
 
+/// A card typed into a column draws a CHECKBOX straight away, not the unassigned mark (task
+/// e17707a2).
+///
+/// Reported on Windows as "the checkbox doesn't show up immediately": the card appears with the
+/// grey unassigned square and only becomes a checkbox once the server's copy comes back assigned.
+/// The leading control is the creator's answer to "whose task is this?", so it has to be right in
+/// the row the board draws straight after the write — offline it is the only answer there will be.
+#[tokio::test]
+async fn a_card_typed_into_a_column_is_mine_straight_away_task_e17707a2() {
+    let app = board_app(json!({ "id": "l1", "name": "Work", "projectId": "p1" })).await;
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "doing",
+            "title": "Write it down",
+        }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["assigneeId"], "me", "{made}");
+
+    let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+    let columns = board["value"]["columns"].as_array().expect("columns");
+    let doing = columns
+        .iter()
+        .find(|column| column["id"] == "doing")
+        .expect("a doing column");
+    assert_eq!(
+        doing["cards"][0]["leading"]["kind"], "checkbox",
+        "the card the board draws is mine, so its mark completes it: {board}"
+    );
+}
+
+/// ...and a board whose list says `unassigned` keeps the unassigned mark, which is the answer to
+/// the report above rather than a second bug (task e17707a2).
+///
+/// The three boards the agent loops work are configured this way on purpose: an unassigned Ready
+/// task is the hand-off, so a card typed into one of their columns belongs to nobody until a loop
+/// claims it. astrid-web's `resolveAssignee` reads the same three-way encoding — `undefined` is
+/// "never configured", SQL `null` is "whoever created it", and the string `'unassigned'` is a
+/// choice that must not be read as a user id — so the mark a card is born with is the same on
+/// every client. A checkbox here would be the shell claiming a task the server says is nobody's.
+#[tokio::test]
+async fn a_board_that_defaults_to_unassigned_keeps_the_unassigned_mark_task_e17707a2() {
+    let app = board_app(json!({
+        "id": "l1",
+        "name": "Work",
+        "projectId": "p1",
+        "defaultAssigneeId": "unassigned",
+    }))
+    .await;
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "doing",
+            "title": "Write it down",
+        }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert!(
+        made["value"]["assigneeId"].is_null(),
+        "the list said nobody, and that is not the same as saying nothing: {made}"
+    );
+
+    let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+    let columns = board["value"]["columns"].as_array().expect("columns");
+    let doing = columns
+        .iter()
+        .find(|column| column["id"] == "doing")
+        .expect("a doing column");
+    assert_eq!(
+        doing["cards"][0]["leading"]["kind"], "unassigned",
+        "nobody's task wears the unassigned mark, on a card as on a row: {board}"
+    );
+}
+
 /// Inbox has no status, so a card typed there carries no role — and a column that is not on this
 /// board is refused rather than guessed at (task 95c7a68f).
 #[tokio::test]
