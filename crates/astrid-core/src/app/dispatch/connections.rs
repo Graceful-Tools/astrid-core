@@ -9,6 +9,54 @@ use crate::services::connections::{
     expiry_in_range, ConnectionKind, OAuthClientPreset, ACCESS_TOKEN_DAYS, REGISTERABLE_SCOPES,
 };
 
+/// Every command about a connection or a minted credential, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Connections => answer(app.context.connections().panel().await),
+        Command::RevokeConnection {
+            connection_kind,
+            id,
+        } => connections::revoke(app, &connection_kind, &id).await,
+        Command::LoadOAuthClient { client_id } => {
+            answer(app.context.connections().oauth_client(&client_id).await)
+        }
+        Command::CheckOAuthClientDraft {
+            draft,
+            toggle_grant,
+        } => connections::check_draft(&draft, toggle_grant.as_deref()),
+        Command::CreateOAuthClient { draft } => connections::create_client(app, &draft).await,
+        Command::UpdateOAuthClient { client_id, draft } => {
+            connections::update_client(app, &client_id, &draft).await
+        }
+        Command::MintTransportCredentials { preset, agent } => {
+            connections::mint_transport_credentials(app, &preset, &agent).await
+        }
+        Command::MintAccessToken {
+            permissions,
+            expires_in_days,
+            description,
+            agent,
+        } => {
+            connections::mint_access_token(
+                app,
+                &permissions,
+                expires_in_days,
+                description.as_deref(),
+                agent.as_deref(),
+            )
+            .await
+        }
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("connections"),
+    }
+}
+
 /// Stop one connection. A kind this build cannot name is refused before anything is sent: the
 /// path segment would be one the server cannot match, and a 404 on screen is a row that will not
 /// go away.

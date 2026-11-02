@@ -4,6 +4,110 @@
 
 use super::*;
 
+/// Every command about a board, its statuses or its projects, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Board {
+            list_id,
+            project_id,
+            limit,
+            ids_only,
+        } => board(
+            app,
+            list_id.as_deref(),
+            project_id.as_deref(),
+            limit,
+            ids_only,
+        ),
+        Command::DropBoardCard {
+            task_id,
+            column_id,
+            list_id,
+            index,
+        } => drop_board_card(app, &task_id, &column_id, &list_id, index),
+        Command::MoveTaskToColumn {
+            task_id,
+            column_id,
+            list_id,
+        } => move_task_to_column(app, &task_id, &column_id, &list_id),
+        Command::AddBoardCard {
+            list_id,
+            column_id,
+            title,
+        } => add_board_card(app, &list_id, &column_id, title),
+        Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
+        Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
+        Command::AddBoardStatus { list_id, name } => {
+            status_outcome(app.context.boards().add_status(&list_id, &name).await)
+        }
+        Command::RenameBoardStatus {
+            list_id,
+            role,
+            name,
+        } => status_outcome(
+            app.context
+                .boards()
+                .rename_status(&list_id, &role, &name)
+                .await,
+        ),
+        Command::ReorderBoardStatus {
+            list_id,
+            role,
+            direction,
+        } => {
+            let direction = match direction.as_str() {
+                "up" => crate::board::ReorderDirection::Up,
+                "down" => crate::board::ReorderDirection::Down,
+                other => {
+                    return Response::failed(Failure::bad_request(format!(
+                        "direction must be 'up' or 'down', not '{other}'"
+                    )))
+                }
+            };
+            status_outcome(
+                app.context
+                    .boards()
+                    .reorder_status(&list_id, &role, direction)
+                    .await,
+            )
+        }
+        Command::RemoveBoardStatus { list_id, role } => {
+            status_outcome(app.context.boards().remove_status(&list_id, &role).await)
+        }
+        Command::Projects => answer(app.store.projects().map_err(Into::into)),
+        Command::CreateProject {
+            name,
+            description,
+            color,
+            image_url,
+        } => answer(
+            app.context
+                .boards()
+                .create_project(
+                    &name,
+                    description.as_deref(),
+                    color.as_deref(),
+                    image_url.as_deref(),
+                )
+                .await,
+        ),
+        Command::CreateBoardForList { list_id } => {
+            answer(app.context.boards().create_board_for_list(&list_id).await)
+        }
+        Command::DeleteProject { project_id } => {
+            answer(app.context.boards().delete_project(&project_id).await)
+        }
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("board"),
+    }
+}
+
 /// How many cards a column carries as rows unless the shell asks for more. The count comes back
 /// whole, and an `idsOnly` answer carries every id: a window is a transport choice for a shell
 /// that draws the core's rows (Windows), never a limit on what the board holds (D43).
@@ -25,6 +129,23 @@ fn domain_tasks(
         .map(str::to_string)
         .collect();
     app.store.tasks_in_lists(&domain).unwrap_or_default()
+}
+
+/// A board-status write's answer: the state that changed, or the web's own refusal as a bad
+/// request (task e5214fba).
+///
+/// It sat in `lists.rs` until task 8a91c5b0 moved the arms out of the router, which is when it
+/// became visible that the only callers are the four board-status arms.
+fn status_outcome(outcome: crate::services::Result<crate::services::StatusOutcome>) -> Response {
+    match outcome {
+        Ok(crate::services::StatusOutcome::Written(state)) => {
+            Response::ok(serde_json::json!({ "state": state }))
+        }
+        Ok(crate::services::StatusOutcome::Refused(refused)) => {
+            Response::failed(Failure::bad_request(&refused.message))
+        }
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 /// The board a list belongs to.

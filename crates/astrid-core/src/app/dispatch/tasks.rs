@@ -4,6 +4,274 @@
 
 use super::*;
 
+/// Every command about a task, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::ToggleAssignee { task_id, user_id } => {
+            toggle_assignee(app, &task_id, user_id.as_deref())
+        }
+        Command::NestTask {
+            task_id,
+            zone,
+            target_id,
+            row_ids,
+        } => nest_task(app, &task_id, &zone, target_id, row_ids),
+        Command::Tasks { ids } => {
+            let store = &app.store;
+            let found = match ids {
+                None => store.tasks(),
+                Some(ids) => ids
+                    .iter()
+                    .map(|id| store.resolve_id(id).and_then(|id| store.task(&id)))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|tasks| tasks.into_iter().flatten().collect()),
+            };
+            match found {
+                Ok(tasks) => Response::ok(tasks),
+                Err(error) => Response::failed(Failure::from(error)),
+            }
+        }
+        Command::ResolveIds { ids } => {
+            let mut moved = serde_json::Map::new();
+            for id in ids {
+                match app.store.resolve_id(&id) {
+                    Ok(real) if real != id => {
+                        moved.insert(id, serde_json::Value::String(real));
+                    }
+                    Ok(_) => {}
+                    Err(error) => return Response::failed(Failure::from(error)),
+                }
+            }
+            Response::ok(serde_json::Value::Object(moved))
+        }
+        Command::Task { task_id } => match app.context.tasks().task(&task_id) {
+            Ok(Some(task)) => Response::ok(task),
+            Ok(None) => Response::failed(Failure::not_found("task", task_id)),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::TaskDetail {
+            task_id,
+            display_mode,
+        } => task_detail(app, &task_id, display_mode),
+        Command::DueDateOptions { task_id, draft } => {
+            due_date_options(app, task_id.as_deref(), draft)
+        }
+        Command::DueDateOnDay { task_id, day } => due_date_on_day(app, &task_id, &day),
+        Command::DueDateAtTime {
+            task_id,
+            hour,
+            minute,
+        } => due_date_at_time(app, &task_id, hour, minute),
+        Command::DueDateAllDay { task_id } => due_date_all_day(app, &task_id),
+        Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
+        Command::TaskProjectFields { task_id } => {
+            let fields = app.context.project_fields();
+            match fields.refresh(&task_id).await {
+                Ok(rows) => Response::ok(rows),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::SetTaskProjectField {
+            task_id,
+            field_id,
+            value,
+        } => answer(
+            app.context
+                .project_fields()
+                .set_now(&task_id, &field_id, value)
+                .await,
+        ),
+        Command::AddTaskBlocker {
+            task_id,
+            blocking_task_id,
+        } => add_task_blocker(app, &task_id, &blocking_task_id).await,
+        Command::RemoveTaskBlocker {
+            task_id,
+            blocking_task_id,
+        } => remove_task_blocker(app, &task_id, &blocking_task_id).await,
+        Command::TaskBlockerCandidates {
+            task_id,
+            query,
+            limit,
+        } => task_blocker_candidates(app, &task_id, &query, limit).await,
+        Command::SearchTasks {
+            query,
+            list_id,
+            include_completed,
+            limit,
+            subtask_display,
+            show_subtasks,
+        } => search_tasks(
+            app,
+            &query,
+            crate::services::search::SearchScope {
+                list_id,
+                include_completed,
+            },
+            limit,
+            subtask_display.map(|display| (display, show_subtasks)),
+        ),
+        Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
+        Command::AssigneeOptions {
+            task_id,
+            list_ids,
+            discovered,
+            agents,
+            current_user,
+        } => assignee_options(
+            app,
+            AssigneeInputs {
+                task_id: task_id.as_deref(),
+                list_ids,
+                discovered: &discovered,
+                agents,
+                current_user,
+            },
+        ),
+        Command::QuickAddDefaults {
+            list_id,
+            assignee_id,
+            priority,
+        } => quick_add_defaults(app, list_id.as_deref(), assignee_id.as_deref(), priority),
+        Command::CreateTask {
+            title,
+            description,
+            list_ids,
+            priority,
+            due_date_time,
+            is_all_day,
+            assignee_id,
+            parent_task_id,
+            status_role,
+            quick_add,
+            locale,
+            repeating,
+            repeating_data,
+            repeat_from,
+            is_private,
+            apply_list_defaults,
+        } => answer(create_task(
+            app,
+            NewTask {
+                title,
+                description,
+                list_ids,
+                priority,
+                due_date_time,
+                is_all_day,
+                assignee_id,
+                parent_task_id,
+                status_role,
+                quick_add,
+                locale,
+                repeating,
+                repeating_data,
+                repeat_from,
+                is_private,
+                apply_list_defaults,
+            },
+        )),
+        Command::UpdateTask { task_id, changes } => match changes_from_json(&changes) {
+            Ok(changes) => answer(app.context.tasks().update(&task_id, &changes)),
+            Err(failure) => Response::failed(failure),
+        },
+        // The only path to a completion, and the reason `TaskChanges::completed` is never set by
+        // the shell: see `crate::services::task`.
+        Command::CompleteTask {
+            task_id,
+            completed,
+            task,
+            timer_duration,
+            last_timer_value,
+            completed_at,
+            source,
+        } => {
+            let timer = (timer_duration.is_some() || last_timer_value.is_some()).then_some(
+                crate::services::TimerResult {
+                    duration_seconds: timer_duration,
+                    last_value: last_timer_value,
+                },
+            );
+            let origin = crate::services::Origin {
+                at: completed_at.as_deref().and_then(date::parse),
+                source,
+            };
+            answer(app.context.tasks().complete_as(
+                &task_id,
+                completed,
+                task.as_deref(),
+                timer,
+                &origin,
+            ))
+        }
+        Command::DeleteTask { task_id } => match app.context.tasks().delete(&task_id) {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::SetClosedReason {
+            task_id,
+            closed_reason,
+        } => {
+            if let Some(reason) = closed_reason.as_deref() {
+                if !crate::model::task::is_closed_reason(reason) {
+                    return Response::failed(Failure::bad_request(format!(
+                        "closedReason must be one of: {}",
+                        crate::model::task::CLOSED_REASONS.join(", ")
+                    )));
+                }
+            }
+            answer(
+                app.context
+                    .tasks()
+                    .close(&task_id, closed_reason.as_deref()),
+            )
+        }
+        Command::ShareTask { task_id } => share_task(app, &task_id).await,
+        Command::CopyTask {
+            task_id,
+            target_list_id,
+            include_comments,
+        } => answer(
+            app.context
+                .tasks()
+                .copy(&task_id, target_list_id.as_deref(), include_comments)
+                .await,
+        ),
+        Command::SetTaskLists { task_id, list_ids } => {
+            answer(app.context.tasks().set_lists(&task_id, list_ids))
+        }
+        Command::ListPicks {
+            task_id,
+            query,
+            list_ids,
+            as_toggles,
+        } => list_picks(app, task_id.as_deref(), list_ids, &query, as_toggles),
+        Command::AddTaskToList { task_id, list_id } => change_task_lists(app, &task_id, |ids| {
+            if !ids.contains(&list_id) {
+                ids.push(list_id.clone());
+            }
+        }),
+        Command::RemoveTaskFromList { task_id, list_id } => {
+            change_task_lists(app, &task_id, |ids| ids.retain(|id| id != &list_id))
+        }
+        Command::CreateListForTask { task_id, name } => create_list_for_task(app, &task_id, &name),
+        Command::SetTaskStatusRole {
+            task_id,
+            status_role,
+        } => answer(app.context.tasks().set_status_role(&task_id, status_role)),
+        Command::StartTimer { task_id } => start_timer(app, &task_id),
+        Command::StopTimer { task_id } => stop_timer(app, &task_id),
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("tasks"),
+    }
+}
+
 /// Everything a new task can be told, as `createTask` says it.
 ///
 /// A struct rather than eleven parameters because there are two callers now: the `createTask` arm

@@ -4,6 +4,25 @@
 
 use super::*;
 
+/// Every command about a reminder, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::ReminderOptions { task_id } => reminder_options(app, &task_id),
+        Command::RemindersDue => reminders_due(app),
+        Command::NextReminder => next_reminder(app),
+        Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
+        Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("reminders"),
+    }
+}
+
 /// When to be reminded about one task.
 pub(super) fn reminder_options(app: &App, task_id: &str) -> Response {
     let task = match app.context.tasks().task(task_id) {

@@ -4,6 +4,372 @@
 
 use super::*;
 
+/// Every command about the account, its agents or its integrations, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::IsSignedIn => Response::ok(serde_json::json!({
+            "signedIn": app.auth.is_signed_in().await,
+            "waitingForCallback": app.auth.is_waiting(),
+        })),
+        Command::CurrentUser => match app.context.account().current_user() {
+            Ok(user) => Response::ok(user),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::SearchUsers {
+            query,
+            task_id,
+            list_ids,
+            include_agents,
+        } => answer(
+            app.context
+                .account()
+                .search_users(&query, task_id.as_deref(), &list_ids, include_agents)
+                .await,
+        ),
+        Command::Agents => agents(app).await,
+        Command::AstridModel => answer(app.context.agents().astrid_model().await),
+        Command::SetAstridModel { agent_id } => answer(
+            app.context
+                .agents()
+                .set_astrid_model(agent_id.as_deref())
+                .await,
+        ),
+        Command::WebhookSettings => answer(app.context.agents().webhook_settings().await),
+        Command::SaveWebhook {
+            url,
+            enabled,
+            events,
+            agents,
+            regenerate_secret,
+        } => answer(
+            app.context
+                .agents()
+                .save_webhook(&url, enabled, &events, &agents, regenerate_secret)
+                .await,
+        ),
+        Command::DeleteWebhook => answer_done(app.context.agents().delete_webhook().await),
+        Command::TestWebhook => answer(app.context.agents().test_webhook().await),
+        Command::CustomAgents => answer(app.context.agents().custom_agents().await),
+        Command::RegisterCustomAgent { name, list_ids } => answer(
+            app.context
+                .agents()
+                .register_custom_agent(&name, list_ids)
+                .await,
+        ),
+        Command::DeleteCustomAgent { agent_id } => {
+            answer_done(app.context.agents().delete_custom_agent(&agent_id).await)
+        }
+        Command::SetCustomAgentPhoto { agent_id, image } => answer(
+            app.context
+                .agents()
+                .set_custom_agent_photo(&agent_id, image.as_deref())
+                .await,
+        ),
+        Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
+            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::DisconnectCopilot => answer_done(app.context.agents().disconnect_copilot().await),
+        Command::SetAgentMode { agent, mode } => {
+            answer(app.context.agents().set_mode(&agent, mode).await)
+        }
+        Command::SaveAgentCredential { service_id, key } => answer_done(
+            app.context
+                .agents()
+                .save_credential(&service_id, &key)
+                .await,
+        ),
+        Command::TestAgentCredential { service_id } => {
+            match app.context.agents().test_credential(&service_id).await {
+                Ok(works) => Response::ok(serde_json::json!({ "works": works })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::DeleteAgentCredential { service_id } => {
+            answer_done(app.context.agents().delete_credential(&service_id).await)
+        }
+        Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
+        Command::ExternalAccounts => external_accounts(app).await,
+        Command::CreateAndLinkGoogleList { list_id, name } => answer(
+            app.context
+                .external()
+                .create_and_link_google_list(&list_id, &name)
+                .await,
+        ),
+        Command::ConnectProvider { provider } => {
+            match app.context.external().authorize_url(provider).await {
+                Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::DisconnectProvider { provider } => {
+            answer_done(app.context.external().disconnect(provider).await)
+        }
+        Command::LinkList {
+            provider,
+            list_id,
+            container_id,
+        } => answer(
+            app.context
+                .external()
+                .link(provider, &list_id, &container_id)
+                .await,
+        ),
+        Command::UnlinkList { provider, link_id } => {
+            answer_done(app.context.external().unlink(provider, &link_id).await)
+        }
+        Command::Features => features(app),
+        Command::MyTasksFilters => match app.context.account().my_tasks_preferences() {
+            Ok(filters) => Response::ok(filters),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RefreshMyTasks => {
+            match app.context.account().refresh_my_tasks_preferences().await {
+                Ok(filters) => Response::ok(filters),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::SetMyTasksFilters { filters } => {
+            match app
+                .context
+                .account()
+                .set_my_tasks_preferences(&filters)
+                .await
+            {
+                Ok(filters) => Response::ok(filters),
+                // The choice is already on screen and already remembered here. Saying so beats
+                // pretending it worked, and beats losing it because the account could not hear.
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::GoogleSyncMode => match app.context.external().auto_link_settings().await {
+            Ok(settings) => Response::ok(serde_json::json!({
+                "mode": settings.mode,
+                "suffix": settings.suffix,
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::SetGoogleSyncMode { mode, suffix } => answer_done(
+            app.context
+                .external()
+                .set_auto_link_mode(mode, suffix.as_deref())
+                .await,
+        ),
+        Command::ImportExternalLedger {
+            provider,
+            pending,
+            tombstones,
+            server_tombstones,
+            excluded,
+            links,
+        } => answer_done(
+            crate::external::ledger::import(
+                &app.store,
+                provider.slug(),
+                &crate::external::ledger::LedgerImport {
+                    pending,
+                    tombstones,
+                    server_tombstones,
+                    excluded,
+                    links,
+                },
+            )
+            .map_err(Into::into),
+        ),
+        Command::SyncExternal => sync_external(app).await,
+        Command::ProfileStats => {
+            let me = app.context.account().current_user_id().ok().flatten();
+            match me {
+                Some(id) => answer(app.context.account().stats(&id).await),
+                // Signed out there is nobody to have statistics about, and zeroes would read as an
+                // account that has done nothing.
+                None => Response::failed(Failure::unauthorized()),
+            }
+        }
+        Command::UpdateProfile { name, photo_path } => {
+            let account = app.context.account();
+            let image = match photo_path {
+                Some(path) => match account.upload_photo(std::path::Path::new(&path)).await {
+                    Ok(url) => Some(url),
+                    Err(error) => return Response::failed(error.into()),
+                },
+                None => None,
+            };
+            match account
+                .update_profile(name.as_deref(), image.as_deref())
+                .await
+            {
+                Ok(_) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::ResendVerification => match app.context.account().resend_verification().await {
+            Ok(answer) => Response::ok(serde_json::json!({
+                "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ChangeEmail { email } => {
+            if email.trim().is_empty() {
+                return Response::failed(Failure::bad_request("an email address is required"));
+            }
+            match app.context.account().change_email(&email).await {
+                Ok(answer) => Response::ok(answer),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::Passkeys => match app.context.account().passkeys().await {
+            Ok(passkeys) => Response::ok(serde_json::json!({ "passkeys": passkeys })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RenamePasskey { id, name } => {
+            if name.trim().is_empty() {
+                return Response::failed(Failure::bad_request("a passkey needs a name"));
+            }
+            match app.context.account().rename_passkey(&id, &name).await {
+                Ok(()) => Response::done(),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RevokePasskey { id } => match app.context.account().revoke_passkey(&id).await {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::PasskeyRegistrationOptions => {
+            match app.context.account().passkey_registration_options().await {
+                Ok(answer) => Response::ok(answer),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RegisterPasskey {
+            session_id,
+            attestation,
+            name,
+        } => {
+            if session_id.trim().is_empty() {
+                return Response::failed(Failure::bad_request(
+                    "a passkey registration needs the sessionId the challenge came with",
+                ));
+            }
+            if attestation.is_null() {
+                return Response::failed(Failure::bad_request(
+                    "a passkey registration needs the authenticator's response",
+                ));
+            }
+            match app
+                .context
+                .account()
+                .register_passkey(&session_id, attestation, name.as_deref())
+                .await
+            {
+                Ok(()) => Response::done(),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::Contacts => match app.context.account().contacts().await {
+            Ok((contacts, total)) => {
+                Response::ok(serde_json::json!({ "contacts": contacts, "total": total }))
+            }
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ClearContacts => match app.context.account().clear_contacts().await {
+            Ok(deleted) => Response::ok(serde_json::json!({ "deleted": deleted })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::UploadContacts { contacts } => {
+            match app.context.account().upload_contacts(&contacts).await {
+                Ok(stats) => Response::ok(stats),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::DeleteAccount { confirmation } => {
+            // The server requires the phrase typed exactly, and so does this: a request that is
+            // going to be refused is not worth sending, and a button that sends one looks like it
+            // worked.
+            if confirmation != crate::services::account::DELETE_CONFIRMATION {
+                return Response::failed(Failure::bad_request(format!(
+                    "type {} exactly to delete the account",
+                    crate::services::account::DELETE_CONFIRMATION
+                )));
+            }
+            if let Err(error) = app.context.account().delete_account(&confirmation).await {
+                return Response::failed(error.into());
+            }
+            // The account is gone; so is everything this machine held for it.
+            sign_out(app).await
+        }
+        Command::ExportAccount { format, path } => {
+            match app
+                .context
+                .account()
+                .export(&format, std::path::Path::new(&path))
+                .await
+            {
+                Ok(bytes) => Response::ok(serde_json::json!({ "path": path, "bytes": bytes })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::Settings => settings(app),
+        Command::RefreshSettings => {
+            // The user first: a settings screen with no name on it looks broken in a way the
+            // settings themselves do not.
+            let _ = app.context.account().refresh_current_user().await;
+            // Best effort, like the user: a server without the route leaves the defaults standing.
+            let _ = app.context.account().refresh_smart_task_settings().await;
+            let _ = app.context.account().refresh_features().await;
+            match app.context.account().refresh_settings().await {
+                Ok(_) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::UpdateReminderSettings { changes } => {
+            match update_reminder_settings(app, changes) {
+                Ok(()) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::UpdateSmartTaskSettings { changes } => {
+            if let Err(reason) = crate::smart_tasks::validate(&changes) {
+                return Response::failed(Failure::bad_request(reason));
+            }
+            match app.context.account().update_smart_task_settings(changes) {
+                Ok(_) => settings(app),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
+        Command::FeedbackListId => answer(app.context.account().feedback_list_id()),
+        Command::Notifications => inbox_response(app.context.notifications().inbox()),
+        Command::RefreshNotifications => {
+            inbox_response(app.context.notifications().refresh().await)
+        }
+        Command::MarkNotificationsRead { ids } => {
+            inbox_response(app.context.notifications().mark_read(&ids).await)
+        }
+        Command::MarkAllNotificationsRead => {
+            inbox_response(app.context.notifications().mark_all_read().await)
+        }
+        Command::BeginSignIn { provider } => match app.auth.begin_with(provider.as_deref()) {
+            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::CompleteSignIn { callback_url } => answer(app.auth.complete(&callback_url).await),
+        Command::CancelSignIn => {
+            app.auth.cancel();
+            Response::done()
+        }
+        Command::SignOut => sign_out(app).await,
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("account"),
+    }
+}
+
 /// The inbox as the bell draws it: each row with the key for its kind, so the shell owns the
 /// words, and the task's title and identifier so a row reads without a lookup.
 pub(super) fn inbox_response(inbox: crate::services::Result<crate::model::Inbox>) -> Response {
@@ -133,30 +499,6 @@ pub(super) fn features(app: &App) -> Response {
         "projectMode": flag("project_mode"),
         "googleTasks": flag("google_tasks"),
         "taskCost": flag("task_cost"),
-    }))
-}
-
-/// The global quick-add chord, as chosen or as shipped, with its parts for `RegisterHotKey`.
-pub(super) fn hotkey(app: &App) -> Response {
-    let stored = app
-        .store
-        .metadata(crate::keyboard::chord::KEY)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| crate::keyboard::chord::DEFAULT.to_string());
-    // A stored chord this build cannot read falls back to the default rather than to nothing:
-    // an app with no way to summon it is worse than one with the shipped way.
-    let chord = crate::keyboard::chord::parse(&stored).unwrap_or_else(|_| {
-        crate::keyboard::chord::parse(crate::keyboard::chord::DEFAULT)
-            .expect("the default is a chord")
-    });
-    Response::ok(serde_json::json!({
-        "chord": chord.to_string(),
-        "ctrl": chord.ctrl,
-        "alt": chord.alt,
-        "shift": chord.shift,
-        "win": chord.win,
-        "key": chord.key.to_string(),
     }))
 }
 

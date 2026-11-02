@@ -4,6 +4,26 @@
 
 use super::*;
 
+/// Every command about a list's filters, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::FilterOptions { list_id } => filter_options(app, &list_id),
+        Command::SetFilter {
+            list_id,
+            field,
+            value,
+        } => set_filter(app, &list_id, &field, &value).await,
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("list_filters"),
+    }
+}
+
 /// What a list is filtered and sorted by, and what else it could be.
 ///
 /// The rules are `crate::filters`; this is the sheet. Every value here is one those rules match on

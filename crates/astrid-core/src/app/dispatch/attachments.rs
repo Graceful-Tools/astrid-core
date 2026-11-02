@@ -4,6 +4,51 @@
 
 use super::*;
 
+/// Every command about an attachment or the clipboard, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Attachments { task_id } => attachments(app, &task_id),
+        Command::DownloadAttachment { task_id, file_id } => {
+            download_attachment(app, &task_id, &file_id).await
+        }
+        Command::AttachFile {
+            task_id,
+            path,
+            content,
+            file_id,
+            name,
+            mime_type,
+            client_request_id,
+            parent_comment_id,
+        } => attach_file(
+            app,
+            &task_id,
+            &path,
+            AttachOptions {
+                content: content.as_deref(),
+                file_id: file_id.as_deref(),
+                name: name.as_deref(),
+                mime_type: mime_type.as_deref(),
+                client_request_id: client_request_id.as_deref(),
+                parent_comment_id: parent_comment_id.as_deref(),
+            },
+        ),
+        Command::ClipboardPaste {
+            files,
+            image_extension,
+            has_text,
+        } => clipboard_paste(app, files, image_extension, has_text),
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("attachments"),
+    }
+}
+
 /// The files on a task, and whether each is already on this machine.
 pub(super) fn attachments(app: &App, task_id: &str) -> Response {
     let service = app.context.attachments(app.attachment_cache());

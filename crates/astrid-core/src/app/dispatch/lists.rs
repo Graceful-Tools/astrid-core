@@ -4,6 +4,170 @@
 
 use super::*;
 
+/// Every command about a list, its sharing or its membership, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Lists => match app.context.lists().all() {
+            Ok(lists) => Response::ok(lists),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::List { list_id } => match app.context.lists().list(&list_id) {
+            Ok(Some(list)) => Response::ok(list),
+            Ok(None) => Response::failed(Failure::not_found("list", list_id)),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ShareList { list_id } => match app.context.share().link_for_list(&list_id).await {
+            Ok(url) => Response::ok(serde_json::json!({ "url": url })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::ResolveShortcode { code } => answer(app.context.share().resolve(&code).await),
+        Command::ListAgentOptions { list_id } => list_agent_options(app, &list_id).await,
+        Command::ListInsights {
+            list_id,
+            days,
+            time_zone,
+        } => answer(
+            app.context
+                .lists()
+                .insights(
+                    &list_id,
+                    days.unwrap_or(crate::services::list::DEFAULT_INSIGHT_WINDOW_DAYS),
+                    time_zone.as_deref().unwrap_or("UTC"),
+                )
+                .await,
+        ),
+        Command::CreateList {
+            name,
+            color,
+            description,
+            privacy,
+        } => {
+            let created = app.context.lists().create_with(&name, color, privacy);
+            match (created, description) {
+                // A description rides on the list's first edit, which the journal sends after the
+                // create: the create's body is the web's, and it takes no description.
+                (Ok(list), Some(description)) if !description.is_empty() => {
+                    let changes = crate::services::ListChanges {
+                        description: Some(Some(description)),
+                        ..Default::default()
+                    };
+                    answer(app.context.lists().update(&list.id, &changes))
+                }
+                (created, _) => answer(created),
+            }
+        }
+        Command::UpdateList { list_id, changes } => match list_changes_from_json(&changes) {
+            Ok(changes) => answer(app.context.lists().update(&list_id, &changes)),
+            Err(failure) => Response::failed(failure),
+        },
+        Command::DeleteList { list_id } => match app.context.lists().delete(&list_id) {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::SetListFavorite { list_id, favorite } => {
+            answer(app.context.lists().set_favorite(&list_id, favorite))
+        }
+        Command::SetManualOrder { list_id, order } => {
+            answer(app.context.lists().set_manual_order(&list_id, &order))
+        }
+        Command::SetListImage { list_id, path } => answer(
+            app.context
+                .lists()
+                .set_image(&list_id, std::path::Path::new(&path))
+                .await,
+        ),
+        Command::ListImage {
+            image_url: Some(address),
+            ..
+        } => answer(
+            app.context
+                .lists()
+                .image_at(&address, app.attachment_cache())
+                .await,
+        ),
+        Command::ListImage { list_id, .. } => answer(
+            app.context
+                .lists()
+                .image(&list_id, app.attachment_cache())
+                .await,
+        ),
+        Command::PublicLists => answer(app.context.lists().public_lists().await),
+        Command::CopyList { list_id } => answer(app.context.lists().copy(&list_id).await),
+        Command::PublicList { list_id } => public_list(app, &list_id).await,
+        Command::MyTasksList => Response::ok(app.context.lists().my_tasks()),
+        Command::ListMembers { list_id } => list_members(app, &list_id),
+        Command::EligibleNewOwners { list_id } => {
+            Response::ok(crate::services::list::transfer_availability(
+                app.context.lists().eligible_new_owners(&list_id).await,
+            ))
+        }
+        Command::TransferListOwnership {
+            list_id,
+            new_owner_id,
+        } => answer_done(
+            app.context
+                .lists()
+                .transfer_ownership(&list_id, &new_owner_id)
+                .await,
+        ),
+        Command::RefreshListMembers { list_id } => {
+            match app.context.lists().roster(&list_id).await {
+                Ok((_, viewer_role)) => {
+                    let mut answer = list_members(app, &list_id);
+                    if let Some(value) = answer.value.as_mut() {
+                        value["viewerRole"] = serde_json::json!(viewer_role);
+                    }
+                    answer
+                }
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::InviteToList {
+            list_id,
+            email,
+            role,
+        } => answer(app.context.members().invite(&list_id, &email, &role).await),
+        Command::SetMemberRole {
+            list_id,
+            user_id,
+            role,
+        } => answer(
+            app.context
+                .members()
+                .set_role(&list_id, &user_id, &role)
+                .await,
+        ),
+        Command::RemoveMember { list_id, user_id } => {
+            answer(app.context.members().remove(&list_id, &user_id).await)
+        }
+        Command::CancelInvitation { list_id, email } => answer(
+            app.context
+                .members()
+                .cancel_invitation(&list_id, &email)
+                .await,
+        ),
+        Command::SetInvitationRole {
+            list_id,
+            email,
+            role,
+        } => answer(
+            app.context
+                .members()
+                .set_invitation_role(&list_id, &email, &role)
+                .await,
+        ),
+        Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("lists"),
+    }
+}
+
 /// Who a list is shared with, and what this account may do about it.
 ///
 /// The permissions come back with the members rather than being worked out in the shell: whether
@@ -227,20 +391,41 @@ pub(super) async fn list_agent_options(app: &App, list_id: &str) -> Response {
     }))
 }
 
-/// A board-status write's answer: the state that changed, or the web's own refusal as a bad
-/// request (task e5214fba).
-pub(super) fn status_outcome(
-    outcome: crate::services::Result<crate::services::StatusOutcome>,
-) -> Response {
-    match outcome {
-        Ok(crate::services::StatusOutcome::Written(state)) => {
-            Response::ok(serde_json::json!({ "state": state }))
-        }
-        Ok(crate::services::StatusOutcome::Refused(refused)) => {
-            Response::failed(Failure::bad_request(&refused.message))
-        }
-        Err(error) => Response::failed(error.into()),
-    }
+/// One public list by its id, with what the reader may do in it (task c5f7d870).
+///
+/// The projection is here rather than in `permissions` because it adds no rule: `role` and
+/// `canAddTask` are [`crate::permissions::role_in_list`] and
+/// [`crate::permissions::can_edit_tasks`] verbatim, which the `permissions.json` fixture already
+/// pins against web (the named case "viewer membership on a public collaborative list"), and
+/// `canComment` reads the same `collaborative` gate the comments route enforces
+/// (astrid-web `app/api/v1/tasks/[id]/comments/route.ts` — standard access, *or* the task is in a
+/// public collaborative list). Projecting it in dispatch is what `canAddTasks` already does for
+/// the rows answer.
+///
+/// A reader we cannot name — signed out, so there is no current user — is told `null` and `false`
+/// rather than refused: the list is public and still worth drawing, and the honest answer to "may
+/// you add to it" is no.
+async fn public_list(app: &App, list_id: &str) -> Response {
+    let list = match app.context.lists().public_list(list_id).await {
+        Ok(list) => list,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let access = crate::permissions::access_of(&list);
+    let me = app.context.account().current_user_id().ok().flatten();
+    let (role, can_write) = match me.as_deref() {
+        Some(me) => (
+            crate::permissions::role_in_list(me, &access),
+            crate::permissions::can_edit_tasks(me, &access),
+        ),
+        None => (None, false),
+    };
+    Response::ok(serde_json::json!({
+        "list": list,
+        "role": role,
+        // May the reader file something here — the whole point of opening a feedback list.
+        "canAddTask": can_write,
+        "canComment": can_write,
+    }))
 }
 
 pub(super) fn list_changes_from_json(

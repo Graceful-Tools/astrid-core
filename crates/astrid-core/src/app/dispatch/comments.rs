@@ -4,6 +4,101 @@
 
 use super::*;
 
+/// Every command about a comment, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
+            Ok(comments) => Response::ok(comments),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::PostComment {
+            task_id,
+            content,
+            parent_comment_id,
+            comment_type,
+            file_id,
+            author_id,
+            client_request_id,
+        } => {
+            let author =
+                author_id.or_else(|| app.context.account().current_user_id().ok().flatten());
+            // A file already on the server travels by id; the rest of its record comes back with
+            // the comment.
+            let file = file_id.map(|id| crate::model::SecureFile {
+                id,
+                name: String::new(),
+                size: 0,
+                mime_type: String::new(),
+            });
+            answer(app.context.comments().post_as(
+                &task_id,
+                &content,
+                author.as_deref(),
+                comment_type.unwrap_or(crate::model::CommentType::Text),
+                file.as_ref(),
+                parent_comment_id.as_deref(),
+                client_request_id.as_deref(),
+            ))
+        }
+        Command::EditComment {
+            comment_id,
+            content,
+        } => match app.context.comments().edit(&comment_id, &content) {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::CommentSuggestions {
+            task_id,
+            text,
+            caret,
+        } => comment_suggestions(app, &task_id, &text, caret),
+        Command::ApplyCommentSuggestion {
+            text,
+            caret,
+            trigger_kind,
+            id,
+            label,
+        } => {
+            let (text, caret) =
+                crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
+            Response::ok(serde_json::json!({ "text": text, "caret": caret }))
+        }
+        Command::DeleteComment { comment_id } => match app.context.comments().delete(&comment_id) {
+            Ok(()) => Response::done(),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::RefreshComments { task_id } => {
+            // Projected the same way the detail projects them, so a refresh cannot draw a comment
+            // differently from the screen it lands in.
+            let me = app.context.account().current_user_id().ok().flatten();
+            match app.context.comments().refresh(&task_id).await {
+                Ok(comments) => {
+                    // The same autolink context the detail builds, for the same reason the
+                    // projection is shared: a refreshed comment must not draw differently from
+                    // the screen it lands in.
+                    let lists = app.store.lists().unwrap_or_default();
+                    let identifiers = match app.store.task(&task_id).ok().flatten() {
+                        Some(task) => identifier_context(app, &task, &lists),
+                        None => crate::identifier::LinkContext::default(),
+                    };
+                    let mut rows = rows::comment::rows(&comments, me.as_deref(), &identifiers);
+                    fill_local_paths(app, &task_id, &mut rows);
+                    Response::ok(rows)
+                }
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("comments"),
+    }
+}
+
 /// Who this task can be assigned to.
 ///
 /// Assigning itself is an ordinary `updateTask` with an `assigneeId` — null clears it — so there

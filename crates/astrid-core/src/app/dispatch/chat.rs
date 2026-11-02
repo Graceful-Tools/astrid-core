@@ -4,6 +4,92 @@
 
 use super::*;
 
+/// Every command about chat, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::Chat { list_id } => chat(app, &list_id),
+        Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
+        Command::SendChatMessage {
+            channel_id,
+            content,
+            reply_to_id,
+            message_type,
+            file_id,
+            path,
+            name,
+            mime_type,
+            client_request_id,
+        } => send_chat_message(
+            app,
+            &channel_id,
+            &content,
+            ChatSendOptions {
+                reply_to_id: reply_to_id.as_deref(),
+                message_type,
+                file_id: file_id.as_deref(),
+                path: path.as_deref(),
+                name: name.as_deref(),
+                mime_type: mime_type.as_deref(),
+                client_request_id: client_request_id.as_deref(),
+            },
+        ),
+        Command::ResolveChatChannel {
+            list_id,
+            virtual_key,
+        } => answer(
+            app.context
+                .chat()
+                .resolve_channel(
+                    list_id.as_deref(),
+                    virtual_key
+                        .or_else(|| {
+                            list_id
+                                .as_deref()
+                                .and_then(|id| chat::virtual_key_for(app, id))
+                        })
+                        .as_deref(),
+                )
+                .await,
+        ),
+        Command::ChatMessages { channel_id } => answer(app.context.chat().messages(&channel_id)),
+        Command::LoadChatMessages {
+            channel_id,
+            before,
+            limit,
+        } => load_chat_messages(app, &channel_id, before.as_deref(), limit).await,
+        Command::ForgetChatMessage { message_id } => {
+            answer_done(app.context.chat().forget(&message_id))
+        }
+        Command::PostAgentResponse {
+            channel_id,
+            content,
+        } => answer_done(
+            app.context
+                .chat()
+                .post_agent_response(&channel_id, &content)
+                .await,
+        ),
+        Command::RequestAstridResponse {
+            channel_id,
+            message_id,
+            content,
+        } => answer_done(
+            app.context
+                .chat()
+                .request_astrid_response(&channel_id, message_id.as_deref(), &content)
+                .await,
+        ),
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("chat"),
+    }
+}
+
 /// A list's chat, from the cache.
 ///
 /// `channelId` is null when this deployment has no channel for the list — chat is a feature a

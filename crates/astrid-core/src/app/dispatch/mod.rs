@@ -1,7 +1,18 @@
 //! Where a command becomes work.
 //!
-//! Every arm is short on purpose: it names a service call, and the service decides. An arm that
-//! grew a rule would be a rule the shell's vocabulary had quietly acquired, in the one file where
+//! [`run`] is a router and nothing else: it names the domain each `Command` belongs to and hands
+//! the command there whole. The arms live in the domain module beside this file, so the file you
+//! open to change what a command does is the one named after the thing it is about (task
+//! 8a91c5b0, which found 203 arms and 1,571 lines here).
+//!
+//! **The router is ONE exhaustive `match`**, and that is the whole reason it is worth having. The
+//! compiler refuses a new `Command` variant no domain claims, and refuses one two domains claim.
+//! A chain of `Option`-returning handlers, each answering "mine?", would have read more naturally
+//! and moved that check to runtime — where a forgotten command is a panic or a silent refusal in
+//! front of somebody instead of a build that does not finish.
+//!
+//! Every arm is still short on purpose: it names a service call, and the service decides. An arm
+//! that grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file where
 //! nobody would look for it.
 
 use super::command::{Command, Failure, Response};
@@ -13,1407 +24,237 @@ use crate::services::{TaskChanges, TaskDraft};
 
 pub(crate) async fn run(app: &App, command: Command) -> Response {
     match command {
-        // ── Reads ────────────────────────────────────────────────────────────────────────────
-        Command::Lists => match app.context.lists().all() {
-            Ok(lists) => Response::ok(lists),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::List { list_id } => match app.context.lists().list(&list_id) {
-            Ok(Some(list)) => Response::ok(list),
-            Ok(None) => Response::failed(Failure::not_found("list", list_id)),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::RowsForList {
-            list_id,
-            display_mode,
-            surface,
-            offset,
-            limit,
-            inputs,
-        } => rows_for_list(
-            app,
-            &list_id,
-            RowsWindow {
-                display_mode,
-                surface,
-                offset,
-                limit,
-            },
-            *inputs,
-        ),
-        Command::ListCounts {
-            lists,
-            current_user_id,
-        } => list_counts(app, &lists, current_user_id),
-        Command::ReminderTriageDeck { reminded_task_id } => {
-            reminder_triage_deck(app, reminded_task_id.as_deref())
-        }
-        Command::ToggleAssignee { task_id, user_id } => {
-            toggle_assignee(app, &task_id, user_id.as_deref())
-        }
-        Command::FeaturedRows { list_id, list } => {
-            featured_rows(app, &list_id, list.map(|list| *list)).await
-        }
-        Command::NestTask {
-            task_id,
-            zone,
-            target_id,
-            row_ids,
-        } => nest_task(app, &task_id, &zone, target_id, row_ids),
-        Command::ListBadges {
-            lists,
-            my_tasks_id,
-            current_user_id,
-        } => list_badges(app, &lists, my_tasks_id, current_user_id),
-        Command::Tasks { ids } => {
-            let store = &app.store;
-            let found = match ids {
-                None => store.tasks(),
-                Some(ids) => ids
-                    .iter()
-                    .map(|id| store.resolve_id(id).and_then(|id| store.task(&id)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map(|tasks| tasks.into_iter().flatten().collect()),
-            };
-            match found {
-                Ok(tasks) => Response::ok(tasks),
-                Err(error) => Response::failed(Failure::from(error)),
-            }
-        }
-        Command::ResolveIds { ids } => {
-            let mut moved = serde_json::Map::new();
-            for id in ids {
-                match app.store.resolve_id(&id) {
-                    Ok(real) if real != id => {
-                        moved.insert(id, serde_json::Value::String(real));
-                    }
-                    Ok(_) => {}
-                    Err(error) => return Response::failed(Failure::from(error)),
-                }
-            }
-            Response::ok(serde_json::Value::Object(moved))
-        }
-        Command::ImportJournalEntry {
-            entry_kind,
-            payload,
-            client_request_id,
-            temp_id,
-        } => {
-            use crate::outbox::kind;
-            let known = [
-                kind::CREATE_TASK,
-                kind::UPDATE_TASK,
-                kind::DELETE_TASK,
-                kind::COMPLETE_TASK,
-                kind::CREATE_LIST,
-                kind::UPDATE_LIST,
-                kind::CREATE_COMMENT,
-                kind::UPDATE_COMMENT,
-                kind::DELETE_COMMENT,
-                // The Apple apps queued membership changes offline in Core Data (D31).
-                kind::INVITE_TO_LIST,
-                kind::SET_MEMBER_ROLE,
-                kind::REMOVE_MEMBER,
-            ];
-            if !known.contains(&entry_kind.as_str()) {
-                return Response::failed(Failure::bad_request(format!(
-                    "{entry_kind} is not a write this journal imports"
-                )));
-            }
-            // Imported once: an upgrade that runs again after a partial failure must not queue a
-            // write it already moved. One `EXISTS` for the pair, rather than reading and decoding
-            // the whole journal to scan for it — this is asked once per entry of a migrating
-            // client's journal, so the scan was quadratic in the size of it (task 71ddacb8).
-            match crate::outbox::journal::holds(&app.store, &entry_kind, &client_request_id) {
-                Ok(true) => return Response::done(),
-                Ok(false) => {}
-                Err(error) => return Response::failed(error.into()),
-            }
-            let entry =
-                crate::outbox::build(&entry_kind, payload, &client_request_id, app.clock.now());
-            let entry = match temp_id {
-                Some(temp_id) => entry.for_temp_id(temp_id),
-                None => entry,
-            };
-            match crate::outbox::journal::enqueue(&app.store, &entry) {
-                Ok(_) => Response::done(),
-                Err(error) => Response::failed(Failure::from(error)),
-            }
-        }
-        Command::SeedCache {
-            current_user,
-            tasks,
-            lists,
-            comments,
-            users,
-            projects,
-            channels,
-            messages,
-        } => {
-            let store = &app.store;
-            // Only into an empty cache: a seed over one this crate already filled would put a
-            // stale copy over what the server said. `EXISTS`, so the usual answer — a cache that
-            // is not empty, on every launch after the first — stops at one row instead of
-            // decoding the account to call `.is_empty()` on it (task 71ddacb8).
-            match store.has_any_tasks() {
-                Ok(false) => {}
-                Ok(true) => return Response::ok(serde_json::json!({ "seeded": false })),
-                Err(error) => return Response::failed(Failure::from(error)),
-            }
-            let written = store
-                .upsert_lists(&lists)
-                .and_then(|()| store.upsert_tasks(&tasks))
-                .and_then(|()| store.upsert_comments(&comments))
-                .and_then(|()| store.upsert_users(&users))
-                .and_then(|()| store.upsert_projects(&projects))
-                .and_then(|()| store.upsert_channels(&channels))
-                .and_then(|()| store.upsert_messages(&messages));
-            if let (Ok(()), Some(user)) = (&written, current_user) {
-                if let Err(error) = app.context.account().set_current_user(&user).await {
-                    return Response::failed(error.into());
-                }
-            }
-            match written {
-                Ok(()) => Response::ok(serde_json::json!({
-                    "seeded": true,
-                    "tasks": tasks.len(),
-                    "lists": lists.len(),
-                })),
-                Err(error) => Response::failed(Failure::from(error)),
-            }
-        }
-        Command::Task { task_id } => match app.context.tasks().task(&task_id) {
-            Ok(Some(task)) => Response::ok(task),
-            Ok(None) => Response::failed(Failure::not_found("task", task_id)),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::TaskDetail {
-            task_id,
-            display_mode,
-        } => task_detail(app, &task_id, display_mode),
-        Command::DueDateOptions { task_id, draft } => {
-            due_date_options(app, task_id.as_deref(), draft)
-        }
-        Command::DueDateOnDay { task_id, day } => due_date_on_day(app, &task_id, &day),
-        Command::DueDateAtTime {
-            task_id,
-            hour,
-            minute,
-        } => due_date_at_time(app, &task_id, hour, minute),
-        Command::DueDateAllDay { task_id } => due_date_all_day(app, &task_id),
-        Command::Comments { task_id } => match app.context.comments().for_task(&task_id) {
-            Ok(comments) => Response::ok(comments),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
-        Command::TaskProjectFields { task_id } => {
-            let fields = app.context.project_fields();
-            match fields.refresh(&task_id).await {
-                Ok(rows) => Response::ok(rows),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::SetTaskProjectField {
-            task_id,
-            field_id,
-            value,
-        } => answer(
-            app.context
-                .project_fields()
-                .set_now(&task_id, &field_id, value)
-                .await,
-        ),
-        Command::AddTaskBlocker {
-            task_id,
-            blocking_task_id,
-        } => add_task_blocker(app, &task_id, &blocking_task_id).await,
-        Command::RemoveTaskBlocker {
-            task_id,
-            blocking_task_id,
-        } => remove_task_blocker(app, &task_id, &blocking_task_id).await,
-        Command::TaskBlockerCandidates {
-            task_id,
-            query,
-            limit,
-        } => task_blocker_candidates(app, &task_id, &query, limit).await,
-        Command::IsSignedIn => Response::ok(serde_json::json!({
-            "signedIn": app.auth.is_signed_in().await,
-            "waitingForCallback": app.auth.is_waiting(),
-        })),
-        Command::SearchTasks {
-            query,
-            list_id,
-            include_completed,
-            limit,
-            subtask_display,
-            show_subtasks,
-        } => search_tasks(
-            app,
-            &query,
-            crate::services::search::SearchScope {
-                list_id,
-                include_completed,
-            },
-            limit,
-            subtask_display.map(|display| (display, show_subtasks)),
-        ),
-        Command::Board {
-            list_id,
-            project_id,
-            limit,
-            ids_only,
-        } => board(
-            app,
-            list_id.as_deref(),
-            project_id.as_deref(),
-            limit,
-            ids_only,
-        ),
-        Command::DropBoardCard {
-            task_id,
-            column_id,
-            list_id,
-            index,
-        } => drop_board_card(app, &task_id, &column_id, &list_id, index),
-        Command::MoveTaskToColumn {
-            task_id,
-            column_id,
-            list_id,
-        } => move_task_to_column(app, &task_id, &column_id, &list_id),
-        Command::ReminderOptions { task_id } => reminder_options(app, &task_id),
-        Command::RemindersDue => reminders_due(app),
-        Command::NextReminder => next_reminder(app),
-        Command::ReminderShown { task_id } => mark_reminder_shown(app, &task_id),
-        Command::SnoozeReminder { task_id, minutes } => snooze_reminder(app, &task_id, minutes),
-        Command::RepeatOptions { task_id } => repeat_options(app, &task_id),
-        Command::AssigneeOptions {
-            task_id,
-            list_ids,
-            discovered,
-            agents,
-            current_user,
-        } => assignee_options(
-            app,
-            AssigneeInputs {
-                task_id: task_id.as_deref(),
-                list_ids,
-                discovered: &discovered,
-                agents,
-                current_user,
-            },
-        ),
-        Command::QuickAddDefaults {
-            list_id,
-            assignee_id,
-            priority,
-        } => quick_add_defaults(app, list_id.as_deref(), assignee_id.as_deref(), priority),
-        Command::CurrentUser => match app.context.account().current_user() {
-            Ok(user) => Response::ok(user),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::ResolveShortcut {
-            key,
-            has_selection,
-            is_text_field_focused,
-            is_modal_presented,
-        } => {
-            let context = crate::keyboard::Context {
-                has_selection,
-                is_text_field_focused,
-                is_modal_presented,
-            };
-            Response::ok(serde_json::json!({
-                "action": crate::keyboard::action_for(&key, context).map(crate::keyboard::action_name),
-            }))
-        }
-        Command::Shortcuts => Response::ok(
-            crate::keyboard::ALL
-                .iter()
-                .map(|binding| {
-                    serde_json::json!({
-                        "keys": binding.keys,
-                        "action": crate::keyboard::action_name(binding.action),
-                        "requiresSelection": binding.requires_selection,
-                        "title": binding.title,
-                    })
-                })
-                .collect::<Vec<_>>(),
-        ),
-        Command::OutboxStats => match crate::outbox::journal::stats(&app.store) {
-            Ok(stats) => Response::ok(serde_json::json!({
-                "pending": stats.pending,
-                "running": stats.running,
-                "completed": stats.completed,
-                "failed": stats.failed,
-                "hasUnsentWork": stats.has_unsent_work(),
-                "deadLetters": dead_letters(app),
-                // When the last full pass began, for Settings' "Last Sync" (iOS; AATD-55).
-                "lastSync": app.store.metadata(crate::sync::LAST_SYNC_KEY).ok().flatten(),
-            })),
-            Err(error) => Response::failed(error.into()),
-        },
-
-        // ── Writes ───────────────────────────────────────────────────────────────────────────
-        Command::CreateTask {
-            title,
-            description,
-            list_ids,
-            priority,
-            due_date_time,
-            is_all_day,
-            assignee_id,
-            parent_task_id,
-            status_role,
-            quick_add,
-            locale,
-            repeating,
-            repeating_data,
-            repeat_from,
-            is_private,
-            apply_list_defaults,
-        } => answer(create_task(
-            app,
-            NewTask {
-                title,
-                description,
-                list_ids,
-                priority,
-                due_date_time,
-                is_all_day,
-                assignee_id,
-                parent_task_id,
-                status_role,
-                quick_add,
-                locale,
-                repeating,
-                repeating_data,
-                repeat_from,
-                is_private,
-                apply_list_defaults,
-            },
-        )),
-        Command::UpdateTask { task_id, changes } => match changes_from_json(&changes) {
-            Ok(changes) => answer(app.context.tasks().update(&task_id, &changes)),
-            Err(failure) => Response::failed(failure),
-        },
-        // The only path to a completion, and the reason `TaskChanges::completed` is never set by
-        // the shell: see `crate::services::task`.
-        Command::CompleteTask {
-            task_id,
-            completed,
-            task,
-            timer_duration,
-            last_timer_value,
-            completed_at,
-            source,
-        } => {
-            let timer = (timer_duration.is_some() || last_timer_value.is_some()).then_some(
-                crate::services::TimerResult {
-                    duration_seconds: timer_duration,
-                    last_value: last_timer_value,
-                },
-            );
-            let origin = crate::services::Origin {
-                at: completed_at.as_deref().and_then(date::parse),
-                source,
-            };
-            answer(app.context.tasks().complete_as(
-                &task_id,
-                completed,
-                task.as_deref(),
-                timer,
-                &origin,
-            ))
-        }
-        Command::DeleteTask { task_id } => match app.context.tasks().delete(&task_id) {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::SetClosedReason {
-            task_id,
-            closed_reason,
-        } => {
-            if let Some(reason) = closed_reason.as_deref() {
-                if !crate::model::task::is_closed_reason(reason) {
-                    return Response::failed(Failure::bad_request(format!(
-                        "closedReason must be one of: {}",
-                        crate::model::task::CLOSED_REASONS.join(", ")
-                    )));
-                }
-            }
-            answer(
-                app.context
-                    .tasks()
-                    .close(&task_id, closed_reason.as_deref()),
-            )
-        }
-        Command::AddBoardCard {
-            list_id,
-            column_id,
-            title,
-        } => add_board_card(app, &list_id, &column_id, title),
-        Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
-        Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
-        Command::ShareTask { task_id } => share_task(app, &task_id).await,
-        Command::ShareList { list_id } => match app.context.share().link_for_list(&list_id).await {
-            Ok(url) => Response::ok(serde_json::json!({ "url": url })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::ResolveShortcode { code } => answer(app.context.share().resolve(&code).await),
-        Command::CopyTask {
-            task_id,
-            target_list_id,
-            include_comments,
-        } => answer(
-            app.context
-                .tasks()
-                .copy(&task_id, target_list_id.as_deref(), include_comments)
-                .await,
-        ),
-        Command::SetTaskLists { task_id, list_ids } => {
-            answer(app.context.tasks().set_lists(&task_id, list_ids))
-        }
-        Command::ListPicks {
-            task_id,
-            query,
-            list_ids,
-            as_toggles,
-        } => list_picks(app, task_id.as_deref(), list_ids, &query, as_toggles),
-        Command::AddTaskToList { task_id, list_id } => change_task_lists(app, &task_id, |ids| {
-            if !ids.contains(&list_id) {
-                ids.push(list_id.clone());
-            }
-        }),
-        Command::RemoveTaskFromList { task_id, list_id } => {
-            change_task_lists(app, &task_id, |ids| ids.retain(|id| id != &list_id))
-        }
-        Command::CreateListForTask { task_id, name } => create_list_for_task(app, &task_id, &name),
-        Command::AddBoardStatus { list_id, name } => {
-            status_outcome(app.context.boards().add_status(&list_id, &name).await)
-        }
-        Command::RenameBoardStatus {
-            list_id,
-            role,
-            name,
-        } => status_outcome(
-            app.context
-                .boards()
-                .rename_status(&list_id, &role, &name)
-                .await,
-        ),
-        Command::ReorderBoardStatus {
-            list_id,
-            role,
-            direction,
-        } => {
-            let direction = match direction.as_str() {
-                "up" => crate::board::ReorderDirection::Up,
-                "down" => crate::board::ReorderDirection::Down,
-                other => {
-                    return Response::failed(Failure::bad_request(format!(
-                        "direction must be 'up' or 'down', not '{other}'"
-                    )))
-                }
-            };
-            status_outcome(
-                app.context
-                    .boards()
-                    .reorder_status(&list_id, &role, direction)
-                    .await,
-            )
-        }
-        Command::RemoveBoardStatus { list_id, role } => {
-            status_outcome(app.context.boards().remove_status(&list_id, &role).await)
-        }
-        Command::ListAgentOptions { list_id } => list_agent_options(app, &list_id).await,
-        Command::ListInsights {
-            list_id,
-            days,
-            time_zone,
-        } => answer(
-            app.context
-                .lists()
-                .insights(
-                    &list_id,
-                    days.unwrap_or(crate::services::list::DEFAULT_INSIGHT_WINDOW_DAYS),
-                    time_zone.as_deref().unwrap_or("UTC"),
-                )
-                .await,
-        ),
-        Command::SetTaskStatusRole {
-            task_id,
-            status_role,
-        } => answer(app.context.tasks().set_status_role(&task_id, status_role)),
-        Command::CreateList {
-            name,
-            color,
-            description,
-            privacy,
-        } => {
-            let created = app.context.lists().create_with(&name, color, privacy);
-            match (created, description) {
-                // A description rides on the list's first edit, which the journal sends after the
-                // create: the create's body is the web's, and it takes no description.
-                (Ok(list), Some(description)) if !description.is_empty() => {
-                    let changes = crate::services::ListChanges {
-                        description: Some(Some(description)),
-                        ..Default::default()
-                    };
-                    answer(app.context.lists().update(&list.id, &changes))
-                }
-                (created, _) => answer(created),
-            }
-        }
-        Command::UpdateList { list_id, changes } => match list_changes_from_json(&changes) {
-            Ok(changes) => answer(app.context.lists().update(&list_id, &changes)),
-            Err(failure) => Response::failed(failure),
-        },
-        Command::DeleteList { list_id } => match app.context.lists().delete(&list_id) {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::SetListFavorite { list_id, favorite } => {
-            answer(app.context.lists().set_favorite(&list_id, favorite))
-        }
-        Command::SetManualOrder { list_id, order } => {
-            answer(app.context.lists().set_manual_order(&list_id, &order))
-        }
-        Command::SetListImage { list_id, path } => answer(
-            app.context
-                .lists()
-                .set_image(&list_id, std::path::Path::new(&path))
-                .await,
-        ),
-        Command::ListImage {
-            image_url: Some(address),
-            ..
-        } => answer(
-            app.context
-                .lists()
-                .image_at(&address, app.attachment_cache())
-                .await,
-        ),
-        Command::ListImage { list_id, .. } => answer(
-            app.context
-                .lists()
-                .image(&list_id, app.attachment_cache())
-                .await,
-        ),
-        Command::PublicLists => answer(app.context.lists().public_lists().await),
-        Command::CopyList { list_id } => answer(app.context.lists().copy(&list_id).await),
-        Command::PublicList { list_id } => public_list(app, &list_id).await,
-        Command::PostComment {
-            task_id,
-            content,
-            parent_comment_id,
-            comment_type,
-            file_id,
-            author_id,
-            client_request_id,
-        } => {
-            let author =
-                author_id.or_else(|| app.context.account().current_user_id().ok().flatten());
-            // A file already on the server travels by id; the rest of its record comes back with
-            // the comment.
-            let file = file_id.map(|id| crate::model::SecureFile {
-                id,
-                name: String::new(),
-                size: 0,
-                mime_type: String::new(),
-            });
-            answer(app.context.comments().post_as(
-                &task_id,
-                &content,
-                author.as_deref(),
-                comment_type.unwrap_or(crate::model::CommentType::Text),
-                file.as_ref(),
-                parent_comment_id.as_deref(),
-                client_request_id.as_deref(),
-            ))
-        }
-        Command::EditComment {
-            comment_id,
-            content,
-        } => match app.context.comments().edit(&comment_id, &content) {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::CommentSuggestions {
-            task_id,
-            text,
-            caret,
-        } => comment_suggestions(app, &task_id, &text, caret),
-        Command::ApplyCommentSuggestion {
-            text,
-            caret,
-            trigger_kind,
-            id,
-            label,
-        } => {
-            let (text, caret) =
-                crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
-            Response::ok(serde_json::json!({ "text": text, "caret": caret }))
-        }
-        Command::DeleteComment { comment_id } => match app.context.comments().delete(&comment_id) {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-
-        // ── The network ──────────────────────────────────────────────────────────────────────
-        Command::Sync => {
-            let mut report = app.sync.sync().await;
-            // What its push step delivered is announced like any delivery; what it pulled in the
-            // caller reads from the answer, as it always has.
-            if let Some(delivered) = report.delivered.take() {
-                crate::app::background::announce_delivery(app, delivered);
-            }
-            // The flags ride on a pass that reached the server: what this person may see can
-            // change while the app is open, and a board that appears on the next pass beats one
-            // that appears on the next launch. Best effort, like the projects.
-            if report.fetched {
-                let _ = app.context.account().refresh_features().await;
-            }
-            Response::ok(serde_json::json!({
-                "fetched": report.fetched,
-                "skipped": report.skipped,
-                "delta": report.delta,
-                "listsAdded": report.lists_added,
-                "listsUpdated": report.lists_updated,
-                "listsDeleted": report.lists_deleted,
-                "tasksAdded": report.tasks_added,
-                "tasksUpdated": report.tasks_updated,
-                "tasksDeleted": report.tasks_deleted,
-                "pushesFailed": report.pushes_failed,
-            }))
-        }
-        Command::StreamState => {
-            Response::ok(serde_json::json!({ "live": app.realtime().is_live() }))
-        }
-        Command::ClearCache => match app.store.clear_rows(crate::sync::LAST_SYNC_KEY) {
-            Ok(()) => {
-                app.realtime().publish(crate::realtime::Change::Synced {
-                    task_ids: Vec::new(),
-                    list_ids: Vec::new(),
-                });
-                Response::done()
-            }
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::NetworkRestored => {
-            match crate::outbox::journal::wake_offline(&app.store, app.clock.now()) {
-                Ok(woken) => {
-                    app.outbox_nudge().notify_one();
-                    app.realtime().reconnect_now();
-                    Response::ok(serde_json::json!({ "woken": woken }))
-                }
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::ReconnectStream => {
-            app.realtime().reconnect_now();
-            Response::done()
-        }
-        Command::RetryDeadLetters => {
-            match crate::outbox::journal::revive_dead(&app.store, app.clock.now()) {
-                Ok(revived) => {
-                    // The delivery loop sends them; the caller does not wait on the network.
-                    app.outbox_nudge().notify_one();
-                    Response::ok(serde_json::json!({ "revived": revived }))
-                }
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::Drain => match app.runner.drain().await {
-            Ok(report) => Response::ok(serde_json::json!({
-                "completed": report.completed,
-                "retried": report.retried,
-                "deadLettered": report.dead_lettered,
-            })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::RefreshComments { task_id } => {
-            // Projected the same way the detail projects them, so a refresh cannot draw a comment
-            // differently from the screen it lands in.
-            let me = app.context.account().current_user_id().ok().flatten();
-            match app.context.comments().refresh(&task_id).await {
-                Ok(comments) => {
-                    // The same autolink context the detail builds, for the same reason the
-                    // projection is shared: a refreshed comment must not draw differently from
-                    // the screen it lands in.
-                    let lists = app.store.lists().unwrap_or_default();
-                    let identifiers = match app.store.task(&task_id).ok().flatten() {
-                        Some(task) => identifier_context(app, &task, &lists),
-                        None => crate::identifier::LinkContext::default(),
-                    };
-                    let mut rows = rows::comment::rows(&comments, me.as_deref(), &identifiers);
-                    fill_local_paths(app, &task_id, &mut rows);
-                    Response::ok(rows)
-                }
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::SearchUsers {
-            query,
-            task_id,
-            list_ids,
-            include_agents,
-        } => answer(
-            app.context
-                .account()
-                .search_users(&query, task_id.as_deref(), &list_ids, include_agents)
-                .await,
-        ),
-        Command::Agents => agents(app).await,
-        Command::AstridModel => answer(app.context.agents().astrid_model().await),
-        Command::SetAstridModel { agent_id } => answer(
-            app.context
-                .agents()
-                .set_astrid_model(agent_id.as_deref())
-                .await,
-        ),
-        Command::WebhookSettings => answer(app.context.agents().webhook_settings().await),
-        Command::SaveWebhook {
-            url,
-            enabled,
-            events,
-            agents,
-            regenerate_secret,
-        } => answer(
-            app.context
-                .agents()
-                .save_webhook(&url, enabled, &events, &agents, regenerate_secret)
-                .await,
-        ),
-        Command::DeleteWebhook => answer_done(app.context.agents().delete_webhook().await),
-        Command::TestWebhook => answer(app.context.agents().test_webhook().await),
-        Command::Connections => answer(app.context.connections().panel().await),
-        Command::RevokeConnection {
-            connection_kind,
-            id,
-        } => connections::revoke(app, &connection_kind, &id).await,
-        Command::LoadOAuthClient { client_id } => {
-            answer(app.context.connections().oauth_client(&client_id).await)
-        }
-        Command::CheckOAuthClientDraft {
-            draft,
-            toggle_grant,
-        } => connections::check_draft(&draft, toggle_grant.as_deref()),
-        Command::CreateOAuthClient { draft } => connections::create_client(app, &draft).await,
-        Command::UpdateOAuthClient { client_id, draft } => {
-            connections::update_client(app, &client_id, &draft).await
-        }
-        Command::MintTransportCredentials { preset, agent } => {
-            connections::mint_transport_credentials(app, &preset, &agent).await
-        }
-        Command::MintAccessToken {
-            permissions,
-            expires_in_days,
-            description,
-            agent,
-        } => {
-            connections::mint_access_token(
-                app,
-                &permissions,
-                expires_in_days,
-                description.as_deref(),
-                agent.as_deref(),
-            )
-            .await
-        }
-        Command::CustomAgents => answer(app.context.agents().custom_agents().await),
-        Command::RegisterCustomAgent { name, list_ids } => answer(
-            app.context
-                .agents()
-                .register_custom_agent(&name, list_ids)
-                .await,
-        ),
-        Command::DeleteCustomAgent { agent_id } => {
-            answer_done(app.context.agents().delete_custom_agent(&agent_id).await)
-        }
-        Command::SetCustomAgentPhoto { agent_id, image } => answer(
-            app.context
-                .agents()
-                .set_custom_agent_photo(&agent_id, image.as_deref())
-                .await,
-        ),
-        Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
-            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::DisconnectCopilot => answer_done(app.context.agents().disconnect_copilot().await),
-        Command::SetAgentMode { agent, mode } => {
-            answer(app.context.agents().set_mode(&agent, mode).await)
-        }
-        Command::SaveAgentCredential { service_id, key } => answer_done(
-            app.context
-                .agents()
-                .save_credential(&service_id, &key)
-                .await,
-        ),
-        Command::TestAgentCredential { service_id } => {
-            match app.context.agents().test_credential(&service_id).await {
-                Ok(works) => Response::ok(serde_json::json!({ "works": works })),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::DeleteAgentCredential { service_id } => {
-            answer_done(app.context.agents().delete_credential(&service_id).await)
-        }
-        Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
-        Command::ExternalAccounts => external_accounts(app).await,
-        Command::CreateAndLinkGoogleList { list_id, name } => answer(
-            app.context
-                .external()
-                .create_and_link_google_list(&list_id, &name)
-                .await,
-        ),
-        Command::ConnectProvider { provider } => {
-            match app.context.external().authorize_url(provider).await {
-                Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::DisconnectProvider { provider } => {
-            answer_done(app.context.external().disconnect(provider).await)
-        }
-        Command::LinkList {
-            provider,
-            list_id,
-            container_id,
-        } => answer(
-            app.context
-                .external()
-                .link(provider, &list_id, &container_id)
-                .await,
-        ),
-        Command::UnlinkList { provider, link_id } => {
-            answer_done(app.context.external().unlink(provider, &link_id).await)
-        }
-        Command::Features => features(app),
-        Command::Hotkey => hotkey(app),
-        Command::SetHotkey { chord } => match crate::keyboard::chord::parse(&chord) {
-            Ok(parsed) => {
-                match app
-                    .store
-                    .set_metadata(crate::keyboard::chord::KEY, &parsed.to_string())
-                {
-                    Ok(()) => hotkey(app),
-                    Err(error) => Response::failed(error.into()),
-                }
-            }
-            Err(reason) => Response::failed(Failure::bad_request(reason.to_string())),
-        },
-        Command::BeginEditing { editor } => {
-            editing(app, |session| crate::editing::begin(session, &editor))
-        }
-        Command::EndEditing { editor } => {
-            editing(app, |session| crate::editing::end(session, &editor))
-        }
-        Command::CancelEditing { editor } => {
-            editing(app, |session| crate::editing::cancel(session, &editor))
-        }
-        Command::CommitAllEditing => editing(app, crate::editing::commit_all),
-        Command::Theme => {
-            let chosen = app
-                .store
-                .metadata(crate::theme::KEY)
-                .ok()
-                .flatten()
-                .map(|value| crate::theme::Theme::parse(&value))
-                .unwrap_or_default();
-            Response::ok(serde_json::json!({
-                "theme": chosen,
-                "isDark": chosen.is_dark(),
-                "choices": crate::theme::Theme::all()
-                    .iter()
-                    .map(|theme| theme.wire())
-                    .collect::<Vec<_>>(),
-            }))
-        }
-        Command::SetTheme { theme } => {
-            match app.store.set_metadata(crate::theme::KEY, theme.wire()) {
-                Ok(()) => Response::ok(serde_json::json!({
-                    "theme": theme,
-                    "isDark": theme.is_dark(),
-                })),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::MyTasksList => Response::ok(app.context.lists().my_tasks()),
-        Command::MyTasksFilters => match app.context.account().my_tasks_preferences() {
-            Ok(filters) => Response::ok(filters),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::RefreshMyTasks => {
-            match app.context.account().refresh_my_tasks_preferences().await {
-                Ok(filters) => Response::ok(filters),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::SetMyTasksFilters { filters } => {
-            match app
-                .context
-                .account()
-                .set_my_tasks_preferences(&filters)
-                .await
-            {
-                Ok(filters) => Response::ok(filters),
-                // The choice is already on screen and already remembered here. Saying so beats
-                // pretending it worked, and beats losing it because the account could not hear.
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::GoogleSyncMode => match app.context.external().auto_link_settings().await {
-            Ok(settings) => Response::ok(serde_json::json!({
-                "mode": settings.mode,
-                "suffix": settings.suffix,
-            })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::SetGoogleSyncMode { mode, suffix } => answer_done(
-            app.context
-                .external()
-                .set_auto_link_mode(mode, suffix.as_deref())
-                .await,
-        ),
-        Command::ImportExternalLedger {
-            provider,
-            pending,
-            tombstones,
-            server_tombstones,
-            excluded,
-            links,
-        } => answer_done(
-            crate::external::ledger::import(
-                &app.store,
-                provider.slug(),
-                &crate::external::ledger::LedgerImport {
-                    pending,
-                    tombstones,
-                    server_tombstones,
-                    excluded,
-                    links,
-                },
-            )
-            .map_err(Into::into),
-        ),
-        Command::SyncExternal => sync_external(app).await,
-        Command::HasSeenTour => Response::ok(serde_json::json!({
-            "seen": app
-                .store
-                .metadata(TOUR_KEY)
-                .ok()
-                .flatten()
-                .is_some_and(|value| value == "yes"),
-        })),
-        Command::TourSeen => match app.store.set_metadata(TOUR_KEY, "yes") {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::Palette { query } => {
-            let lists = app.store.lists().unwrap_or_default();
-            let tasks = app.store.tasks().unwrap_or_default();
-            Response::ok(serde_json::json!({
-                "rows": crate::palette::search(&query, &lists, &tasks),
-            }))
-        }
-        Command::ProfileStats => {
-            let me = app.context.account().current_user_id().ok().flatten();
-            match me {
-                Some(id) => answer(app.context.account().stats(&id).await),
-                // Signed out there is nobody to have statistics about, and zeroes would read as an
-                // account that has done nothing.
-                None => Response::failed(Failure::unauthorized()),
-            }
-        }
-        Command::ProfileTasks { user_id } => row_json::profile_rows(app, user_id.as_deref()).await,
-        Command::UpdateProfile { name, photo_path } => {
-            let account = app.context.account();
-            let image = match photo_path {
-                Some(path) => match account.upload_photo(std::path::Path::new(&path)).await {
-                    Ok(url) => Some(url),
-                    Err(error) => return Response::failed(error.into()),
-                },
-                None => None,
-            };
-            match account
-                .update_profile(name.as_deref(), image.as_deref())
-                .await
-            {
-                Ok(_) => settings(app),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::ResendVerification => match app.context.account().resend_verification().await {
-            Ok(answer) => Response::ok(serde_json::json!({
-                "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
-            })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::ChangeEmail { email } => {
-            if email.trim().is_empty() {
-                return Response::failed(Failure::bad_request("an email address is required"));
-            }
-            match app.context.account().change_email(&email).await {
-                Ok(answer) => Response::ok(answer),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::Passkeys => match app.context.account().passkeys().await {
-            Ok(passkeys) => Response::ok(serde_json::json!({ "passkeys": passkeys })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::RenamePasskey { id, name } => {
-            if name.trim().is_empty() {
-                return Response::failed(Failure::bad_request("a passkey needs a name"));
-            }
-            match app.context.account().rename_passkey(&id, &name).await {
-                Ok(()) => Response::done(),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::RevokePasskey { id } => match app.context.account().revoke_passkey(&id).await {
-            Ok(()) => Response::done(),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::PasskeyRegistrationOptions => {
-            match app.context.account().passkey_registration_options().await {
-                Ok(answer) => Response::ok(answer),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::RegisterPasskey {
-            session_id,
-            attestation,
-            name,
-        } => {
-            if session_id.trim().is_empty() {
-                return Response::failed(Failure::bad_request(
-                    "a passkey registration needs the sessionId the challenge came with",
-                ));
-            }
-            if attestation.is_null() {
-                return Response::failed(Failure::bad_request(
-                    "a passkey registration needs the authenticator's response",
-                ));
-            }
-            match app
-                .context
-                .account()
-                .register_passkey(&session_id, attestation, name.as_deref())
-                .await
-            {
-                Ok(()) => Response::done(),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::Contacts => match app.context.account().contacts().await {
-            Ok((contacts, total)) => {
-                Response::ok(serde_json::json!({ "contacts": contacts, "total": total }))
-            }
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::ClearContacts => match app.context.account().clear_contacts().await {
-            Ok(deleted) => Response::ok(serde_json::json!({ "deleted": deleted })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::UploadContacts { contacts } => {
-            match app.context.account().upload_contacts(&contacts).await {
-                Ok(stats) => Response::ok(stats),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::DeleteAccount { confirmation } => {
-            // The server requires the phrase typed exactly, and so does this: a request that is
-            // going to be refused is not worth sending, and a button that sends one looks like it
-            // worked.
-            if confirmation != crate::services::account::DELETE_CONFIRMATION {
-                return Response::failed(Failure::bad_request(format!(
-                    "type {} exactly to delete the account",
-                    crate::services::account::DELETE_CONFIRMATION
-                )));
-            }
-            if let Err(error) = app.context.account().delete_account(&confirmation).await {
-                return Response::failed(error.into());
-            }
-            // The account is gone; so is everything this machine held for it.
-            sign_out(app).await
-        }
-        Command::ExportAccount { format, path } => {
-            match app
-                .context
-                .account()
-                .export(&format, std::path::Path::new(&path))
-                .await
-            {
-                Ok(bytes) => Response::ok(serde_json::json!({ "path": path, "bytes": bytes })),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::Settings => settings(app),
-        Command::RefreshSettings => {
-            // The user first: a settings screen with no name on it looks broken in a way the
-            // settings themselves do not.
-            let _ = app.context.account().refresh_current_user().await;
-            // Best effort, like the user: a server without the route leaves the defaults standing.
-            let _ = app.context.account().refresh_smart_task_settings().await;
-            let _ = app.context.account().refresh_features().await;
-            match app.context.account().refresh_settings().await {
-                Ok(_) => settings(app),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::UpdateReminderSettings { changes } => {
-            match update_reminder_settings(app, changes) {
-                Ok(()) => settings(app),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::UpdateSmartTaskSettings { changes } => {
-            if let Err(reason) = crate::smart_tasks::validate(&changes) {
-                return Response::failed(Failure::bad_request(reason));
-            }
-            match app.context.account().update_smart_task_settings(changes) {
-                Ok(_) => settings(app),
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::StartTimer { task_id } => start_timer(app, &task_id),
-        Command::StopTimer { task_id } => stop_timer(app, &task_id),
-        Command::Attachments { task_id } => attachments(app, &task_id),
-        Command::DownloadAttachment { task_id, file_id } => {
-            download_attachment(app, &task_id, &file_id).await
-        }
-        Command::AttachFile {
-            task_id,
-            path,
-            content,
-            file_id,
-            name,
-            mime_type,
-            client_request_id,
-            parent_comment_id,
-        } => attach_file(
-            app,
-            &task_id,
-            &path,
-            AttachOptions {
-                content: content.as_deref(),
-                file_id: file_id.as_deref(),
-                name: name.as_deref(),
-                mime_type: mime_type.as_deref(),
-                client_request_id: client_request_id.as_deref(),
-                parent_comment_id: parent_comment_id.as_deref(),
-            },
-        ),
-        Command::ClipboardPaste {
-            files,
-            image_extension,
-            has_text,
-        } => clipboard_paste(app, files, image_extension, has_text),
-        Command::FilterOptions { list_id } => filter_options(app, &list_id),
-        Command::SetFilter {
-            list_id,
-            field,
-            value,
-        } => set_filter(app, &list_id, &field, &value).await,
-        Command::Chat { list_id } => chat(app, &list_id),
-        Command::RefreshChat { list_id } => refresh_chat(app, &list_id).await,
-        Command::SendChatMessage {
-            channel_id,
-            content,
-            reply_to_id,
-            message_type,
-            file_id,
-            path,
-            name,
-            mime_type,
-            client_request_id,
-        } => send_chat_message(
-            app,
-            &channel_id,
-            &content,
-            ChatSendOptions {
-                reply_to_id: reply_to_id.as_deref(),
-                message_type,
-                file_id: file_id.as_deref(),
-                path: path.as_deref(),
-                name: name.as_deref(),
-                mime_type: mime_type.as_deref(),
-                client_request_id: client_request_id.as_deref(),
-            },
-        ),
-        Command::ResolveChatChannel {
-            list_id,
-            virtual_key,
-        } => answer(
-            app.context
-                .chat()
-                .resolve_channel(
-                    list_id.as_deref(),
-                    virtual_key
-                        .or_else(|| {
-                            list_id
-                                .as_deref()
-                                .and_then(|id| chat::virtual_key_for(app, id))
-                        })
-                        .as_deref(),
-                )
-                .await,
-        ),
-        Command::ChatMessages { channel_id } => answer(app.context.chat().messages(&channel_id)),
-        Command::LoadChatMessages {
-            channel_id,
-            before,
-            limit,
-        } => load_chat_messages(app, &channel_id, before.as_deref(), limit).await,
-        Command::ForgetChatMessage { message_id } => {
-            answer_done(app.context.chat().forget(&message_id))
-        }
-        Command::PostAgentResponse {
-            channel_id,
-            content,
-        } => answer_done(
-            app.context
-                .chat()
-                .post_agent_response(&channel_id, &content)
-                .await,
-        ),
-        Command::RequestAstridResponse {
-            channel_id,
-            message_id,
-            content,
-        } => answer_done(
-            app.context
-                .chat()
-                .request_astrid_response(&channel_id, message_id.as_deref(), &content)
-                .await,
-        ),
-        Command::ListMembers { list_id } => list_members(app, &list_id),
-        Command::EligibleNewOwners { list_id } => {
-            Response::ok(crate::services::list::transfer_availability(
-                app.context.lists().eligible_new_owners(&list_id).await,
-            ))
-        }
-        Command::TransferListOwnership {
-            list_id,
-            new_owner_id,
-        } => answer_done(
-            app.context
-                .lists()
-                .transfer_ownership(&list_id, &new_owner_id)
-                .await,
-        ),
-        Command::RefreshListMembers { list_id } => {
-            match app.context.lists().roster(&list_id).await {
-                Ok((_, viewer_role)) => {
-                    let mut answer = list_members(app, &list_id);
-                    if let Some(value) = answer.value.as_mut() {
-                        value["viewerRole"] = serde_json::json!(viewer_role);
-                    }
-                    answer
-                }
-                Err(error) => Response::failed(error.into()),
-            }
-        }
-        Command::InviteToList {
-            list_id,
-            email,
-            role,
-        } => answer(app.context.members().invite(&list_id, &email, &role).await),
-        Command::SetMemberRole {
-            list_id,
-            user_id,
-            role,
-        } => answer(
-            app.context
-                .members()
-                .set_role(&list_id, &user_id, &role)
-                .await,
-        ),
-        Command::RemoveMember { list_id, user_id } => {
-            answer(app.context.members().remove(&list_id, &user_id).await)
-        }
-        Command::CancelInvitation { list_id, email } => answer(
-            app.context
-                .members()
-                .cancel_invitation(&list_id, &email)
-                .await,
-        ),
-        Command::SetInvitationRole {
-            list_id,
-            email,
-            role,
-        } => answer(
-            app.context
-                .members()
-                .set_invitation_role(&list_id, &email, &role)
-                .await,
-        ),
-        Command::LeaveList { list_id } => answer_done(app.context.lists().leave(&list_id).await),
-        Command::Projects => answer(app.store.projects().map_err(Into::into)),
-        Command::CreateProject {
-            name,
-            description,
-            color,
-            image_url,
-        } => answer(
-            app.context
-                .boards()
-                .create_project(
-                    &name,
-                    description.as_deref(),
-                    color.as_deref(),
-                    image_url.as_deref(),
-                )
-                .await,
-        ),
-        Command::CreateBoardForList { list_id } => {
-            answer(app.context.boards().create_board_for_list(&list_id).await)
-        }
-        Command::DeleteProject { project_id } => {
-            answer(app.context.boards().delete_project(&project_id).await)
-        }
-        Command::RefreshCapabilities => answer(app.context.account().refresh_capabilities().await),
-        Command::FeedbackListId => answer(app.context.account().feedback_list_id()),
-        Command::Notifications => inbox_response(app.context.notifications().inbox()),
-        Command::RefreshNotifications => {
-            inbox_response(app.context.notifications().refresh().await)
-        }
-        Command::MarkNotificationsRead { ids } => {
-            inbox_response(app.context.notifications().mark_read(&ids).await)
-        }
-        Command::MarkAllNotificationsRead => {
-            inbox_response(app.context.notifications().mark_all_read().await)
-        }
-        Command::BeginSignIn { provider } => match app.auth.begin_with(provider.as_deref()) {
-            Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
-            Err(error) => Response::failed(error.into()),
-        },
-        Command::CompleteSignIn { callback_url } => answer(app.auth.complete(&callback_url).await),
-        Command::CancelSignIn => {
-            app.auth.cancel();
-            Response::done()
-        }
-        Command::SignOut => sign_out(app).await,
+        // ── Tasks ──
+        command @ (Command::ToggleAssignee { .. }
+        | Command::NestTask { .. }
+        | Command::Tasks { .. }
+        | Command::ResolveIds { .. }
+        | Command::Task { .. }
+        | Command::TaskDetail { .. }
+        | Command::DueDateOptions { .. }
+        | Command::DueDateOnDay { .. }
+        | Command::DueDateAtTime { .. }
+        | Command::DueDateAllDay { .. }
+        | Command::TaskBlockers { .. }
+        | Command::TaskProjectFields { .. }
+        | Command::SetTaskProjectField { .. }
+        | Command::AddTaskBlocker { .. }
+        | Command::RemoveTaskBlocker { .. }
+        | Command::TaskBlockerCandidates { .. }
+        | Command::SearchTasks { .. }
+        | Command::RepeatOptions { .. }
+        | Command::AssigneeOptions { .. }
+        | Command::QuickAddDefaults { .. }
+        | Command::CreateTask { .. }
+        | Command::UpdateTask { .. }
+        | Command::CompleteTask { .. }
+        | Command::DeleteTask { .. }
+        | Command::SetClosedReason { .. }
+        | Command::ShareTask { .. }
+        | Command::CopyTask { .. }
+        | Command::SetTaskLists { .. }
+        | Command::ListPicks { .. }
+        | Command::AddTaskToList { .. }
+        | Command::RemoveTaskFromList { .. }
+        | Command::CreateListForTask { .. }
+        | Command::SetTaskStatusRole { .. }
+        | Command::StartTimer { .. }
+        | Command::StopTimer { .. }) => tasks::run(app, command).await,
+        // ── Rows, counts and badges ──
+        command @ (Command::RowsForList { .. }
+        | Command::ListCounts { .. }
+        | Command::ReminderTriageDeck { .. }
+        | Command::FeaturedRows { .. }
+        | Command::ListBadges { .. }
+        | Command::ProfileTasks { .. }) => row_json::run(app, command).await,
+        // ── Lists, sharing and membership ──
+        command @ (Command::Lists
+        | Command::List { .. }
+        | Command::ShareList { .. }
+        | Command::ResolveShortcode { .. }
+        | Command::ListAgentOptions { .. }
+        | Command::ListInsights { .. }
+        | Command::CreateList { .. }
+        | Command::UpdateList { .. }
+        | Command::DeleteList { .. }
+        | Command::SetListFavorite { .. }
+        | Command::SetManualOrder { .. }
+        | Command::SetListImage { .. }
+        | Command::ListImage { .. }
+        | Command::PublicLists
+        | Command::CopyList { .. }
+        | Command::PublicList { .. }
+        | Command::MyTasksList
+        | Command::ListMembers { .. }
+        | Command::EligibleNewOwners { .. }
+        | Command::TransferListOwnership { .. }
+        | Command::RefreshListMembers { .. }
+        | Command::InviteToList { .. }
+        | Command::SetMemberRole { .. }
+        | Command::RemoveMember { .. }
+        | Command::CancelInvitation { .. }
+        | Command::SetInvitationRole { .. }
+        | Command::LeaveList { .. }) => lists::run(app, command).await,
+        // ── Boards, statuses and projects ──
+        command @ (Command::Board { .. }
+        | Command::DropBoardCard { .. }
+        | Command::MoveTaskToColumn { .. }
+        | Command::AddBoardCard { .. }
+        | Command::TaskStatusOptions { .. }
+        | Command::SetTaskStatus { .. }
+        | Command::AddBoardStatus { .. }
+        | Command::RenameBoardStatus { .. }
+        | Command::ReorderBoardStatus { .. }
+        | Command::RemoveBoardStatus { .. }
+        | Command::Projects
+        | Command::CreateProject { .. }
+        | Command::CreateBoardForList { .. }
+        | Command::DeleteProject { .. }) => board::run(app, command).await,
+        // ── Comments ──
+        command @ (Command::Comments { .. }
+        | Command::PostComment { .. }
+        | Command::EditComment { .. }
+        | Command::CommentSuggestions { .. }
+        | Command::ApplyCommentSuggestion { .. }
+        | Command::DeleteComment { .. }
+        | Command::RefreshComments { .. }) => comments::run(app, command).await,
+        // ── Attachments and the clipboard ──
+        command @ (Command::Attachments { .. }
+        | Command::DownloadAttachment { .. }
+        | Command::AttachFile { .. }
+        | Command::ClipboardPaste { .. }) => attachments::run(app, command).await,
+        // ── Chat ──
+        command @ (Command::Chat { .. }
+        | Command::RefreshChat { .. }
+        | Command::SendChatMessage { .. }
+        | Command::ResolveChatChannel { .. }
+        | Command::ChatMessages { .. }
+        | Command::LoadChatMessages { .. }
+        | Command::ForgetChatMessage { .. }
+        | Command::PostAgentResponse { .. }
+        | Command::RequestAstridResponse { .. }) => chat::run(app, command).await,
+        // ── Reminders ──
+        command @ (Command::ReminderOptions { .. }
+        | Command::RemindersDue
+        | Command::NextReminder
+        | Command::ReminderShown { .. }
+        | Command::SnoozeReminder { .. }) => reminders::run(app, command),
+        // ── List filters ──
+        command @ (Command::FilterOptions { .. } | Command::SetFilter { .. }) => {
+            list_filters::run(app, command).await
+        }
+        // ── The account, its agents and its integrations ──
+        command @ (Command::IsSignedIn
+        | Command::CurrentUser
+        | Command::SearchUsers { .. }
+        | Command::Agents
+        | Command::AstridModel
+        | Command::SetAstridModel { .. }
+        | Command::WebhookSettings
+        | Command::SaveWebhook { .. }
+        | Command::DeleteWebhook
+        | Command::TestWebhook
+        | Command::CustomAgents
+        | Command::RegisterCustomAgent { .. }
+        | Command::DeleteCustomAgent { .. }
+        | Command::SetCustomAgentPhoto { .. }
+        | Command::ConnectCopilot
+        | Command::DisconnectCopilot
+        | Command::SetAgentMode { .. }
+        | Command::SaveAgentCredential { .. }
+        | Command::TestAgentCredential { .. }
+        | Command::DeleteAgentCredential { .. }
+        | Command::ExternalSync { .. }
+        | Command::ExternalAccounts
+        | Command::CreateAndLinkGoogleList { .. }
+        | Command::ConnectProvider { .. }
+        | Command::DisconnectProvider { .. }
+        | Command::LinkList { .. }
+        | Command::UnlinkList { .. }
+        | Command::Features
+        | Command::MyTasksFilters
+        | Command::RefreshMyTasks
+        | Command::SetMyTasksFilters { .. }
+        | Command::GoogleSyncMode
+        | Command::SetGoogleSyncMode { .. }
+        | Command::ImportExternalLedger { .. }
+        | Command::SyncExternal
+        | Command::ProfileStats
+        | Command::UpdateProfile { .. }
+        | Command::ResendVerification
+        | Command::ChangeEmail { .. }
+        | Command::Passkeys
+        | Command::RenamePasskey { .. }
+        | Command::RevokePasskey { .. }
+        | Command::PasskeyRegistrationOptions
+        | Command::RegisterPasskey { .. }
+        | Command::Contacts
+        | Command::ClearContacts
+        | Command::UploadContacts { .. }
+        | Command::DeleteAccount { .. }
+        | Command::ExportAccount { .. }
+        | Command::Settings
+        | Command::RefreshSettings
+        | Command::UpdateReminderSettings { .. }
+        | Command::UpdateSmartTaskSettings { .. }
+        | Command::RefreshCapabilities
+        | Command::FeedbackListId
+        | Command::Notifications
+        | Command::RefreshNotifications
+        | Command::MarkNotificationsRead { .. }
+        | Command::MarkAllNotificationsRead
+        | Command::BeginSignIn { .. }
+        | Command::CompleteSignIn { .. }
+        | Command::CancelSignIn
+        | Command::SignOut) => account::run(app, command).await,
+        // ── Connections and credentials ──
+        command @ (Command::Connections
+        | Command::RevokeConnection { .. }
+        | Command::LoadOAuthClient { .. }
+        | Command::CheckOAuthClientDraft { .. }
+        | Command::CreateOAuthClient { .. }
+        | Command::UpdateOAuthClient { .. }
+        | Command::MintTransportCredentials { .. }
+        | Command::MintAccessToken { .. }) => connections::run(app, command).await,
+        // ── Sync, the outbox and the cache ──
+        command @ (Command::ImportJournalEntry { .. }
+        | Command::SeedCache { .. }
+        | Command::OutboxStats
+        | Command::Sync
+        | Command::StreamState
+        | Command::ClearCache
+        | Command::NetworkRestored
+        | Command::ReconnectStream
+        | Command::RetryDeadLetters
+        | Command::Drain) => network::run(app, command).await,
+        // ── The shell itself — keys, editing, theme, palette ──
+        command @ (Command::ResolveShortcut { .. }
+        | Command::Shortcuts
+        | Command::Hotkey
+        | Command::SetHotkey { .. }
+        | Command::BeginEditing { .. }
+        | Command::EndEditing { .. }
+        | Command::CancelEditing { .. }
+        | Command::CommitAllEditing
+        | Command::Theme
+        | Command::SetTheme { .. }
+        | Command::HasSeenTour
+        | Command::TourSeen
+        | Command::Palette { .. }) => shell::run(app, command),
     }
 }
 
-/// The newest few refused writes, as `{ kind, error }` — why a write did not land, readable where
-/// the count is shown. The journal keeps them, so the reason is never lost to a prune.
-fn dead_letters(app: &App) -> Vec<serde_json::Value> {
-    crate::outbox::journal::dead_letters(&app.store, 5)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| serde_json::json!({ "kind": entry.kind, "error": entry.last_error }))
-        .collect()
-}
-
-/// Where "the tour has been seen" is remembered.
+/// A command that reached the wrong domain module.
 ///
-/// The cache, so it belongs to this installation: somebody who has used the app for a year on a
-/// laptop still wants to be shown where the hotkey is the first time they open it on a desktop.
-const TOUR_KEY: &str = "tour.seen";
+/// [`run`] is one exhaustive `match` over every `Command` variant and the groups it routes are
+/// disjoint, so the compiler has already proved this is unreachable. It answers rather than
+/// panicking anyway: a routing slip would be a mistake in this file, and a mistake in this file
+/// must not take the window down with it.
+pub(super) fn misrouted(domain: &str) -> Response {
+    Response::failed(Failure::bad_request(format!(
+        "this command is not one of dispatch::{domain}'s"
+    )))
+}
 
 /// For a write whose answer is that it happened. `Response::done()` rather than `ok(())`, so the
 /// shell is not handed a `null` to decide something about.
@@ -1429,43 +270,6 @@ fn answer<T: serde::Serialize>(result: crate::services::Result<T>) -> Response {
         Ok(value) => Response::ok(value),
         Err(error) => Response::failed(error.into()),
     }
-}
-
-/// One public list by its id, with what the reader may do in it (task c5f7d870).
-///
-/// The projection is here rather than in `permissions` because it adds no rule: `role` and
-/// `canAddTask` are [`crate::permissions::role_in_list`] and
-/// [`crate::permissions::can_edit_tasks`] verbatim, which the `permissions.json` fixture already
-/// pins against web (the named case "viewer membership on a public collaborative list"), and
-/// `canComment` reads the same `collaborative` gate the comments route enforces
-/// (astrid-web `app/api/v1/tasks/[id]/comments/route.ts` — standard access, *or* the task is in a
-/// public collaborative list). Projecting it in dispatch is what `canAddTasks` already does for
-/// the rows answer.
-///
-/// A reader we cannot name — signed out, so there is no current user — is told `null` and `false`
-/// rather than refused: the list is public and still worth drawing, and the honest answer to "may
-/// you add to it" is no.
-async fn public_list(app: &App, list_id: &str) -> Response {
-    let list = match app.context.lists().public_list(list_id).await {
-        Ok(list) => list,
-        Err(error) => return Response::failed(error.into()),
-    };
-    let access = crate::permissions::access_of(&list);
-    let me = app.context.account().current_user_id().ok().flatten();
-    let (role, can_write) = match me.as_deref() {
-        Some(me) => (
-            crate::permissions::role_in_list(me, &access),
-            crate::permissions::can_edit_tasks(me, &access),
-        ),
-        None => (None, false),
-    };
-    Response::ok(serde_json::json!({
-        "list": list,
-        "role": role,
-        // May the reader file something here — the whole point of opening a feedback list.
-        "canAddTask": can_write,
-        "canComment": can_write,
-    }))
 }
 
 /// What a list permits, as the shells read it (task 897e25c5, astrid-web's
@@ -1511,8 +315,7 @@ fn supports_json(list: Option<&crate::model::TaskList>) -> serde_json::Value {
     })
 }
 
-// The helpers, by domain. Glob-imported so an arm above names a helper the way it always
-// has, and so the domain files can reach each other through `use super::*`.
+// A module per domain: its own arms, and the helpers only its arms call.
 mod account;
 mod attachments;
 mod board;
@@ -1521,40 +324,21 @@ mod comments;
 mod connections;
 mod list_filters;
 mod lists;
+mod network;
 mod reminders;
 mod row_json;
+mod shell;
 mod tasks;
-/// Step the one editing session and answer with what the shell must do (task e71ed760).
-///
-/// The machine is pure ([`crate::editing`]); this is where its session lives between calls. A
-/// poisoned lock is recovered rather than propagated: the session is one small value, and a
-/// panic elsewhere must not leave every editor in the window unable to open.
-fn editing(
-    app: &App,
-    step: impl FnOnce(&crate::editing::Session) -> crate::editing::Transition,
-) -> Response {
-    let mut session = app
-        .editing
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let transition = step(&session);
-    *session = transition.session.clone();
-    Response::ok(serde_json::json!({
-        "active": transition.session.active,
-        "commit": transition.commit,
-        "cancel": transition.cancel,
-    }))
-}
 
+// Glob-imported so that a domain file can reach another domain's helper through `use super::*`,
+// which is the only reason anything is re-exported here. `board`, `chat`, `list_filters` and
+// `reminders` are absent deliberately: once task 8a91c5b0 moved the arms into the domain modules,
+// nothing outside each of those four used anything in it, and the compiler said so.
 use account::*;
 use attachments::*;
-use board::*;
-use chat::*;
 use comments::*;
-use list_filters::*;
 use lists::*;
 pub(in crate::app) use reminders::due_reminders;
-use reminders::*;
 use row_json::*;
 use tasks::*;
 

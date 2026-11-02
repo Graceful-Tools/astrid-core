@@ -4,6 +4,54 @@
 
 use super::*;
 
+/// Every command that answers with rows, counts or badges, handed here whole by [`super::run`]
+/// (task 8a91c5b0).
+///
+/// Every arm is short on purpose: it names a service call, and the service decides. An arm that
+/// grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file nobody
+/// would look in for it.
+pub(super) async fn run(app: &App, command: Command) -> Response {
+    match command {
+        Command::RowsForList {
+            list_id,
+            display_mode,
+            surface,
+            offset,
+            limit,
+            inputs,
+        } => rows_for_list(
+            app,
+            &list_id,
+            RowsWindow {
+                display_mode,
+                surface,
+                offset,
+                limit,
+            },
+            *inputs,
+        ),
+        Command::ListCounts {
+            lists,
+            current_user_id,
+        } => list_counts(app, &lists, current_user_id),
+        Command::ReminderTriageDeck { reminded_task_id } => {
+            reminder_triage_deck(app, reminded_task_id.as_deref())
+        }
+        Command::FeaturedRows { list_id, list } => {
+            featured_rows(app, &list_id, list.map(|list| *list)).await
+        }
+        Command::ListBadges {
+            lists,
+            my_tasks_id,
+            current_user_id,
+        } => list_badges(app, &lists, my_tasks_id, current_user_id),
+        Command::ProfileTasks { user_id } => row_json::profile_rows(app, user_id.as_deref()).await,
+        // `super::run` is one exhaustive match over every variant and the groups it routes are
+        // disjoint, so the compiler has already proved nothing else reaches this arm.
+        _ => misrouted("row_json"),
+    }
+}
+
 /// Where the rows go and which of them: the projection's settings and the window.
 pub(super) struct RowsWindow {
     pub display_mode: Option<String>,
