@@ -461,87 +461,124 @@ impl SyncManager {
         .await?;
         report.absorb(applied);
 
-        // Tasks come a page at a time, and the walk stops on a short page rather than on the
-        // server's count — see `api::pagination` for why that count cannot be trusted.
-        let fetched = self.fetch_all_tasks(since_param).await?;
-        let (deleted_tasks, tasks_whole) = (fetched.deleted, fetched.whole);
-        // Only if the lists route sent none — see the note there on why the earliest wins.
-        if server_time.is_none() {
-            server_time = fetched.server_time;
-        }
-        let tasks = Arc::new(fetched.tasks);
-        // The tasks, likewise in one transaction once every page is in hand — and likewise on a
-        // blocking thread, which for the task phase is the one that matters: this is the apply a
-        // thousand-row first pass spends its time in (task bb20ca56).
-        let applied = applying({
-            let store = self.store.clone();
-            let tasks = tasks.clone();
-            let deleting_tasks = deleting_tasks.clone();
-            move || {
-                let mut report = SyncReport::default();
-                store.transaction(|connection| {
-                    // Tasks made here that the server has not answered for yet, by the idempotency
-                    // key their create carries — so a pull that brings one's server copy first
-                    // replaces it rather than showing it twice.
-                    let made_here: std::collections::HashMap<String, String> =
-                        store::temp_tasks_in(connection)?
-                            .into_iter()
-                            .filter_map(|task| {
-                                task.client_request_id.clone().map(|key| (key, task.id))
-                            })
-                            .collect();
-                    for task in tasks.iter() {
-                        if deleting_tasks.contains(&task.id) {
-                            continue;
-                        }
-                        if let Some(temp_id) = task
-                            .client_request_id
-                            .as_ref()
-                            .and_then(|key| made_here.get(key))
-                        {
-                            store::record_id_mapping_in(
-                                connection,
-                                temp_id,
-                                &task.id,
-                                task.updated_at.unwrap_or(started_at),
-                            )?;
-                            store::delete_task_in(connection, temp_id)?;
-                            report.changed_task_ids.push(temp_id.clone());
-                        }
-                        match store::task_in(connection, &task.id)? {
-                            Some(cached) => {
-                                if is_newer(task.updated_at, cached.updated_at) {
-                                    // Both sides may have moved. The resolver decides field by
-                                    // field.
-                                    let resolved = conflict::resolve(&cached, task);
-                                    store::upsert_task_in(connection, &resolved)?;
-                                    report.tasks_updated += 1;
+        // Tasks come a page at a time, and each page is applied and dropped before the next is
+        // asked for — see [`TaskWalk`] for what the walk decides between pages, and why the rows
+        // are not collected first.
+        let mut walk = TaskWalk::new(since_param);
+        let mut deleted_tasks: Vec<String> = Vec::new();
+        let mut tasks_whole = true;
+        // The ids the server listed, and only the ids. This is all the full-pass absence pruning
+        // below ever needed the rows for, and keeping the rows to answer it is what held every
+        // page of a 10k-task first pull in memory at once (task 86109567). Not built at all on a
+        // delta pass, which does not prune by absence.
+        let mut seen_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
+        while let Some(page) = walk.next_page(&self.client).await? {
+            // Only if the lists route sent none — see the note there on why the earliest wins.
+            if server_time.is_none() {
+                server_time = page.server_time;
+            }
+            deleted_tasks.extend(page.deleted);
+            if !page.whole {
+                tasks_whole = false;
+            }
+            if since.is_none() {
+                seen_tasks.extend(page.tasks.iter().map(|task| task.id.clone()));
+            }
+            // One transaction per page, on a blocking thread — which for the task phase is the one
+            // that matters: this is the apply a thousand-row first pass spends its time in (task
+            // bb20ca56). Per page rather than per pass is the task's own note: a list being drawn
+            // could already see half a pass, so a page boundary is no weaker a seam than a row.
+            let applied = applying({
+                let store = self.store.clone();
+                let tasks = page.tasks;
+                let deleting_tasks = deleting_tasks.clone();
+                move || {
+                    let mut report = SyncReport::default();
+                    store.transaction(|connection| {
+                        // Tasks made here that the server has not answered for yet, by the
+                        // idempotency key their create carries — so a pull that brings one's server
+                        // copy first replaces it rather than showing it twice.
+                        //
+                        // Read once per page rather than once per pass: a page just applied may have
+                        // retired some of them, and there are only ever a handful.
+                        let made_here: std::collections::HashMap<String, String> =
+                            store::temp_tasks_in(connection)?
+                                .into_iter()
+                                .filter_map(|task| {
+                                    task.client_request_id.clone().map(|key| (key, task.id))
+                                })
+                                .collect();
+                        for task in &tasks {
+                            if deleting_tasks.contains(&task.id) {
+                                continue;
+                            }
+                            if let Some(temp_id) = task
+                                .client_request_id
+                                .as_ref()
+                                .and_then(|key| made_here.get(key))
+                            {
+                                store::record_id_mapping_in(
+                                    connection,
+                                    temp_id,
+                                    &task.id,
+                                    task.updated_at.unwrap_or(started_at),
+                                )?;
+                                store::delete_task_in(connection, temp_id)?;
+                                report.changed_task_ids.push(temp_id.clone());
+                            }
+                            match store::task_in(connection, &task.id)? {
+                                Some(cached) => {
+                                    if is_newer(task.updated_at, cached.updated_at) {
+                                        // Both sides may have moved. The resolver decides field by
+                                        // field.
+                                        let resolved = conflict::resolve(&cached, task);
+                                        store::upsert_task_in(connection, &resolved)?;
+                                        report.tasks_updated += 1;
+                                        report.changed_task_ids.push(task.id.clone());
+                                    } else {
+                                        report.tasks_unchanged += 1;
+                                    }
+                                }
+                                None => {
+                                    store::upsert_task_in(connection, task)?;
+                                    report.tasks_added += 1;
                                     report.changed_task_ids.push(task.id.clone());
-                                } else {
-                                    report.tasks_unchanged += 1;
                                 }
                             }
-                            None => {
-                                store::upsert_task_in(connection, task)?;
-                                report.tasks_added += 1;
-                                report.changed_task_ids.push(task.id.clone());
+                        }
+                        Ok(())
+                    })?;
+                    Ok(report)
+                }
+            })
+            .await?;
+            report.absorb(applied);
+        }
+
+        // The tombstones once the walk is done, rather than inside a page's own transaction: one
+        // carried on page three is as real as one on page one, and no page can know whether a later
+        // one carries more. Nothing to do on the common pass that collected none.
+        if !deleted_tasks.is_empty() {
+            let applied = applying({
+                let store = self.store.clone();
+                move || {
+                    let mut report = SyncReport::default();
+                    store.transaction(|connection| {
+                        for id in deleted_tasks {
+                            if store::task_in(connection, &id)?.is_some() {
+                                store::delete_task_in(connection, &id)?;
+                                report.tasks_deleted += 1;
+                                report.changed_task_ids.push(id);
                             }
                         }
-                    }
-                    for id in deleted_tasks {
-                        if store::task_in(connection, &id)?.is_some() {
-                            store::delete_task_in(connection, &id)?;
-                            report.tasks_deleted += 1;
-                            report.changed_task_ids.push(id);
-                        }
-                    }
-                    Ok(())
-                })?;
-                Ok(report)
-            }
-        })
-        .await?;
-        report.absorb(applied);
+                        Ok(())
+                    })?;
+                    Ok(report)
+                }
+            })
+            .await?;
+            report.absorb(applied);
+        }
 
         // A full pass carries no tombstones, so what the server no longer has is known only by
         // its absence. Left alone it would stay forever — a list deleted on the web while this
@@ -553,8 +590,6 @@ impl SyncManager {
             let fresh = |updated_at: Option<DateTime<Utc>>| {
                 updated_at.is_some_and(|at| at > started_at - delta_overlap())
             };
-            let seen_tasks: std::collections::HashSet<&str> =
-                tasks.iter().map(|task| task.id.as_str()).collect();
             // A row that would not decode is still on the server; with one, the listing cannot say
             // what is missing, so nothing is taken on its word this pass.
             let absent_tasks: Vec<String> = if tasks_whole {
@@ -562,7 +597,7 @@ impl SyncManager {
                     .tasks()?
                     .into_iter()
                     .filter(|cached| {
-                        !seen_tasks.contains(cached.id.as_str())
+                        !seen_tasks.contains(&cached.id)
                             && !crate::model::is_temp_id(&cached.id)
                             && !unsent_tasks.contains(&cached.id)
                             && !fresh(cached.updated_at)
@@ -625,90 +660,6 @@ impl SyncManager {
         )
     }
 
-    /// Every task page, and every tombstone the pages carried.
-    ///
-    /// The tombstones are gathered across pages rather than read off the first: losing them on
-    /// page two would bring a deleted task back on the machines with the most tasks, which are
-    /// the machines whose owners would notice least.
-    async fn fetch_all_tasks(&self, since: Option<String>) -> Result<TaskFetch, ApiError> {
-        const PAGE: usize = 1000;
-        let mut fetched = TaskFetch {
-            tasks: Vec::new(),
-            deleted: Vec::new(),
-            whole: true,
-            server_time: None,
-        };
-        // An empty `cursor` starts a keyset walk; `None` means offset paging, which is where a
-        // deployment too old to understand `cursor` ends up (below).
-        let mut cursor: Option<String> = Some(String::new());
-        let mut offset = 0usize;
-        loop {
-            let mut request = self
-                .client
-                .get(endpoints::TASKS)
-                .query("limit", Some(PAGE.to_string()))
-                // The per-task embedded member arrays are large and redundant: permission
-                // checks resolve membership from the list, not from a copy stapled to every
-                // task. Older servers ignore the parameter and send them anyway.
-                .query("leanListMembers", Some("1".to_string()))
-                .query("updatedSince", since.clone());
-            request = match &cursor {
-                Some(value) => request.query("cursor", Some(value.clone())),
-                None => request.query("offset", Some(offset.to_string())),
-            };
-            let body = self.client.send(request).await?;
-            // Nothing else is asked for: the replica this fills is what the detail view
-            // renders offline, so a page trimmed of anything more is refused rather than
-            // stored (AITD-499).
-            require_only_omitted(&body, &OMITTED_BY_REQUEST)?;
-            if fetched.server_time.is_none() {
-                fetched.server_time = string_named(&body, endpoints::envelope::SERVER_TIME);
-            }
-            // Absent on the last page, and on every offset page. Opaque — never parsed.
-            let next = string_named(&body, endpoints::envelope::NEXT_CURSOR);
-            fetched
-                .deleted
-                .extend(ids_named(&body, endpoints::envelope::DELETED_TASKS));
-            let page =
-                crate::model::lenient::<Task>(unwrap_envelope(body, endpoints::envelope::TASKS));
-            report_skips("tasks", &page.skipped);
-            if !page.skipped.is_empty() {
-                fetched.whole = false;
-            }
-            let items = page.into_items();
-            let received = items.len();
-            fetched.tasks.extend(items);
-
-            if cursor.is_some() {
-                if let Some(next) = next {
-                    cursor = Some(next);
-                    continue;
-                }
-                // No `nextCursor`. On a deployment that sends `serverTime` the two shipped
-                // together (AWTD-1470), so its absence is the end of the walk and nothing else.
-                if fetched.server_time.is_some() {
-                    break;
-                }
-                // Otherwise `cursor` was ignored and this was offset page zero under the default
-                // order. Stopping here would silently truncate a library at one page, so fall
-                // back to the walk this client has always done.
-                if received < PAGE {
-                    break;
-                }
-                cursor = None;
-                offset = PAGE;
-                continue;
-            }
-            // Offset paging stops on a short page rather than on the server's count — see
-            // `api::pagination` for why that count cannot be trusted.
-            if received < PAGE {
-                break;
-            }
-            offset += PAGE;
-        }
-        Ok(fetched)
-    }
-
     /// Fetch the projects. Separate from the main pass because a deployment without boards answers
     /// 404, and a pass that treated that as a failure would stop syncing tasks on an older server.
     pub async fn sync_projects(&self) -> Result<usize, ServiceError> {
@@ -738,21 +689,121 @@ fn is_newer(incoming: Option<DateTime<Utc>>, cached: Option<DateTime<Utc>>) -> b
     }
 }
 
-/// The rows under `key`, or the whole body when the key is absent. Both shapes have been seen on
-/// the same route — see [`ApiClient::send_collection`], which this mirrors so the delta fields
-/// beside the rows can be read first.
-/// What the task walk came back with.
-struct TaskFetch {
+/// How many rows a task page asks for.
+const TASK_PAGE: usize = 1000;
+
+/// One page of the task walk.
+struct TaskPage {
     tasks: Vec<Task>,
-    /// Gathered across pages rather than read off the first: losing them on page two would bring
-    /// a deleted task back on the machines with the most tasks, which are the machines whose
-    /// owners would notice least.
+    /// The tombstones this page carried. The caller gathers them across the whole walk rather than
+    /// reading them off the first page: losing them on page two would bring a deleted task back on
+    /// the machines with the most tasks, which are the machines whose owners would notice least.
     deleted: Vec<String>,
-    /// False if any page held a row that would not decode, which makes the listing unable to say
+    /// False if this page held a row that would not decode, which makes the listing unable to say
     /// what is missing.
     whole: bool,
-    /// The server's clock, from the first page that carried one.
+    /// The server's clock, when this page carried it.
     server_time: Option<String>,
+}
+
+/// The task walk, a page at a time.
+///
+/// A struct holding the walk's state rather than a loop that collects every page: the pass applies
+/// each page and drops it before asking for the next, so the memory high-water mark of a 10k-task
+/// full pull is one page rather than ten (task 86109567).
+///
+/// Every decision the collecting loop made between pages is here unchanged — follow the server's
+/// `nextCursor`; fall back to offsets on a deployment that ignored `cursor`; stop an offset walk on
+/// a short page. Only where the rows go has changed.
+struct TaskWalk {
+    since: Option<String>,
+    /// `Some("")` starts a keyset walk; `None` means offset paging, which is where a deployment too
+    /// old to understand `cursor` ends up.
+    cursor: Option<String>,
+    offset: usize,
+    /// Whether any page so far carried `serverTime`. On a deployment that sends it, it and
+    /// `nextCursor` shipped together (AWTD-1470), so a later page without a cursor is the end of
+    /// the walk rather than a dropped parameter — and the page that vouches for that need not be
+    /// the one that ends it.
+    stamped: bool,
+    /// Set once the walk has reached the end, so every later call answers `None`.
+    finished: bool,
+}
+
+impl TaskWalk {
+    fn new(since: Option<String>) -> Self {
+        TaskWalk {
+            since,
+            cursor: Some(String::new()),
+            offset: 0,
+            stamped: false,
+            finished: false,
+        }
+    }
+
+    /// The next page, or `None` once the walk is done.
+    async fn next_page(&mut self, client: &ApiClient) -> Result<Option<TaskPage>, ApiError> {
+        if self.finished {
+            return Ok(None);
+        }
+        let mut request = client
+            .get(endpoints::TASKS)
+            .query("limit", Some(TASK_PAGE.to_string()))
+            // The per-task embedded member arrays are large and redundant: permission checks
+            // resolve membership from the list, not from a copy stapled to every task. Older
+            // servers ignore the parameter and send them anyway.
+            .query("leanListMembers", Some("1".to_string()))
+            .query("updatedSince", self.since.clone());
+        request = match &self.cursor {
+            Some(value) => request.query("cursor", Some(value.clone())),
+            None => request.query("offset", Some(self.offset.to_string())),
+        };
+        let body = client.send(request).await?;
+        // Nothing else is asked for: the replica this fills is what the detail view renders
+        // offline, so a page trimmed of anything more is refused rather than stored (AITD-499).
+        require_only_omitted(&body, &OMITTED_BY_REQUEST)?;
+        let server_time = string_named(&body, endpoints::envelope::SERVER_TIME);
+        self.stamped = self.stamped || server_time.is_some();
+        // Absent on the last page, and on every offset page. Opaque — never parsed.
+        let next = string_named(&body, endpoints::envelope::NEXT_CURSOR);
+        let deleted = ids_named(&body, endpoints::envelope::DELETED_TASKS);
+        let decoded =
+            crate::model::lenient::<Task>(unwrap_envelope(body, endpoints::envelope::TASKS));
+        report_skips("tasks", &decoded.skipped);
+        let whole = decoded.skipped.is_empty();
+        let tasks = decoded.into_items();
+        let received = tasks.len();
+
+        if self.cursor.is_some() {
+            match next {
+                Some(next) => self.cursor = Some(next),
+                // No `nextCursor` from a deployment that stamps its pages: the end of the walk, and
+                // nothing else.
+                None if self.stamped => self.finished = true,
+                // Otherwise `cursor` was ignored and this was offset page zero under the default
+                // order. A short page is still the end; a full one would silently truncate a
+                // library, so fall back to the walk this client has always done.
+                None if received < TASK_PAGE => self.finished = true,
+                None => {
+                    self.cursor = None;
+                    self.offset = TASK_PAGE;
+                }
+            }
+        } else if received < TASK_PAGE {
+            // Offset paging stops on a short page rather than on the server's count — see
+            // `api::pagination` for why that count cannot be trusted.
+            self.finished = true;
+        } else {
+            self.offset += TASK_PAGE;
+        }
+
+        Ok(Some(TaskPage {
+            tasks,
+            deleted,
+            whole,
+            server_time,
+        }))
+    }
 }
 
 /// A top-level string from a response envelope. `None` for absent, null, or any other type —
@@ -886,6 +937,60 @@ mod tests {
                 store,
             },
             transport,
+        )
+    }
+
+    /// A transport that notes how much the cache already held each time a task page was asked
+    /// for. The only way from outside to tell "applied as it arrives" from "collected, then
+    /// applied" — the memory high-water mark the two differ by is not observable.
+    struct PageProbe {
+        inner: StubTransport,
+        store: Arc<Store>,
+        cached: std::sync::Mutex<Vec<usize>>,
+    }
+
+    impl PageProbe {
+        fn cached_when_asked(&self) -> Vec<usize> {
+            self.cached.lock().expect("probe lock").clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::api::HttpTransport for PageProbe {
+        async fn send(
+            &self,
+            request: crate::api::HttpRequest,
+        ) -> Result<crate::api::HttpResponse, TransportError> {
+            if request.url.contains("/api/v1/tasks?") {
+                let held = self.store.tasks().map(|tasks| tasks.len()).unwrap_or(0);
+                self.cached.lock().expect("probe lock").push(held);
+            }
+            self.inner.send(request).await
+        }
+    }
+
+    /// The fixture built around that probe. Inlined rather than built on [`fixture`] because the
+    /// transport needs the store, which [`fixture`] makes and keeps.
+    fn fixture_with_page_probe(transport: StubTransport) -> (Fixture, Arc<PageProbe>) {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let clock = Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z"));
+        let probe = Arc::new(PageProbe {
+            inner: transport,
+            store: store.clone(),
+            cached: std::sync::Mutex::new(Vec::new()),
+        });
+        let client = Arc::new(ApiClient::new(
+            "https://astrid.cc",
+            probe.clone(),
+            Arc::new(MemorySecureStore::new()),
+        ));
+        let runner = Arc::new(Runner::new(client.clone(), store.clone(), clock.clone()));
+        (
+            Fixture {
+                sync: SyncManager::new(client, store.clone(), clock, runner),
+                store,
+            },
+            probe,
         )
     }
 
@@ -1237,6 +1342,95 @@ mod tests {
             !asked.iter().any(|url| url.contains("offset=")),
             "a cursor walk never counts offsets: {asked:?}"
         );
+    }
+
+    /// Task `86109567`: the pages are applied as they arrive, so a full pull holds one page of
+    /// rows rather than the whole library.
+    ///
+    /// The memory high-water mark itself is not observable from a test, so this asserts the
+    /// behaviour that produces it — each page is in the cache before the next is asked for. A
+    /// pass that collected every page first would ask for all three with the cache still empty.
+    #[tokio::test]
+    async fn task_86109567_each_page_is_applied_before_the_next_is_asked_for() {
+        let page = |ids: [&str; 2], next: Option<&str>| {
+            let mut body = json!({
+                "tasks": ids.map(|id| json!({ "id": id, "title": id, "listIds": ["l1"] })),
+                "serverTime": "2026-09-07T10:00:00Z",
+            });
+            if let Some(next) = next {
+                body["nextCursor"] = json!(next);
+            }
+            body
+        };
+        let (fixture, probe) = fixture_with_page_probe(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [{ "id": "l1", "name": "Home" }], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json("/api/v1/tasks", 200, page(["t1", "t2"], Some("page-two")))
+                .push_json("/api/v1/tasks", 200, page(["t3", "t4"], Some("page-three")))
+                .push_json("/api/v1/tasks", 200, page(["t5", "t6"], None)),
+        );
+
+        let report = fixture.sync.sync().await;
+        assert_eq!(report.tasks_added, 6, "every page lands: {report:?}");
+        assert_eq!(
+            probe.cached_when_asked(),
+            vec![0, 2, 4],
+            "each page is applied before the next is requested"
+        );
+    }
+
+    /// Task `86109567`: a tombstone carried on a later page is as real as one on the first, and a
+    /// walk that applies page by page must not let the per-page transaction decide deletions.
+    ///
+    /// Green before the page-by-page apply as well as after — it is the guard on that change, not
+    /// a reproduction of a bug, and the thing worth pinning is that it stays green.
+    #[tokio::test]
+    async fn task_86109567_a_tombstone_on_a_later_page_still_deletes() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [{ "id": "l1", "name": "Home" }], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{ "id": "t1", "title": "one", "listIds": ["l1"] }],
+                        "serverTime": "2026-09-07T10:00:00Z",
+                        "nextCursor": "page-two",
+                    }),
+                )
+                // The row arrived on page one; its tombstone only on page two.
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{ "id": "t2", "title": "two", "listIds": ["l1"] }],
+                        "deletedIds": ["t1"],
+                        "serverTime": "2026-09-07T10:00:00Z",
+                    }),
+                ),
+        );
+
+        let report = fixture.sync.sync().await;
+        assert_eq!(
+            report.tasks_deleted, 1,
+            "the tombstone is honoured: {report:?}"
+        );
+        let cached: Vec<String> = fixture
+            .store
+            .tasks()
+            .expect("reads")
+            .into_iter()
+            .map(|task| task.id)
+            .collect();
+        assert_eq!(cached, vec!["t2".to_string()], "t1 is gone: {cached:?}");
     }
 
     /// Task `86109567`: a deployment that ignores `cursor` must not be read as "one page and

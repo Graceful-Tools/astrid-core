@@ -51,6 +51,11 @@ enum Kind {
 /// know is a failure of its own, below: a payload nobody round-trips is how D55 survived.
 const SURFACES: &[(&str, Kind, Shape)] = &[
     ("task.listPage", Kind::Task, Shape::Many("/tasks")),
+    // The same rows as `task.listPage`, fetched by `?cursor=` instead of `?offset=` (AWTD-1470).
+    // The rows are identical by construction; it is here because the surface exists and every
+    // surface is round-tripped — the envelope's own `nextCursor` and `serverTime` are read by
+    // `astrid_core::sync`, which is not a model and so not this test's business.
+    ("task.listPage.cursor", Kind::Task, Shape::Many("/tasks")),
     ("task.listPage.omitted", Kind::Task, Shape::Many("/tasks")),
     ("task.read", Kind::Task, Shape::One("/task")),
     ("task.event", Kind::Task, Shape::One("/v1Task")),

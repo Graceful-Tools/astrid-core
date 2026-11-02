@@ -31,9 +31,9 @@ pub enum Privacy {
     Public,
 }
 
-/// `{ enabledTypes, defaultAgentId }` — the shape the server stores and, since 2026-08-29, emits
-/// as `aiAgentConfig` beside the plain `aiAgentsEnabled` array. It carries the default agent the
-/// array cannot express.
+/// `{ enabledTypes, defaultAgentId, allowMemberAssignment }` — the shape the server stores and,
+/// since 2026-08-29, emits as `aiAgentConfig` beside the plain `aiAgentsEnabled` array. It carries
+/// the default agent the array cannot express.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAgentConfig {
@@ -41,6 +41,14 @@ pub struct ListAgentConfig {
     pub enabled_types: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_agent_id: Option<String>,
+    /// Whether a member, rather than only an admin, may assign a task to an agent on this list.
+    ///
+    /// Carried so the wire round trip loses nothing; nothing in the core reads it yet, and gating
+    /// on it is a dispatch decision rather than a model one. `Option` rather than `bool` because
+    /// absent and `false` are different answers, and defaulting the key in would invent it on a
+    /// surface that never sent it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_member_assignment: Option<bool>,
 }
 
 /// Someone's membership of a list. Presence IS membership; the role only refines what it allows.
