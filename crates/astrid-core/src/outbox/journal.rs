@@ -192,25 +192,51 @@ pub fn wake_offline(store: &Store, now: DateTime<Utc>) -> Result<usize> {
 /// with the same evidence; nothing is lost by trying.
 pub fn revive_dead(store: &Store, now: DateTime<Utc>) -> Result<usize> {
     store.transaction(|connection| {
-        // Not a deletion, and not an old one: replayed after days, a delete removes what somebody
-        // has since gone back to, and a full-field edit overwrites what changed elsewhere since.
         let revived = connection.execute(
-            "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = ?1,
-                               updated_at = ?1
-             WHERE status = 'failedPermanent'
-               AND kind NOT IN ('deleteTask', 'deleteList', 'deleteComment')
-               AND updated_at >= ?2",
-            rusqlite::params![
-                date::format(now),
-                date::format(now - chrono::Duration::days(REVIVE_WINDOW_DAYS))
-            ],
+            &format!(
+                "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = ?2,
+                                   updated_at = ?2
+                 WHERE {REVIVABLE}"
+            ),
+            rusqlite::params![date::format(revive_cutoff(now)), date::format(now)],
         )?;
         Ok(revived)
     })
 }
 
+/// Which dead letters a retry reaches: not a deletion, and not an old one. Replayed after days, a
+/// delete removes what somebody has since gone back to, and a full-field edit overwrites what
+/// changed elsewhere since.
+///
+/// One predicate, shared by the retry and by [`retryable_dead_count`] — the count a shell draws
+/// beside its "Try again" link and the set that link revives must be the same set, or the row says
+/// "1 refused" about a write the button cannot touch and never clears (task 22e9bc7b). `?1` is the
+/// oldest `updated_at` still in reach.
+const REVIVABLE: &str = "status = 'failedPermanent'
+               AND kind NOT IN ('deleteTask', 'deleteList', 'deleteComment')
+               AND updated_at >= ?1";
+
 /// How far back a "retry failed writes" reaches.
 pub const REVIVE_WINDOW_DAYS: i64 = 7;
+
+fn revive_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
+    now - chrono::Duration::days(REVIVE_WINDOW_DAYS)
+}
+
+/// How many refused writes [`revive_dead`] would give another go — what a shell offers a retry
+/// for, as opposed to [`Stats::failed`], which is every write that was refused at all.
+///
+/// A read, on the read connection: the shell asks after every sync pass.
+pub fn retryable_dead_count(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+    store.reading(|connection| {
+        let count: i64 = connection.query_row(
+            &format!("SELECT COUNT(*) FROM outbox WHERE {REVIVABLE}"),
+            [date::format(revive_cutoff(now))],
+            |row| row.get(0),
+        )?;
+        Ok(usize::try_from(count).unwrap_or(0))
+    })
+}
 
 /// Rewrite an entry's payload — used when a temporary id it names is resolved to a real one.
 pub fn update_payload(
@@ -661,6 +687,49 @@ mod tests {
                 .expect("present")
                 .status,
             Status::FailedPermanent
+        );
+    }
+
+    /// The number drawn beside "Try again" has to be a number pressing it can act on.
+    ///
+    /// `failed` counts every write the Outbox gave up on, including the two kinds
+    /// [`revive_dead`] deliberately never touches — a refused delete, and anything refused more
+    /// than [`REVIVE_WINDOW_DAYS`] ago. A shell drawing `failed` beside the retry link therefore
+    /// showed "1 refused", answered "nothing to retry" when pressed, and never cleared
+    /// (task 22e9bc7b).
+    #[test]
+    fn only_dead_letters_a_retry_would_revive_count_as_retryable_task_22e9bc7b() {
+        let store = Store::in_memory().expect("opens");
+        let mut delete = new_entry("delete");
+        delete.kind = kind::DELETE_TASK.to_string();
+        enqueue(&store, &delete).expect("enqueues");
+        enqueue(&store, &new_entry("old")).expect("enqueues");
+        enqueue(&store, &new_entry("recent")).expect("enqueues");
+        mark_dead(&store, "delete", "403", t0() + Duration::days(9)).expect("records");
+        mark_dead(&store, "old", "403", t0()).expect("records");
+        mark_dead(&store, "recent", "403", t0() + Duration::days(9)).expect("records");
+
+        let now = t0() + Duration::days(10);
+        assert_eq!(
+            stats(&store).expect("reads").failed,
+            3,
+            "all three are writes the server refused"
+        );
+        let retryable = retryable_dead_count(&store, now).expect("counts");
+        assert_eq!(retryable, 1, "only `recent` is within reach of a retry");
+        // The count and the button are the same predicate, so this cannot drift.
+        assert_eq!(revive_dead(&store, now).expect("revives"), retryable);
+    }
+
+    /// Nothing refused, nothing to offer: the row is absent rather than reading "0 refused".
+    #[test]
+    fn an_empty_journal_has_nothing_to_retry_task_22e9bc7b() {
+        let store = Store::in_memory().expect("opens");
+        enqueue(&store, &new_entry("waiting")).expect("enqueues");
+        assert_eq!(
+            retryable_dead_count(&store, t0()).expect("counts"),
+            0,
+            "a write still waiting to go is not a refused one"
         );
     }
 

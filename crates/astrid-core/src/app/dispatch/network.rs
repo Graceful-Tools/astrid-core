@@ -120,6 +120,15 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 "running": stats.running,
                 "completed": stats.completed,
                 "failed": stats.failed,
+                // How many of those a retry would actually give another go. A refused delete and
+                // anything refused over a week ago are never replayed, so a shell that drew
+                // `failed` beside its "Try again" link offered a button that could do nothing and
+                // a row that never cleared (task 22e9bc7b).
+                "retryable": crate::outbox::journal::retryable_dead_count(
+                    &app.store,
+                    app.clock.now(),
+                )
+                .unwrap_or(0),
                 "hasUnsentWork": stats.has_unsent_work(),
                 "deadLetters": dead_letters(app),
                 // When the last full pass began, for Settings' "Last Sync" (iOS; AATD-55).

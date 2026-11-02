@@ -45,6 +45,38 @@ async fn the_outbox_stats_say_why_a_write_was_refused() {
     assert_eq!(stats["value"]["deadLetters"][0]["error"], "403 not yours");
 }
 
+/// `retryable` is the count a shell can put a "Try again" beside: how many of the refused writes
+/// `retryDeadLetters` would actually give another go. A refused *delete* is never replayed, so
+/// drawing `failed` there offered a button that answered "nothing to retry" and a row that never
+/// cleared (task 22e9bc7b).
+#[tokio::test]
+async fn the_outbox_stats_separate_refused_writes_from_retryable_ones_task_22e9bc7b() {
+    let app = app_with(StubTransport::new());
+    for kind in [
+        crate::outbox::kind::CREATE_TASK,
+        crate::outbox::kind::DELETE_TASK,
+    ] {
+        let entry =
+            crate::outbox::build(kind, json!({ "taskId": "t1" }), "temp_1", app.clock.now());
+        crate::outbox::journal::enqueue(&app.store, &entry).expect("enqueues");
+        crate::outbox::journal::mark_dead(&app.store, &entry.id, "403 not yours", app.clock.now())
+            .expect("records");
+    }
+
+    let stats = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert_eq!(stats["value"]["failed"], 2, "both were refused");
+    assert_eq!(stats["value"]["retryable"], 1, "the delete is not replayed");
+
+    // And a retry revives exactly that many, leaving the row honest about what is left.
+    let retried = call(&app, json!({ "kind": "retryDeadLetters" })).await;
+    assert_eq!(retried["value"]["revived"], 1);
+    let after = call(&app, json!({ "kind": "outboxStats" })).await;
+    assert_eq!(
+        after["value"]["retryable"], 0,
+        "nothing left to offer a retry for"
+    );
+}
+
 /// Clearing the cache forgets rows but keeps what has not been sent.
 #[tokio::test]
 async fn clearing_the_cache_keeps_the_journal() {
