@@ -18,7 +18,7 @@ pub mod conflict;
 pub mod policy;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -37,12 +37,29 @@ use crate::store::{self, Store};
 /// it forever.
 pub(crate) const LAST_SYNC_KEY: &str = "sync.last-completed";
 
-/// How far behind the stamp a delta pass asks from.
+/// The *server's* clock at the start of the last successful pass, verbatim as it sent it.
 ///
-/// The stamp is this machine's clock and `updatedAt` is the server's, and the two disagree by
-/// however wrong this machine's clock is. Asking for a little more than strictly necessary costs
-/// a few rows that [`is_newer`] then declines to apply; asking for a little less loses an edit
-/// silently. Five minutes covers any clock a machine that can still sign in is likely to have.
+/// This is what a delta pass asks from, and [`LAST_SYNC_KEY`] is only how this machine judges
+/// how long it has been away. The server reads it before it runs the query (astrid-web
+/// `app/api/v1/tasks/route.ts`, AWTD-1470), so a write that lands while the query runs is newer
+/// than the stamp and arrives next pass rather than being skipped.
+///
+/// Kept as the string the server sent rather than a parsed instant: it goes straight back as
+/// `updatedSince`, and a reformat is a chance to lose precision for no gain.
+///
+/// Empty, or absent, means the last pass talked to a deployment too old to send one — see
+/// [`delta_overlap`].
+pub(crate) const LAST_SYNC_SERVER_KEY: &str = "sync.last-completed.server";
+
+/// How far behind a *local* stamp a delta pass asks from.
+///
+/// Only for a deployment that sends no `serverTime`. Then the stamp is this machine's clock and
+/// `updatedAt` is the server's, and the two disagree by however wrong this machine's clock is.
+/// Asking for a little more than strictly necessary costs a few rows that [`is_newer`] then
+/// declines to apply; asking for a little less loses an edit silently. Five minutes covers any
+/// clock a machine that can still sign in is likely to have — which is the whole weakness of it,
+/// and why a server-issued stamp needs no margin at all: a clock two hours fast skipped two hours
+/// of other people's edits, silently, with nothing to raise (task 86109567).
 fn delta_overlap() -> chrono::Duration {
     chrono::Duration::minutes(5)
 }
@@ -192,6 +209,15 @@ impl SyncManager {
             .and_then(date::parse)
     }
 
+    /// The server's own stamp from the last successful pass, if that server sent one.
+    fn last_sync_server(&self) -> Option<String> {
+        self.store
+            .metadata(LAST_SYNC_SERVER_KEY)
+            .ok()
+            .flatten()
+            .filter(|stamp| !stamp.is_empty())
+    }
+
     /// One pass, because a person asked: push, fetch, apply.
     ///
     /// If a timer pass is already running this waits for it and then runs, rather than returning
@@ -276,13 +302,25 @@ impl SyncManager {
         // Stamped before the fetch, for the reason on `LAST_SYNC_KEY`. A first pass — or one
         // after a sign-out, which clears the cache — has no stamp and pulls everything.
         let started_at = self.clock.now();
-        let since = self
+        // How long this machine has been away is a question about THIS machine, so the local
+        // stamp answers it — a server stamp compared against a local `now` would be exactly the
+        // skew this fix removes. What to ask the server FROM is the server's own stamp, sent back
+        // verbatim and with no margin; only a deployment that never sent one falls back to the
+        // local clock minus [`delta_overlap`].
+        let within_delta_age = self
             .last_sync()
-            .filter(|stamp| started_at - *stamp <= max_delta_age())
-            .map(|stamp| stamp - delta_overlap());
+            .is_some_and(|stamp| started_at - stamp <= max_delta_age());
+        let since = if within_delta_age {
+            self.last_sync_server().or_else(|| {
+                self.last_sync()
+                    .map(|stamp| date::format(stamp - delta_overlap()))
+            })
+        } else {
+            None
+        };
 
-        match self.fetch_and_apply(since, started_at).await {
-            Ok(mut report) => {
+        match self.fetch_and_apply(since.clone(), started_at).await {
+            Ok((mut report, server_time)) => {
                 report.pushes_failed = pushes_failed;
                 report.delivered = delivered;
                 report.fetched = true;
@@ -296,6 +334,13 @@ impl SyncManager {
                 let _ = self
                     .store
                     .set_metadata(LAST_SYNC_KEY, &date::format(started_at));
+                // Written every pass, including as an empty string when the server sent none, so
+                // a device that talks to a current deployment and then to an older one falls back
+                // rather than replaying a stamp that server never issued.
+                let _ = self.store.set_metadata(
+                    LAST_SYNC_SERVER_KEY,
+                    server_time.as_deref().unwrap_or_default(),
+                );
                 report
             }
             Err(error) => {
@@ -313,14 +358,16 @@ impl SyncManager {
     /// the server lists beside the rows so a client that never sees a deleted row can still stop
     /// showing it. A server too old to know `updatedSince` ignores it and answers with
     /// everything, which folds in exactly as a full pull would.
+    /// Also answers with the server's own stamp for this pass, which becomes the next pass's
+    /// cursor. `None` from a deployment that does not send one.
     async fn fetch_and_apply(
         &self,
-        since: Option<DateTime<Utc>>,
+        since_param: Option<String>,
         started_at: DateTime<Utc>,
-    ) -> Result<SyncReport, ServiceError> {
+    ) -> Result<(SyncReport, Option<String>), ServiceError> {
         use crate::outbox::{journal, kind};
         let mut report = SyncReport::default();
-        let since_param = since.map(date::format);
+        let since = since_param.clone();
         // Rows deleted here whose delete is on its way — or has just landed, while a fetch that
         // began before it was in flight. The server still lists them; a pull must not bring them
         // back (the Apple apps' `recentlyDeletedIds`).
@@ -337,6 +384,11 @@ impl SyncManager {
                     .query("updatedSince", since_param.clone()),
             )
             .await?;
+        // The pass's cursor comes from the FIRST request it made, not the last: the lists query ran
+        // before the tasks query, so the tasks response's stamp is later, and storing that one
+        // would skip a list edited in between. The earliest stamp of the pass costs a few rows
+        // `is_newer` declines next pass; the latest loses an edit.
+        let mut server_time = string_named(&body, endpoints::envelope::SERVER_TIME);
         // `deletedIds` is what the lists route sends (`app/api/v1/lists/route.ts`); the older name
         // is read too. Read under the wrong name, a list deleted elsewhere stayed for a day.
         let mut deleted_lists = ids_named(&body, endpoints::envelope::DELETED_TASKS);
@@ -411,8 +463,13 @@ impl SyncManager {
 
         // Tasks come a page at a time, and the walk stops on a short page rather than on the
         // server's count — see `api::pagination` for why that count cannot be trusted.
-        let (tasks, deleted_tasks, tasks_whole) = self.fetch_all_tasks(since_param).await?;
-        let tasks = Arc::new(tasks);
+        let fetched = self.fetch_all_tasks(since_param).await?;
+        let (deleted_tasks, tasks_whole) = (fetched.deleted, fetched.whole);
+        // Only if the lists route sent none — see the note there on why the earliest wins.
+        if server_time.is_none() {
+            server_time = fetched.server_time;
+        }
+        let tasks = Arc::new(fetched.tasks);
         // The tasks, likewise in one transaction once every page is in hand — and likewise on a
         // blocking thread, which for the task phase is the one that matters: this is the apply a
         // thousand-row first pass spends its time in (task bb20ca56).
@@ -553,7 +610,7 @@ impl SyncManager {
             }
         }
 
-        Ok(report)
+        Ok((report, server_time))
     }
 
     /// Whether the server says this row is gone — not found, or no longer this account's. Any other
@@ -573,54 +630,83 @@ impl SyncManager {
     /// The tombstones are gathered across pages rather than read off the first: losing them on
     /// page two would bring a deleted task back on the machines with the most tasks, which are
     /// the machines whose owners would notice least.
-    async fn fetch_all_tasks(
-        &self,
-        since: Option<String>,
-    ) -> Result<(Vec<Task>, Vec<String>, bool), ApiError> {
+    async fn fetch_all_tasks(&self, since: Option<String>) -> Result<TaskFetch, ApiError> {
         const PAGE: usize = 1000;
-        let deleted = Mutex::new(Vec::new());
-        let whole = std::sync::atomic::AtomicBool::new(true);
-        let tasks = crate::api::fetch_all(PAGE, |limit, offset| {
-            let since = since.clone();
-            let deleted = &deleted;
-            let whole = &whole;
-            async move {
-                let request = self
-                    .client
-                    .get(endpoints::TASKS)
-                    .query("limit", Some(limit.to_string()))
-                    .query("offset", Some(offset.to_string()))
-                    // The per-task embedded member arrays are large and redundant: permission
-                    // checks resolve membership from the list, not from a copy stapled to every
-                    // task. Older servers ignore the parameter and send them anyway.
-                    .query("leanListMembers", Some("1".to_string()))
-                    .query("updatedSince", since);
-                let body = self.client.send(request).await?;
-                // Nothing else is asked for: the replica this fills is what the detail view
-                // renders offline, so a page trimmed of anything more is refused rather than
-                // stored (AITD-499).
-                require_only_omitted(&body, &OMITTED_BY_REQUEST)?;
-                deleted
-                    .lock()
-                    .expect("tombstone lock")
-                    .extend(ids_named(&body, endpoints::envelope::DELETED_TASKS));
-                let page = crate::model::lenient::<Task>(unwrap_envelope(
-                    body,
-                    endpoints::envelope::TASKS,
-                ));
-                report_skips("tasks", &page.skipped);
-                if !page.skipped.is_empty() {
-                    whole.store(false, std::sync::atomic::Ordering::SeqCst);
-                }
-                Ok::<crate::api::Page<Task>, ApiError>(crate::api::Page {
-                    items: page.into_items(),
-                    total: None,
-                })
+        let mut fetched = TaskFetch {
+            tasks: Vec::new(),
+            deleted: Vec::new(),
+            whole: true,
+            server_time: None,
+        };
+        // An empty `cursor` starts a keyset walk; `None` means offset paging, which is where a
+        // deployment too old to understand `cursor` ends up (below).
+        let mut cursor: Option<String> = Some(String::new());
+        let mut offset = 0usize;
+        loop {
+            let mut request = self
+                .client
+                .get(endpoints::TASKS)
+                .query("limit", Some(PAGE.to_string()))
+                // The per-task embedded member arrays are large and redundant: permission
+                // checks resolve membership from the list, not from a copy stapled to every
+                // task. Older servers ignore the parameter and send them anyway.
+                .query("leanListMembers", Some("1".to_string()))
+                .query("updatedSince", since.clone());
+            request = match &cursor {
+                Some(value) => request.query("cursor", Some(value.clone())),
+                None => request.query("offset", Some(offset.to_string())),
+            };
+            let body = self.client.send(request).await?;
+            // Nothing else is asked for: the replica this fills is what the detail view
+            // renders offline, so a page trimmed of anything more is refused rather than
+            // stored (AITD-499).
+            require_only_omitted(&body, &OMITTED_BY_REQUEST)?;
+            if fetched.server_time.is_none() {
+                fetched.server_time = string_named(&body, endpoints::envelope::SERVER_TIME);
             }
-        })
-        .await?;
-        let deleted = deleted.into_inner().expect("tombstone lock");
-        Ok((tasks, deleted, whole.into_inner()))
+            // Absent on the last page, and on every offset page. Opaque — never parsed.
+            let next = string_named(&body, endpoints::envelope::NEXT_CURSOR);
+            fetched
+                .deleted
+                .extend(ids_named(&body, endpoints::envelope::DELETED_TASKS));
+            let page =
+                crate::model::lenient::<Task>(unwrap_envelope(body, endpoints::envelope::TASKS));
+            report_skips("tasks", &page.skipped);
+            if !page.skipped.is_empty() {
+                fetched.whole = false;
+            }
+            let items = page.into_items();
+            let received = items.len();
+            fetched.tasks.extend(items);
+
+            if cursor.is_some() {
+                if let Some(next) = next {
+                    cursor = Some(next);
+                    continue;
+                }
+                // No `nextCursor`. On a deployment that sends `serverTime` the two shipped
+                // together (AWTD-1470), so its absence is the end of the walk and nothing else.
+                if fetched.server_time.is_some() {
+                    break;
+                }
+                // Otherwise `cursor` was ignored and this was offset page zero under the default
+                // order. Stopping here would silently truncate a library at one page, so fall
+                // back to the walk this client has always done.
+                if received < PAGE {
+                    break;
+                }
+                cursor = None;
+                offset = PAGE;
+                continue;
+            }
+            // Offset paging stops on a short page rather than on the server's count — see
+            // `api::pagination` for why that count cannot be trusted.
+            if received < PAGE {
+                break;
+            }
+            offset += PAGE;
+        }
+        Ok(fetched)
     }
 
     /// Fetch the projects. Separate from the main pass because a deployment without boards answers
@@ -655,6 +741,29 @@ fn is_newer(incoming: Option<DateTime<Utc>>, cached: Option<DateTime<Utc>>) -> b
 /// The rows under `key`, or the whole body when the key is absent. Both shapes have been seen on
 /// the same route — see [`ApiClient::send_collection`], which this mirrors so the delta fields
 /// beside the rows can be read first.
+/// What the task walk came back with.
+struct TaskFetch {
+    tasks: Vec<Task>,
+    /// Gathered across pages rather than read off the first: losing them on page two would bring
+    /// a deleted task back on the machines with the most tasks, which are the machines whose
+    /// owners would notice least.
+    deleted: Vec<String>,
+    /// False if any page held a row that would not decode, which makes the listing unable to say
+    /// what is missing.
+    whole: bool,
+    /// The server's clock, from the first page that carried one.
+    server_time: Option<String>,
+}
+
+/// A top-level string from a response envelope. `None` for absent, null, or any other type —
+/// every caller's answer to a server that does not send one is to fall back, not to fail.
+fn string_named(body: &serde_json::Value, key: &str) -> Option<String> {
+    body.get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
 fn unwrap_envelope(body: serde_json::Value, key: &str) -> serde_json::Value {
     match body.get(key) {
         Some(rows) => rows.clone(),
@@ -758,6 +867,36 @@ mod tests {
             sync: SyncManager::new(client, store.clone(), clock, runner),
             store,
         }
+    }
+
+    /// The same, keeping the transport so a test can assert on what was actually asked for.
+    fn fixture_with_transport(transport: StubTransport) -> (Fixture, Arc<StubTransport>) {
+        let transport = Arc::new(transport);
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let clock = Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z"));
+        let client = Arc::new(ApiClient::new(
+            "https://astrid.cc",
+            transport.clone(),
+            Arc::new(MemorySecureStore::new()),
+        ));
+        let runner = Arc::new(Runner::new(client.clone(), store.clone(), clock.clone()));
+        (
+            Fixture {
+                sync: SyncManager::new(client, store.clone(), clock, runner),
+                store,
+            },
+            transport,
+        )
+    }
+
+    /// Every task URL the transport was asked for, in order.
+    fn task_urls(transport: &StubTransport) -> Vec<String> {
+        transport
+            .requests()
+            .into_iter()
+            .map(|request| request.url)
+            .filter(|url| url.contains("/api/v1/tasks?"))
+            .collect()
     }
 
     fn empty_task_pages(transport: StubTransport) -> StubTransport {
@@ -945,6 +1084,197 @@ mod tests {
         // The first page is short (2 < 1000), so exactly one task request is made.
         let report = fixture.sync.sync().await;
         assert_eq!(report.tasks_added, 2);
+    }
+
+    /// Task `86109567`: the delta cursor is the server's own stamp, sent back verbatim and with
+    /// no skew margin.
+    ///
+    /// This machine's clock reads 12:00 and the server's reads 10:00 — two hours fast, the case
+    /// the five-minute margin never covered. Asking from `12:00 − 5 min` would skip every edit
+    /// anyone else made between 10:00 and 11:55, with nothing to raise.
+    #[tokio::test]
+    async fn task_86109567_the_delta_cursor_is_the_servers_stamp_not_this_machines_clock() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [], "serverTime": "2026-09-07T10:30:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [], "serverTime": "2026-09-07T10:30:00Z" }),
+                ),
+        );
+
+        assert!(fixture.sync.sync().await.fetched, "the first pass runs");
+        let second = fixture.sync.sync().await;
+        assert!(second.delta, "the second pass is a delta pass");
+
+        let asked = task_urls(&transport);
+        let second_ask = asked.last().expect("a second task request");
+        assert!(
+            second_ask.contains("updatedSince=2026-09-07T10%3A00%3A00Z"),
+            "the server's own stamp goes back verbatim, not the local clock: {second_ask}"
+        );
+        assert!(
+            !second_ask.contains("11%3A55"),
+            "no five-minute margin on a server stamp: {second_ask}"
+        );
+    }
+
+    /// Task `86109567`: the pass stores the EARLIEST server stamp it was given, which is the one
+    /// from its first request. The lists query ran before the tasks query, so storing the tasks
+    /// stamp would skip a list edited between the two.
+    #[tokio::test]
+    async fn task_86109567_the_stored_cursor_is_the_first_stamp_of_the_pass() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [], "serverTime": "2026-09-07T10:00:09Z" }),
+                )
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+
+        fixture.sync.sync().await;
+        fixture.sync.sync().await;
+
+        let second_ask = task_urls(&transport).last().expect("a second ask").clone();
+        assert!(
+            second_ask.contains("updatedSince=2026-09-07T10%3A00%3A00Z"),
+            "the lists stamp, not the later tasks one: {second_ask}"
+        );
+    }
+
+    /// Task `86109567`: a deployment that sends no `serverTime` keeps the old behaviour — the
+    /// local clock with the five-minute margin — rather than losing its delta pass entirely.
+    #[tokio::test]
+    async fn task_86109567_a_server_without_a_stamp_still_asks_from_the_local_clock() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+
+        fixture.sync.sync().await;
+        assert!(fixture.sync.sync().await.delta, "still a delta pass");
+
+        let second_ask = task_urls(&transport).last().expect("a second ask").clone();
+        assert!(
+            second_ask.contains("updatedSince=2026-09-07T11%3A55%3A00Z"),
+            "the local stamp less the margin: {second_ask}"
+        );
+    }
+
+    /// Task `86109567`: the walk follows the server's `nextCursor` rather than counting offsets,
+    /// so a row that moves mid-walk cannot push another off a page and out of the pass.
+    #[tokio::test]
+    async fn task_86109567_the_walk_follows_the_servers_cursor() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [{ "id": "l1", "name": "Home" }], "serverTime": "2026-09-07T10:00:00Z" }),
+                )
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{ "id": "t1", "title": "one", "listIds": ["l1"] }],
+                        "serverTime": "2026-09-07T10:00:00Z",
+                        "nextCursor": "page-two",
+                    }),
+                )
+                // No `nextCursor`: the last page, even though it is not short.
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({
+                        "tasks": [{ "id": "t2", "title": "two", "listIds": ["l1"] }],
+                        "serverTime": "2026-09-07T10:00:00Z",
+                    }),
+                ),
+        );
+
+        let report = fixture.sync.sync().await;
+        assert_eq!(report.tasks_added, 2, "both pages are applied: {report:?}");
+
+        let asked = task_urls(&transport);
+        assert_eq!(asked.len(), 2, "two pages, then stop: {asked:?}");
+        assert!(
+            asked[0].contains("cursor=&") || asked[0].ends_with("cursor="),
+            "an empty cursor starts the walk: {}",
+            asked[0]
+        );
+        assert!(
+            asked[1].contains("cursor=page-two"),
+            "the second page is asked for by the server's cursor: {}",
+            asked[1]
+        );
+        assert!(
+            !asked.iter().any(|url| url.contains("offset=")),
+            "a cursor walk never counts offsets: {asked:?}"
+        );
+    }
+
+    /// Task `86109567`: a deployment that ignores `cursor` must not be read as "one page and
+    /// done". Without `serverTime` to vouch for it, a full page with no `nextCursor` means the
+    /// parameter was dropped, and the walk falls back to offsets rather than truncating a library.
+    #[tokio::test]
+    async fn task_86109567_a_server_that_ignores_the_cursor_falls_back_to_offsets() {
+        let full_page: Vec<serde_json::Value> = (0..1000)
+            .map(|n| json!({ "id": format!("t{n}"), "title": "x", "listIds": ["l1"] }))
+            .collect();
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/lists",
+                    200,
+                    json!({ "lists": [{ "id": "l1", "name": "Home" }] }),
+                )
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": full_page }))
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [{ "id": "last", "title": "y", "listIds": ["l1"] }] }),
+                ),
+        );
+
+        let report = fixture.sync.sync().await;
+        assert_eq!(
+            report.tasks_added, 1001,
+            "the page past the first is not lost: {report:?}"
+        );
+
+        let asked = task_urls(&transport);
+        assert_eq!(asked.len(), 2, "two requests: {}", asked.len());
+        assert!(
+            asked[1].contains("offset=1000"),
+            "the walk continues by offset: {}",
+            asked[1]
+        );
     }
 
     /// A local write that will not go must not stop remote changes arriving — task 3173727d.

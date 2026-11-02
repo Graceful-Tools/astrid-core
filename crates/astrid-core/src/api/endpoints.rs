@@ -207,6 +207,14 @@ pub mod envelope {
     pub const DELETED_TASKS: &str = "deletedIds";
     /// The same beside `lists`. A different name, because the lists route grew it separately.
     pub const DELETED_LISTS: &str = "deletedListIds";
+    /// Top level on `/api/v1/tasks` and `/api/v1/lists`: the server's clock, read BEFORE the
+    /// query ran, so a write that lands while it runs is newer than this (AWTD-1470). A delta
+    /// pass sends it back as `updatedSince` instead of trusting this machine's clock. Absent on a
+    /// deployment that predates it.
+    pub const SERVER_TIME: &str = "serverTime";
+    /// Top level on a `?cursor=` page of `/api/v1/tasks` that has more rows after it; absent on
+    /// the last page, and on an `offset` page. Opaque: pass it back, never parse it.
+    pub const NEXT_CURSOR: &str = "nextCursor";
 }
 
 pub fn task(id: &str) -> String {
