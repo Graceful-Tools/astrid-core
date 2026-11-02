@@ -46,8 +46,8 @@ cross-repository access, which this workflow does not have, so the `astrid-windo
 and `astrid-android` rows are checked for shape and history but not compared against the
 manifests they claim to describe. astrid-web is public and *is* compared.
 
-Closing that gap is tracked as its own task: give the workflow a `CONSUMER_PINS_TOKEN` secret and
-the check compares all four. The alternative — each client asserting its own pin against this
+Closing that gap is tracked as task `4c891314` on the Astrid Windows board: give the workflow a
+`CONSUMER_PINS_TOKEN` secret and the check compares all four. The alternative — each client asserting its own pin against this
 file — has the same auth problem pointing the other way.
 
 ## Bumping a pin
