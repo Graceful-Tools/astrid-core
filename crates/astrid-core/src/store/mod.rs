@@ -45,6 +45,7 @@
 pub mod schema;
 pub mod session;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -179,6 +180,7 @@ impl Store {
     /// Run `work` inside a transaction. Used by sync, which must never leave half a snapshot
     /// visible to a list that is being drawn at the time.
     pub fn transaction<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        opened::record_transaction();
         let mut guard = self.connection.lock().map_err(|_| StoreError::Lock)?;
         let transaction = guard.transaction()?;
         let value = work(&transaction)?;
@@ -207,6 +209,7 @@ impl Store {
     /// Reads must come through here rather than [`Store::with`] so that drawing a list does not
     /// wait for a sync pass to commit — see the module header.
     fn read<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        opened::record_read();
         match &self.reader {
             Some(reader) => {
                 let guard = reader.lock().map_err(|_| StoreError::Lock)?;
@@ -672,22 +675,29 @@ impl Store {
     /// The server id for a temporary one, if it has been delivered. Follows a chain, because a
     /// temporary id can in principle be remapped twice; a cycle stops rather than hangs.
     pub fn resolve_id(&self, id: &str) -> Result<String> {
+        self.read(|connection| resolve_in(connection, id))
+    }
+
+    /// Resolve many ids under ONE read.
+    ///
+    /// The loop that calls [`Store::resolve_id`] per item pays the read lock once per item, and
+    /// `journal::ids_named` does exactly that over the whole journal, two to four times a sync
+    /// (task `f7d45608`). Ids absent from the mapping table resolve to themselves, so the answer
+    /// has an entry for every id asked about.
+    pub fn resolve_ids<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<HashMap<String, String>> {
+        let ids: Vec<&str> = ids.into_iter().collect();
         self.read(|connection| {
-            let mut current = id.to_string();
-            for _ in 0..8 {
-                let next: Option<String> = connection
-                    .query_row(
-                        "SELECT server_id FROM id_mappings WHERE temp_id = ?1",
-                        [&current],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                match next {
-                    Some(next) if next != current => current = next,
-                    _ => break,
+            let mut resolved = HashMap::with_capacity(ids.len());
+            for id in ids {
+                if resolved.contains_key(id) {
+                    continue;
                 }
+                resolved.insert(id.to_string(), resolve_in(connection, id)?);
             }
-            Ok(current)
+            Ok(resolved)
         })
     }
 
@@ -1001,6 +1011,28 @@ pub(crate) fn upsert_list_in(connection: &Connection, list: &TaskList) -> Result
     Ok(())
 }
 
+/// Follow the chain of id mappings from `id` to whatever it finally resolves to.
+///
+/// Bounded at eight hops: a cycle in the mapping table would otherwise spin here for ever, and
+/// eight is more rewrites than any real id goes through.
+fn resolve_in(connection: &Connection, id: &str) -> Result<String> {
+    let mut current = id.to_string();
+    for _ in 0..8 {
+        let next: Option<String> = connection
+            .query_row(
+                "SELECT server_id FROM id_mappings WHERE temp_id = ?1",
+                [&current],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match next {
+            Some(next) if next != current => current = next,
+            _ => break,
+        }
+    }
+    Ok(current)
+}
+
 fn encode<T: Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|error| StoreError::Corrupt(error.to_string()))
 }
@@ -1042,6 +1074,51 @@ pub mod decodes {
 
     pub(super) fn record() {
         COUNT.with(|count| count.set(count.get().saturating_add(1)));
+    }
+}
+
+/// How many connections this thread has taken: `transactions` is [`Store::transaction`] — the
+/// writer's lock plus a BEGIN/COMMIT — and `reads` is the read connection.
+///
+/// The cost [`decodes`] cannot see. A question answered by one indexed lookup still costs the
+/// writer's lock and a transaction if it is asked through [`Store::transaction`], and a loop that
+/// asks a one-row question per item costs that lock once per item however cheap each answer is.
+/// Both were true of the Outbox (task `f7d45608`): `has_pending` opened a transaction after every
+/// command, a drain pass read the journal twice, and `journal::ids_named` took the read lock once
+/// per journalled entry. A millisecond budget cannot tell those from a fast laptop; a count can.
+///
+/// **Per thread**, for the reason [`decodes`] gives: a process-wide counter would make any two
+/// tests that assert on it flaky as soon as `cargo test` ran them at the same time.
+pub mod opened {
+    use std::cell::Cell;
+
+    thread_local! {
+        static TRANSACTIONS: Cell<u64> = const { Cell::new(0) };
+        static READS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Write transactions opened on this thread so far.
+    pub fn transactions() -> u64 {
+        TRANSACTIONS.with(Cell::get)
+    }
+
+    /// Read-connection passes taken on this thread so far.
+    pub fn reads() -> u64 {
+        READS.with(Cell::get)
+    }
+
+    /// Start counting both again from zero — what a test calls before the work it is bounding.
+    pub fn reset() {
+        TRANSACTIONS.with(|count| count.set(0));
+        READS.with(|count| count.set(0));
+    }
+
+    pub(super) fn record_transaction() {
+        TRANSACTIONS.with(|count| count.set(count.get().saturating_add(1)));
+    }
+
+    pub(super) fn record_read() {
+        READS.with(|count| count.set(count.get().saturating_add(1)));
     }
 }
 

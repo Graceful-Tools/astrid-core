@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
 
 use crate::api::ApiClient;
 use crate::platform::Clock;
@@ -186,6 +187,19 @@ impl DrainReport {
     pub fn did_anything(&self) -> bool {
         self.completed + self.retried + self.dead_lettered > 0
     }
+
+    /// Fold one entry's outcome into the pass's report.
+    ///
+    /// The batch is dispatched concurrently, so each entry produces a report of its own rather
+    /// than writing into a shared one; this is how they are put back together, in batch order so
+    /// that the ids a drain announces do not depend on which request answered first.
+    fn absorb(&mut self, other: DrainReport) {
+        self.completed += other.completed;
+        self.retried += other.retried;
+        self.dead_lettered += other.dead_lettered;
+        self.pruned += other.pruned;
+        self.delivered.absorb(other.delivered);
+    }
 }
 
 pub struct Runner {
@@ -218,18 +232,37 @@ impl Runner {
         let _one_at_a_time = self.draining.lock().await;
         for _ in 0..MAX_PASSES {
             let now = self.clock.now();
-            let entries = journal::load(&self.store)?;
-            self.dead_letter_stranded(&entries, now, &mut report)?;
+            // ONE read of the journal per pass. The dead-lettering below is the only thing that
+            // changes it between here and the batch, and it says what it changed, so a second
+            // full read to see its own writes is a read the pass can do without.
+            let mut entries = journal::load(&self.store)?;
+            let doomed = self.dead_letter_stranded(&entries, now, &mut report)?;
+            for entry in entries
+                .iter_mut()
+                .filter(|entry| doomed.contains(&entry.id))
+            {
+                entry.status = super::entry::Status::FailedPermanent;
+            }
 
-            let entries = journal::all(&self.store)?;
             let ready = scheduler::runnable(&entries, now, &HashSet::new());
             let batch = scheduler::concurrent_batch(&ready, CONCURRENCY_LIMIT);
             if batch.is_empty() {
                 break;
             }
 
-            for entry in batch {
-                self.run_one(entry, now, &mut report).await?;
+            // All at once. A batch is at most one entry per lane, and an entry whose dependency
+            // has not completed is not runnable, so everything in one batch is independent of
+            // everything else in it by construction — which is what makes this safe, and what
+            // made running them one at a time pay four round-trips of latency for four unrelated
+            // writes (task `f7d45608`). `buffered`, not `buffer_unordered`: they run together but
+            // are folded in batch order, so the ids a drain announces stay deterministic.
+            let outcomes: Vec<Result<DrainReport>> = futures_util::stream::iter(batch)
+                .map(|entry| self.run_one(entry, now))
+                .buffered(CONCURRENCY_LIMIT)
+                .collect()
+                .await;
+            for outcome in outcomes {
+                report.absorb(outcome?);
             }
         }
 
@@ -247,16 +280,14 @@ impl Runner {
         ))
     }
 
-    async fn run_one(
-        &self,
-        entry: Entry,
-        now: DateTime<Utc>,
-        report: &mut DrainReport,
-    ) -> Result<()> {
+    /// Send one entry and record what became of it. Answers its own report, which the pass folds
+    /// in — the batch runs concurrently, so there is no shared one to write into.
+    async fn run_one(&self, entry: Entry, now: DateTime<Utc>) -> Result<DrainReport> {
+        let mut report = DrainReport::default();
         // Claim it. Losing the race means another runner has it; there is nothing to do and
         // nothing to report.
         if !journal::mark_running(&self.store, &entry.id, now)? {
-            return Ok(());
+            return Ok(report);
         }
 
         // Whatever temporary ids this entry names may have been resolved since it was written.
@@ -284,7 +315,7 @@ impl Runner {
                         &self.store,
                         &entry.id,
                         attempts,
-                        scheduler::next_attempt_at(now, attempts),
+                        scheduler::next_attempt_at(now, attempts, &entry.id),
                         &reason,
                         now,
                     )?;
@@ -308,32 +339,35 @@ impl Runner {
                 report.delivered.note(&self.store, &entry, None);
             }
         }
-        Ok(())
+        Ok(report)
     }
 
     /// Dead-letter everything that can never run, so it stops occupying a lane and stops looking
     /// to the user like a write still on its way.
+    ///
+    /// Answers which ids it killed, so the pass can apply them to the journal it already holds
+    /// rather than reading the whole thing again to see this function's own writes.
     fn dead_letter_stranded(
         &self,
         entries: &[Entry],
         now: DateTime<Utc>,
         report: &mut DrainReport,
-    ) -> Result<()> {
+    ) -> Result<HashSet<String>> {
         let mut doomed = scheduler::stranded(entries);
         doomed.extend(scheduler::temp_stranded(entries));
-        for id in doomed {
+        for id in &doomed {
             journal::mark_dead(
                 &self.store,
-                &id,
+                id,
                 "a write it depended on failed permanently",
                 now,
             )?;
             report.dead_lettered += 1;
-            if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+            if let Some(entry) = entries.iter().find(|entry| &entry.id == id) {
                 report.delivered.note(&self.store, entry, None);
             }
         }
-        Ok(())
+        Ok(doomed)
     }
 
     /// Rewrite every `temp_` id in the payload that the server has since given a real one.
@@ -389,14 +423,61 @@ fn rewrite_ids(value: &mut serde_json::Value, resolve: &mut impl FnMut(&str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::transport::{HttpRequest, HttpResponse, HttpTransport};
     use crate::api::{StubTransport, TransportError};
     use crate::model::date;
     use crate::outbox::entry::kind;
     use crate::platform::{FixedClock, MemorySecureStore};
+    use async_trait::async_trait;
     use chrono::Duration;
 
     fn t0() -> DateTime<Utc> {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
+    }
+
+    /// How long a request on [`BarrierTransport`] waits for the others before giving up.
+    ///
+    /// Long enough that four requests dispatched together always meet; short enough that a drain
+    /// which sends them one at a time *fails* this test in under two seconds rather than hanging
+    /// the suite, which is the whole reason the barrier has a timeout at all.
+    const PATIENCE: std::time::Duration = std::time::Duration::from_millis(400);
+
+    /// A transport that answers nothing until `width` requests are in flight together.
+    ///
+    /// Dispatched one at a time, each request waits alone, times out, and is reported unreachable.
+    /// Dispatched concurrently, the barrier releases all of them at once — so "did these overlap"
+    /// becomes an assertion about the report rather than about the wall clock.
+    struct BarrierTransport {
+        barrier: tokio::sync::Barrier,
+        body: serde_json::Value,
+    }
+
+    impl BarrierTransport {
+        fn new(width: usize, body: serde_json::Value) -> Self {
+            BarrierTransport {
+                barrier: tokio::sync::Barrier::new(width),
+                body,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl HttpTransport for BarrierTransport {
+        async fn send(
+            &self,
+            _request: HttpRequest,
+        ) -> std::result::Result<HttpResponse, TransportError> {
+            match tokio::time::timeout(PATIENCE, self.barrier.wait()).await {
+                Ok(_) => Ok(HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: self.body.to_string().into_bytes(),
+                }),
+                Err(_) => Err(TransportError::Unreachable(
+                    "waited alone at the barrier".into(),
+                )),
+            }
+        }
     }
 
     struct Fixture {
@@ -410,17 +491,26 @@ mod tests {
         let transport = Arc::new(transport);
         let store = Arc::new(Store::in_memory().expect("opens"));
         let clock = Arc::new(FixedClock::at(t0()));
-        let client = Arc::new(ApiClient::new(
-            "https://astrid.cc",
-            transport.clone(),
-            Arc::new(MemorySecureStore::new()),
-        ));
         Fixture {
-            runner: Runner::new(client, store.clone(), clock.clone()),
+            runner: runner_over(transport.clone(), store.clone(), clock.clone()),
             store,
             clock,
             transport,
         }
+    }
+
+    /// A runner over any transport, for the tests that need one the stub cannot be.
+    fn runner_over(
+        transport: Arc<dyn HttpTransport>,
+        store: Arc<Store>,
+        clock: Arc<FixedClock>,
+    ) -> Runner {
+        let client = Arc::new(ApiClient::new(
+            "https://astrid.cc",
+            transport,
+            Arc::new(MemorySecureStore::new()),
+        ));
+        Runner::new(client, store, clock)
     }
 
     fn enqueue(store: &Store, entry: Entry) -> Entry {
@@ -783,6 +873,130 @@ mod tests {
             .expect("present");
         assert_eq!(entry.status, crate::outbox::Status::Pending);
         assert_eq!(entry.attempts, 0);
+    }
+
+    /// Task `f7d45608`: `CONCURRENCY_LIMIT` is four and the batch was dispatched with a plain
+    /// `for` loop, so four writes to four unrelated tasks cost four round-trips of latency
+    /// instead of one. The barrier only releases when all four are in flight together.
+    #[tokio::test]
+    async fn f7d45608_a_batch_of_independent_entries_goes_out_together() {
+        let store = Arc::new(Store::in_memory().expect("opens"));
+        let runner = runner_over(
+            Arc::new(BarrierTransport::new(
+                CONCURRENCY_LIMIT,
+                serde_json::json!({ "task": { "id": "t1" } }),
+            )),
+            store.clone(),
+            Arc::new(FixedClock::at(t0())),
+        );
+        for index in 0..CONCURRENCY_LIMIT {
+            enqueue(
+                &store,
+                Entry::new(
+                    format!("e{index}"),
+                    kind::UPDATE_TASK,
+                    serde_json::json!({ "taskId": format!("t{index}"), "body": { "title": "x" } }),
+                    format!("crid-{index}"),
+                    t0(),
+                ),
+            );
+        }
+
+        let report = runner.drain().await.expect("drains");
+        assert_eq!(
+            report.completed, CONCURRENCY_LIMIT,
+            "the batch has to overlap for any of these to answer: {report:?}"
+        );
+    }
+
+    /// Task `f7d45608`: concurrency must not reach inside a lane or past a dependency. An entry
+    /// whose dependency has not completed is not runnable, so it cannot share a batch with it —
+    /// which is the property that makes dispatching a whole batch at once safe, and it holds
+    /// while unrelated entries go out alongside.
+    #[tokio::test]
+    async fn f7d45608_a_dependent_entry_still_waits_while_unrelated_writes_go_out_beside_it() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    serde_json::json!({ "task": { "id": "cm3real" } }),
+                )
+                .fallback(Ok(crate::api::HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: br#"{"task":{"id":"other"}}"#.to_vec(),
+                })),
+        );
+        enqueue(&fixture.store, create_task("create", "temp_1"));
+        enqueue(
+            &fixture.store,
+            Entry::new(
+                "update",
+                kind::UPDATE_TASK,
+                serde_json::json!({ "taskId": "temp_1", "body": { "title": "after" } }),
+                "crid-update",
+                t0(),
+            )
+            .depending_on(["create".to_string()])
+            .for_temp_id("temp_1"),
+        );
+        for index in 0..2 {
+            enqueue(
+                &fixture.store,
+                Entry::new(
+                    format!("unrelated{index}"),
+                    kind::UPDATE_TASK,
+                    serde_json::json!({ "taskId": format!("u{index}"), "body": { "title": "x" } }),
+                    format!("crid-u{index}"),
+                    t0(),
+                ),
+            );
+        }
+
+        let report = fixture.runner.drain().await.expect("drains");
+        assert_eq!(report.completed, 4, "{report:?}");
+        let urls: Vec<String> = fixture
+            .transport
+            .requests()
+            .into_iter()
+            .map(|request| request.url)
+            .collect();
+        let created = urls
+            .iter()
+            .position(|url| url.ends_with("/api/v1/tasks"))
+            .expect("the create went");
+        let edited = urls
+            .iter()
+            .position(|url| url.ends_with("/api/v1/tasks/cm3real"))
+            .expect("the edit went, to the real id");
+        assert!(created < edited, "the edit overtook its create: {urls:?}");
+    }
+
+    /// Task `f7d45608`: a pass read the whole journal twice — `journal::load`, then
+    /// `journal::all` to see `load`'s own recovery and the dead-lettering — and a drain repeats
+    /// its pass until nothing is runnable, so the second read was paid for again every time.
+    ///
+    /// Five write transactions for one entry: the journal read in each of the two passes (the
+    /// one that sends it, and the one that finds nothing left), the claim, the completion, and
+    /// the prune. It was eight.
+    #[tokio::test]
+    async fn f7d45608_a_drain_pass_reads_the_journal_once() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/tasks",
+            200,
+            serde_json::json!({ "task": { "id": "cm3real" } }),
+        ));
+        enqueue(&fixture.store, create_task("e1", "temp_1"));
+
+        crate::store::opened::reset();
+        let report = fixture.runner.drain().await.expect("drains");
+        assert_eq!(report.completed, 1);
+        assert_eq!(
+            crate::store::opened::transactions(),
+            5,
+            "a drain of one entry must not read the journal twice a pass"
+        );
     }
 
     /// AITD-454: each kind names what it touched, so the shell re-reads those rows alone.

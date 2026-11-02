@@ -35,16 +35,58 @@ pub fn offline_wait() -> Duration {
     Duration::seconds(OFFLINE_WAIT_SECS)
 }
 
-/// How long to wait after the `attempts`-th failure.
+/// The longest an entry waits after the `attempts`-th failure — the ceiling
+/// [`jittered_backoff`] spreads beneath.
 pub fn backoff(attempts: i64) -> Duration {
     let exponent = attempts.saturating_sub(1).clamp(0, 32) as u32;
     let seconds = BASE_BACKOFF_SECS.saturating_mul(1i64 << exponent);
     Duration::seconds(seconds.min(MAX_BACKOFF_SECS))
 }
 
+/// How long to wait after the `attempts`-th failure, spread so that entries which failed together
+/// do not come back together.
+///
+/// Equal jitter: half of [`backoff`] is fixed and the other half is spread by a number derived
+/// from `seed`. So the wait is never shorter than half the backoff — no entry retries hotter than
+/// before — and fifty writes that a 503 refused in one drain return across a window instead of in
+/// one burst, which is the burst that keeps a struggling server struggling.
+///
+/// **Derived, not random.** `seed` is the entry's own id, so this stays a pure function a test can
+/// call, the core needs no RNG, and one entry's wait is reproducible while two entries' waits
+/// differ — which is the only property that matters here.
+pub fn jittered_backoff(attempts: i64, seed: &str) -> Duration {
+    let full = backoff(attempts).num_milliseconds();
+    let fixed = full / 2;
+    let spread = full - fixed;
+    if spread <= 0 {
+        return Duration::milliseconds(full);
+    }
+    let offset = (spread_seed(seed, attempts) % spread as u64) as i64;
+    Duration::milliseconds(fixed + offset)
+}
+
+/// FNV-1a over the seed and the attempt count.
+///
+/// Not a hash with any security property, and it does not need one: all that is asked of it is
+/// that two different entry ids land on different numbers. A dependency-free sixteen lines beats
+/// adding an RNG to the core for this.
+fn spread_seed(seed: &str, attempts: i64) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut value = OFFSET_BASIS;
+    for byte in seed.as_bytes().iter().chain(attempts.to_le_bytes().iter()) {
+        value ^= u64::from(*byte);
+        value = value.wrapping_mul(PRIME);
+    }
+    value
+}
+
 /// When an entry that has failed `attempts` times may next run.
-pub fn next_attempt_at(now: DateTime<Utc>, attempts: i64) -> DateTime<Utc> {
-    now + backoff(attempts)
+///
+/// `seed` is what decorrelates this entry's wait from everything else that failed at the same
+/// moment; the runner passes the entry's id.
+pub fn next_attempt_at(now: DateTime<Utc>, attempts: i64, seed: &str) -> DateTime<Utc> {
+    now + jittered_backoff(attempts, seed)
 }
 
 /// Statuses that will not succeed on a retry, so the entry is dead-lettered at once.
@@ -418,7 +460,51 @@ mod tests {
 
     #[test]
     fn the_next_attempt_is_now_plus_the_backoff() {
-        assert_eq!(next_attempt_at(t0(), 1), t0() + backoff(1));
+        assert_eq!(
+            next_attempt_at(t0(), 1, "e1"),
+            t0() + jittered_backoff(1, "e1")
+        );
+    }
+
+    /// Task `f7d45608`: a server that refuses everything refuses every queued write in one drain,
+    /// and without jitter all of them came back at the very same instant — the burst that keeps a
+    /// struggling server struggling.
+    #[test]
+    fn f7d45608_waits_are_spread_so_entries_that_failed_together_do_not_return_together() {
+        let waits: HashSet<i64> = (0..50)
+            .map(|index| jittered_backoff(4, &format!("entry-{index}")).num_milliseconds())
+            .collect();
+        assert!(
+            waits.len() > 25,
+            "fifty entries produced only {} distinct waits",
+            waits.len()
+        );
+    }
+
+    /// Task `f7d45608`: and the spread only ever makes an entry wait LONGER than half the
+    /// backoff, never shorter than before the jitter existed. A "jitter" that could retry sooner
+    /// than the backoff said would be a regression dressed as a fix.
+    #[test]
+    fn f7d45608_the_jitter_stays_between_half_the_backoff_and_the_backoff() {
+        for attempts in [0, 1, 2, 3, 8, 100, i64::MAX] {
+            let full = backoff(attempts);
+            for index in 0..20 {
+                let wait = jittered_backoff(attempts, &format!("entry-{index}"));
+                assert!(
+                    wait <= full && wait * 2 >= full,
+                    "attempts {attempts}: {wait} outside half of {full}..{full}"
+                );
+            }
+        }
+    }
+
+    /// Task `f7d45608`: one entry's wait is reproducible. The jitter decorrelates entries from
+    /// each other, not an entry from itself — a wait that changed every time it was asked for
+    /// would make [`next_wakeup`] disagree with what was written to the journal.
+    #[test]
+    fn f7d45608_one_entry_gets_the_same_wait_every_time() {
+        assert_eq!(jittered_backoff(3, "e1"), jittered_backoff(3, "e1"));
+        assert_ne!(jittered_backoff(3, "e1"), jittered_backoff(3, "e2"));
     }
 
     // ── Giving up ────────────────────────────────────────────────────────────────────────────

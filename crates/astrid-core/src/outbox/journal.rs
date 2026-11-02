@@ -323,28 +323,38 @@ pub fn ids_named(
     field: &str,
     include_completed: bool,
 ) -> Result<std::collections::HashSet<String>> {
-    let mut ids = std::collections::HashSet::new();
-    for entry in all(store)? {
-        let live = match entry.status {
-            Status::Pending | Status::Running => true,
-            Status::Completed => include_completed,
-            Status::FailedPermanent => false,
-        };
-        if !live || kinds.is_some_and(|kinds| !kinds.contains(&entry.kind.as_str())) {
-            continue;
+    let entries = all(store)?;
+    // Gather first, resolve once. Resolving inside the loop took the read lock per journalled
+    // entry, and a sync pass asks this two to four times (task `f7d45608`).
+    let named: Vec<&str> = entries
+        .iter()
+        .filter(|entry| {
+            let live = match entry.status {
+                Status::Pending | Status::Running => true,
+                Status::Completed => include_completed,
+                Status::FailedPermanent => false,
+            };
+            live && !kinds.is_some_and(|kinds| !kinds.contains(&entry.kind.as_str()))
+        })
+        .filter_map(|entry| entry.payload.get(field).and_then(serde_json::Value::as_str))
+        .collect();
+    let resolved = store.resolve_ids(named.iter().copied())?;
+
+    let mut ids = std::collections::HashSet::with_capacity(named.len() * 2);
+    for id in named {
+        if let Some(real) = resolved.get(id) {
+            ids.insert(real.clone());
         }
-        if let Some(id) = entry.payload.get(field).and_then(serde_json::Value::as_str) {
-            ids.insert(store.resolve_id(id)?);
-            ids.insert(id.to_string());
-        }
+        ids.insert(id.to_string());
     }
     Ok(ids)
 }
 
-/// Whether anything is waiting to go. One indexed lookup, for the caller that asks after every
-/// command and must not pay for reading the journal each time.
+/// Whether anything is waiting to go. One indexed lookup on the READ connection, for the caller
+/// that asks after every command: through [`Store::transaction`] it took the writer's lock and
+/// opened a transaction to answer a one-row question (task `f7d45608`).
 pub fn has_pending(store: &Store) -> Result<bool> {
-    store.transaction(|connection| {
+    store.reading(|connection| {
         let pending: i64 = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM outbox WHERE status = 'pending')",
             [],
@@ -468,6 +478,63 @@ mod tests {
             format!("temp_{id}"),
             t0(),
         )
+    }
+
+    /// Task `f7d45608`: `App::run` asks this after every single command, and it took the writer's
+    /// lock and opened a transaction to answer one `SELECT EXISTS`.
+    #[test]
+    fn f7d45608_has_pending_opens_no_transaction() {
+        let store = Store::in_memory().expect("opens");
+        enqueue(&store, &new_entry("e1")).expect("enqueues");
+
+        crate::store::opened::reset();
+        assert!(has_pending(&store).expect("reads"));
+        assert_eq!(
+            crate::store::opened::transactions(),
+            0,
+            "a one-row question must not take the writer's lock"
+        );
+        assert_eq!(crate::store::opened::reads(), 1);
+    }
+
+    /// Task `f7d45608`: a sync pass asks `ids_named` two to four times, and it resolved each
+    /// journalled id in a read of its own — the read lock once per entry.
+    #[test]
+    fn f7d45608_ids_named_resolves_every_id_in_one_read() {
+        let store = Store::in_memory().expect("opens");
+        for index in 0..20 {
+            let mut entry = new_entry(&format!("e{index}"));
+            entry.payload = serde_json::json!({ "taskId": format!("t{index}") });
+            enqueue(&store, &entry).expect("enqueues");
+        }
+
+        crate::store::opened::reset();
+        let named = ids_named(&store, None, "taskId", false).expect("reads");
+        assert_eq!(named.len(), 20);
+        assert_eq!(
+            crate::store::opened::reads(),
+            1,
+            "twenty entries must cost one read, not twenty"
+        );
+    }
+
+    /// And the answer is unchanged: both the temporary id a write names and whatever it has since
+    /// resolved to, so a pull cannot overwrite either.
+    #[test]
+    fn ids_named_answers_the_temporary_id_and_the_real_one() {
+        let store = Store::in_memory().expect("opens");
+        let mut entry = new_entry("e1");
+        entry.payload = serde_json::json!({ "taskId": "temp_1" });
+        enqueue(&store, &entry).expect("enqueues");
+        store
+            .record_id_mapping("temp_1", "cm3real", t0())
+            .expect("records");
+
+        let named = ids_named(&store, None, "taskId", false).expect("reads");
+        assert!(
+            named.contains("temp_1") && named.contains("cm3real"),
+            "{named:?}"
+        );
     }
 
     #[test]
