@@ -276,6 +276,27 @@ mod tests {
         assert!(!sink.is_live());
     }
 
+    /// Task 5751fcb8: the sync tick stretches to ten minutes while the stream is healthy, so it
+    /// needs to tell a connection that never dropped from one that dropped and came back between
+    /// two ticks. `is_live` cannot — both read `true`. The count can.
+    #[test]
+    fn task_5751fcb8_the_sink_counts_the_connections_the_stream_made() {
+        let sink = RealtimeSink::new(Arc::new(Store::in_memory().expect("opens")));
+        assert_eq!(sink.connections(), 0, "nothing has connected yet");
+
+        sink.set_live(true);
+        sink.set_live(true);
+        assert_eq!(
+            sink.connections(),
+            1,
+            "one connection saying so twice is one connection"
+        );
+
+        sink.set_live(false);
+        sink.set_live(true);
+        assert_eq!(sink.connections(), 2, "a reconnect is a second connection");
+    }
+
     /// Waking from sleep, or the network coming back, should not wait out a backoff chosen while
     /// the world was different (Apple `reconnectNow`, which the Mac calls on wake).
     #[tokio::test]

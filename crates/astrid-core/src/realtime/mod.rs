@@ -245,6 +245,8 @@ pub struct RealtimeSink {
     store: Arc<Store>,
     listeners: std::sync::Mutex<Vec<ChangeListener>>,
     live: std::sync::atomic::AtomicBool,
+    /// How many times the stream has connected — see [`RealtimeSink::connections`].
+    connections: std::sync::atomic::AtomicU64,
     wake: tokio::sync::Notify,
 }
 
@@ -254,6 +256,7 @@ impl RealtimeSink {
             store,
             listeners: std::sync::Mutex::new(Vec::new()),
             live: std::sync::atomic::AtomicBool::new(false),
+            connections: std::sync::atomic::AtomicU64::new(0),
             wake: tokio::sync::Notify::new(),
         }
     }
@@ -280,9 +283,25 @@ impl RealtimeSink {
         self.live.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// How many times the stream has connected since the app started.
+    ///
+    /// The background sync pass stretches to ten minutes while the stream is healthy (task
+    /// 5751fcb8, [`crate::sync::policy::tick_fetches`]), and [`RealtimeSink::is_live`] alone is not
+    /// safe to decide that on: a stream that dropped and reconnected *between* two ticks reads
+    /// `true` at both of them and delivered nothing in between. A number that moved is the only
+    /// evidence of the gap, so a pass runs after every reconnect however healthy the connection
+    /// looks by the time anybody asks.
+    pub fn connections(&self) -> u64 {
+        self.connections.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Record the stream connecting or dropping, announcing only a change.
     pub(crate) fn set_live(&self, live: bool) {
         if self.live.swap(live, std::sync::atomic::Ordering::SeqCst) != live {
+            if live {
+                self.connections
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             self.publish(Change::Stream { live });
         }
     }

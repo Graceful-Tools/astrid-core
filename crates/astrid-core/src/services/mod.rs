@@ -21,6 +21,7 @@ pub mod auth;
 pub mod board;
 pub mod chat;
 pub mod comment;
+pub mod conditional;
 pub mod connections;
 pub mod dependency;
 pub mod external;

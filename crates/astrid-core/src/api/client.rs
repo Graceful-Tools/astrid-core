@@ -117,6 +117,8 @@ pub struct Request {
     /// A body that is not JSON: its content type, and its bytes. Used by the one thing that sends
     /// a file.
     raw: Option<(String, Vec<u8>)>,
+    /// Headers this one call adds to the ones every call carries.
+    headers: Vec<(String, String)>,
 }
 
 impl Request {
@@ -127,7 +129,18 @@ impl Request {
             query: Vec::new(),
             body: None,
             raw: None,
+            headers: Vec::new(),
         }
+    }
+
+    /// Add a header to this one call.
+    ///
+    /// For the things that are a property of the *request* rather than of the client: a
+    /// conditional GET's `If-None-Match`, say. The headers every call carries — accept, platform,
+    /// the session cookie — are [`ApiClient::build`]'s and are not set here.
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
     }
 
     /// A body of bytes, with the content type to send them under.
@@ -282,6 +295,44 @@ impl ApiClient {
         Ok(response)
     }
 
+    /// Send a conditional GET: `None` **is** the 304.
+    ///
+    /// Task 5751fcb8. A 304 is not an error and it is not a success either — `is_success()` is
+    /// `200..300`, so [`ApiClient::send_raw`] reports one as `ApiError::Http { status: 304 }`, and
+    /// anything that went through [`ApiClient::send`] would decode its empty body to
+    /// `Value::Null` and hand back "nothing" for "nothing changed". Those are opposite answers,
+    /// and a caller that cached the second would wipe what it had on the very tick that proved it
+    /// was still right.
+    ///
+    /// Passing `etag: None` is an ordinary unconditional GET, which is what the first read of
+    /// anything is.
+    pub async fn send_conditional(
+        &self,
+        request: Request,
+        etag: Option<&str>,
+    ) -> Result<Option<HttpResponse>, ApiError> {
+        let request = match etag {
+            Some(etag) => request.header("if-none-match", etag),
+            None => request,
+        };
+        let http = self.build(request).await?;
+        let response = self.transport.send(http).await?;
+
+        if response.status == 401 {
+            return Err(ApiError::Unauthorized);
+        }
+        if response.status == 304 {
+            return Ok(None);
+        }
+        if !response.is_success() {
+            return Err(ApiError::Http {
+                status: response.status,
+                message: response.text(),
+            });
+        }
+        Ok(Some(response))
+    }
+
     /// Open a long-lived event stream, with the same headers every other request carries.
     ///
     /// Built here rather than by the real-time module so the stream states the platform and sends
@@ -357,6 +408,7 @@ impl ApiClient {
         if let Some(cookie) = self.secure_store.get(SESSION_COOKIE_KEY).await {
             headers.push(("cookie".to_string(), cookie));
         }
+        headers.extend(request.headers);
 
         let body = match (request.raw, request.body) {
             (Some((content_type, bytes)), _) => {

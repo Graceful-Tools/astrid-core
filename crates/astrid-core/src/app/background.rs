@@ -16,6 +16,12 @@
 //! to appear. Everything the stream delivers also arrives on the next pass, so the timer is the
 //! floor and the stream is the improvement — which is exactly why a dropped stream is not an error
 //! worth showing anybody.
+//!
+//! **Which is also why the floor moves.** While the stream is connected the pass is re-asking for
+//! what the stream already said: five sequential round trips a minute, forever, for an account
+//! nothing had happened to. So a healthy stream stretches the tick to ten minutes and a reconnect
+//! buys a catch-up pass — [`policy::tick_fetches`] has the rule and the reasoning. The heartbeat
+//! itself stays at a minute, because it is also how fast the loop notices the stream is gone.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,11 +40,18 @@ const SIGNED_OUT_RETRY: Duration = Duration::from_secs(2);
 ///
 /// Never runs while signed out: every request would 401, and an app sitting on a sign-in screen
 /// making a request a minute is an app that looks broken in a network log.
+///
+/// And never runs just because a minute passed, either — see [`policy::tick_fetches`]. The tick is
+/// the heartbeat; whether it costs anything depends on whether the stream has the account covered.
 pub async fn sync_loop(
     app: Arc<App>,
     should_continue: impl Fn() -> bool + Send,
     interval: Duration,
 ) {
+    // The pass this loop last ran, against the clock the loop sleeps on rather than
+    // `app.clock` — a shell's clock can be a fixed one, and an interval measured against a clock
+    // that never moves is an interval that never elapses.
+    let mut last_pass: Option<(u64, tokio::time::Instant)> = None;
     while should_continue() {
         tokio::time::sleep(interval).await;
         if !should_continue() {
@@ -47,6 +60,20 @@ pub async fn sync_loop(
         if !app.auth.is_signed_in().await {
             continue;
         }
+        let stream = policy::StreamHealth {
+            live: app.realtime.is_live(),
+            connections: app.realtime.connections(),
+        };
+        if !policy::tick_fetches(
+            stream,
+            last_pass.map(|(connections, at)| policy::LastPass {
+                connections,
+                age_secs: at.elapsed().as_secs(),
+            }),
+        ) {
+            continue;
+        }
+        last_pass = Some((stream.connections, tokio::time::Instant::now()));
         let mut report = app.sync.sync_in_background().await;
         tracing::debug!(
             fetched = report.fetched,
@@ -750,6 +777,47 @@ mod tests {
         .await;
 
         assert_eq!(heard.load(Ordering::SeqCst), 0);
+    }
+
+    /// Task 5751fcb8, finding C3: an idle minute with the live stream healthy makes no requests at
+    /// all. It used to make five on every tick — lists, tasks, projects (a full refetch), the
+    /// flags and the notification inbox — for an account nothing had happened to, while the stream
+    /// sat there ready to say so within a second if it had.
+    ///
+    /// One pass still runs: the cache has to be filled from somewhere, and the stream only ever
+    /// reports what happens from now on.
+    #[tokio::test(start_paused = true)]
+    async fn task_5751fcb8_an_idle_minute_with_a_live_stream_makes_no_further_requests() {
+        let secure = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = StubTransport::new()
+            .push_json("/api/v1/lists", 200, serde_json::json!({ "lists": [] }))
+            .push_json("/api/v1/tasks", 200, serde_json::json!({ "tasks": [] }))
+            .fallback(Err(TransportError::Unreachable("done".into())));
+        let recorded = transport.recorded.clone();
+        let app = app_with(transport, secure);
+        app.realtime.set_live(true);
+
+        let ticks = AtomicUsize::new(0);
+        sync_loop(
+            app,
+            || ticks.fetch_add(1, Ordering::SeqCst) < 12,
+            Duration::from_secs(60),
+        )
+        .await;
+
+        let lists = recorded
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|request| request.url.contains("/api/v1/lists"))
+            .count();
+        assert_eq!(
+            lists, 1,
+            "one pass to fill the cache, and then the stream carries it"
+        );
     }
 
     #[tokio::test(start_paused = true)]

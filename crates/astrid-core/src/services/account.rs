@@ -623,12 +623,24 @@ impl AccountService {
         }))
     }
 
+    /// Re-read the flags, conditionally.
+    ///
+    /// This runs on every background tick, and `app/api/v1/features/route.ts` has answered 304 to
+    /// an `If-None-Match` since it was written — so task 5751fcb8 made the tick ask. Unchanged
+    /// gives back what was already cached, and **writes nothing**: a 304 carries no body, and
+    /// storing that would turn every flag off on the one tick that proved they were all still
+    /// right.
     pub async fn refresh_features(&self) -> Result<serde_json::Value> {
-        let value = self
-            .context
-            .client
-            .send(self.context.client.get(endpoints::FEATURES))
-            .await?;
+        let fresh = super::conditional::get_conditional(
+            &self.context.client,
+            &self.context.store,
+            "features",
+            self.context.client.get(endpoints::FEATURES),
+        )
+        .await?;
+        let Some(value) = fresh else {
+            return Ok(self.features()?.unwrap_or(serde_json::Value::Null));
+        };
         let features = value.get("features").cloned().unwrap_or(value);
         self.context
             .store
@@ -947,6 +959,77 @@ mod tests {
                 .expect("reads"),
             Some(false),
             "a flag nobody has heard of is off"
+        );
+    }
+
+    /// Task 5751fcb8, finding C3: the flags are re-fetched on every 60 s tick, and there was no
+    /// `If-None-Match` anywhere in the crate — even though `app/api/v1/features/route.ts` has
+    /// answered 304 to one since it was written. So the second read sends the tag it was given,
+    /// and a 304 leaves the cache exactly as it was.
+    ///
+    /// The cache part is the half that would bite: a 304 carries no body, and the old path would
+    /// have decoded that to `Value::Null` and written it over the flags — every control on the
+    /// screen turning off once a minute, on the tick that proved nothing had changed.
+    #[tokio::test]
+    async fn task_5751fcb8_a_304_leaves_the_cached_flags_alone() {
+        let transport = StubTransport::new()
+            .push(
+                "/api/v1/features",
+                Ok(crate::api::transport::HttpResponse {
+                    status: 200,
+                    headers: vec![
+                        ("content-type".into(), "application/json".into()),
+                        ("etag".into(), "\"features-3-10\"".into()),
+                    ],
+                    body: json!({ "version": 3, "features": { "project_mode": true } })
+                        .to_string()
+                        .into_bytes(),
+                }),
+            )
+            .push(
+                "/api/v1/features",
+                Ok(crate::api::transport::HttpResponse {
+                    status: 304,
+                    headers: vec![("etag".into(), "\"features-3-10\"".into())],
+                    body: Vec::new(),
+                }),
+            );
+        let recorded = transport.recorded.clone();
+        let fixture = fixture(transport);
+
+        fixture.service.refresh_features().await.expect("refreshes");
+        assert_eq!(
+            fixture.service.has_feature("project_mode").expect("reads"),
+            Some(true)
+        );
+
+        let unchanged = fixture
+            .service
+            .refresh_features()
+            .await
+            .expect("a 304 is not a failure");
+        assert_eq!(
+            unchanged,
+            json!({ "project_mode": true }),
+            "unchanged means what was already cached, not nothing"
+        );
+        assert_eq!(
+            fixture.service.has_feature("project_mode").expect("reads"),
+            Some(true),
+            "the cache is untouched"
+        );
+
+        let sent = recorded.lock().expect("lock");
+        assert_eq!(sent.len(), 2);
+        assert_eq!(
+            sent[0].header("if-none-match"),
+            None,
+            "nothing to ask about on the first read"
+        );
+        assert_eq!(
+            sent[1].header("if-none-match"),
+            Some("\"features-3-10\""),
+            "and the second read asks whether that is still the answer"
         );
     }
 
