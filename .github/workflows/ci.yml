@@ -130,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Packages named explicitly: the action's default list still includes the retired `tools`.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools ndk;27.2.12479018
       - name: cargo-ndk
