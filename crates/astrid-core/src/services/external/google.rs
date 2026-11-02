@@ -1,106 +1,35 @@
-//! Connecting other people's task systems, and mirroring Google Tasks.
-//!
-//! Ports the client half of `astrid-ios/Astrid App/Core/Sync/`. The decisions it makes live in
-//! [`crate::external`] with their reasons and their tests; this is the pass that uses them.
-//!
-//! ## Two providers, two shapes
-//!
-//! **GitHub is the server's job.** A cron on astrid-web pulls issues and pushes tasks, so a client
-//! only configures it: connect the account, link a list to a repository. A list linked from here
-//! syncs whether or not this app is running.
+//! Mirroring Google Tasks: the pass, and the auto-linking that decides what it runs over.
 //!
 //! **Google Tasks is the client's job.** The server holds the tokens and proxies the API, but the
 //! pulling and pushing are the client's — "clients poll on foreground/nudge", as the route says.
+//! So nearly all of [`super`] is this file, while [`super::github`] is a handful of names.
 //!
-//! ## Deletions go through a ledger, and the pass is what feeds it
-//!
-//! The server's link row cascades away with the task, so a deletion has to be captured *at delete
-//! time* — and deleting is local, offline and synchronous, with no server to ask. So every pass
-//! writes down the links it fetched ([`ledger::remember_links`]), a deletion reads them, and the
-//! next pass removes the twin and refuses to import the id again. See [`crate::external::ledger`].
-//!
-//! A remote deletion is acted on when Google says so explicitly (`deleted`), or when a twin is
-//! absent from a **complete** listing — never from a cursor page, a truncated listing or a failed
-//! one. Deleting local tasks because a page did not mention them is how a dropped request wipes
-//! somebody's list; see [`decisions::local_deletions`].
-//!
-//! ## Parity with Apple (AWTD2-56)
-//!
-//! The pass is `GoogleTasksSyncService.sync(link:)` and `syncMyTasks` from astrid-ios, in the same
-//! order and with the same rules: the two watermarks on each server link and last-write-wins,
-//! same-title adoption, no twin created without a complete listing, parents before children,
-//! completion drift repair, deletion by absence, the completed backfill, and a cursor committed
-//! only when every pulled item was dealt with.
+//! Ports `GoogleTasksSyncService.sync(link:)` and `syncMyTasks` from astrid-ios. The decisions the
+//! pass makes live in [`crate::external`] with their reasons and their tests; this is the pass that
+//! uses them. [`super`] has the module's overview, the ledger's part in it, and the parity notes.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Context, Result};
+use super::{ExternalLink, ExternalSyncService, Provider};
 use crate::api::endpoints;
 use crate::external::auto_link::{self, SyncMode};
 use crate::external::decisions::{self, PullOutcome};
 use crate::external::ledger;
 use crate::model::{date, Task};
+use crate::services::Result;
 
-/// Which system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Provider {
-    GoogleTasks,
-    GitHub,
-}
+/// The name the API knows it by.
+pub(super) const WIRE: &str = "GOOGLE_TASKS";
 
-impl Provider {
-    /// The name the API knows it by.
-    ///
-    /// GitHub is `GITHUB_ISSUES` over the wire, which reads oddly beside the enum but is the
-    /// server's own name for it — the one `/api/v1/integrations` validates against and the one the
-    /// Apple clients send. Anything else is a 400 on disconnect and a provider that never shows as
-    /// connected.
-    pub fn wire(self) -> &'static str {
-        match self {
-            Provider::GoogleTasks => "GOOGLE_TASKS",
-            Provider::GitHub => "GITHUB_ISSUES",
-        }
-    }
+/// The name this crate's own records key it by — the API's slug, and the ledger's own key.
+pub(super) const SLUG: &str = "google";
 
-    /// The name this crate's own records key it by — the ledger's `google`.
-    pub(crate) fn slug(self) -> &'static str {
-        match self {
-            Provider::GoogleTasks => "google",
-            Provider::GitHub => "github",
-        }
-    }
-}
+/// Where the task lists this account can link are listed.
+pub(super) const CONTAINERS_PATH: &str = endpoints::GOOGLE_TASKLISTS;
 
-/// One list mirrored to one container.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalLink {
-    pub id: String,
-    #[serde(default)]
-    pub astrid_list_id: String,
-    #[serde(default)]
-    pub remote_container_id: String,
-    /// What the other side calls it — the server fetches and stores this on every link precisely
-    /// so no client has to render an opaque Google tasklist id, or make a second call to find a
-    /// name it was already told (task 6db679c3).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_container_name: Option<String>,
-    /// Where the last pull got to. Held by the server, committed by the client after it has
-    /// applied a pass — so a client killed mid-pass re-pulls rather than skipping for ever.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-}
-
-/// A container on the other side: a Google task list, or a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Container {
-    pub id: String,
-    #[serde(default)]
-    pub name: String,
-}
+/// And the key they arrive under.
+pub(super) const CONTAINERS_KEY: &str = "tasklists";
 
 /// One remote item, as the proxy hands it over (`GET api/v1/sync/google/tasks`).
 #[derive(Debug, Clone, Deserialize)]
@@ -168,12 +97,12 @@ enum Placement {
     MyTasks(String),
 }
 
-/// The name the ledger files Google's deletions under.
-const PROVIDER_KEY: &str = "google";
+/// The name the ledger files Google's deletions under — [`SLUG`], read as a ledger key.
+const PROVIDER_KEY: &str = SLUG;
 
 /// And the one it files list-to-container links under, so deleting a list can be remembered the
 /// same way deleting a task is. Separate from the tasks' own store: the ids mean different things.
-const LIST_PROVIDER_KEY: &str = "google.lists";
+pub(super) const LIST_PROVIDER_KEY: &str = "google.lists";
 
 /// How this account wants its lists linked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,32 +160,13 @@ pub struct PassReport {
     pub backfilled: usize,
 }
 
-pub struct ExternalSyncService {
-    context: Context,
-}
-
 impl ExternalSyncService {
-    pub fn new(context: Context) -> Self {
-        ExternalSyncService { context }
-    }
-
-    /// Which providers this account has connected.
-    ///
-    /// Also the moment the server's tombstones arrive — the deletions made on the web and on other
-    /// devices — so this device stops re-importing what somebody deleted elsewhere.
-    pub async fn status(&self) -> Result<serde_json::Value> {
-        let request = self.context.client.get(endpoints::INTEGRATIONS);
-        let answer = self.context.client.send(request).await?;
-        self.merge_server_tombstones(&answer)?;
-        Ok(answer)
-    }
-
     /// Take the tombstones out of Google's integration metadata.
     ///
     /// They arrive as one comma-separated string, which is how the server stores its metadata, and
     /// they go into their own store — never this device's — so a large merge cannot evict a local
     /// deletion. See [`crate::external::ledger`].
-    fn merge_server_tombstones(&self, answer: &serde_json::Value) -> Result<()> {
+    pub(super) fn merge_server_tombstones(&self, answer: &serde_json::Value) -> Result<()> {
         let Some(integrations) = answer
             .get("integrations")
             .and_then(|value| value.as_array())
@@ -283,136 +193,9 @@ impl ExternalSyncService {
         Ok(())
     }
 
-    /// The URL to open in a browser to connect a provider.
-    ///
-    /// The same hand-off shape as signing in: the browser is where somebody's Google password
-    /// belongs, and an app that asked for it in its own window would be teaching a bad habit.
-    pub async fn authorize_url(&self, provider: Provider) -> Result<String> {
-        let request = self
-            .context
-            .client
-            .get(endpoints::integration_authorize(provider.slug()));
-        let answer = self.context.client.send(request).await?;
-        Ok(answer
-            .get("url")
-            .or_else(|| answer.get("authorizeUrl"))
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string())
-    }
-
-    pub async fn disconnect(&self, provider: Provider) -> Result<()> {
-        let request = self
-            .context
-            .client
-            .delete(endpoints::INTEGRATIONS)
-            .query("provider", Some(provider.wire().to_string()));
-        self.context.client.send(request).await?;
-        Ok(())
-    }
-
-    /// The containers on the other side, and — for Google — which is the default list.
-    pub async fn containers(&self, provider: Provider) -> Result<(Vec<Container>, Option<String>)> {
-        let path = match provider {
-            Provider::GoogleTasks => endpoints::GOOGLE_TASKLISTS.to_string(),
-            Provider::GitHub => endpoints::GITHUB_SYNC_REPOS.to_string(),
-        };
-        let answer = self
-            .context
-            .client
-            .send(self.context.client.get(path))
-            .await?;
-        let key = match provider {
-            Provider::GoogleTasks => "tasklists",
-            Provider::GitHub => "repos",
-        };
-        let containers = answer
-            .get(key)
-            .cloned()
-            .map(serde_json::from_value::<Vec<Container>>)
-            .transpose()
-            .unwrap_or_default()
-            .unwrap_or_default();
-        let default = answer
-            .get("defaultId")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
-        Ok((containers, default))
-    }
-
-    pub async fn links(&self, provider: Provider) -> Result<Vec<ExternalLink>> {
-        let answer = self
-            .context
-            .client
-            .send(
-                self.context
-                    .client
-                    .get(endpoints::sync_links(provider.slug())),
-            )
-            .await?;
-        let links: Vec<ExternalLink> = answer
-            .get("links")
-            .cloned()
-            .map(serde_json::from_value::<Vec<ExternalLink>>)
-            .transpose()
-            .unwrap_or_default()
-            .unwrap_or_default();
-        // Written down for the same reason the task links are: deleting a list is local and
-        // offline, and by then the link is gone.
-        if provider == Provider::GoogleTasks {
-            ledger::remember_links(
-                &self.context.store,
-                LIST_PROVIDER_KEY,
-                "google",
-                links.iter().map(|link| {
-                    (
-                        link.astrid_list_id.clone(),
-                        link.remote_container_id.clone(),
-                    )
-                }),
-            )?;
-        }
-        Ok(links)
-    }
-
-    /// Link a list to a container by hand.
-    ///
-    /// Which is a yes to that container, so it takes back an earlier "no" — on this device and on
-    /// the account — or the all-lists modes go on refusing a list somebody has since chosen.
-    /// (Apple `linkList`; AWTD2-56.)
-    pub async fn link(
-        &self,
-        provider: Provider,
-        list_id: &str,
-        container_id: &str,
-    ) -> Result<serde_json::Value> {
-        let answer = self.create_link(provider, list_id, container_id).await?;
-        if provider == Provider::GoogleTasks {
-            self.clear_exclusion(container_id).await;
-        }
-        Ok(answer)
-    }
-
-    async fn create_link(
-        &self,
-        provider: Provider,
-        list_id: &str,
-        container_id: &str,
-    ) -> Result<serde_json::Value> {
-        let request = self
-            .context
-            .client
-            .post(endpoints::sync_links(provider.slug()))
-            .value(json!({
-                "astridListId": list_id,
-                "remoteContainerId": container_id,
-            }));
-        Ok(self.context.client.send(request).await?)
-    }
-
     /// Best effort: the link is made either way, and a setting that could not be written is put
     /// right by the next manual link.
-    async fn clear_exclusion(&self, container_id: &str) {
+    pub(super) async fn clear_exclusion(&self, container_id: &str) {
         let _ = ledger::include(&self.context.store, PROVIDER_KEY, container_id);
         let Ok(settings) = self.auto_link_settings().await else {
             return;
@@ -434,16 +217,6 @@ impl ExternalSyncService {
                 "metadata": { "excludedTasklists": rest.join(",") },
             }));
         let _ = self.context.client.send(request).await;
-    }
-
-    pub async fn unlink(&self, provider: Provider, link_id: &str) -> Result<()> {
-        let request = self
-            .context
-            .client
-            .delete(endpoints::sync_links(provider.slug()))
-            .query("linkId", Some(link_id.to_string()));
-        self.context.client.send(request).await?;
-        Ok(())
     }
 
     /// One Google pass over one link. See [`Self::run_pass`] for the order and why.
@@ -2037,6 +1810,7 @@ mod tests {
     use crate::api::{ApiClient, StubTransport};
     use crate::model::date;
     use crate::platform::{FixedClock, MemorySecureStore};
+    use crate::services::Context;
     use crate::store::Store;
     use std::sync::Arc;
 
@@ -2818,17 +2592,6 @@ mod tests {
         assert!(ledger::tombstoned(&fixture.store, PROVIDER_KEY).is_empty());
     }
 
-    /// The names are the server's, not ours. `GITHUB_ISSUES` is what `PROVIDER_CAPABILITY` in
-    /// astrid-web's `/api/v1/integrations` route accepts and what the Apple clients send; anything
-    /// else is a 400 on disconnect and a provider that never reads as connected.
-    #[test]
-    fn a_provider_travels_under_the_name_the_api_knows() {
-        assert_eq!(Provider::GoogleTasks.wire(), "GOOGLE_TASKS");
-        assert_eq!(Provider::GitHub.wire(), "GITHUB_ISSUES");
-        assert_eq!(Provider::GoogleTasks.slug(), "google");
-        assert_eq!(Provider::GitHub.slug(), "github");
-    }
-
     /// The whole point of the ledger: a task deleted here takes its twin with it, on a later pass,
     /// with nothing but what was written down at delete time.
     #[tokio::test]
@@ -3035,6 +2798,7 @@ mod awtd2_56 {
     use crate::api::{ApiClient, HttpRequest, HttpResponse, HttpTransport, Method, TransportError};
     use crate::model::date;
     use crate::platform::{FixedClock, MemorySecureStore};
+    use crate::services::Context;
     use crate::store::Store;
     use async_trait::async_trait;
     use serde_json::Value;
