@@ -3,7 +3,7 @@
 //! Ports `TaskLeadingControl.swift`, `DueDateLabel.swift`, `TaskDisplayMode.swift` and the row
 //! assembly the Apple views do, from `astrid-ios/Astrid App/Core/Layout/` and `Models/`.
 //!
-//! Rule 9 of `docs/ASTRID.md` §0 says the shell decides nothing. A row is where that rule gets
+//! Rule 8 of README.md says the shell decides nothing. A row is where that rule gets
 //! tested, because a row is *mostly* presentation — and the parts of it that are not are precisely
 //! the parts that went wrong three times on Apple: whether the leading control is a checkbox or a
 //! face, whether tapping it completes the task or opens a picker, and which day a date is.
@@ -418,7 +418,8 @@ impl TaskRow {
         let mut leading =
             LeadingControl::for_task(assignee_id, context.current_user_id, context.display_mode);
         // The mark has to be able to read as checked, and the unassigned mark cannot
-        // (PRODUCT_CONTRACT.md §4). Only this pair: someone else's photo still reads as theirs.
+        // (`astrid-web/docs/PRODUCT_CONTRACT.md` §4). Only this pair: someone else's photo still
+        // reads as theirs.
         if task.completed && leading == LeadingControl::Unassigned {
             leading = LeadingControl::Checkbox;
         }

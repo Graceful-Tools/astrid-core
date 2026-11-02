@@ -1,6 +1,6 @@
 //! The control points. Everything the shell asks for goes through one of these.
 //!
-//! Ported from `astrid-ios/Astrid App/Core/Services/`. Rule 1 of `docs/ASTRID.md` §0 — all backend
+//! Ported from `astrid-ios/Astrid App/Core/Services/`. Rule 1 of README.md — all backend
 //! writes go through a service — is not about layering for its own sake. A service is where the
 //! three things that must happen together happen together:
 //!

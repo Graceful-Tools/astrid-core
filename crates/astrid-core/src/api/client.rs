@@ -2,7 +2,7 @@
 //!
 //! Ported from `astrid-ios/Astrid App/Core/Networking/AstridAPIClient.swift`. Services call it;
 //! the shell never sees it, and neither does a timer, a notification handler or a sync worker —
-//! rule 1 in `docs/ASTRID.md` §0, which exists because every write that skipped the service layer
+//! rule 1 in README.md, which exists because every write that skipped the service layer
 //! on another platform skipped something else with it.
 //!
 //! Four things are true of every request this builds, and they are true *because* they are built
@@ -35,7 +35,7 @@ use crate::platform::{SecureStore, SESSION_COOKIE_KEY};
 /// a convenience: M0's exit criterion is signing in against one.
 pub const DEFAULT_BASE_URL: &str = "https://astrid.cc";
 
-/// Every path this client may reach starts here. Rule 5 in `docs/ASTRID.md` §0 stated as a
+/// Every path this client may reach starts here. Rule 4 in README.md stated as a
 /// constant, and checked by [`ApiClient::request`], so a stray legacy path fails locally instead
 /// of in production.
 pub const API_PREFIX: &str = "/api/v1/";
@@ -269,9 +269,8 @@ impl ApiClient {
         let value = self.send(request).await?;
         let array = match key {
             // Most v1 collection routes answer `{ "tasks": [...], "total": n }`; a few answer a
-            // bare array. Asking for a key that is absent falls back to the whole body rather than
-            // reporting nothing, because both shapes have been seen on the same route.
-            Some(key) => value.get(key).cloned().unwrap_or(value),
+            // bare array. [`endpoints::envelope::unwrap`] is the one place that reconciles them.
+            Some(key) => endpoints::envelope::unwrap(value, key),
             None => value,
         };
         Ok(model::lenient(array))
@@ -503,7 +502,7 @@ mod tests {
         );
     }
 
-    /// Rule 5 of `docs/ASTRID.md` §0, enforced rather than remembered.
+    /// Rule 4 of README.md, enforced rather than remembered.
     #[tokio::test]
     async fn a_path_outside_v1_is_refused() {
         let (client, _) = client_with(StubTransport::new());

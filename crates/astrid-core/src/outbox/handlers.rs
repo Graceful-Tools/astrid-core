@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::api::endpoints::envelope::unwrap as unwrap_envelope;
 use crate::api::{endpoints, ApiClient, ApiError};
 use crate::model::{ChatMessage, Comment, Task, TaskList};
 use crate::store::Store;
@@ -127,12 +128,6 @@ fn id<'a>(entry: &'a Entry, field: &str) -> Result<&'a str, Outcome> {
             // Not retryable: the payload is what it is, and it will still be wrong in five minutes.
             Outcome::Dead(format!("the payload has no {field}"))
         })
-}
-
-/// Pull the object out of an envelope (`{ "task": … }`), or take the body as-is when the route
-/// answered bare. Both shapes exist across v1, and on the same route across deployments.
-fn unwrap_envelope(value: serde_json::Value, key: &str) -> serde_json::Value {
-    value.get(key).cloned().unwrap_or(value)
 }
 
 async fn create_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {

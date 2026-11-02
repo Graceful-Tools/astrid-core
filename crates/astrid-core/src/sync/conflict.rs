@@ -17,7 +17,7 @@
 //! them back, so the two agree. It fires when a write was queued offline and something else
 //! changed the same task in the meantime — which is exactly when getting it wrong is most visible.
 
-use chrono::{DateTime, Utc};
+use super::is_newer;
 
 use crate::model::Task;
 
@@ -65,14 +65,6 @@ pub fn resolve(local: &Task, server: &Task) -> Task {
     resolved
 }
 
-fn is_newer(local: Option<DateTime<Utc>>, server: Option<DateTime<Utc>>) -> bool {
-    match (local, server) {
-        (Some(local), Some(server)) => local > server,
-        (Some(_), None) => true,
-        _ => false,
-    }
-}
-
 /// Merge two versions of a comment thread.
 ///
 /// Comments are additive: two people commenting at once is not a conflict, it is a conversation.
@@ -116,6 +108,7 @@ pub fn merge_comments(
 mod tests {
     use super::*;
     use crate::model::{date, Comment, Priority};
+    use chrono::{DateTime, Utc};
 
     fn at(instant: &str) -> DateTime<Utc> {
         date::parse(instant).expect("an instant")

@@ -6,7 +6,7 @@
 //! typed and nothing else, so a list set up as *High, assigned to me, due today* behaved
 //! differently depending on which client added the task.
 //!
-//! The rule lives here rather than in the shell because of rule 4 in `docs/ASTRID.md`: the
+//! The rule lives here rather than in the shell because of rule 8 in README.md: the
 //! shell must not decide what a new task looks like. It is applied at the door, to whatever the
 //! caller did NOT say — a priority typed into quick-add wins over the list's default, exactly as
 //! the web's `taskData.priority ?? targetList.defaultPriority` reads.

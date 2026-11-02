@@ -1167,7 +1167,7 @@ pub(super) fn changes_from_json(value: &serde_json::Value) -> Result<TaskChanges
             "timerDuration" => changes.timer_duration = Some(value.as_i64()),
             "lastTimerValue" => changes.last_timer_value = Some(value.as_str().map(str::to_string)),
             // `completed` is deliberately absent. Completing a task through an update skips the
-            // repeat rollover, which is rule 2 of `docs/ASTRID.md` §0 — so the shell cannot ask
+            // repeat rollover, which is rule 2 of README.md — so the shell cannot ask
             // for it here even by accident.
             "completed" | "completedAt" => {
                 return Err(Failure::bad_request(

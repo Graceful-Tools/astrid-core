@@ -24,8 +24,8 @@ pub const PROJECTS_FROM_LIST: &str = "/api/v1/projects/from-list";
 /// A board's columns: add (POST), rename (PATCH), reorder (PUT), remove (DELETE).
 ///
 /// **The server does not have this route yet.** The web manages statuses at `/api/statuses`,
-/// which is not under `/api/v1` and which this client refuses to speak (docs/ASTRID.md §0 rule
-/// 6, enforced by the request guard). The versioned route — this path, the same four verbs, the
+/// which is not under `/api/v1` and which this client refuses to speak (README.md rule 4,
+/// enforced by the request guard). The versioned route — this path, the same four verbs, the
 /// same bodies minus the project id that is now in the path — is filed on the web board as task
 /// 58994c6c, and the Windows task that needs it (e5214fba) waits on it. Nothing here changes
 /// when it lands.
@@ -182,6 +182,22 @@ pub const PUBLIC_LISTS: &str = "/api/v1/public/lists";
 
 /// The envelope key each collection route answers under.
 pub mod envelope {
+    /// Pull the object or array out of an envelope (`{ "task": … }`), or take the body as-is when
+    /// the route answered bare.
+    ///
+    /// Both shapes exist across v1, and have been seen on the SAME route across deployments — so
+    /// asking for a key that is absent falls back to the whole body rather than reporting nothing.
+    ///
+    /// One function for every caller. Until 2026-11-02 there were three: `sync`, `outbox::handlers`
+    /// and an inline copy in `ApiClient::send_collection`, all with this behaviour and none of them
+    /// able to carry a fix for the other two.
+    pub fn unwrap(body: serde_json::Value, key: &str) -> serde_json::Value {
+        match body.get(key) {
+            Some(inner) => inner.clone(),
+            None => body,
+        }
+    }
+
     pub const TASK: &str = "task";
     pub const TASKS: &str = "tasks";
     pub const LIST: &str = "list";

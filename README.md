@@ -31,13 +31,18 @@ astrid-android   app/ (Kotlin, Compose)  ──  UniFFI (astrid-android/core)  �
                                                           └─ generates contracts/fixtures ──▶ here
 ```
 
-The core has no platform dependency. A shell hands it three things through traits — a secure
-store for the session, a clock, and reachability — and a cache directory, and drives it through
+The core has no platform dependency. A shell hands it two things through traits — a secure
+store for the session and a clock — and a cache directory, and drives it through
 one door: JSON commands to `astrid_core::app::App::run_json`, answered with JSON. The shell renders
 and dispatches; **it decides nothing**. That split was built once for Windows (which cannot
 compile Swift) and is what lets the Apple apps retire their second copy of every rule and let Android start without one.
 
 ## The rules
+
+**These numbers are cited from doc comments throughout `crates/`, so they are stable: add at the
+end, never renumber.** Until 2026-11-02 those comments cited `docs/ASTRID.md` §0 — astrid-windows's
+numbering, from before the core was its own repository — and had already drifted apart from each
+other: two sites called the `/api/v1`-only rule rule 5 and a third called it rule 6.
 
 1. **Backend writes go through a service** — never the API client from a shell or a worker.
 2. **Complete a task ONLY via `TaskService::complete`** (or `complete_as`) — `update_task(completed: true)`
@@ -56,6 +61,11 @@ compile Swift) and is what lets the Apple apps retire their second copy of every
 7. **Port from Swift test-first.** The Swift tests are the specification: write the Rust tests
    red, port green, refactor. Do not improve behaviour while porting — a divergence found on the
    way goes in [docs/CONTRACTS.md](./docs/CONTRACTS.md), not into the code.
+8. **The shell decides nothing.** It renders what an answer names and dispatches commands back;
+   every question with an answer — may this person do that, is this control a checkbox or a face,
+   what does a new task inherit — is asked of the core. A `role == "admin"` in XAML or in Swift is
+   the shape of bug this rule exists to make impossible. This is the "How it fits" split above,
+   stated as a rule because doc comments need a number to cite.
 
 ## Quick start
 
