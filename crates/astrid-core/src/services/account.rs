@@ -857,10 +857,17 @@ impl AccountService {
 
     /// Forget everything. Sign-out: the cache, the journal, the credential.
     pub async fn sign_out(&self) -> Result<()> {
-        // The credentials first: anything that starts after this finds nobody signed in.
-        let store = self.context.client.secure_store();
-        let _ = store.delete(crate::platform::SESSION_COOKIE_KEY).await;
-        let _ = store.delete(CURRENT_USER_ID_KEY).await;
+        // The credentials first: anything that starts after this finds nobody signed in. The
+        // cookie goes through the client, which drops its cached copy with it — the copy every
+        // request actually reads, and so the one that would otherwise keep sending the previous
+        // person's session until the process restarted (task ec54c0a5).
+        let _ = self.context.client.clear_session_cookie().await;
+        let _ = self
+            .context
+            .client
+            .secure_store()
+            .delete(CURRENT_USER_ID_KEY)
+            .await;
         self.context.store.clear()?;
         Ok(())
     }
@@ -879,6 +886,7 @@ mod tests {
         service: AccountService,
         store: Arc<Store>,
         secure: Arc<MemorySecureStore>,
+        client: Arc<ApiClient>,
     }
 
     fn fixture(transport: StubTransport) -> Fixture {
@@ -887,12 +895,13 @@ mod tests {
             SESSION_COOKIE_KEY,
             "next-auth.session-token=abc",
         ));
+        let client = Arc::new(ApiClient::new(
+            "https://astrid.cc",
+            Arc::new(transport),
+            secure.clone(),
+        ));
         let context = Context::new(
-            Arc::new(ApiClient::new(
-                "https://astrid.cc",
-                Arc::new(transport),
-                secure.clone(),
-            )),
+            client.clone(),
             store.clone(),
             Arc::new(FixedClock::parsed("2026-09-07T12:00:00Z")),
         );
@@ -900,6 +909,7 @@ mod tests {
             service: context.account(),
             store,
             secure,
+            client,
         }
     }
 
@@ -1228,6 +1238,46 @@ mod tests {
         assert!(fixture.store.tasks().expect("reads").is_empty());
         assert!(fixture.service.current_user().expect("reads").is_none());
         assert_eq!(fixture.secure.get(SESSION_COOKIE_KEY).await, None);
+    }
+
+    /// Task ec54c0a5. The session cookie is now held in memory by the client, so sign-out has one
+    /// more thing to forget — and forgetting the durable copy while keeping the cached one would
+    /// leave the app sending the previous person's credential until the process restarted. The
+    /// in-memory copy is the one that matters here, because it is the one every request reads.
+    #[tokio::test]
+    async fn signing_out_clears_the_cached_session_cookie_as_well_as_the_stored_one() {
+        let fixture = fixture(StubTransport::new().fallback(Ok(crate::api::HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: b"[]".to_vec(),
+        })));
+
+        // A request before sign-out is what puts the cookie in the cache in the first place.
+        fixture
+            .client
+            .send(fixture.client.get(endpoints::TASKS))
+            .await
+            .expect("succeeds");
+        assert_eq!(
+            fixture.client.session_cookie().await.as_deref(),
+            Some("next-auth.session-token=abc")
+        );
+
+        fixture.service.sign_out().await.expect("signs out");
+
+        assert_eq!(fixture.client.session_cookie().await, None);
+        let built = fixture
+            .client
+            .build(fixture.client.get(endpoints::TASKS))
+            .await
+            .expect("builds");
+        assert!(
+            !built
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("cookie")),
+            "a request built after sign-out must carry no credential"
+        );
     }
 
     /// Sync state is per-account. A tombstone or a queued remote deletion left behind would have

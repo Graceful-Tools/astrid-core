@@ -51,6 +51,11 @@ pub trait SecureStore: Send + Sync {
 #[derive(Debug, Default)]
 pub struct MemorySecureStore {
     entries: Mutex<HashMap<String, String>>,
+    /// How many times each key has been read. The observation task ec54c0a5 needed: a cache in
+    /// front of a credential vault is only correct if something can count the calls that reach
+    /// the vault, and "one `get` per sign-in rather than one per HTTP request" is a claim no
+    /// assertion about *behaviour* can make.
+    reads: Mutex<HashMap<String, usize>>,
 }
 
 impl MemorySecureStore {
@@ -68,11 +73,30 @@ impl MemorySecureStore {
             .insert(key.to_string(), value.to_string());
         store
     }
+
+    /// How many times `key` has been read since this store was made.
+    ///
+    /// Counts the attempt, not the hit: a read that finds nothing still reached the store, and on
+    /// a real device that is still a callback into the Keychain or the Credential Locker.
+    pub fn reads_of(&self, key: &str) -> usize {
+        self.reads
+            .lock()
+            .expect("store lock")
+            .get(key)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 #[async_trait]
 impl SecureStore for MemorySecureStore {
     async fn get(&self, key: &str) -> Option<String> {
+        *self
+            .reads
+            .lock()
+            .expect("store lock")
+            .entry(key.to_string())
+            .or_insert(0) += 1;
         self.entries.lock().expect("store lock").get(key).cloned()
     }
 

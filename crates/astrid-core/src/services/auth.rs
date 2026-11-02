@@ -30,7 +30,6 @@ use std::sync::Mutex;
 use super::{Context, Result};
 use crate::auth::desktop_handoff::{self, ExchangeRequest, ExchangeResponse, HandoffFlow};
 use crate::model::User;
-use crate::platform::SESSION_COOKIE_KEY;
 
 /// Where the exchange happens. Outside `/api/v1` is not allowed by the client's path rule, so this
 /// one is on the versioned prefix — see `astrid-web`'s route of the same name.
@@ -107,8 +106,7 @@ impl AuthService {
     pub async fn is_signed_in(&self) -> bool {
         self.context
             .client
-            .secure_store()
-            .get(SESSION_COOKIE_KEY)
+            .session_cookie()
             .await
             .is_some_and(|cookie| !cookie.trim().is_empty())
     }
@@ -177,10 +175,11 @@ impl AuthService {
 
         // The cookie goes in first. Everything after this point is an authenticated request, and
         // the very next one — fetching the user — would 401 if the credential were stored after.
+        // Through the client rather than straight into the store, so the cached copy every request
+        // reads is the one just issued (task ec54c0a5).
         self.context
             .client
-            .secure_store()
-            .set(SESSION_COOKIE_KEY, &exchange.cookie_header())
+            .set_session_cookie(&exchange.cookie_header())
             .await
             .map_err(|error| crate::api::ApiError::Refused(error.to_string()))?;
 
@@ -200,7 +199,7 @@ impl AuthService {
 mod tests {
     use super::*;
     use crate::api::{ApiClient, StubTransport};
-    use crate::platform::{FixedClock, MemorySecureStore, SecureStore};
+    use crate::platform::{FixedClock, MemorySecureStore, SecureStore, SESSION_COOKIE_KEY};
     use crate::store::Store;
     use std::sync::Arc;
 
@@ -382,6 +381,38 @@ mod tests {
         );
         assert!(fixture.auth.is_signed_in().await);
         assert!(!fixture.auth.is_waiting(), "the flow is spent");
+    }
+
+    /// Task ec54c0a5. Sign-in hands the cookie to the client, which caches it as it stores it, so
+    /// everything that follows — the `users/me` call inside `complete`, every request after it,
+    /// and `is_signed_in` itself — is answered from memory.
+    ///
+    /// `is_signed_in` is asked on every launch and on every window activation, so it is one of the
+    /// callers that made the vault read look harmless when it was measured once.
+    #[tokio::test]
+    async fn ec54c0a5_signing_in_primes_the_cache_so_nothing_after_it_reads_the_vault() {
+        let fixture = fixture(StubTransport::new().push_json(
+            "/api/v1/auth/desktop/exchange",
+            200,
+            exchange_body(),
+        ));
+        let url = fixture.auth.begin().expect("begins");
+        let state = state_from(&url);
+        fixture
+            .auth
+            .complete(&format!("astrid://auth/callback?code=abc&state={state}"))
+            .await
+            .expect("completes");
+
+        let after_sign_in = fixture.secure.reads_of(SESSION_COOKIE_KEY);
+        for _ in 0..50 {
+            assert!(fixture.auth.is_signed_in().await);
+        }
+        assert_eq!(
+            fixture.secure.reads_of(SESSION_COOKIE_KEY),
+            after_sign_in,
+            "a signed-in app must not call into the credential vault to be told so"
+        );
     }
 
     /// Any web page can open `astrid://auth/callback?code=…`. The state check is what makes that

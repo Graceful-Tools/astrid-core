@@ -11,7 +11,8 @@
 //! - the path is checked for traversal ([`super::path`]) before a URL is ever composed;
 //! - the platform header is set ([`super::platform`]), so the request is counted as this app
 //!   rather than as UNKNOWN;
-//! - the session `Cookie` header is attached from secure storage;
+//! - the session `Cookie` header is attached, from secure storage the first time and from this
+//!   client's own copy after that ([`ApiClient::session_cookie`]);
 //! - a 401 comes back as [`ApiError::Unauthorized`] rather than as an anonymous 4xx, because that
 //!   one status is the difference between "retry later" and "sign the user out".
 //!
@@ -172,10 +173,40 @@ impl Request {
     }
 }
 
+/// What this client knows about the session cookie without asking the credential vault.
+///
+/// `Unknown` and `Known(None)` are different answers, and keeping them apart is half the point:
+/// collapsing them into a plain `Option<String>` would leave a *signed-out* app calling into the
+/// Keychain, the Keystore or the Credential Locker on every single request, which is the same cost
+/// the cache exists to remove.
+#[derive(Debug, Clone, Default)]
+enum CachedCookie {
+    /// Nobody has asked the store yet, or something invalidated what we had.
+    #[default]
+    Unknown,
+    /// The store was asked, and this is what it said.
+    Known(Option<String>),
+}
+
 pub struct ApiClient {
     base_url: String,
     transport: Arc<dyn HttpTransport>,
     secure_store: Arc<dyn SecureStore>,
+    /// The session cookie, held in memory in front of [`ApiClient::secure_store`] (task ec54c0a5).
+    ///
+    /// `SecureStore::get` is a trip out of Rust and into the platform's credential vault — a
+    /// UniFFI foreign callback into the Keychain on Apple, Keystore over JNA on Android, the
+    /// Credential Locker here. [`ApiClient::build`] needs the cookie on every request, so paying
+    /// for it per request means a sync walking twenty pages crosses that boundary twenty times for
+    /// a value that changes twice in a session: once at sign-in and once at sign-out.
+    ///
+    /// The store stays the durable source of truth. This is a read-through cache in front of it,
+    /// and it is correct only because this client is the one gateway to the credential: sign-in
+    /// goes through [`ApiClient::set_session_cookie`], sign-out through
+    /// [`ApiClient::clear_session_cookie`], and a 401 through
+    /// [`ApiClient::forget_session_cookie`]. A writer this client cannot see would make it stale,
+    /// which is why there is no longer a way to reach the key except through here.
+    session_cookie: std::sync::RwLock<CachedCookie>,
     /// What this build states in `x-platform` — see [`platform_header`].
     platform: platform_header::Platform,
 }
@@ -190,6 +221,7 @@ impl ApiClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             transport,
             secure_store,
+            session_cookie: std::sync::RwLock::new(CachedCookie::Unknown),
             platform: platform_header::Platform::default(),
         }
     }
@@ -213,8 +245,83 @@ impl ApiClient {
     ///
     /// Exposed so sign-in and sign-out write the session to the same place every request reads it
     /// from. Two references to one store, rather than two stores that agree until they do not.
+    ///
+    /// **The session cookie is not read or written through here** — it goes through
+    /// [`ApiClient::session_cookie`] and friends, which keep the in-memory copy honest. This is
+    /// for the other things that sit beside the credential, such as
+    /// [`crate::platform::CURRENT_USER_ID_KEY`].
     pub fn secure_store(&self) -> &Arc<dyn SecureStore> {
         &self.secure_store
+    }
+
+    /// The session cookie every request carries, from memory once it is known.
+    ///
+    /// The first caller pays for the credential-vault read and every caller after it does not,
+    /// until something invalidates the cache. See [`ApiClient::session_cookie`]'s field for why
+    /// that matters (task ec54c0a5).
+    pub async fn session_cookie(&self) -> Option<String> {
+        if let CachedCookie::Known(cookie) = self.cached_cookie() {
+            return cookie;
+        }
+        // Deliberately not holding the lock across this await. Two requests racing the very first
+        // read both ask the store and both write the same answer, which costs one extra vault call
+        // once; holding a lock across a platform callback would serialise every request in the app
+        // behind it, and on Apple that callback can show UI.
+        let cookie = self.secure_store.get(SESSION_COOKIE_KEY).await;
+        self.remember_cookie(CachedCookie::Known(cookie.clone()));
+        cookie
+    }
+
+    /// Store a new session and start serving it. Sign-in's half.
+    ///
+    /// Caches what it was given rather than reading back what it wrote: the value is already in
+    /// hand, so a confirming read would be a vault call that can only agree.
+    pub async fn set_session_cookie(
+        &self,
+        cookie: &str,
+    ) -> Result<(), crate::platform::PlatformError> {
+        self.secure_store.set(SESSION_COOKIE_KEY, cookie).await?;
+        self.remember_cookie(CachedCookie::Known(Some(cookie.to_string())));
+        Ok(())
+    }
+
+    /// Delete the session, from the store and from memory. Sign-out's half.
+    ///
+    /// On a failed delete the cache drops to `Unknown` rather than to "no session": the store may
+    /// still hold the credential, and the next request should find that out from the store instead
+    /// of this client deciding it.
+    pub async fn clear_session_cookie(&self) -> Result<(), crate::platform::PlatformError> {
+        match self.secure_store.delete(SESSION_COOKIE_KEY).await {
+            Ok(()) => {
+                self.remember_cookie(CachedCookie::Known(None));
+                Ok(())
+            }
+            Err(error) => {
+                self.remember_cookie(CachedCookie::Unknown);
+                Err(error)
+            }
+        }
+    }
+
+    /// Drop the cached copy without touching the store — what a 401 does.
+    ///
+    /// The server has refused the credential this client is holding. That does not mean the stored
+    /// one is bad: a sign-in on another thread may already have replaced it, and the Outbox parks
+    /// an unauthorised entry precisely so it can be retried once there is a new session. So the
+    /// next request asks the store again rather than assuming either answer.
+    pub fn forget_session_cookie(&self) {
+        self.remember_cookie(CachedCookie::Unknown);
+    }
+
+    fn cached_cookie(&self) -> CachedCookie {
+        self.session_cookie
+            .read()
+            .expect("session cookie lock")
+            .clone()
+    }
+
+    fn remember_cookie(&self, cached: CachedCookie) {
+        *self.session_cookie.write().expect("session cookie lock") = cached;
     }
 
     pub fn get(&self, path: impl Into<String>) -> Request {
@@ -250,9 +357,19 @@ impl ApiClient {
     }
 
     /// Send, and decode into `T`.
+    ///
+    /// Straight from the response bytes rather than through a `serde_json::Value` first (task
+    /// ec54c0a5): building the whole tree only to walk it again allocates every string and every
+    /// map in the body twice, which on a page of a hundred tasks is the bulk of what the call
+    /// does. The empty-body case still goes through `Value::Null`, because a 204 on a DELETE has
+    /// to decode rather than fail — see [`ApiClient::send`].
     pub async fn send_as<T: DeserializeOwned>(&self, request: Request) -> Result<T, ApiError> {
-        let value = self.send(request).await?;
-        serde_json::from_value(value).map_err(|error| ApiError::Decode(error.to_string()))
+        let response = self.send_raw(request).await?;
+        if response.body.is_empty() {
+            return serde_json::from_value(serde_json::Value::Null)
+                .map_err(|error| ApiError::Decode(error.to_string()));
+        }
+        serde_json::from_slice(&response.body).map_err(|error| ApiError::Decode(error.to_string()))
     }
 
     /// Send, and decode a collection row by row.
@@ -283,6 +400,7 @@ impl ApiClient {
         let response = self.transport.send(http).await?;
 
         if response.status == 401 {
+            self.forget_session_cookie();
             return Err(ApiError::Unauthorized);
         }
         if !response.is_success() {
@@ -318,6 +436,7 @@ impl ApiClient {
         let response = self.transport.send(http).await?;
 
         if response.status == 401 {
+            self.forget_session_cookie();
             return Err(ApiError::Unauthorized);
         }
         if response.status == 304 {
@@ -353,7 +472,10 @@ impl ApiClient {
         match self.transport.open_stream(http).await {
             Ok(frames) => Ok(frames),
             // A refused stream carries a status, and 401 is the one that means "stop", not "wait".
-            Err(TransportError::Refused(401)) => Err(ApiError::Unauthorized),
+            Err(TransportError::Refused(401)) => {
+                self.forget_session_cookie();
+                Err(ApiError::Unauthorized)
+            }
             Err(TransportError::Refused(status)) => Err(ApiError::Http {
                 status,
                 message: "the live stream was refused".to_string(),
@@ -404,7 +526,7 @@ impl ApiClient {
                 self.platform.wire().to_string(),
             ),
         ];
-        if let Some(cookie) = self.secure_store.get(SESSION_COOKIE_KEY).await {
+        if let Some(cookie) = self.session_cookie().await {
             headers.push(("cookie".to_string(), cookie));
         }
         headers.extend(request.headers);
@@ -650,6 +772,183 @@ mod tests {
         let url = &transport.requests()[0].url;
         assert!(url.contains("q=ada%20lovelace"), "{url}");
         assert!(!url.contains("listId"), "{url}");
+    }
+
+    /// Task ec54c0a5. The session cookie is read from the credential vault once and then served
+    /// from memory.
+    ///
+    /// On Apple that `get` is a UniFFI foreign callback into the Keychain and on Android it is
+    /// Keystore over JNA, so "once per request" is a per-request trip out of Rust and into the
+    /// platform — paid by every sync page and every Outbox drain, which are exactly the places
+    /// that send requests in bulk.
+    #[tokio::test]
+    async fn the_session_cookie_is_read_from_the_store_once_across_many_requests() {
+        let store = Arc::new(MemorySecureStore::with(
+            SESSION_COOKIE_KEY,
+            "next-auth.session-token=abc",
+        ));
+        let transport = Arc::new(StubTransport::new().fallback(Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: b"[]".to_vec(),
+        })));
+        let client = ApiClient::new("https://astrid.cc", transport.clone(), store.clone());
+
+        for _ in 0..100 {
+            client
+                .send(client.get("/api/v1/tasks"))
+                .await
+                .expect("succeeds");
+        }
+
+        assert_eq!(transport.requests().len(), 100);
+        assert_eq!(
+            store.reads_of(SESSION_COOKIE_KEY),
+            1,
+            "100 requests must cost one credential-vault read, not 100"
+        );
+        for sent in transport.requests() {
+            assert_eq!(sent.header("cookie"), Some("next-auth.session-token=abc"));
+        }
+    }
+
+    /// Signed out, the cache has to hold "there is no session" as an answer in its own right —
+    /// otherwise a signed-out app calls into the vault on every request, which is the same bug
+    /// wearing the other hat.
+    #[tokio::test]
+    async fn with_no_session_the_store_is_still_only_asked_once() {
+        let store = Arc::new(MemorySecureStore::new());
+        let transport = Arc::new(StubTransport::new().fallback(Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: b"[]".to_vec(),
+        })));
+        let client = ApiClient::new("https://astrid.cc", transport.clone(), store.clone());
+
+        for _ in 0..10 {
+            client
+                .send(client.get("/api/v1/tasks"))
+                .await
+                .expect("succeeds");
+        }
+
+        assert_eq!(store.reads_of(SESSION_COOKIE_KEY), 1);
+        assert_eq!(transport.requests()[9].header("cookie"), None);
+    }
+
+    /// Task ec54c0a5. A 401 is the server saying the credential this client is holding is not
+    /// good, so the cached copy is dropped — but *not* the stored one, which may already have been
+    /// replaced by a sign-in. The next request asks the store rather than assuming either answer.
+    #[tokio::test]
+    async fn a_401_drops_the_cached_session_and_the_next_request_reads_the_store_again() {
+        let store = Arc::new(MemorySecureStore::with(SESSION_COOKIE_KEY, "stale=1"));
+        let transport = Arc::new(
+            StubTransport::new()
+                .push_json("/api/v1/tasks", 200, serde_json::json!([]))
+                .push_json("/api/v1/tasks", 401, serde_json::json!({}))
+                .push_json("/api/v1/tasks", 200, serde_json::json!([])),
+        );
+        let client = ApiClient::new("https://astrid.cc", transport.clone(), store.clone());
+
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+        assert_eq!(store.reads_of(SESSION_COOKIE_KEY), 1);
+
+        assert!(matches!(
+            client.send(client.get("/api/v1/tasks")).await,
+            Err(ApiError::Unauthorized)
+        ));
+
+        // The session was renewed out from under the client while it was being refused.
+        store
+            .set(SESSION_COOKIE_KEY, "fresh=2")
+            .await
+            .expect("stores");
+
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+        assert_eq!(
+            store.reads_of(SESSION_COOKIE_KEY),
+            2,
+            "the 401 must have invalidated the cache"
+        );
+        assert_eq!(transport.requests()[2].header("cookie"), Some("fresh=2"));
+    }
+
+    /// The write half: sign-in hands the cookie to the client, which stores it durably *and*
+    /// starts serving it — so the first authenticated request after signing in needs no vault
+    /// read at all.
+    #[tokio::test]
+    async fn setting_the_session_stores_it_and_primes_the_cache() {
+        let store = Arc::new(MemorySecureStore::new());
+        let transport = Arc::new(StubTransport::new().fallback(Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: b"[]".to_vec(),
+        })));
+        let client = ApiClient::new("https://astrid.cc", transport.clone(), store.clone());
+
+        client
+            .set_session_cookie("next-auth.session-token=new")
+            .await
+            .expect("stores");
+
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+
+        assert_eq!(
+            transport.requests()[0].header("cookie"),
+            Some("next-auth.session-token=new")
+        );
+        assert_eq!(
+            store.reads_of(SESSION_COOKIE_KEY),
+            0,
+            "sign-in already knows the cookie; reading it back is a trip it has no reason to make"
+        );
+        // Durable, not only cached: a restart has to find it.
+        assert_eq!(
+            store.get(SESSION_COOKIE_KEY).await.as_deref(),
+            Some("next-auth.session-token=new")
+        );
+    }
+
+    /// And the clear half, which sign-out uses: gone from the store and gone from memory, in one
+    /// call, so the two can never disagree.
+    #[tokio::test]
+    async fn clearing_the_session_empties_the_store_and_the_cache() {
+        let store = Arc::new(MemorySecureStore::with(SESSION_COOKIE_KEY, "signed-in=1"));
+        let transport = Arc::new(StubTransport::new().fallback(Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: b"[]".to_vec(),
+        })));
+        let client = ApiClient::new("https://astrid.cc", transport.clone(), store.clone());
+
+        // Prime the cache the way a signed-in session would.
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+        assert_eq!(
+            transport.requests()[0].header("cookie"),
+            Some("signed-in=1")
+        );
+
+        client.clear_session_cookie().await.expect("clears");
+
+        assert_eq!(client.session_cookie().await, None);
+        assert_eq!(store.get(SESSION_COOKIE_KEY).await, None);
+        client
+            .send(client.get("/api/v1/tasks"))
+            .await
+            .expect("succeeds");
+        assert_eq!(transport.requests()[1].header("cookie"), None);
     }
 
     /// Offline is not a refusal: it comes back as a transport error the Outbox will retry.

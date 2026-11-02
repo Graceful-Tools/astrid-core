@@ -191,9 +191,13 @@ pub mod envelope {
     /// One function for every caller. Until 2026-11-02 there were three: `sync`, `outbox::handlers`
     /// and an inline copy in `ApiClient::send_collection`, all with this behaviour and none of them
     /// able to carry a fix for the other two.
-    pub fn unwrap(body: serde_json::Value, key: &str) -> serde_json::Value {
-        match body.get(key) {
-            Some(inner) => inner.clone(),
+    /// Taken by move rather than cloned (task ec54c0a5): `body` is owned already, so cloning the
+    /// inner value duplicated every row of every listing — a hundred tasks, deep-copied, on each
+    /// page of each sync pass. `Value::take` leaves `Null` behind in a body that is dropped on the
+    /// next line.
+    pub fn unwrap(mut body: serde_json::Value, key: &str) -> serde_json::Value {
+        match body.get_mut(key) {
+            Some(inner) => inner.take(),
             None => body,
         }
     }
