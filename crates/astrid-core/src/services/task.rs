@@ -4,7 +4,7 @@
 //!
 //! ## Completion is the rule this file exists to protect
 //!
-//! Rule 2 of `docs/ASTRID.md` §0: a task is completed **only** through [`TaskService::complete`].
+//! Rule 2 of README.md: a task is completed **only** through [`TaskService::complete`].
 //! An `update(completed: true)` writes the flag and skips the rollover, so a daily task completed
 //! that way is simply done forever — and nothing about the code that did it looks wrong. That is
 //! why the two paths are separate functions here and why the rollover is not an option on the
@@ -437,7 +437,7 @@ impl TaskService {
     /// `on_screen` is the task as the user is looking at it, when a view let them edit fields
     /// before completing. The due date, all-day flag, repeat settings and repeat-from are taken
     /// from it, because those are what the next occurrence is computed from and the cache may be a
-    /// sync behind (rule 3 of `docs/ASTRID.md` §0).
+    /// sync behind (rule 3 of README.md).
     ///
     /// A repeating task that is completed does not become completed: it rolls forward to its next
     /// occurrence and stays open. A series that has reached its end condition stays completed with

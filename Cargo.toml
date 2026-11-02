@@ -18,7 +18,15 @@ members = ["crates/astrid-rules", "crates/astrid-rules-wasm", "crates/astrid-cor
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# The minimum Rust this workspace is CHECKED against, and it must equal `rust-toolchain.toml`'s
+# channel — the `msrv` job in CI asserts both halves: that the two agree, and that the workspace
+# builds under this version. It read "1.82" until 2026-11-02, against a floating `stable`
+# toolchain and no job, which made it a claim rather than a promise.
+#
+# Lowering it is a deliberate, measured act: install that older toolchain, run
+# `cargo +<version> check --workspace --all-features --all-targets` green, then lower BOTH files
+# together. The lockfile's transitive dependencies are what decides how far down it can go.
+rust-version = "1.98.1"
 license = "MIT"
 repository = "https://github.com/Graceful-Tools/astrid-core"
 

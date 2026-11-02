@@ -38,7 +38,8 @@ pub enum PlatformError {
 /// build it is [`MemorySecureStore`].
 ///
 /// Async because the Windows implementation may be called from a background thread and
-/// `PasswordVault` is not free to touch — see the M0 spike in `docs/M0_NOTES.md`.
+/// `PasswordVault` is not free to touch — the Windows M0 spike measured it, and its notes live in
+/// that repo. Cheap enough once, not cheap enough per request.
 #[async_trait]
 pub trait SecureStore: Send + Sync {
     async fn get(&self, key: &str) -> Option<String>;
@@ -215,31 +216,13 @@ impl Clock for FixedClock {
     }
 }
 
-/// Whether the machine believes it can reach the network.
-///
-/// Advisory only, and treated as such everywhere: the Outbox attempts a send when this says
-/// online and *also* recovers when it is wrong, because a captive portal, a VPN coming up and a
-/// sleeping laptop all report "connected" while nothing gets through.
-pub trait Reachability: Send + Sync {
-    fn is_online(&self) -> bool;
-}
-
-/// Reachability for the paths that have no opinion — tests, and the periods before the shell has
-/// wired the real monitor up.
-#[derive(Debug)]
-pub struct AssumeOnline(pub bool);
-
-impl Default for AssumeOnline {
-    fn default() -> Self {
-        AssumeOnline(true)
-    }
-}
-
-impl Reachability for AssumeOnline {
-    fn is_online(&self) -> bool {
-        self.0
-    }
-}
+// A `Reachability` trait and an `AssumeOnline` default lived here until 2026-11-02, and nothing
+// ever constructed either — not the core, not `astrid-ffi`, not any shell. The Outbox never asked
+// whether the machine was online because the answer could not be trusted: a captive portal, a VPN
+// coming up and a sleeping laptop all report "connected" while nothing gets through. So it
+// attempts the send and recovers from the failure, which is the behaviour an advisory flag would
+// only have been allowed to hint at. A shell that wants to nudge a drain when the network returns
+// has `App::outbox_nudge` already.
 
 #[cfg(test)]
 mod tests {

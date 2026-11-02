@@ -4,7 +4,7 @@
 //! ([`App`]) and one vocabulary ([`Command`], [`Response`]). Nothing else is public to it: not the
 //! services, not the store, not the API client.
 //!
-//! That is rule 9 of `docs/ASTRID.md` §0 made structural rather than aspirational. A shell that
+//! That is rule 8 of README.md made structural rather than aspirational. A shell that
 //! could reach `TaskService` could also reach `update_task(completed: true)`, and the rule about
 //! completing tasks would be a comment instead of a wall. Here the only way to complete a task is
 //! [`Command::CompleteTask`], and that goes where it has to go.
@@ -104,8 +104,8 @@ pub struct App {
     /// added here took up to a minute to exist anywhere else — an offline-first design behaving,
     /// while online, like an offline one.
     pub(crate) outbox_nudge: Arc<tokio::sync::Notify>,
-    /// The one editing session (`PRODUCT_CONTRACT.md` §6): at most one editor open across the
-    /// whole window, stepped by the `beginEditing` / `endEditing` / `cancelEditing` /
+    /// The one editing session (`astrid-web/docs/PRODUCT_CONTRACT.md` §6): at most one editor open
+    /// across the whole window, stepped by the `beginEditing` / `endEditing` / `cancelEditing` /
     /// `commitAllEditing` commands. Held here rather than in the shell so the rule is the core's
     /// — the shell only does what each answer names.
     pub(crate) editing: std::sync::Mutex<crate::editing::Session>,

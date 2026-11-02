@@ -145,6 +145,93 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
         run: cargo ndk -t arm64-v8a --platform 28 build -p astrid-core
 
+  # `rust-toolchain.toml` said `channel = "stable"` while `Cargo.toml` declared
+  # `rust-version = "1.82"`, the README called the toolchain "pinned", and no job checked either —
+  # so the MSRV was a claim rather than a promise, and every machine built with whatever stable it
+  # happened to have. Both files now name one version, and this job is what makes that checkable:
+  # it fails if they disagree, and then builds the workspace under the declared MSRV.
+  #
+  # Lowering the MSRV below the pinned toolchain is allowed and is a deliberate act — install the
+  # older toolchain, get `cargo check` green under it, and lower both files together. This job
+  # keeps working when they differ in that direction, because it installs what `rust-version` says.
+  msrv:
+    name: MSRV
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The two files must name one version
+        id: msrv
+        run: |
+          declared=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          pinned=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -1)
+          echo "Cargo.toml rust-version: $declared"
+          echo "rust-toolchain.toml channel: $pinned"
+          if [ -z "$declared" ] || [ -z "$pinned" ]; then
+            echo "::error::could not read rust-version from Cargo.toml or channel from rust-toolchain.toml"
+            exit 1
+          fi
+          case "$pinned" in
+            stable|beta|nightly*)
+              echo "::error::rust-toolchain.toml is '$pinned'. Pin a version — a floating channel is what made the MSRV unverifiable."
+              exit 1
+              ;;
+          esac
+          if [ "$declared" != "$pinned" ]; then
+            echo "::error::Cargo.toml says $declared and rust-toolchain.toml says $pinned. See CONSUMERS.md."
+            exit 1
+          fi
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
+
+      # Installed explicitly rather than taken from rust-toolchain.toml, so that this job still
+      # checks the right compiler once the MSRV is deliberately lower than the pin.
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        run: rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-${{ steps.msrv.outputs.version }}
+
+      - name: Check
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-features --all-targets
+
+  # Four repositories pin this core by revision, and nothing recorded what those revisions were
+  # until CONSUMERS.md did. The November 2026 platform assessment read the Windows pin as 96
+  # commits behind off a manifest that had already been bumped three times, which is what a table
+  # nobody checks costs. `check-pins` asks whether every consumer is listed, whether each revision
+  # is a real commit, and whether it is an ancestor of main — a pin at an unmerged branch means a
+  # client is running code nobody reviewed. Being BEHIND main is only reported, never failed.
+  #
+  # Runs on the Monday schedule as well, unlike fmt/clippy/tests: a pin goes stale because time
+  # passed in ANOTHER repository, so it has no commit here to answer to.
+  pins:
+    name: consumer pins
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history: `merge-base --is-ancestor` cannot be answered from a shallow clone, and
+      # answering it wrong would fail every pin at once.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: astrid-core
+
+      # Public, and its `REVISION` file is the one consumer manifest this workflow can read, so
+      # that row is compared against reality rather than merely checked for shape.
+      - uses: actions/checkout@v4
+        with:
+          repository: Graceful-Tools/astrid-web
+          path: astrid-web
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: astrid-core
+          key: pins
+
+      - name: Check the pins table
+        working-directory: astrid-core
+        run: cargo xtask check-pins ../astrid-web
+
   contracts:
     name: cross-platform contracts
     if: github.event_name != 'schedule'

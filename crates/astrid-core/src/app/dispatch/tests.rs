@@ -3930,8 +3930,9 @@ async fn a_card_typed_into_the_inbox_carries_no_role_task_95c7a68f() {
 /// (task 95c7a68f, ASTRID.md §0 rule 2).
 ///
 /// The list's own default repeat is what makes this provable: `update(completed: true)` would
-/// leave a finished daily task, while `complete_task` rolls it forward to tomorrow and leaves it
-/// open. The same test therefore shows that a card typed into a column takes its list's defaults,
+/// leave a finished daily task, while `TaskService::complete` rolls it forward to tomorrow and
+/// leaves it open. The same test therefore shows a card typed into a column takes its list's
+/// defaults,
 /// because it goes through the one create path the quick-add box uses.
 #[tokio::test]
 async fn a_card_typed_into_done_is_completed_through_the_service_task_95c7a68f() {

@@ -151,7 +151,7 @@ pub(super) fn board(
 ///
 /// Done goes through the completion service rather than writing the flag, because a repeating card
 /// dragged to Done must roll forward to its next occurrence like every other completion — rule 2 of
-/// `docs/ASTRID.md` §0 does not stop applying because the gesture is a drag. Coming back out of
+/// README.md does not stop applying because the gesture is a drag. Coming back out of
 /// Done un-completes through the same service, for the same reason.
 pub(super) fn move_task_to_column(
     app: &App,
@@ -181,7 +181,7 @@ pub(super) fn move_task_to_column(
 ///
 /// Done completes through the completion service for the same reason a card dragged there does
 /// (see [`move_task_to_column`]): `update(completed: true)` skips the repeat rollover, and a
-/// repeating card is repeating whichever gesture finished it — rule 2 of `docs/ASTRID.md` §0.
+/// repeating card is repeating whichever gesture finished it — rule 2 of README.md.
 pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: String) -> Response {
     let lists = app.store.lists().unwrap_or_default();
     let Some(opened) = lists.iter().find(|list| list.id == list_id) else {

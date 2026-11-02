@@ -1,8 +1,14 @@
 # Pinned so every machine and CI runner builds the same core.
 # Bump deliberately; a toolchain bump is a PR of its own.
 #
+# A VERSION, not `stable`. It said `stable` until 2026-11-02 while the README called it "pinned"
+# and `Cargo.toml` declared `rust-version = "1.82"` — so every machine built with whatever stable
+# it happened to have, nothing checked the declared MSRV, and a release that broke 1.82 would have
+# landed silently. `channel` and `rust-version` must agree; the `msrv` job in CI fails if they do
+# not.
+#
 # No targets: the core builds for the host, and each client pins the targets it ships on
 # (astrid-windows its two MSVC triples, the Apple apps theirs).
 [toolchain]
-channel = "stable"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]

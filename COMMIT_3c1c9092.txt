@@ -1,0 +1,31 @@
+Governance: one place says the rules, the pins and the toolchain (task 3c1c9092)
+
+The doc comments cited `docs/ASTRID.md` §0 — astrid-windows's numbering, from before the core
+was its own repository — and had drifted apart from each other: two sites called the
+`/api/v1`-only rule rule 5 and a third called it rule 6. They now cite this repo's own
+README.md, with rule 8 added so the sites about the shell deciding nothing have a number to
+cite. The `docs/M0_NOTES.md` pointers are gone and what they said stays.
+`TaskService::complete_task` is `complete`, which is the method's name.
+
+`rust-toolchain.toml` was `channel = "stable"` while `Cargo.toml` declared
+`rust-version = "1.82"` and nothing checked either, so the MSRV was a claim rather than a
+promise. Both files now name 1.98.1 and the new `msrv` CI job asserts they agree and builds
+the workspace under the declared version. Lowering the MSRV below the pin stays allowed and
+deliberate: the job installs what `rust-version` says.
+
+CONSUMERS.md records what the four consumers pin, and `cargo xtask check-pins` keeps it honest
+on every push and on the Monday schedule — every consumer listed, every revision a real commit
+and an ancestor of main, and astrid-web's `REVISION` file compared against its row. Being
+behind main is reported, never failed. It found the Windows pin already current, which the
+November assessment had read as 96 commits behind off a stale manifest.
+
+`Reachability` and `AssumeOnline` are deleted. Nothing constructed either, in the core or in
+any shell, so no behaviour can change; the Outbox never asked whether the machine was online
+because a captive portal answers yes.
+
+And the duplicates: one `is_newer` for `sync`, one envelope unwrap in
+`api::endpoints::envelope` for all three callers, and `sync`'s `ids_named` renamed to `ids_in`
+so it stops colliding with `journal::ids_named` — one function called both of them four lines
+apart to answer two unrelated questions.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

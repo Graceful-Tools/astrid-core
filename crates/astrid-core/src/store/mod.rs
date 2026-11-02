@@ -3,7 +3,7 @@
 //! This is the read path. It never waits on a request, and it is authoritative for what the UI
 //! draws — sync writes into it, the Outbox writes into it optimistically, and the shell renders
 //! whatever it holds. That ordering is what makes the app work on a train, and it is the reason
-//! rule 5 of `docs/ASTRID.md` §0 exists.
+//! rule 5 of README.md exists.
 //!
 //! Ported in spirit rather than in shape from `astrid-ios/Astrid App/Core/Persistence/`, which is
 //! Core Data. The behaviour that matters — local-first reads, upsert-by-id, membership as a real

@@ -10,8 +10,8 @@
 //! sorts or draws. That is not redundancy, it buys two different things:
 //!
 //! - **Speed.** A read that can be expressed in the columns costs an indexed lookup whatever the
-//!   account holds, where the same read over `json` costs a full parse per row. The M0 spike put a
-//!   number on what that has to fit inside; see `docs/M0_NOTES.md`.
+//!   account holds, where the same read over `json` costs a full parse per row. The budget that
+//!   has to fit inside was set by the Windows M0 spike, whose notes live in that repo.
 //!
 //!   **The list view is not yet one of those reads**, though this file claimed it was until task
 //!   `71ddacb8`. [`super::Store::summaries_in_list`] does read columns and nothing else, but its

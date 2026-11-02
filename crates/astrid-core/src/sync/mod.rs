@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
+use crate::api::endpoints::envelope::unwrap as unwrap_envelope;
 use crate::api::{endpoints, ApiClient, ApiError};
 use crate::model::{date, Project, Task, TaskList};
 use crate::outbox::Runner;
@@ -391,8 +392,8 @@ impl SyncManager {
         let mut server_time = string_named(&body, endpoints::envelope::SERVER_TIME);
         // `deletedIds` is what the lists route sends (`app/api/v1/lists/route.ts`); the older name
         // is read too. Read under the wrong name, a list deleted elsewhere stayed for a day.
-        let mut deleted_lists = ids_named(&body, endpoints::envelope::DELETED_TASKS);
-        deleted_lists.extend(ids_named(&body, endpoints::envelope::DELETED_LISTS));
+        let mut deleted_lists = ids_in(&body, endpoints::envelope::DELETED_TASKS);
+        deleted_lists.extend(ids_in(&body, endpoints::envelope::DELETED_LISTS));
         let lists = Arc::new(crate::model::lenient::<TaskList>(unwrap_envelope(
             body,
             endpoints::envelope::LISTS,
@@ -677,11 +678,15 @@ impl SyncManager {
     }
 }
 
-/// Whether the server's version is worth applying.
+/// Whether one version of a row is worth applying over another.
 ///
 /// A version with no timestamp is treated as older, not newer: a thin payload must not overwrite a
-/// full one just because it arrived second.
-fn is_newer(incoming: Option<DateTime<Utc>>, cached: Option<DateTime<Utc>>) -> bool {
+/// full one just because it arrived second, and a cached row with no `updated_at` cannot claim to
+/// have been edited since.
+///
+/// One function for the whole module, including [`conflict`], which had a byte-identical private
+/// copy of it until 2026-11-02.
+pub(super) fn is_newer(incoming: Option<DateTime<Utc>>, cached: Option<DateTime<Utc>>) -> bool {
     match (incoming, cached) {
         (Some(incoming), Some(cached)) => incoming > cached,
         (Some(_), None) => true,
@@ -766,7 +771,7 @@ impl TaskWalk {
         self.stamped = self.stamped || server_time.is_some();
         // Absent on the last page, and on every offset page. Opaque — never parsed.
         let next = string_named(&body, endpoints::envelope::NEXT_CURSOR);
-        let deleted = ids_named(&body, endpoints::envelope::DELETED_TASKS);
+        let deleted = ids_in(&body, endpoints::envelope::DELETED_TASKS);
         let decoded =
             crate::model::lenient::<Task>(unwrap_envelope(body, endpoints::envelope::TASKS));
         report_skips("tasks", &decoded.skipped);
@@ -815,15 +820,13 @@ fn string_named(body: &serde_json::Value, key: &str) -> Option<String> {
         .map(|value| value.to_string())
 }
 
-fn unwrap_envelope(body: serde_json::Value, key: &str) -> serde_json::Value {
-    match body.get(key) {
-        Some(rows) => rows.clone(),
-        None => body,
-    }
-}
-
-/// The string ids under `key`, or nothing. A tombstone that is not a string is not a tombstone.
-fn ids_named(body: &serde_json::Value, key: &str) -> Vec<String> {
+/// The string ids under `key` in a response body, or nothing. A tombstone that is not a string is
+/// not a tombstone.
+///
+/// Named `ids_named` until 2026-11-02, which is also what [`journal::ids_named`] is called — and
+/// one function in this file called both of them, four lines apart, to answer two unrelated
+/// questions. This one reads a payload; that one reads the write journal.
+fn ids_in(body: &serde_json::Value, key: &str) -> Vec<String> {
     body.get(key)
         .and_then(serde_json::Value::as_array)
         .map(|ids| {

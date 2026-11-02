@@ -4,7 +4,7 @@
 //! (`RepeatingTaskCalculator`), which mirrors `astrid-web/types/repeating.ts` and
 //! `astrid-web/lib/repeating-task-handler.ts`. All three must stay behaviour-compatible.
 //!
-//! **Do not add pattern math anywhere else.** `TaskService::complete_task` is the only production
+//! **Do not add pattern math anywhere else.** `TaskService::complete` is the only production
 //! entry point and delegates here. An inline copy in the iOS `TaskService` once ignored `weekdays`,
 //! `month_repeat_type`, `month_weekday` and the yearly `month`/`day`, so a weekly Mon/Wed/Fri task
 //! added seven days instead of picking the next selected weekday. Collapsing the logic into one
@@ -28,7 +28,7 @@
 //! 1. Teach this calculator to honour it.
 //! 2. Add a test here that walks the pattern through several completions — single-step tests
 //!    routinely miss what multi-step ones catch.
-//! 3. Add a matching test at the `TaskService::complete_task` level, so the production path is
+//! 3. Add a matching test at the `TaskService::complete` level, so the production path is
 //!    covered and not just the calculator in isolation.
 //! 4. Mirror the change in astrid-web and astrid-ios.
 

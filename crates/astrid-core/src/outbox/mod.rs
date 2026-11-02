@@ -1,6 +1,6 @@
 //! The write journal — the only path a change takes to the server.
 //!
-//! Ported from `astrid-ios/Astrid App/Core/Outbox/`. Rule 5 of `docs/ASTRID.md` §0 says nothing
+//! Ported from `astrid-ios/Astrid App/Core/Outbox/`. Rule 5 of README.md says nothing
 //! bypasses it, and the reason is the shape of the app rather than a preference: a task typed on a
 //! train has to exist, be editable, survive a relaunch, and arrive — in the order it was made —
 //! whenever the network comes back. A service that wrote straight to the API would have to invent
