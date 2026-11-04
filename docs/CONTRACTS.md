@@ -1190,3 +1190,100 @@ Exposed as the `dueDateAllDay` command, answering `{ dueDateTime, isAllDay: true
 shape a quick pick does, because the shell must not do this arithmetic. Tests:
 `task_0616f2d1_clearing_a_time_west_of_utc_keeps_the_readers_day` and its east-of-UTC twin in
 `rows::due_picks`, and the five `task_0616f2d1_*` dispatch tests.
+
+---
+
+## Why the palette, mentions and search read every task (task `3845b8a6`, 2026-11-04)
+
+Four reads ask `Store::tasks()` — `SELECT json FROM tasks` plus a full `serde_json` decode per row
+— and then filter in Rust:
+
+| Surface | Call site | Matcher |
+|---|---|---|
+| The search box, offline | `app/dispatch/tasks.rs:939` | `services::search::search_tasks` |
+| The blocker/dependency picker, offline | `app/dispatch/tasks.rs:1492` (`cache_search`) | `services::search::search` |
+| The mention popup's `!` | `app/dispatch/comments.rs:123` | `parse::mentions::suggestions` |
+| The command palette | `app/dispatch/shell.rs:163` | `palette::search` |
+
+The audit asked for by task `a09a1e2c` (itself split from `71ddacb8`, which bounded the reminder
+loop and the board) was whether a SQL `WHERE` could narrow them first. **For the first three it
+cannot, and this section is why — so that nobody re-audits it.** The fourth, the palette, has been
+bounded; that is at the end.
+
+### What a prefilter would get wrong
+
+**1. The free-text match reads the assignee's name and email.** `services::search::text_matches`
+(`crates/astrid-core/src/services/search.rs:199-216`) keeps a task whose title *and* description
+both miss the needle, when the assignee's `name` or `email` contains it — the assignee resolved
+either from `task.assignee` or by looking `task.assignee_id` up in `SearchContext::users`
+(`:206-216`). This is iOS's `TaskListView.applySearchFilter`, which the entry above does not get to
+change. A `WHERE title LIKE ?1 OR description LIKE ?1` prefilter silently drops that row, and
+"searching a person's name stopped finding their tasks" is the bug report.
+
+**2. Nested users' names and emails exist only in `json`.** `parse::mentions::mentionable`
+(`crates/astrid-rules/src/parse/mentions.rs:263-281`) notes `task.creator` and `task.assignee` as
+whole `User`s, for `name` / `email` / `is_agent()`. The *ids* would be safe — `assignee_id` and
+`creator_id` are columns, and the insert already folds the nested fallbacks into them
+(`store/mod.rs:1017-1020`: `assignee_id.or_else(|| assignee.map(|u| u.id))`, then
+`effective_creator_id()`) — but the names and emails hanging off those users are not columns at
+all.
+
+**3. Fuzzy matching is not expressible as `LIKE`.** `palette::score`
+(`crates/astrid-rules/src/palette.rs:30`, called at `:203`) is an in-order *subsequence* match: `tdy` matches
+`Today`, `ydt` does not (`a_query_must_appear_in_order`, `:231-236`). `LIKE '%tdy%'` matches
+neither. And a bare identifier is compared `eq_ignore_ascii_case` (`search.rs:81`,
+`palette.rs:188-190`) against `task.identifier`, which is on **neither** `TaskSummary`
+(`store/mod.rs:83-104`) nor the `tasks` columns (`schema.rs:38-59`) — it is read out of `json` and
+nowhere else.
+
+**4. `matches_in_lists`'s `"public_lists"` arm reads `task.lists`, not `effective_list_ids()`**
+(`crates/astrid-rules/src/filters/mod.rs:233-237`, against the `in_a_list` of `:229` that its
+sibling arms use at `:231-232`). Here the mismatch runs the
+other way: a `task_lists_membership × lists.privacy` join is *strictly more permissive* than the
+Rust rule, which sees only the lists the cached `json` happens to carry inline. **Whether that is
+the bug and the join is the correct answer is the open question on `a09a1e2c`.** If it is resolved
+as a bug and fixed, strike this item — the other three stand on their own.
+
+### What *is* safe to push down
+
+For whoever bounds the parts that can be bounded, these are columns on `tasks`
+(`store/schema.rs:38-59`, plus the migration at `:185`) and carry the same value the decoded `Task`
+reports:
+
+`completed`, `priority`, `due_date_time`, `is_all_day`, `parent_task_id IS NULL`, `assignee_id`,
+`creator_id`, `status_role`, `is_private`, `repeating`, `reminder_time`, and membership `list_id`
+via `task_lists_membership`.
+
+Indexed today, and only these: `tasks_by_parent` (`parent_task_id`), `tasks_by_due`
+(`due_date_time`), `tasks_by_assignee` (`assignee_id`), `tasks_by_updated` (`updated_at`),
+`tasks_by_reminder` (`reminder_time`, **partial** — `WHERE reminder_time IS NOT NULL`), and
+`membership_by_list` (`task_lists_membership(list_id)`) — `schema.rs:61-64`, `:73`, `:187`. Nothing
+on `completed`, `priority`, `creator_id`, `status_role` or `is_private`.
+
+Two traps in that list. `description` is a column but is **not** on `TaskSummary`, which carries
+only `has_description: bool` — so a description prefilter is available in SQL and not to a summary
+reader. And an unindexed column in a `WHERE` is still usually worth it here: the scan reads one
+narrow column per skipped row against a whole `json` parse saved, which is the cost
+`store::decodes` was added to measure.
+
+### The palette, which *can* be bounded
+
+`palette::search` uses its `tasks` slice in exactly two places — the exact-identifier lookup
+(`palette.rs:182-193`) and the title ranking (`:195-204`) — and **both** open with
+`!task.completed`. So `WHERE completed = 0` is not merely a superset of what the matcher keeps, it
+is precisely it, with the Rust matcher still the final filter. `Store::tasks_incomplete()`
+(`store/mod.rs:271`) does that, and `dispatch/shell.rs:163` calls it.
+
+It bounds the row *count*, not the per-row decode: what the palette reads next (`identifier`,
+`title`, `effective_list_ids()`) lives only in `json`, so a surviving row is still decoded whole.
+On an account whose history dwarfs its live work — which every account becomes — that is the larger
+half. `tests/bounded_reads.rs::the_palette_decodes_only_live_tasks_3845b8a6` pins the ceiling: five
+hundred finished tasks and three live ones cost four decodes, not five hundred and four. Its
+sibling `a_bounded_palette_still_finds_a_task_by_its_identifier_3845b8a6` guards the other pass,
+which a `completed = 0` narrowing could have quietly cost.
+
+No index on `completed` was added, and none should be: a two-valued column where most rows match is
+one SQLite would decline to use, and the win here is the decode, not the scan.
+
+The mention popup and the two search surfaces stay unbounded, deliberately. They are not slow by
+oversight; they are correct by reading everything.

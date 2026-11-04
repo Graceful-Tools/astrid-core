@@ -214,3 +214,87 @@ async fn a_board_decodes_only_the_tasks_in_its_project_71ddacb8() {
         "a board decoded {decoded} rows for a project holding five tasks"
     );
 }
+
+/// The palette is the one of the four unbounded task reads that *can* be bounded (task
+/// `3845b8a6`).
+///
+/// `palette::search` uses its `tasks` slice in exactly two places — the exact-identifier lookup
+/// and the title ranking — and **both** filter `!task.completed` before anything else. So
+/// `WHERE completed = 0` is not merely a superset of what the matcher keeps, it is precisely it,
+/// and the matcher is still the final filter. Everything else the palette needs from a row
+/// (`identifier`, `title`, `effective_list_ids()`) lives only in `json`, so this bounds the row
+/// *count*, not the per-row decode — which is the half that costs.
+///
+/// The other three (`services::search`, `parse::mentions`, `cache_search`) cannot be bounded at
+/// all; `docs/CONTRACTS.md` says which fields force that.
+#[tokio::test]
+async fn the_palette_decodes_only_live_tasks_3845b8a6() {
+    let app = app();
+    let list: astrid_core::model::TaskList =
+        serde_json::from_value(json!({ "id": "l1", "name": "Everything" })).expect("a list");
+    app.store().upsert_list(&list).expect("stores");
+
+    // An account whose history dwarfs its live work, which is what every account becomes.
+    let done: Vec<Task> = (0..TASKS)
+        .map(|index| Task {
+            list_ids: Some(vec!["l1".into()]),
+            completed: true,
+            ..Task::new(format!("done{index}"), format!("Wrote the report {index}"))
+        })
+        .collect();
+    app.store().upsert_tasks(&done).expect("stores");
+    let live: Vec<Task> = (0..3)
+        .map(|index| Task {
+            list_ids: Some(vec!["l1".into()]),
+            ..Task::new(format!("live{index}"), format!("Write the report {index}"))
+        })
+        .collect();
+    app.store().upsert_tasks(&live).expect("stores");
+
+    decodes::reset();
+    let answer = run(&app, json!({ "kind": "palette", "query": "wrtrpt" })).await;
+    let rows = answer["value"]["rows"].as_array().expect("rows").clone();
+
+    // The ranking still answers, and still answers only the live ones.
+    let ids: Vec<&str> = rows.iter().filter_map(|row| row["id"].as_str()).collect();
+    assert!(
+        ids.contains(&"live0"),
+        "the palette stopped finding a live task: {ids:?}"
+    );
+    assert!(
+        !ids.iter().any(|id| id.starts_with("done")),
+        "the palette offered a finished task: {ids:?}"
+    );
+
+    // One list plus the three live tasks. Not the five hundred finished ones behind them.
+    assert_eq!(
+        decodes::count(),
+        4,
+        "a palette query decoded the account's history as well as its live work"
+    );
+}
+
+/// Bounding the read must not lose the exact-identifier lookup, which is a *different* pass over
+/// the same slice (`palette.rs`, the `exact` row) and the reason a bare `awtd-1405` typed into the
+/// palette finds that task rather than ranking titles (task `3845b8a6`).
+#[tokio::test]
+async fn a_bounded_palette_still_finds_a_task_by_its_identifier_3845b8a6() {
+    let app = app();
+    let list: astrid_core::model::TaskList =
+        serde_json::from_value(json!({ "id": "l1", "name": "Everything" })).expect("a list");
+    app.store().upsert_list(&list).expect("stores");
+    let task = Task {
+        list_ids: Some(vec!["l1".into()]),
+        identifier: Some("AWTD-1405".into()),
+        ..Task::new("by-id", "Nothing in this title matches the query")
+    };
+    app.store().upsert_task(&task).expect("stores");
+
+    let answer = run(&app, json!({ "kind": "palette", "query": "awtd-1405" })).await;
+    let rows = answer["value"]["rows"].as_array().expect("rows").clone();
+    let ids: Vec<&str> = rows.iter().filter_map(|row| row["id"].as_str()).collect();
+    assert!(
+        ids.contains(&"by-id"),
+        "the identifier lookup was lost when the read was bounded: {ids:?}"
+    );
+}

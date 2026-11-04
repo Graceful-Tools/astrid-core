@@ -158,7 +158,9 @@ pub(super) fn run(app: &App, command: Command) -> Response {
         },
         Command::Palette { query } => {
             let lists = app.store.lists().unwrap_or_default();
-            let tasks = app.store.tasks().unwrap_or_default();
+            // Bounded: both of the palette's passes drop finished tasks first, so the
+            // `completed` column keeps exactly what the matcher would (task `3845b8a6`).
+            let tasks = app.store.tasks_incomplete().unwrap_or_default();
             Response::ok(serde_json::json!({
                 "rows": crate::palette::search(&query, &lists, &tasks),
             }))

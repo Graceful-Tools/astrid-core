@@ -251,6 +251,32 @@ impl Store {
         })
     }
 
+    /// Every cached task that is not finished.
+    ///
+    /// For a reader that drops finished tasks as its *first* act, so the `completed` column
+    /// answers precisely what the Rust matcher would keep rather than merely a superset of it —
+    /// the palette, whose two passes over its slice both open with `!task.completed` (task
+    /// `3845b8a6`). It still decodes a whole [`Task`] per surviving row, because what the palette
+    /// then reads (`identifier`, `title`, `effective_list_ids()`) lives only in `json`; what is
+    /// bounded is the row *count*, and on an account whose history dwarfs its live work that is
+    /// the larger half.
+    ///
+    /// Deliberately **not** indexed on `completed`. A skipped row costs one integer column read
+    /// against a `serde_json` parse saved, and an index on a two-valued column where most rows
+    /// match is one SQLite would decline to use anyway.
+    ///
+    /// The three task reads that *cannot* be bounded — `services::search`, `parse::mentions` and
+    /// `dispatch::tasks::cache_search` — and the fields that force it are written up in
+    /// `docs/CONTRACTS.md`.
+    pub fn tasks_incomplete(&self) -> Result<Vec<Task>> {
+        self.read(|connection| {
+            let mut statement =
+                connection.prepare_cached("SELECT json FROM tasks WHERE completed = 0")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.map(|json| decode(&json?)).collect()
+        })
+    }
+
     /// Every cached task as `(id, updated_at)`.
     ///
     /// The whole of what a full pass's absence scan needs (task `c8457e0f`): it compares each
