@@ -208,6 +208,11 @@ jobs:
   pins:
     name: consumer pins
     runs-on: ubuntu-latest
+    # A step's `if:` cannot read `secrets` — GitHub rejects the whole workflow file when it tries,
+    # and then NO job runs, not only this one. A job's `env:` can read it, and a step's `if:` can
+    # read `env`, so the presence of the token travels that way.
+    env:
+      HAS_PINS_TOKEN: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
     steps:
       # The whole history: `merge-base --is-ancestor` cannot be answered from a shallow clone, and
       # answering it wrong would fail every pin at once.
@@ -232,21 +237,21 @@ jobs:
       # unchecked rather than failing — a fork's pull request gets no secrets at all, and a gate
       # that goes red for a reason the contributor cannot fix is worse than the gap it closed.
       - uses: actions/checkout@v4
-        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-windows
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-windows
 
       - uses: actions/checkout@v4
-        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-ios
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-ios
 
       - uses: actions/checkout@v4
-        if: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+        if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-android
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
