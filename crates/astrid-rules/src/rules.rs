@@ -113,6 +113,37 @@ pub enum Rule {
     /// [`crate::agent_name`]. Through this door rather than the async one because it is asked on
     /// every keystroke, and because the answer depends on nothing but the name.
     CustomAgentName { name: String },
+    /// A project's board as iOS draws it: its columns in order, each with its cards in order —
+    /// see [`crate::board_cards`]. `custom_states` is the project's `customStates` as the wire
+    /// carries it; `board_list_id` the list whose manual order and Done window the board follows
+    /// (none: store order, the default window).
+    Board {
+        project_id: String,
+        #[serde(default)]
+        custom_states: Option<serde_json::Value>,
+        #[serde(default)]
+        tasks: Vec<Task>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        board_list_id: Option<String>,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes: where their day starts for Done's window.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+    },
+    /// What dropping `task` on the column `column` (an id from [`Rule::Board`]) writes — see
+    /// [`crate::board::resolve_move`]. A drop on Done answers `completed: true`; a shell completes
+    /// through [`Rule::Completion`] so a repeating task rolls forward.
+    BoardMove {
+        task: Box<Task>,
+        column: String,
+        #[serde(default)]
+        custom_states: Option<serde_json::Value>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+    },
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -230,7 +261,66 @@ pub fn run(rule: Rule) -> Response {
             None => crate::markdown::render(&text),
         }),
         Rule::CustomAgentName { name } => Response::ok(crate::agent_name::check(&name)),
+        Rule::Board {
+            project_id,
+            custom_states,
+            tasks,
+            lists,
+            board_list_id,
+            now,
+            utc_offset_minutes,
+        } => {
+            let Some(offset) = chrono::FixedOffset::east_opt(utc_offset_minutes * 60) else {
+                return Response::failed(Failure::bad_request(format!(
+                    "{utc_offset_minutes} minutes is not an offset from UTC"
+                )));
+            };
+            let columns = crate::board_cards::columns_with_rows(custom_states.as_ref(), &lists);
+            let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
+            let list = crate::board_cards::BoardList::of(
+                board_list_id
+                    .as_deref()
+                    .and_then(|id| lists.iter().find(|list| list.id == id)),
+            );
+            Response::ok(
+                columns
+                    .iter()
+                    .map(|column| BoardColumnCards {
+                        task_ids: crate::board_cards::column_cards(
+                            &cards, column, &columns, list, now, offset,
+                        )
+                        .into_iter()
+                        .map(|task| task.id.clone())
+                        .collect(),
+                        column: column.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        }
+        Rule::BoardMove {
+            task,
+            column,
+            custom_states,
+            lists,
+        } => {
+            let columns = crate::board::columns(custom_states.as_ref());
+            match columns.iter().find(|candidate| candidate.id == column) {
+                Some(target) => Response::ok(crate::board::resolve_move(&task, target, &lists)),
+                None => Response::failed(Failure::bad_request(format!(
+                    "{column} is not a column of this board"
+                ))),
+            }
+        }
     }
+}
+
+/// One column of [`Rule::Board`]'s answer: the column, and its cards' ids in order.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BoardColumnCards {
+    #[serde(flatten)]
+    column: crate::board::BoardColumn,
+    task_ids: Vec<String>,
 }
 
 /// A zone by its IANA name. An unknown name is refused rather than read as UTC: a person in Tokyo
@@ -252,6 +342,53 @@ pub fn run_json(request: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The Astrid Code project board asks the door for its columns and cards, and for what a
+    /// drop writes, instead of keeping its own copy of the board rules.
+    #[test]
+    fn a_board_answers_its_columns_cards_and_moves() {
+        let answer = run_json(
+            r#"{"kind":"board","projectId":"p","now":"2026-11-08T12:00:00.000Z",
+                "customStates":[{"role":"review","name":"Review","order":3},{"role":"doing","name":"In progress","order":1}],
+                "lists":[{"id":"l1","name":"iOS","projectId":"p","manualSortOrder":["b2","b1"]},{"id":"other","name":"Home"}],
+                "boardListId":"l1",
+                "tasks":[{"id":"a","listIds":["l1"],"statusRole":"review"},{"id":"b1","listIds":["l1"]},{"id":"b2","listIds":["l1"],"statusRole":"gone"},
+                         {"id":"c","listIds":["l1"],"completed":true,"updatedAt":"2026-11-08T11:00:00.000Z"},{"id":"sub","listIds":["l1"],"parentTaskId":"a"},
+                         {"id":"x","listIds":["other"]}]}"#,
+        );
+        let answer: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        let columns = answer["value"].as_array().unwrap();
+        let ids: Vec<&str> = columns.iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                "__virtual_inbox__",
+                "ready",
+                "doing",
+                "waiting",
+                "review",
+                "__virtual_done__"
+            ]
+        );
+        assert_eq!(columns[2]["name"], "In progress");
+        // An unknown role falls to Inbox; the manual order arranges it; no subtask, no other project's task.
+        assert_eq!(columns[0]["taskIds"], serde_json::json!(["b2", "b1"]));
+        assert_eq!(columns[4]["taskIds"], serde_json::json!(["a"]));
+        assert_eq!(columns[5]["taskIds"], serde_json::json!(["c"]));
+
+        let moved: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"boardMove","task":{"id":"a","listIds":["l1"],"statusRole":"review"},"column":"__virtual_inbox__"}"#,
+        )).unwrap();
+        assert_eq!(
+            moved["value"],
+            serde_json::json!({ "listIds": ["l1"], "completed": false, "statusRole": null })
+        );
+        let refused: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"boardMove","task":{"id":"a"},"column":"nope"}"#,
+        ))
+        .unwrap();
+        assert_eq!(refused["ok"], false);
+    }
 
     /// AATD-50: the custom editor's Preview words a pattern nobody has saved yet.
     #[test]
