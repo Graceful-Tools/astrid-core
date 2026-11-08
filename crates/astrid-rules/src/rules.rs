@@ -270,7 +270,10 @@ pub fn run(rule: Rule) -> Response {
             now,
             utc_offset_minutes,
         } => {
-            let Some(offset) = chrono::FixedOffset::east_opt(utc_offset_minutes * 60) else {
+            let Some(offset) = utc_offset_minutes
+                .checked_mul(60)
+                .and_then(chrono::FixedOffset::east_opt)
+            else {
                 return Response::failed(Failure::bad_request(format!(
                     "{utc_offset_minutes} minutes is not an offset from UTC"
                 )));
@@ -388,6 +391,13 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(refused["ok"], false);
+
+        // An offset too large to be one is refused, not overflowed.
+        let absurd: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"board","projectId":"p","now":"2026-11-08T12:00:00.000Z","utcOffsetMinutes":2147483647}"#,
+        ))
+        .unwrap();
+        assert_eq!(absurd["ok"], false);
     }
 
     /// AATD-50: the custom editor's Preview words a pattern nobody has saved yet.
