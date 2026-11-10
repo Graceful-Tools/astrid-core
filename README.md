@@ -67,12 +67,18 @@ other: two sites called the `/api/v1`-only rule rule 5 and a third called it rul
    the shape of bug this rule exists to make impossible. This is the "How it fits" split above,
    stated as a rule because doc comments need a number to cite.
 
+## Design tokens
+
+How Astrid looks has one source too: [`design/tokens.json`](./design/README.md), generated into
+each client's own format by `cargo xtask gen-design`. Nothing from it is linked into the core.
+
 ## Quick start
 
 ```bash
 cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
+cargo xtask check-design        # design/generated is what design/tokens.json produces
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 cargo deny check                # advisories, licences, wildcards, where the crates came from
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy

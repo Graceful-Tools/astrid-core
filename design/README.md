@@ -1,0 +1,84 @@
+# Design tokens
+
+`tokens.json` is the one source for how Astrid looks: the colours of every theme, the spacing and
+radius scales, shadows, type sizes, motion and the sizes of shared controls. It is to appearance
+what [`contracts/fixtures`](../contracts/README.md) is to behaviour. The system it belongs to —
+the component specs and the rules for platform differences — is defined in astrid-web's
+[`docs/specs/DESIGN_SYSTEM.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/specs/DESIGN_SYSTEM.md).
+
+**The values are the iOS and Mac apps'** (`astrid-ios`, `Theme.swift` and the Mac's token files),
+except where the register below records that another client was right.
+
+```bash
+cargo xtask gen-design                   # write design/generated from tokens.json
+cargo xtask check-design [../astrid-web] # fail if generated is stale, or web's copy is not ours
+```
+
+`cargo test` runs the same staleness check, so a change to `tokens.json` that was not regenerated
+fails the suite.
+
+## Generated, never shipped
+
+Nothing here is linked into the core. `astrid_rules::theme` decides which theme is chosen and says
+plainly that it does not hand a shell hex values; that still holds. The generator writes each
+platform's own kind of resource, the client vendors the file, and its toolkit does the theming.
+
+| File in `generated/` | For | Vendored at |
+|---|---|---|
+| `web/astrid-tokens.css` | astrid-web: CSS custom properties, colours as `r, g, b` triplets | `packages/astrid-design/` with a `REVISION` |
+| `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | not adopted yet |
+| `tokens.resolved.json` | every client: the source with each theme's `extends` flattened | `packages/astrid-design/` in astrid-web |
+
+Android (Compose) and Windows (XAML) emitters are added to `crates/xtask/src/design.rs` in the
+change that adopts them, so each one is written against the project that compiles it. Until then
+those clients can read `tokens.resolved.json` in a test.
+
+Every generated source file starts with a `body-sha256` line: a hash of everything below it. A
+consumer checks that hash in its own gate, with no access to this repository, so a hand-edited
+copy fails there.
+
+## Changing a value
+
+1. Change it in the iOS/Mac app first if it is a design change (the reference), or record here why
+   another client's value is the right one.
+2. Edit `tokens.json`, run `cargo xtask gen-design`, commit both.
+3. Each client takes it by re-vendoring at the new revision. A value never changes in a client's
+   copy.
+
+## Adding a theme
+
+A theme is data. To add one:
+
+1. Add an entry under `themes` with its `appearance` (`light` or `dark`) and the theme it
+   `extends`. Restate only the colours that differ.
+2. Add the name to `astrid_rules::theme::Theme`, which is what lets somebody choose it.
+3. `cargo xtask gen-design`.
+
+The generator refuses a theme that the core cannot name, a colour name one theme has and another
+lacks, and body text under 4.5:1 against the theme's own page (`bg-primary`, `bg-secondary`). A
+brand's accent is not a theme: it is the `{brand.*}` references, which a partner build replaces in
+every theme at once.
+
+## What a platform may do differently
+
+Consistency is the default. A platform may **add** — a token it alone needs, a density (`compact`
+for pointer-driven desktops, `comfortable` for touch) — and may use its own native control where
+the toolkit provides one. It may not restate a shared value with a different number. Anything else
+that differs is either a row below or a bug.
+
+## Register
+
+Where the clients differ from the tokens today. An entry leaves when the client adopts the value.
+
+| # | What | Tokens say | Who differs | State |
+|---|---|---|---|---|
+| DS1 | Ocean text colours | Web's, one step darker than light's (web AWTD-1496: grey on cyan measured 3.1:1) | iOS, Mac, Android use light's | open on Apple and Android |
+| DS2 | Priority colours | iOS's `#6B7280`, accent, `#FBBF24`, `#EF4444` | Windows samples the checkbox art (`#B3B6BA`, `#328ACC`, `#F5AF39`, `#D5392E`) | open on Windows |
+| DS3 | Surfaces and borders | iOS's | Windows follows the web's old values (light border `#EBEDF0`, selection `#F3F8FF`) | open on Windows; web adopts with its first vendored copy |
+| DS4 | Leading control size, touch | 34 | Web draws 32 px | open on web; a sizing change, so its own task |
+| DS5 | Selection outline | 2 comfortable, 1.5 compact, in the accent | The Mac draws the accent at 55% opacity; web draws it solid | undecided: which opacity |
+| DS6 | Repeat frame around a photo or the unassigned mark | 1.25 × the control, as on web (AWTD-1571) | iOS draws a repeating task assigned to someone else at the wrong size | open on iOS |
+| DS7 | Task details panel: opens out of the selected row over `motion.panel`, wearing the selection outline, with an arrow to the row | Mac and web | iOS, Android, Windows have neither | open on those three |
+| DS8 | iOS resolves themes per view (fixed light values, a ternary at each use) | one palette per theme, as the Mac resolves them | iOS | open on iOS |
+| DS9 | Web-only surfaces (sidebar, panel, pill, count badge, card glass) | not tokens yet | web keeps them in its theme stylesheets | open: tokenise with the component specs |
+| DS10 | VS Code takes the editor's colours | product meanings only (priority order, overdue, glyphs) | astrid-vscode, by design | permanent |

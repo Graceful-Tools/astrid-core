@@ -8,3 +8,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
+# The design tokens (`design/tokens.json`) are read, checked and written out per platform; the
+# theme list is checked against the core's own, so the two cannot name different themes.
+astrid-rules = { path = "../astrid-rules" }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

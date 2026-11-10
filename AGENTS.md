@@ -45,6 +45,7 @@ cargo test --workspace                                   # the inner loop
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts                              # against ../astrid-web
+cargo xtask check-design                                 # design/generated is current (design/README.md)
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 ```
 

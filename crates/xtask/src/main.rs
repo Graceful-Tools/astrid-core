@@ -5,6 +5,8 @@
 
 use std::process::ExitCode;
 
+mod design;
+
 const COMMANDS: &[(&str, &str)] = &[
     (
         "check-contracts",
@@ -13,6 +15,14 @@ const COMMANDS: &[(&str, &str)] = &[
     (
         "check-pins",
         "verify CONSUMERS.md's revisions are real, merged commits [consumer checkout paths]",
+    ),
+    (
+        "gen-design",
+        "write design/generated from design/tokens.json",
+    ),
+    (
+        "check-design",
+        "verify design/generated is current, and astrid-web's vendored copy [path, default ../astrid-web]",
     ),
 ];
 
@@ -25,6 +35,11 @@ fn main() -> ExitCode {
     match command.as_str() {
         "check-contracts" => check_contracts(),
         "check-pins" => check_pins(),
+        "gen-design" => design::generate(&repo_root()),
+        "check-design" => design::check(
+            &repo_root(),
+            std::env::args().nth(2).map(std::path::PathBuf::from),
+        ),
         other => {
             eprintln!("unknown command: {other}\n");
             usage();
