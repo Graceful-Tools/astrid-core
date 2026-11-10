@@ -269,6 +269,14 @@ jobs:
         working-directory: astrid-core
         run: cargo xtask check-pins ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
 
+      # The design tokens are pinned the same way: astrid-web vendors design/generated at the
+      # revision in its packages/astrid-design/REVISION. Here because the comparison reads that
+      # revision out of this repository's history, which only this job fetches whole. Before web
+      # has vendored a copy the row is reported unchecked.
+      - name: Check astrid-web's design tokens are ours
+        working-directory: astrid-core
+        run: cargo xtask check-design ../astrid-web
+
   contracts:
     name: cross-platform contracts
     if: github.event_name != 'schedule'
