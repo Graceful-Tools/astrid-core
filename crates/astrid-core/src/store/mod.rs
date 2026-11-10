@@ -188,6 +188,17 @@ impl Store {
         Ok(value)
     }
 
+    /// The writer itself, mutably, outside a transaction. rusqlite installs a hook only through
+    /// `&mut Connection` (since 0.33), and a test that counts commits has to install one.
+    #[cfg(test)]
+    pub(crate) fn writer_mut<T>(
+        &self,
+        work: impl FnOnce(&mut Connection) -> Result<T>,
+    ) -> Result<T> {
+        let mut guard = self.connection.lock().map_err(|_| StoreError::Lock)?;
+        work(&mut guard)
+    }
+
     /// Run `work` on the read connection.
     ///
     /// For the modules that own a table of their own — the Outbox's journal — so that a question

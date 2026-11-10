@@ -1081,12 +1081,12 @@ mod tests {
         let commits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         fixture
             .store
-            .transaction(|connection| {
+            .writer_mut(|connection| {
                 let commits = commits.clone();
                 connection.commit_hook(Some(move || {
                     commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     false
-                }));
+                }))?;
                 Ok(())
             })
             .expect("hooks");
