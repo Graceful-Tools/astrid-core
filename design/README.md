@@ -93,3 +93,5 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS18 | A completed task: title struck through and muted, its mark at `state.completed-mark-opacity` | iOS and Mac | Web also dims the whole row to 75% | open on web |
 | DS19 | Title truncation in a row | undecided | iOS wraps without limit (one line beside an open panel), the Mac stops at two lines, web wraps without limit | undecided |
 | DS20 | Hairline width | 0.5 | Web draws 1 px | open on web; 0.5 px only on high-density screens |
+| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent | Under a partner accent the square follows the brand and the checkbox art stays Astrid blue, on iOS and web alike | open: draw or tint the art from the tokens |
+| DS22 | Priority glyphs as text (`!!` in a header or menu) | the priority colour | Medium's amber is 1.7:1 on white; the web used a darker orange (2.8:1) before adopting the token. "None" as text uses muted text on web | open: text variants of the priority colours, checked for contrast |
