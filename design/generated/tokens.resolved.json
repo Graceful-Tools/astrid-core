@@ -34,6 +34,16 @@
     },
     "three-column-breakpoint": 1100
   },
+  "markdown": {
+    "blockquote-bar": 3,
+    "decision-badge": 24,
+    "decision-card-radius": 10,
+    "tradeoff-cell-max": 150,
+    "tradeoff-cell-min": 84,
+    "tradeoff-cell-radius": 4,
+    "tradeoff-gap": 3,
+    "tradeoff-swatch": 10
+  },
   "motion": {
     "drawer": {
       "ease": "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
@@ -89,6 +99,13 @@
       "#FFD966",
       "#93C47D",
       "#38761D"
+    ],
+    "tradeoff-text": [
+      "#FFFFFF",
+      "#111827",
+      "#111827",
+      "#111827",
+      "#FFFFFF"
     ]
   },
   "radius": {

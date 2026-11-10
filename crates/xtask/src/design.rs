@@ -466,9 +466,9 @@ fn web_css(tokens: &Tokens) -> String {
             ));
         }
     }
-    // `size` and `layout` share a shape: lengths per density, plus a few that hold everywhere.
+    // `size`, `layout` and `markdown` share a shape: lengths, per density or holding everywhere.
     // A length is in px; a ratio (`*-scale`) has no unit.
-    for section in ["size", "layout"] {
+    for section in ["size", "layout", "markdown"] {
         for (name, value) in object(&tokens.raw, section) {
             match value.as_object() {
                 Some(sizes) => {
@@ -643,7 +643,7 @@ fn apple_swift(tokens: &Tokens) -> String {
         }
     }
     swift.push_str("    }\n");
-    for section in ["size", "layout"] {
+    for section in ["size", "layout", "markdown"] {
         swift.push_str(&format!("\n    enum {} {{\n", capitalised(section)));
         for (name, value) in object(&tokens.raw, section) {
             match value.as_object() {
