@@ -1,7 +1,8 @@
 # Design tokens
 
 `tokens.json` is the one source for how Astrid looks: the colours of every theme, the spacing and
-radius scales, shadows, type sizes, motion and the sizes of shared controls. It is to appearance
+radius scales, shadows, type sizes, motion, the sizes of shared controls, the layout rules that
+keep them aligned (`layout`) and how a control looks in each state (`state`). It is to appearance
 what [`contracts/fixtures`](../contracts/README.md) is to behaviour. The system it belongs to —
 the component specs and the rules for platform differences — is defined in astrid-web's
 [`docs/specs/DESIGN_SYSTEM.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/specs/DESIGN_SYSTEM.md).
@@ -76,9 +77,23 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS2 | Priority colours | iOS's `#6B7280`, accent, `#FBBF24`, `#EF4444` | Windows samples the checkbox art (`#B3B6BA`, `#328ACC`, `#F5AF39`, `#D5392E`) | open on Windows |
 | DS3 | Surfaces and borders | iOS's | Windows follows the web's old values (light border `#EBEDF0`, selection `#F3F8FF`) | open on Windows; web adopts with its first vendored copy |
 | DS4 | Leading control size, touch | 34 | Web draws 32 px | open on web; a sizing change, so its own task |
-| DS5 | Selection outline | 2 comfortable, 1.5 compact, in the accent | The Mac draws the accent at 55% opacity; web draws it solid | undecided: which opacity |
+| DS5 | Selection outline | 2.5 comfortable (iOS), 1.5 compact (Mac), in the accent | Web draws 2 px at every width. The Mac draws the accent at 55% opacity; iOS and web draw it solid | undecided: the opacity, and whether desktop web is compact |
 | DS6 | Repeat frame around a photo or the unassigned mark | 1.25 × the control, as on web (AWTD-1571) | iOS draws a repeating task assigned to someone else at the wrong size | open on iOS |
 | DS7 | Task details panel: opens out of the selected row over `motion.panel`, wearing the selection outline, with an arrow to the row | Mac and web | iOS, Android, Windows have neither | open on those three |
 | DS8 | iOS resolves themes per view (fixed light values, a ternary at each use) | one palette per theme, as the Mac resolves them | iOS | open on iOS |
 | DS9 | Web-only surfaces (sidebar, panel, pill, count badge, card glass) | not tokens yet | web keeps them in its theme stylesheets | open: tokenise with the component specs |
 | DS10 | VS Code takes the editor's colours | product meanings only (priority order, overdue, glyphs) | astrid-vscode, by design | permanent |
+| DS11 | Detail field icon column: field content starts under the title | 62 comfortable (16 + 34 + 12), 29 compact (19 + 10) | Web 56 (16 + 32 + 8), which follows from DS4 | open on web, with DS4 |
+| DS12 | Subtask indent per depth, at most four deep | 16 | Web indents 24 | open on web |
+| DS13 | Corner radius per component: row 8; board card 8 / 6; board column 12 / 8; details panel 16 / 14 | iOS / Mac | Web draws rows, cards and the panel at 12 | open on web |
+| DS14 | Row minimum height | 76 comfortable, 52 compact | Web 64 at every width | open on web |
+| DS15 | Motion comes from the tokens | `motion.*` | Web reads none of them (57 durations written out). iOS writes its springs out (board 0.28/0.88, panel 0.36/0.92, mode switch 200 ms against medium's 220). The Mac's hover is a literal 0.1 | open on all three |
+| DS16 | Completing a task | undecided | The Mac pops the checkbox on a spring; iOS gives a haptic and no motion; web does neither | undecided: which is the reference |
+| DS17 | Reduced motion is honoured | every animation has a no-motion form | No client checks the system setting | open everywhere |
+| DS18 | A completed task: title struck through and muted, its mark at `state.completed-mark-opacity` | iOS and Mac | Web also dims the whole row to 75% | open on web |
+| DS19 | Title truncation in a row | undecided | iOS wraps without limit (one line beside an open panel), the Mac stops at two lines, web wraps without limit | undecided |
+| DS20 | Hairline width | 0.5 | Web draws 1 px | open on web; 0.5 px only on high-density screens |
+| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent | Under a partner accent the square follows the brand and the checkbox art stays Astrid blue, on iOS and web alike | open: draw or tint the art from the tokens |
+| DS22 | Priority glyphs as text (`!!` in a header or menu) | the priority colour | Medium's amber is 1.7:1 on white; the web used a darker orange (2.8:1) before adopting the token. "None" as text uses muted text on web | open: text variants of the priority colours, checked for contrast |
+| DS23 | Trade-off grid and Decision cards: the five rating fills and their text colours, cells 84-150 wide with a 3 gap and radius 4, a 10 swatch in the key, cards at radius 10 with a 24 number badge | iOS (`DecisionViews.swift`) | Web draws a 4 gap, radius 6 cells and a 12 swatch. iOS draws the dark text as black at 87%, the token is `#111827` | open on web |
+| DS24 | Markdown headings | not tokens yet | iOS sizes them with Dynamic Type; web writes 1.75 / 1.375 / 1.125 / 1 rem | open: heading sizes join `type` |

@@ -466,18 +466,30 @@ fn web_css(tokens: &Tokens) -> String {
             ));
         }
     }
-    for (name, value) in object(&tokens.raw, "size") {
-        match value.as_object() {
-            Some(sizes) => {
-                for (key, size) in sizes {
-                    css.push_str(&format!(
-                        "  --astrid-size-{name}-{key}: {}px;\n",
-                        number(size)
-                    ));
+    // `size`, `layout` and `markdown` share a shape: lengths, per density or holding everywhere.
+    // A length is in px; a ratio (`*-scale`) has no unit.
+    for section in ["size", "layout", "markdown"] {
+        for (name, value) in object(&tokens.raw, section) {
+            match value.as_object() {
+                Some(sizes) => {
+                    for (key, size) in sizes {
+                        css.push_str(&format!(
+                            "  --astrid-{section}-{name}-{key}: {}{};\n",
+                            number(size),
+                            unit(key)
+                        ));
+                    }
                 }
+                None => css.push_str(&format!(
+                    "  --astrid-{section}-{name}: {}{};\n",
+                    number(&value),
+                    unit(&name)
+                )),
             }
-            None => css.push_str(&format!("  --astrid-size-{name}: {};\n", number(&value))),
         }
+    }
+    for (name, value) in object(&tokens.raw, "state") {
+        css.push_str(&format!("  --astrid-state-{name}: {};\n", number(&value)));
     }
     css.push_str("}\n");
 
@@ -499,6 +511,15 @@ fn web_css(tokens: &Tokens) -> String {
         css.push_str("}\n");
     }
     css
+}
+
+/// The CSS unit a length token takes. A ratio is a bare number.
+fn unit(key: &str) -> &'static str {
+    if key.ends_with("-scale") {
+        ""
+    } else {
+        "px"
+    }
 }
 
 fn camel(key: &str) -> String {
@@ -621,26 +642,38 @@ fn apple_swift(tokens: &Tokens) -> String {
             ));
         }
     }
-    swift.push_str("    }\n\n    enum Size {\n");
-    for (name, value) in object(&tokens.raw, "size") {
-        match value.as_object() {
-            Some(sizes) => {
-                swift.push_str(&format!("        enum {} {{\n", capitalised(&name)));
-                for (key, size) in sizes {
-                    swift.push_str(&format!(
-                        "            static let {}: CGFloat = {}\n",
-                        camel(key),
-                        number(size)
-                    ));
+    swift.push_str("    }\n");
+    for section in ["size", "layout", "markdown"] {
+        swift.push_str(&format!("\n    enum {} {{\n", capitalised(section)));
+        for (name, value) in object(&tokens.raw, section) {
+            match value.as_object() {
+                Some(sizes) => {
+                    swift.push_str(&format!("        enum {} {{\n", capitalised(&name)));
+                    for (key, size) in sizes {
+                        swift.push_str(&format!(
+                            "            static let {}: CGFloat = {}\n",
+                            camel(key),
+                            number(size)
+                        ));
+                    }
+                    swift.push_str("        }\n");
                 }
-                swift.push_str("        }\n");
+                None => swift.push_str(&format!(
+                    "        static let {}: CGFloat = {}\n",
+                    camel(&name),
+                    number(&value)
+                )),
             }
-            None => swift.push_str(&format!(
-                "        static let {}: CGFloat = {}\n",
-                camel(&name),
-                number(&value)
-            )),
         }
+        swift.push_str("    }\n");
+    }
+    swift.push_str("\n    enum State {\n");
+    for (name, value) in object(&tokens.raw, "state") {
+        swift.push_str(&format!(
+            "        static let {}: Double = {}\n",
+            camel(&name),
+            number(&value)
+        ));
     }
     swift.push_str("    }\n}\n");
     swift
@@ -827,7 +860,9 @@ mod tests {
   "shadow": {{ "sm": {{ "y": 1, "blur": 2, "alpha": 0.05 }} }},
   "type": {{ "comfortable": {{ "body": {{ "size": 17, "weight": 400 }} }} }},
   "motion": {{ "fast": {{ "ms": 150, "ease": "ease-out" }} }},
-  "size": {{ "comfortable": {{ "leading-control": 34 }}, "repeat-frame-scale": 1.25 }}
+  "size": {{ "comfortable": {{ "leading-control": 34 }}, "repeat-frame-scale": 1.25 }},
+  "layout": {{ "compact": {{ "row-min-height": 52 }}, "three-column-breakpoint": 1100 }},
+  "state": {{ "press-scale": 0.98 }}
 }}"##
         )
     }
@@ -908,6 +943,19 @@ mod tests {
             "{css}"
         );
         assert!(css.contains("  --astrid-space-4: 4px;"), "{css}");
+        assert!(
+            css.contains("  --astrid-size-comfortable-leading-control: 34px;"),
+            "{css}"
+        );
+        assert!(
+            css.contains("  --astrid-layout-compact-row-min-height: 52px;"),
+            "{css}"
+        );
+        assert!(
+            css.contains("  --astrid-layout-three-column-breakpoint: 1100px;"),
+            "{css}"
+        );
+        assert!(css.contains("  --astrid-state-press-scale: 0.98;"), "{css}");
         assert!(
             css.contains("  --astrid-size-repeat-frame-scale: 1.25;"),
             "{css}"
