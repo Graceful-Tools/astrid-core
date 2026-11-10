@@ -46,6 +46,10 @@ rather than going unnoticed at runtime.
 | `markdown.json` | `lib/markdown.ts` (`renderMarkdownWithLinks`) — **executed** in a jsdom window, so through DOMPurify as a page is, and the HTML read back into the core's blocks (the driver documents how): 130 texts: GFM, breaks, links and autolinks, references, task ids, HTML, and 23 `xss-*` sanitisation cases. 130 cases, none disputed: web adopted D38 (AWTD-1064) | `astrid_core::markdown` |
 | `my-tasks.json` | `lib/my-tasks-scope.ts` (`myTasksShows`, as `hooks/useFilterState.ts` calls it for `"my-tasks"`) — **executed** over ten tasks by reader, priority filter and assignee filter; completion and due date are left to `filters.json` rather than asserted twice. 18 cases, 222 disputed (D25) | `astrid_core::filters::my_tasks` |
 | `wire-shapes.json` | each `/api/v1` route's own Prisma select and serializer — **executed** over fixed records, so it is what the server sends rather than a description of it: six surfaces (the task list page and its `?omit=` variant, a task and a list read classic and GitHub-backed). Not a rule but a shape: every key on the wire must survive a decode and re-encode, and none may be invented (D53–D55) | `astrid_rules::model::Task`, `astrid_rules::model::TaskList` |
+| `agent-queue.json` | `app/api/v1/agent-queue/route.ts`, `lib/agent-queue.ts` (AWTD-1566) | no consumer here yet: the agent harnesses read it; held so `check-contracts` can say our copies are web's |
+| `agent-modes.json` | `app/api/v1/users/me/agent-modes/route.ts` (AWTD-1566) | no consumer here yet |
+| `fixall-claim.json` | `app/api/v1/tasks/[id]/claim-fixall/route.ts` (AWTD-1566) | no consumer here yet |
+| `agent-registry.json` | `lib/brand/agent-emails.ts`, `lib/ai/harness-agents.ts` (AWTD-1566) | no consumer here yet |
 
 ## Two kinds of export
 
