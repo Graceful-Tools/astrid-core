@@ -55,6 +55,31 @@ const AA_BODY: f64 = 4.5;
 const READABLE_TEXT: &[&str] = &["text-primary", "text-secondary", "text-muted"];
 const READABLE_ON: &[&str] = &["bg-primary", "bg-secondary"];
 
+/// A meaning drawn as text or an icon: the `<meaning>-ink` colours. The base colour (`accent`,
+/// `error`, …) is one mid-tone that is right as a fill and too light as text on a light surface;
+/// the ink is the same meaning dark enough (or, on a dark theme, light enough) to read.
+const INK_MEANINGS: &[&str] = &["accent", "error", "success", "warning", "info"];
+
+/// How strong a status wash is: the meaning's base colour at this opacity over the surface, behind
+/// a notice or a badge whose label is the ink. The web's `--theme-wash-opacity`.
+const INK_WASH: f64 = 0.12;
+
+/// The surfaces an ink is drawn on: `bg-secondary`, and the card. The tokens do not name the card
+/// yet (register DS9); it is the web's `--theme-surface`: `bg-hover` (the white) on a light theme,
+/// `bg-secondary` on a dark one. The page (`bg-primary`) is not held to this, because a theme's
+/// page may be a colour (Ocean's cyan), where a status colour is not drawn straight onto it.
+fn ink_surfaces(appearance: &str) -> &'static [&'static str] {
+    if appearance == "dark" {
+        &["bg-secondary"]
+    } else {
+        &["bg-hover", "bg-secondary"]
+    }
+}
+
+fn ink_card(appearance: &str) -> &'static str {
+    ink_surfaces(appearance)[0]
+}
+
 /// One colour: a literal, or the brand's, which a partner build replaces.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Colour {
@@ -160,6 +185,43 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
                 if ratio < AA_BODY {
                     problems.push(format!(
                         "themes.{name}: {text} on {surface} is {ratio:.2}:1, under {AA_BODY}:1"
+                    ));
+                }
+            }
+        }
+    }
+
+    // A meaning as text reads on the theme's surfaces, and on its own wash over the card. A brand
+    // colour is checked at Astrid's value; a partner's is the partner's to check.
+    let literal = |theme: &Theme, key: &str| match theme.colours.get(key)? {
+        Colour::Hex(r, g, b) => Some((*r, *g, *b)),
+        Colour::Brand(reference) => brand.get(reference).copied(),
+    };
+    for (name, theme) in &themes {
+        for meaning in INK_MEANINGS {
+            let ink_name = format!("{meaning}-ink");
+            let (Some(ink), Some(base)) = (literal(theme, &ink_name), literal(theme, meaning))
+            else {
+                continue;
+            };
+            for surface in ink_surfaces(&theme.appearance) {
+                let Some(on) = literal(theme, surface) else {
+                    continue;
+                };
+                let ratio = contrast(ink, on);
+                if ratio < AA_BODY {
+                    problems.push(format!(
+                        "themes.{name}: {ink_name} on {surface} is {ratio:.2}:1, under {AA_BODY}:1"
+                    ));
+                }
+            }
+            let card = ink_card(&theme.appearance);
+            if let Some(on) = literal(theme, card) {
+                let ratio = contrast(ink, over(base, on, INK_WASH));
+                if ratio < AA_BODY {
+                    problems.push(format!(
+                        "themes.{name}: {ink_name} on the {meaning} wash over {card} is \
+                         {ratio:.2}:1, under {AA_BODY}:1"
                     ));
                 }
             }
@@ -324,6 +386,16 @@ pub fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
     }
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `top` at `alpha` over `under`, as a browser composites it: per channel, rounded.
+pub fn over(top: (u8, u8, u8), under: (u8, u8, u8), alpha: f64) -> (u8, u8, u8) {
+    let mix = |t: u8, u: u8| (f64::from(t) * alpha + f64::from(u) * (1.0 - alpha)).round() as u8;
+    (
+        mix(top.0, under.0),
+        mix(top.1, under.1),
+        mix(top.2, under.2),
+    )
 }
 
 // ── Emitters ──────────────────────────────────────────────────────────────────────────────────
@@ -544,6 +616,8 @@ fn apple_swift(tokens: &Tokens) -> String {
         "accent" => "Brand.accentColor".to_string(),
         "accent-hover" => "Brand.accentHoverColor".to_string(),
         "accent-text" => "Brand.accentTextColor".to_string(),
+        "accent-ink" => "Brand.accentInkColor".to_string(),
+        "accent-ink-dark" => "Brand.accentInkDarkColor".to_string(),
         other => format!("Brand.{}Color", camel(other)),
     };
     let mut swift = String::from("import SwiftUI\n\nenum AstridTokens {\n");
@@ -907,6 +981,81 @@ mod tests {
         );
     }
 
+    /// astrid-web AWTD-1575: one mid-tone per meaning is a fill, not text. `text-red-600` became the
+    /// error red and fell from 4.83:1 to 3.76:1 on white. The ink is held to body text's 4.5:1 on
+    /// the theme's surfaces and on its own wash.
+    #[test]
+    fn an_ink_a_theme_cannot_read_is_refused() {
+        let with_ink = |ink: &str| {
+            source("", "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                &format!(
+                    r##""accent": "{{brand.accent}}", "bg-hover": "#FFFFFF", "error": "#EF4444", "error-ink": "{ink}""##
+                ),
+            )
+        };
+        // The fill itself, as text.
+        let problems = parse(&with_ink("#EF4444"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.light: error-ink on bg-hover")),
+            "{problems:?}"
+        );
+        // Readable on white (4.83:1) and not on its own wash (4.14:1).
+        let problems = parse(&with_ink("#DC2626"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.light: error-ink on the error wash over bg-hover")),
+            "{problems:?}"
+        );
+        // Dark inherits it, and a red that reads on white does not on a dark card.
+        let problems = parse(&with_ink("#B91C1C"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.starts_with("themes.dark: error-ink")),
+            "{problems:?}"
+        );
+    }
+
+    /// The accent's ink is the brand's, so a partner replaces it with the accent; the committed
+    /// inks are the values the register records.
+    #[test]
+    fn the_committed_inks_are_readable_and_the_accents_is_the_brands() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        for (name, theme) in &tokens.themes {
+            for meaning in INK_MEANINGS {
+                assert!(
+                    theme.colours.contains_key(&format!("{meaning}-ink")),
+                    "{name} has no {meaning}-ink"
+                );
+            }
+            let want = if theme.appearance == "dark" {
+                "accent-ink-dark"
+            } else {
+                "accent-ink"
+            };
+            assert_eq!(
+                theme.colours["accent-ink"],
+                Colour::Brand(want.to_string()),
+                "{name}"
+            );
+        }
+        let css = web_css(&tokens);
+        assert!(
+            css.contains("  --astrid-accent-ink: var(--brand-accent-ink-rgb, 37, 99, 235);"),
+            "{css}"
+        );
+        assert!(
+            css.contains("  --astrid-accent-ink: var(--brand-accent-ink-dark-rgb, 96, 165, 250);"),
+            "{css}"
+        );
+    }
+
     /// A theme the core cannot name is one nobody can choose.
     #[test]
     fn the_themes_are_the_cores_theme_modes() {
@@ -986,10 +1135,7 @@ mod tests {
         let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
         let json: serde_json::Value = serde_json::from_str(&source).expect("json");
         assert_eq!(json["size"]["repeat-frame-scale"].as_f64(), Some(1.0));
-        assert_eq!(
-            json["size"]["repeat-frame-inner-scale"].as_f64(),
-            Some(1.0)
-        );
+        assert_eq!(json["size"]["repeat-frame-inner-scale"].as_f64(), Some(1.0));
     }
 
     /// The real file: valid, and already generated. This is what fails a pull request that edits

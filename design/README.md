@@ -56,9 +56,33 @@ A theme is data. To add one:
 3. `cargo xtask gen-design`.
 
 The generator refuses a theme that the core cannot name, a colour name one theme has and another
-lacks, and body text under 4.5:1 against the theme's own page (`bg-primary`, `bg-secondary`). A
-brand's accent is not a theme: it is the `{brand.*}` references, which a partner build replaces in
-every theme at once.
+lacks, body text under 4.5:1 against the theme's own page (`bg-primary`, `bg-secondary`), and an
+ink (below) under 4.5:1 on the theme's surfaces or on its own wash. A brand's accent is not a
+theme: it is the `{brand.*}` references, which a partner build replaces in every theme at once.
+
+## A meaning as a fill, and as text
+
+`accent`, `error`, `success`, `warning` and `info` are one mid-tone each, the same in every theme.
+That is the colour of a **fill**, a border or a ring. As **text or an icon** on the theme's own
+surfaces it is too light on white (the error red is 3.76:1) and was a lighter shade on dark, so
+each has an ink: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`, `info-ink`. A theme with
+a light appearance takes a darker shade, a dark one a lighter shade.
+
+| Use | Token |
+|---|---|
+| A solid fill, a border, a focus ring, a wash (the colour at 12%) | `error` |
+| A label, a link or an icon on a surface, or on the meaning's own wash | `error-ink` |
+| Text on the solid fill | `accent-text` |
+
+The generator holds each ink to 4.5:1 on `bg-secondary`, on the card (`bg-hover` in a light theme,
+`bg-secondary` in a dark one; DS9) and on its own 12% wash over the card. The page is not checked:
+Ocean's is cyan, where an ink is 3.1-3.5:1, and a status colour belongs on a card there.
+
+`accent-ink` is the brand's, like `accent`: `brand.accent-ink` for light themes and
+`brand.accent-ink-dark` for dark ones, with Astrid's blues as the defaults. The generator has no
+way to derive one colour from another, so a partner build supplies both with its accent (on web
+`--brand-accent-ink-rgb` and `--brand-accent-ink-dark-rgb`, on Apple `Brand.accentInkColor` and
+`Brand.accentInkDarkColor`); the contrast check runs on Astrid's values only.
 
 ## What a platform may do differently
 
@@ -97,3 +121,4 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS22 | Priority glyphs as text (`!!` in a header or menu) | the priority colour | Medium's amber is 1.7:1 on white; the web used a darker orange (2.8:1) before adopting the token. "None" as text uses muted text on web | open: text variants of the priority colours, checked for contrast |
 | DS23 | Trade-off grid and Decision cards: the five rating fills and their text colours, cells 84-150 wide with a 3 gap and radius 4, a 10 swatch in the key, cards at radius 10 with a 24 number badge | iOS (`DecisionViews.swift`) | Web draws a 4 gap, radius 6 cells and a 12 swatch. iOS draws the dark text as black at 87%, the token is `#111827` | open on web |
 | DS24 | Markdown headings | not tokens yet | iOS sizes them with Dynamic Type; web writes 1.75 / 1.375 / 1.125 / 1 rem | open: heading sizes join `type` |
+| DS25 | A meaning as text or an icon: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`, `info-ink` | Web's (AWTD-1575): it wrote a darker shade for text on light and a lighter one on dark (`text-blue-600 dark:text-blue-400`), and reading the single mid-tone as text dropped links from 5.17:1 to 3.68:1 and error text from 4.83:1 to 3.76:1. Light and Ocean `#2563EB`, `#B91C1C`, `#15803D`, `#B45309`, `#0E7490`; Dark `#60A5FA`, `#F87171`, `#4ADE80`, `#FBBF24`, `#22D3EE`. The error ink is one step darker than web's `#DC2626`, which is 4.14:1 on its own wash. Additive: no existing value changes | iOS, Mac, Windows and Android draw text and icons in the fill colour. Web adopts with its next vendored copy. A partner build has to supply `accent-ink` and `accent-ink-dark` with its accent | open on iOS, Mac, Windows, Android: adopt at the next re-vendor |
