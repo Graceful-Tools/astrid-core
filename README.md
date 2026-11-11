@@ -135,6 +135,7 @@ crates/astrid-core/src/
 crates/xtask/   cargo xtask check-contracts
 contracts/      the fixtures generated from astrid-web, and the exporter (see contracts/README.md)
 docs/CONTRACTS.md   the decisions and known divergences between clients
+docs/CROSS_CLIENT_REVIEW_2026-11.md   what each client still re-implements, theming, white-label gaps
 ```
 
 ## License

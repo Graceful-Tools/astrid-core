@@ -9,11 +9,17 @@ November platform assessment on the strength of a stale manifest nobody had look
 This file is that statement, and `cargo xtask check-pins` keeps it honest on every push and once a
 week.
 
+> **Not yet rows (2026-11-11).** Two more repositories vendor the `astrid-rules` wasm and are not in
+> the table or in `check-pins`: astrid-vscode (`vendor/astrid-rules/REVISION`, `3dcc880`) and
+> astrid-code (`extensions/astrid/dist/astrid-rules/REVISION`, `765e38e`). Neither are the design-token
+> copies (web `packages/astrid-design/REVISION`, iOS `AstridTokens.swift`). Adding them is AWTD2-160;
+> see [docs/CROSS_CLIENT_REVIEW_2026-11.md](./docs/CROSS_CLIENT_REVIEW_2026-11.md) §2.1.
+
 | Repository | Takes | Pinned in | Revision |
 |---|---|---|---|
 | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `52a371d21781f59dd4814d68794f533df85587ae` |
 | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `8c3274dba50a3760d7c38043ba8f446015523d21` |
-| [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI | `core/` (see its `docs/CORE_MIGRATION.md`) | `3677cfb631d6fe415db5a77403e2c79f4e0b8c2b` |
+| [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI | `core/` (see its `docs/CORE_MIGRATION.md`) | `a503a62039fca9a19ce7802a2d9f6d38ae5f89d8` |
 | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI | `core/` | `2cf2b5fb202ce99147d6a00c01e3041b1cdccf0a` |
 
 **Full forty-character shas, never short ones.** A short sha is ambiguous as the history grows,

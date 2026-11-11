@@ -27,7 +27,7 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | File in `generated/` | For | Vendored at |
 |---|---|---|
 | `web/astrid-tokens.css` | astrid-web: CSS custom properties, colours as `r, g, b` triplets | `packages/astrid-design/` with a `REVISION` |
-| `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | not adopted yet |
+| `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | `Astrid App/Utilities/AstridTokens.swift`, hash-checked by `check:contracts` (AITD-605/610) |
 | `tokens.resolved.json` | every client: the source with each theme's `extends` flattened | `packages/astrid-design/` in astrid-web |
 
 Android (Compose) and Windows (XAML) emitters are added to `crates/xtask/src/design.rs` in the
@@ -96,7 +96,9 @@ Ocean's is cyan, where an ink is 3.1-3.5:1, and a status colour belongs on a car
 `brand.accent-ink-dark` for dark ones, with Astrid's blues as the defaults. The generator has no
 way to derive one colour from another, so a partner build supplies both with its accent (on web
 `--brand-accent-ink-rgb` and `--brand-accent-ink-dark-rgb`, on Apple `Brand.accentInkColor` and
-`Brand.accentInkDarkColor`); the contrast check runs on Astrid's values only.
+`Brand.accentInkDarkColor` — which the Swift names but `Brand.swift` does not define yet, so iOS cannot
+re-vendor past DS25 until AITD-615 adds them); the contrast check runs on Astrid's values only.
+Deriving both inks from one accent, and checking a partner's, is AWTD2-159.
 
 ## What a platform may do differently
 
