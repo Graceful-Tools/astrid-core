@@ -143,7 +143,7 @@
       "selection-outline": 1.5
     },
     "hairline": 0.5,
-    "repeat-frame-inner-scale": 0.625,
+    "repeat-frame-inner-scale": 1.0,
     "repeat-frame-scale": 1.0
   },
   "space": [

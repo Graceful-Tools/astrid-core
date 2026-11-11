@@ -976,8 +976,10 @@ mod tests {
     }
 
     /// AITD-612: the repeat arrows round someone else's photo or the "U" are the plain square's
-    /// own size on every platform, as the web has drawn them since AWTD-1576 (Jon, 2026-11-11).
-    /// At 1.25 they were bigger than the squares beside them and stuck out of the column.
+    /// own size on every platform (Jon, 2026-11-11). At 1.25 they were bigger than the squares
+    /// beside them and stuck out of the column. Reopened the same day: the photo inside must be
+    /// the same size as a non-repeating task's photo ("The same size as the default profile
+    /// photo"), so the arrows are the photo's border and the inner scale is 1.0, not 0.625.
     #[test]
     fn the_repeat_frame_is_the_size_of_the_square_it_replaces() {
         let root = crate::repo_root();
@@ -986,7 +988,7 @@ mod tests {
         assert_eq!(json["size"]["repeat-frame-scale"].as_f64(), Some(1.0));
         assert_eq!(
             json["size"]["repeat-frame-inner-scale"].as_f64(),
-            Some(0.625)
+            Some(1.0)
         );
     }
 
