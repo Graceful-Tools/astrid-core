@@ -97,6 +97,19 @@ const AA_LINE: f64 = 3.0;
 /// A line that must be seen against the page it is drawn on.
 const VISIBLE_LINES: &[&str] = &["border-focus"];
 
+/// The priority colours: an outline, a mark or a glyph on a card, so each is seen against it.
+const PRIORITIES: &[&str] = &[
+    "priority-none",
+    "priority-low",
+    "priority-medium",
+    "priority-high",
+];
+
+/// The priority colours under `AA_LINE` on the card today, by the theme's appearance. Recorded,
+/// not fixed: the register's DS22 is where a text variant of the priority colours is decided. The
+/// amber is 1.67:1 on a white card.
+const FAINT_PRIORITIES: &[(&str, &str)] = &[("light", "priority-medium")];
+
 /// One colour: a literal, or the brand's, which a partner build replaces.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Colour {
@@ -272,6 +285,29 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
                         "themes.{name}: {line} on {surface} is {ratio:.2}:1, under {AA_LINE}:1"
                     ));
                 }
+            }
+        }
+    }
+
+    // A priority colour shows on the card it is drawn on (astrid-web AWTD-1575: low priority
+    // followed the darker accent to 2.84:1 on a dark card, and the repeat frame went dim).
+    for (name, theme) in &themes {
+        let card = ink_card(&theme.appearance);
+        let Some(on) = literal(theme, card) else {
+            continue;
+        };
+        for priority in PRIORITIES {
+            if FAINT_PRIORITIES.contains(&(theme.appearance.as_str(), priority)) {
+                continue;
+            }
+            let Some(colour) = literal(theme, priority) else {
+                continue;
+            };
+            let ratio = contrast(colour, on);
+            if ratio < AA_LINE {
+                problems.push(format!(
+                    "themes.{name}: {priority} on {card} is {ratio:.2}:1, under {AA_LINE}:1"
+                ));
             }
         }
     }
@@ -1183,16 +1219,16 @@ mod tests {
                 Colour::Brand("accent".to_string()),
                 "{name}"
             );
-            assert_eq!(
-                theme.colours["priority-low"],
-                Colour::Brand("accent".to_string()),
-                "{name}"
-            );
             let ring = if theme.appearance == "dark" {
                 "accent-ink-dark"
             } else {
                 "accent"
             };
+            assert_eq!(
+                theme.colours["priority-low"],
+                Colour::Brand(ring.to_string()),
+                "{name}"
+            );
             assert_eq!(
                 theme.colours["border-focus"],
                 Colour::Brand(ring.to_string()),
@@ -1202,6 +1238,55 @@ mod tests {
         assert!(contrast(white, tokens.brand["accent"]) >= AA_BODY);
         assert!(contrast(white, tokens.brand["accent-hover"]) >= AA_BODY);
         assert!(contrast(white, (220, 38, 38)) >= AA_BODY);
+    }
+
+    /// astrid-web AWTD-1575: low priority is the accent, and the accent that carries a white label
+    /// is 2.84:1 on a dark card, where the repeat frame went dim. A dark theme draws it in the
+    /// accent's lighter shade, and a priority colour a card cannot show is refused.
+    #[test]
+    fn a_priority_a_card_cannot_show_is_refused() {
+        let with_low = |dark: &str| {
+            source(dark, "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                r##""accent": "{brand.accent}", "bg-hover": "#FFFFFF", "priority-low": "#2563EB""##,
+            )
+        };
+        let problems = parse(&with_low(""), THEMES).unwrap_err();
+        assert_eq!(
+            problems,
+            vec!["themes.dark: priority-low on bg-secondary is 2.84:1, under 3:1".to_string()]
+        );
+        assert!(parse(&with_low(r##", "priority-low": "#60A5FA""##), THEMES).is_ok());
+    }
+
+    /// The committed priority colours show on every theme's card, bar the ones the register
+    /// records (DS22), and each of those is still under the line: an exception that no longer
+    /// fails is one to delete.
+    #[test]
+    fn the_committed_priorities_show_on_the_card() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        let value = |theme: &Theme, key: &str| match &theme.colours[key] {
+            Colour::Hex(r, g, b) => (*r, *g, *b),
+            Colour::Brand(reference) => tokens.brand[reference],
+        };
+        for (name, theme) in &tokens.themes {
+            let card = value(theme, ink_card(&theme.appearance));
+            for priority in PRIORITIES {
+                let ratio = contrast(value(theme, priority), card);
+                let recorded = FAINT_PRIORITIES.contains(&(theme.appearance.as_str(), priority));
+                assert_eq!(
+                    ratio < AA_LINE,
+                    recorded,
+                    "{name}: {priority} is {ratio:.2}:1 on the card"
+                );
+            }
+            // The others are their own colours in every theme.
+            assert_eq!(theme.colours["priority-none"], Colour::Hex(107, 114, 128));
+            assert_eq!(theme.colours["priority-medium"], Colour::Hex(251, 191, 36));
+            assert_eq!(theme.colours["priority-high"], Colour::Hex(239, 68, 68));
+        }
     }
 
     /// A theme the core cannot name is one nobody can choose.
