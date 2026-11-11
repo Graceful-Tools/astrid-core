@@ -56,23 +56,37 @@ A theme is data. To add one:
 3. `cargo xtask gen-design`.
 
 The generator refuses a theme that the core cannot name, a colour name one theme has and another
-lacks, body text under 4.5:1 against the theme's own page (`bg-primary`, `bg-secondary`), and an
-ink (below) under 4.5:1 on the theme's surfaces or on its own wash. A brand's accent is not a
-theme: it is the `{brand.*}` references, which a partner build replaces in every theme at once.
+lacks, body text under 4.5:1 against the theme's own page (`bg-primary`, `bg-secondary`), an
+ink (below) under 4.5:1 on the theme's surfaces or on its own wash, a label under 4.5:1 on the
+accent, its hover or the error fill, and a focus ring under 3:1 on the page. A brand's accent is
+not a theme: it is the `{brand.*}` references, which a partner build replaces in every theme at
+once.
 
 ## A meaning as a fill, and as text
 
-`accent`, `error`, `success`, `warning` and `info` are one mid-tone each, the same in every theme.
-That is the colour of a **fill**, a border or a ring. As **text or an icon** on the theme's own
-surfaces it is too light on white (the error red is 3.76:1) and was a lighter shade on dark, so
-each has an ink: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`, `info-ink`. A theme with
-a light appearance takes a darker shade, a dark one a lighter shade.
+`accent`, `error`, `success`, `warning` and `info` are one colour each, the same in every theme.
+That is the colour of a **fill**, a border or a wash. As **text or an icon** on the theme's own
+surfaces it does not read everywhere (the success green is 2.3:1 on white, the accent 2.84:1 on a
+dark card), so each has an ink: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`,
+`info-ink`. A theme with a light appearance takes a darker shade, a dark one a lighter shade.
 
 | Use | Token |
 |---|---|
-| A solid fill, a border, a focus ring, a wash (the colour at 12%) | `error` |
+| A solid fill, a border, a wash (the colour at 12%) | `error` |
 | A label, a link or an icon on a surface, or on the meaning's own wash | `error-ink` |
 | Text on the solid fill | `accent-text` |
+| The focus ring, and the line around a selected row | `border-focus`, `bg-selected-border` |
+
+**A fill that carries a label is dark enough for it** (DS26). `accent`, `accent-hover` and `error`
+are buttons, and `accent-text` (white) on each is 5.17:1, 6.70:1 and 4.83:1. The generator refuses
+any of the three under 4.5:1. `success`, `warning` and `info` are not held to it: they are washes
+and marks, and a label on one is the theme's text on its wash.
+
+A fill that dark is a poor line on a dark theme (the accent is 2.84:1 on Dark's card), so the two
+lines that carry meaning by themselves follow the theme: `border-focus` is the accent on a light
+theme and the accent's dark ink on a dark one, as is Dark's `bg-selected-border`. The generator
+holds `border-focus` to 3:1 on the page (`bg-primary`, `bg-secondary`). Any other accent or error
+line on a dark surface (a border, a ring a client draws from `accent`) should read the ink there.
 
 The generator holds each ink to 4.5:1 on `bg-secondary`, on the card (`bg-hover` in a light theme,
 `bg-secondary` in a dark one; DS9) and on its own 12% wash over the card. The page is not checked:
@@ -100,25 +114,26 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS1 | Ocean text colours | Web's, one step darker than light's (web AWTD-1496: grey on cyan measured 3.1:1) | iOS, Mac, Android use light's | open on Apple and Android |
 | DS2 | Priority colours | iOS's `#6B7280`, accent, `#FBBF24`, `#EF4444` | Windows samples the checkbox art (`#B3B6BA`, `#328ACC`, `#F5AF39`, `#D5392E`) | open on Windows |
 | DS3 | Surfaces and borders | iOS's | Windows follows the web's old values (light border `#EBEDF0`, selection `#F3F8FF`) | open on Windows; web adopts with its first vendored copy |
-| DS4 | Leading control size, touch | 34 | Web draws 32 px | open on web; a sizing change, so its own task |
+| DS4 | Leading control size, touch | 34 | Nobody: web draws 34 from the token (`size.leading-control`) | closed on web |
 | DS5 | Selection outline | The Mac's (Jon, 2026-11-10): the accent at `state.selection-outline-opacity` (55%), 1.5 wide on pointer layouts and 2.5 on touch | iOS draws it solid. Web adopts with its next vendored copy | open on iOS (opacity) |
-| DS6 | Repeat frame around a photo or the unassigned mark | The control's own size (`repeat-frame-scale` 1.0), and the photo or "U" fills it (`repeat-frame-inner-scale` 1.0): the arrows are the photo's border, in place of the priority outline (Jon, 2026-11-11, AITD-612 reopened: "The same size as the default profile photo"; was 0.625, and 1.25 before that) | iOS and Mac draw it by hand until they re-vendor at this revision; web still draws a 20px photo in 32px arrows (AWTD-1576) and has to follow | open on web; Apple vendoring only |
+| DS6 | Repeat frame around a photo or the unassigned mark | The control's own size (`repeat-frame-scale` 1.0), and the photo or "U" fills it (`repeat-frame-inner-scale` 1.0): the arrows are the photo's border, in place of the priority outline (Jon, 2026-11-11, AITD-612 reopened: "The same size as the default profile photo"; was 0.625, and 1.25 before that) | iOS and Mac draw it by hand until they re-vendor at this revision. Web draws it as iOS does, the frame and the photo both at 1.0 from the tokens (AWTD-1579) | closed on web; Apple vendoring only |
 | DS7 | Task details panel: opens out of the selected row over `motion.panel`, wearing the selection outline, with an arrow to the row. Wherever the list and the details share the screen: Mac, desktop web, iPad, Windows, and two-pane Android (tablets, foldables, dual-screen). Not a phone's single pane (Jon, 2026-11-10) | Mac and web | iPad, Android and Windows have neither | open on those three |
 | DS8 | iOS resolves themes per view (fixed light values, a ternary at each use) | one palette per theme, as the Mac resolves them | iOS | open on iOS |
-| DS9 | Web-only surfaces (sidebar, panel, pill, count badge, card glass) | not tokens yet | web keeps them in its theme stylesheets | open: tokenise with the component specs |
+| DS9 | Web-only surfaces (sidebar, panel, pill, count badge, card glass) | not tokens yet | Web names each once in its theme stylesheets as a variable that reads a token, so none is a colour written out. Two directional shadows are still written out there (one upward, one to the left): `shadow` has no direction | closed as far as web can go; open: name the surfaces and a directional shadow here, with the component specs |
 | DS10 | VS Code takes the editor's colours | product meanings only (priority order, overdue, glyphs) | astrid-vscode, by design | permanent |
-| DS11 | Detail field icon column: field content starts under the title | 62 comfortable (16 + 34 + 12), 29 compact (19 + 10) | Web 56 (16 + 32 + 8), which follows from DS4 | open on web, with DS4 |
+| DS11 | Detail field icon column: field content starts under the title | 62 comfortable (16 + 34 + 12), 29 compact (19 + 10) | Web 58 (16 + 34 + 8): the control is the token's, the gap is 8 against 12 | open on web: the gap |
 | DS12 | Subtask indent per depth, at most four deep | 16 | Web indents 24 | open on web |
 | DS13 | Corner radius per component: row 8; board card 8 / 6; board column 12 / 8; details panel 16 / 14 | iOS / Mac | Web draws rows, cards and the panel at 12 | open on web |
 | DS14 | Row minimum height | 76 comfortable, 52 compact | Web 64 at every width | open on web |
-| DS15 | Motion comes from the tokens | `motion.*` | Web reads none of them (57 durations written out). iOS writes its springs out (board 0.28/0.88, panel 0.36/0.92, mode switch 200 ms against medium's 220). The Mac's hover is a literal 0.1 | open on all three |
+| DS15 | Motion comes from the tokens | `motion.*` | Web's stylesheets read them all; five durations are still written out in its components. iOS writes its springs out (board 0.28/0.88, panel 0.36/0.92, mode switch 200 ms against medium's 220). The Mac's hover is a literal 0.1 | closed for web's stylesheets, open for its components (five); open on iOS and Mac |
 | DS16 | Completing a task | The Mac's and iOS's together (Jon, 2026-11-10): the checkbox pops to `state.complete-pop-scale` (1.28) on `motion.spring`, with a success haptic where the device has one | iOS has the haptic and no pop; the Mac has the pop; web and Android have neither until they adopt | open on iOS, Android, Windows; web adopts with its next vendored copy |
 | DS17 | Reduced motion is honoured | every animation has a no-motion form | No client checks the system setting | open everywhere |
 | DS18 | A completed task: title struck through and muted, its mark at `state.completed-mark-opacity` | iOS and Mac | Web also dims the whole row to 75% | open on web |
 | DS19 | Title in a row | iOS's (Jon, 2026-11-10): it wraps without limit by default, and an appearance setting on every client chooses wrap, two lines or one line. The choice belongs to the machine, like the theme | The Mac stops at two lines with no setting | open on Mac, iOS, Android, Windows (the setting); web adopts now |
 | DS20 | Hairline width | 0.5 | Web draws 1 px | open on web; 0.5 px only on high-density screens |
-| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent | Under a partner accent the square follows the brand and the checkbox art stays Astrid blue, on iOS and web alike | accepted as it is (Jon, 2026-11-10) |
+| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent | Under a partner accent the square follows the brand and the checkbox art stays Astrid blue, on iOS and web alike. Since DS26 the same holds for Astrid itself: low priority drawn from the token is the darker accent `#2563EB`, the art the blue it was drawn in | accepted as it is (Jon, 2026-11-10); the art against the darker accent has not been looked at |
 | DS22 | Priority glyphs as text (`!!` in a header or menu) | the priority colour | Medium's amber is 1.7:1 on white; the web used a darker orange (2.8:1) before adopting the token. "None" as text uses muted text on web | open: text variants of the priority colours, checked for contrast |
 | DS23 | Trade-off grid and Decision cards: the five rating fills and their text colours, cells 84-150 wide with a 3 gap and radius 4, a 10 swatch in the key, cards at radius 10 with a 24 number badge | iOS (`DecisionViews.swift`) | Web draws a 4 gap, radius 6 cells and a 12 swatch. iOS draws the dark text as black at 87%, the token is `#111827` | open on web |
 | DS24 | Markdown headings | not tokens yet | iOS sizes them with Dynamic Type; web writes 1.75 / 1.375 / 1.125 / 1 rem | open: heading sizes join `type` |
-| DS25 | A meaning as text or an icon: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`, `info-ink` | Web's (AWTD-1575): it wrote a darker shade for text on light and a lighter one on dark (`text-blue-600 dark:text-blue-400`), and reading the single mid-tone as text dropped links from 5.17:1 to 3.68:1 and error text from 4.83:1 to 3.76:1. Light and Ocean `#2563EB`, `#B91C1C`, `#15803D`, `#B45309`, `#0E7490`; Dark `#60A5FA`, `#F87171`, `#4ADE80`, `#FBBF24`, `#22D3EE`. The error ink is one step darker than web's `#DC2626`, which is 4.14:1 on its own wash. Additive: no existing value changes | iOS, Mac, Windows and Android draw text and icons in the fill colour. Web adopts with its next vendored copy. A partner build has to supply `accent-ink` and `accent-ink-dark` with its accent | open on iOS, Mac, Windows, Android: adopt at the next re-vendor |
+| DS25 | A meaning as text or an icon: `accent-ink`, `error-ink`, `success-ink`, `warning-ink`, `info-ink` | Web's (AWTD-1575): it wrote a darker shade for text on light and a lighter one on dark (`text-blue-600 dark:text-blue-400`), and reading the single mid-tone as text dropped links from 5.17:1 to 3.68:1 and error text from 4.83:1 to 3.76:1. Light and Ocean `#1D4ED8`, `#B91C1C`, `#15803D`, `#B45309`, `#0E7490`; Dark `#60A5FA`, `#F87171`, `#4ADE80`, `#FBBF24`, `#22D3EE`. The error ink is one step darker than web's `#DC2626`, which is 4.14:1 on its own wash; the accent ink was `#2563EB` until DS26 made that the fill, where it is 4.37:1 on its own wash | iOS, Mac, Windows and Android draw text and icons in the fill colour. Web adopts with its next vendored copy. A partner build has to supply `accent-ink` and `accent-ink-dark` with its accent | open on iOS, Mac, Windows, Android: adopt at the next re-vendor |
+| DS26 | A fill that carries a label: `accent`, `accent-hover`, `error` | Darkened (Jon, 2026-11-11: "Darken accent and error in the shared tokens, every platform follows"; web AWTD-1575) so the label on a button is readable. `accent` `#2563EB` (white on it 5.17:1, was `#3B82F6` at 3.68:1), `accent-hover` `#1D4ED8` (6.70:1, one step on so it is still a hover), `error` `#DC2626` (4.83:1, was `#EF4444` at 3.76:1), in every theme; the generator refuses a label under 4.5:1. What follows: `priority-low` and a light theme's `border-focus` are the accent; `accent-ink` on light themes moves to `#1D4ED8` (DS25); Dark's `border-focus` and `bg-selected-border` become the accent's dark ink `#60A5FA`, because the new accent is 2.84:1 as a line on a dark card. What stays: `priority-high` and `overdue` (`#EF4444`: priority's and the due date's own reds, drawn as marks and text, and darker would lose them on dark), the list palette's blue and red (a person's choice), `bg-selected` and light's `bg-selected-border` (tints) | Every client until it re-vendors. iOS and Mac also change `Brand.accentColor`, `Brand.accentHoverColor` and `Brand.accentInkColor`, which the generated Swift names and does not hold; a partner build supplies its own. A client that draws a border, ring or selection outline from `accent` on a dark theme should check it there | open on iOS, Mac, Windows, Android: adopt at the next re-vendor. Web adopts with its next vendored copy |
