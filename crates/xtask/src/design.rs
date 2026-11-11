@@ -80,6 +80,23 @@ fn ink_card(appearance: &str) -> &'static str {
     ink_surfaces(appearance)[0]
 }
 
+/// A solid fill and the text a client draws on it: (fill, label). A button's label is body text, so
+/// it is held to the same 4.5:1. No token names the text on an error fill; every client that
+/// draws one (the web's `--destructive-foreground`, `text-danger-foreground`) uses `accent-text`.
+/// `success`, `warning` and `info` are not held to this: they are washes and marks, and white on
+/// the warning amber is 2.1:1 (the web's spec says to prefer a wash there).
+const LABELLED_FILLS: &[(&str, &str)] = &[
+    ("accent", "accent-text"),
+    ("accent-hover", "accent-text"),
+    ("error", "accent-text"),
+];
+
+/// WCAG 1.4.11 for a line that carries meaning on its own: the focus ring.
+const AA_LINE: f64 = 3.0;
+
+/// A line that must be seen against the page it is drawn on.
+const VISIBLE_LINES: &[&str] = &["border-focus"];
+
 /// One colour: a literal, or the brand's, which a partner build replaces.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Colour {
@@ -222,6 +239,37 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
                     problems.push(format!(
                         "themes.{name}: {ink_name} on the {meaning} wash over {card} is \
                          {ratio:.2}:1, under {AA_BODY}:1"
+                    ));
+                }
+            }
+        }
+    }
+
+    // A label on a solid fill reads (astrid-web AWTD-1575: white on the old accent was 3.68:1 and
+    // on the old error red 3.76:1), and the focus ring shows on the theme's own surfaces: a fill
+    // dark enough for a white label is too dark to be a line on a dark theme.
+    for (name, theme) in &themes {
+        for (fill, label) in LABELLED_FILLS {
+            let (Some(on), Some(text)) = (literal(theme, fill), literal(theme, label)) else {
+                continue;
+            };
+            let ratio = contrast(text, on);
+            if ratio < AA_BODY {
+                problems.push(format!(
+                    "themes.{name}: {label} on {fill} is {ratio:.2}:1, under {AA_BODY}:1"
+                ));
+            }
+        }
+        for line in VISIBLE_LINES {
+            for surface in READABLE_ON {
+                let (Some(colour), Some(on)) = (literal(theme, line), literal(theme, surface))
+                else {
+                    continue;
+                };
+                let ratio = contrast(colour, on);
+                if ratio < AA_LINE {
+                    problems.push(format!(
+                        "themes.{name}: {line} on {surface} is {ratio:.2}:1, under {AA_LINE}:1"
                     ));
                 }
             }
@@ -1047,13 +1095,113 @@ mod tests {
         }
         let css = web_css(&tokens);
         assert!(
-            css.contains("  --astrid-accent-ink: var(--brand-accent-ink-rgb, 37, 99, 235);"),
+            css.contains("  --astrid-accent-ink: var(--brand-accent-ink-rgb, 29, 78, 216);"),
             "{css}"
         );
         assert!(
             css.contains("  --astrid-accent-ink: var(--brand-accent-ink-dark-rgb, 96, 165, 250);"),
             "{css}"
         );
+    }
+
+    /// astrid-web AWTD-1575 (Jon, 2026-11-11): a button's label is read, so the fill under it is
+    /// dark enough for it. White on the old accent `#3B82F6` was 3.68:1 and on the old error red
+    /// `#EF4444` 3.76:1.
+    #[test]
+    fn a_fill_its_label_cannot_be_read_on_is_refused() {
+        let with_fills = |accent: &str, hover: &str, error: &str| {
+            source("", "#6B7280")
+                .replace(
+                    r##""brand": { "accent": "#3B82F6" }"##,
+                    &format!(
+                        r##""brand": {{ "accent": "{accent}", "accent-hover": "{hover}", "accent-text": "#FFFFFF" }}"##
+                    ),
+                )
+                .replace(
+                    r##""accent": "{brand.accent}""##,
+                    &format!(
+                        r##""accent": "{{brand.accent}}", "accent-hover": "{{brand.accent-hover}}", "accent-text": "{{brand.accent-text}}", "error": "{error}""##
+                    ),
+                )
+        };
+        let problems = parse(&with_fills("#3B82F6", "#2563EB", "#EF4444"), THEMES).unwrap_err();
+        for theme in THEMES {
+            for refused in [
+                format!("themes.{theme}: accent-text on accent is 3.68:1"),
+                format!("themes.{theme}: accent-text on error is 3.76:1"),
+            ] {
+                assert!(
+                    problems.iter().any(|p| p.starts_with(&refused)),
+                    "{refused}: {problems:?}"
+                );
+            }
+        }
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        // A hover lighter than the fill loses the label again.
+        let problems = parse(&with_fills("#2563EB", "#3B82F6", "#DC2626"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.contains("accent-text on accent-hover is 3.68:1")),
+            "{problems:?}"
+        );
+        assert!(parse(&with_fills("#2563EB", "#1D4ED8", "#DC2626"), THEMES).is_ok());
+    }
+
+    /// The accent that carries a white label is 2.84:1 as a line on a dark card, so a dark theme's
+    /// focus ring is the accent's lighter shade, and one that cannot be seen is refused.
+    #[test]
+    fn a_focus_ring_a_theme_cannot_show_is_refused() {
+        let with_ring = |dark: &str| {
+            source(dark, "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                r##""accent": "{brand.accent}", "border-focus": "#2563EB""##,
+            )
+        };
+        let problems = parse(&with_ring(""), THEMES).unwrap_err();
+        assert_eq!(
+            problems,
+            vec!["themes.dark: border-focus on bg-secondary is 2.84:1, under 3:1".to_string()]
+        );
+        assert!(parse(&with_ring(r##", "border-focus": "#60A5FA""##), THEMES).is_ok());
+    }
+
+    /// The committed fills carry their labels in every theme, and the values are the ones the
+    /// register records (DS26).
+    #[test]
+    fn the_committed_fills_carry_their_labels() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        assert_eq!(tokens.brand["accent"], (37, 99, 235));
+        assert_eq!(tokens.brand["accent-hover"], (29, 78, 216));
+        let white = (255, 255, 255);
+        for (name, theme) in &tokens.themes {
+            assert_eq!(theme.colours["error"], Colour::Hex(220, 38, 38), "{name}");
+            assert_eq!(
+                theme.colours["accent"],
+                Colour::Brand("accent".to_string()),
+                "{name}"
+            );
+            assert_eq!(
+                theme.colours["priority-low"],
+                Colour::Brand("accent".to_string()),
+                "{name}"
+            );
+            let ring = if theme.appearance == "dark" {
+                "accent-ink-dark"
+            } else {
+                "accent"
+            };
+            assert_eq!(
+                theme.colours["border-focus"],
+                Colour::Brand(ring.to_string()),
+                "{name}"
+            );
+        }
+        assert!(contrast(white, tokens.brand["accent"]) >= AA_BODY);
+        assert!(contrast(white, tokens.brand["accent-hover"]) >= AA_BODY);
+        assert!(contrast(white, (220, 38, 38)) >= AA_BODY);
     }
 
     /// A theme the core cannot name is one nobody can choose.
