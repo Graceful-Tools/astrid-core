@@ -975,6 +975,21 @@ mod tests {
         assert_eq!(lines.next().unwrap(), "body\n");
     }
 
+    /// AITD-612: the repeat arrows round someone else's photo or the "U" are the plain square's
+    /// own size on every platform, as the web has drawn them since AWTD-1576 (Jon, 2026-11-11).
+    /// At 1.25 they were bigger than the squares beside them and stuck out of the column.
+    #[test]
+    fn the_repeat_frame_is_the_size_of_the_square_it_replaces() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let json: serde_json::Value = serde_json::from_str(&source).expect("json");
+        assert_eq!(json["size"]["repeat-frame-scale"].as_f64(), Some(1.0));
+        assert_eq!(
+            json["size"]["repeat-frame-inner-scale"].as_f64(),
+            Some(0.625)
+        );
+    }
+
     /// The real file: valid, and already generated. This is what fails a pull request that edits
     /// the source and forgets to regenerate.
     #[test]
