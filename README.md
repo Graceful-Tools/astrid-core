@@ -73,7 +73,9 @@ other: two sites called the `/api/v1`-only rule rule 5 and a third called it rul
 ## Design tokens
 
 How Astrid looks has one source too: [`design/tokens.json`](./design/README.md), generated into
-each client's own format by `cargo xtask gen-design`. Nothing from it is linked into the core.
+each client's own format by `cargo xtask gen-design`. The shared art — the checkbox and the agent
+marks — lives beside it in [`design/assets`](./design/README.md#shared-art), with a manifest of
+hashes and owners, and is generated the same way. Nothing from either is linked into the core.
 
 ## Quick start
 
@@ -82,7 +84,7 @@ cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
 cargo xtask check-core-contracts  # the core-first fixtures (waiting.json) are what the rules answer
-cargo xtask check-design        # design/generated is what design/tokens.json produces
+cargo xtask check-design        # design/generated is what design/tokens.json and design/assets produce
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 cargo deny check                # advisories, licences, wildcards, where the crates came from
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy
