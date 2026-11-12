@@ -23,6 +23,11 @@ client together, and the entry says which behaviour this crate currently follows
 > [`docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md).
 > At that point the rule's fixture is generated from here.
 
+> **Core-first: the Waiting lane is canonical here from day one** (Jon, 2026-11-12). There is no
+> web implementation to run: the rules are `astrid_rules::waiting` (R1–R5) and the presets in
+> `astrid_rules::board` (R7), web's TypeScript **mirrors** them, and the fixture
+> `contracts/fixtures/waiting.json` is generated **here** and copied by web — §8.
+
 ---
 
 ## 1. Repeating-task rollover
@@ -471,6 +476,47 @@ behaviour this crate follows and what it would take to close it. An undocumented
 a bug report from a confused user.
 
 ---
+
+## 8. The Waiting lane (core-first, Jon 2026-11-12)
+
+Canonical: `astrid_rules::waiting` and `astrid_rules::board::{preset_states, available_presets,
+add_preset_state}`. Fixture: `contracts/fixtures/waiting.json`, generated here by
+`cargo xtask gen-core-contracts` (contracts/README.md "Core-first fixtures"). **Web mirrors these
+rules; nobody else spells them** — not fixall, not an agent script, not a shell.
+
+- **R1.** A task may be in Waiting only while it has a wait condition: a due date strictly in the
+  future, or an incomplete blocker. Nothing else counts.
+- **R2.** Entering Waiting needs a condition, supplied in the write or already on the task;
+  without one the write is refused with `WAITING_NEEDS_CONDITION` (the server's code too; a shell
+  shows the date / task picker). Entering clears the assignee unless the mover keeps it. A task
+  already in Waiting is not entering: an edit that removes its last condition wakes it.
+- **R3.** A Waiting task wakes to Ready when every blocker is complete and its date has come,
+  keeping its assignee; with no condition at all (legacy) it goes to Inbox, keeping its assignee.
+- **R4.** Waiting on a person is Inbox assigned to that person (`handBack`), never Waiting.
+- **R5.** A Ready task with a future date moves to Waiting, unassigned (`settle`, which also runs
+  R3 — the one function a scheduled job calls per task).
+- **R6.** Finished work awaiting its deploy stays in Doing. No rule here: `settle` leaves Doing alone.
+- **R7.** Optional preset columns a board can add, none shown by default: `testing` / "Testing" /
+  "Deploying, in canary, or in an experiment." A task in it is not Waiting.
+
+**"Due to start"** is ported from astrid-web `lib/ready-queue-scope.ts` `isDueToStart`: no
+readable date is due now, a date is due once `due <= now`. All-day dates are stored at midnight
+UTC, so an all-day task wakes at the start of its (UTC) day, and an all-day date for today is no
+longer a wait condition once that day has begun.
+
+**The doors.** Rules door (`run_json`, the wasm `runJson`): `waitingWrite`, `waitingWake`,
+`waitingSettle`, `handBack`, `boardPresets`. App door (dispatch): `moveTaskToColumn`,
+`setTaskStatus`, `dropBoardCard`, `addBoardCard` and `setTaskStatusRole` take the optional
+`dueDateTime`, `isAllDay`, `waitOnTaskId` and `keepAssignee` (`app::command::WaitOptions`), and
+`updateTask` reads `keepAssignee` beside its changes; each refuses with
+`{ kind: "refused", code: "WAITING_NEEDS_CONDITION" }` before writing anything. A server refusal
+that carries a `code` in its body now reaches the shell as `Failure.code` too.
+
+**Where this crate decides on its own cache.** Dispatch checks a blocker's completion against
+this machine's cache; a blocker the cache does not hold counts as **incomplete** (the server
+named it, and it answers the same refusal if that is wrong). Wake-on-blocker-completion and the
+scheduled `settle` are the server's job; a native client sees their result as ordinary task
+updates.
 
 ## D10 — A list's *When* default without a *When Time* stamps the creation instant on web
 

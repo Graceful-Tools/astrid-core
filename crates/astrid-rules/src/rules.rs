@@ -144,6 +144,44 @@ pub enum Rule {
         #[serde(default)]
         lists: Vec<crate::model::TaskList>,
     },
+    /// R1/R2 of [`crate::waiting`]: whether a write that may move `task` into, within or out of
+    /// Waiting is allowed, and what it stores — see [`crate::waiting::resolve_status_write`].
+    /// `task` and `blockers` are as they are before the write; `change` is the write. Refused with
+    /// `{kind: "refused", code: "WAITING_NEEDS_CONDITION"}` when it enters Waiting with no condition.
+    WaitingWrite {
+        task: Box<Task>,
+        #[serde(default)]
+        blockers: Vec<crate::waiting::Blocker>,
+        #[serde(default)]
+        change: crate::waiting::StatusChange,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// R3: does a Waiting task leave by itself — [`crate::waiting::wake`]. Answers
+    /// `{ "action": "stay" | "wakeToReady" | "resolveToInbox" }`.
+    WaitingWake {
+        task: Box<Task>,
+        #[serde(default)]
+        blockers: Vec<crate::waiting::Blocker>,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// R3 + R5: the lane a task belongs in now, and the write that puts it there —
+    /// [`crate::waiting::settle`]. What the server's scheduled job runs per task.
+    WaitingSettle {
+        task: Box<Task>,
+        #[serde(default)]
+        blockers: Vec<crate::waiting::Blocker>,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// R4: what handing a task back to a person writes — [`crate::waiting::hand_back`].
+    HandBack { assignee_id: String },
+    /// R7: the optional preset columns this board can still add — [`crate::board::available_presets`].
+    BoardPresets {
+        #[serde(default)]
+        custom_states: Option<serde_json::Value>,
+    },
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -314,7 +352,41 @@ pub fn run(rule: Rule) -> Response {
                 ))),
             }
         }
+        Rule::WaitingWrite {
+            task,
+            blockers,
+            change,
+            now,
+        } => match crate::waiting::resolve_status_write(&task, &blockers, &change, now) {
+            Ok(resolved) => Response::ok(resolved),
+            Err(crate::waiting::WaitingError::WaitingNeedsCondition) => {
+                Response::failed(Failure::waiting_needs_condition())
+            }
+        },
+        Rule::WaitingWake {
+            task,
+            blockers,
+            now,
+        } => Response::ok(WakeAnswer {
+            action: crate::waiting::wake(&task, &blockers, now),
+        }),
+        Rule::WaitingSettle {
+            task,
+            blockers,
+            now,
+        } => Response::ok(crate::waiting::settle(&task, &blockers, now)),
+        Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
+        Rule::BoardPresets { custom_states } => {
+            Response::ok(crate::board::available_presets(custom_states.as_ref()))
+        }
     }
+}
+
+/// [`Rule::WaitingWake`]'s answer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WakeAnswer {
+    action: crate::waiting::Wake,
 }
 
 /// One column of [`Rule::Board`]'s answer: the column, and its cards' ids in order.
@@ -587,6 +659,32 @@ mod tests {
         assert_eq!(
             without["value"][0]["inlines"][0]["text"],
             "Fixed by AWTD-12"
+        );
+    }
+
+    /// R2 through the door: a move into Waiting with nothing to wait on is refused with the code
+    /// a client turns into the picker.
+    #[test]
+    fn a_waiting_write_without_a_condition_is_refused_with_its_code() {
+        let reply = answer(json!({
+            "kind": "waitingWrite",
+            "task": { "id": "t", "statusRole": "doing", "assigneeId": "u" },
+            "change": { "statusRole": "waiting" },
+            "now": "2026-11-12T12:00:00Z"
+        }));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["error"]["kind"], "refused");
+        assert_eq!(reply["error"]["code"], "WAITING_NEEDS_CONDITION");
+
+        let reply = answer(json!({
+            "kind": "waitingWrite",
+            "task": { "id": "t", "statusRole": "doing", "assigneeId": "u" },
+            "change": { "statusRole": "waiting", "dueDateTime": "2026-11-13T00:00:00Z" },
+            "now": "2026-11-12T12:00:00Z"
+        }));
+        assert_eq!(
+            reply["value"],
+            json!({ "statusRole": "waiting", "assignee": "clear", "transition": "enter" })
         );
     }
 

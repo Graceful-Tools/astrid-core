@@ -30,6 +30,45 @@ pub(crate) fn yes() -> bool {
     true
 }
 
+/// What a move into Waiting can carry: the condition it waits on, and whether to keep the assignee
+/// (`astrid_rules::waiting`, R1/R2 — canonical in this core since 2026-11-12).
+///
+/// Flattened into every command that can put a task in Waiting — `moveTaskToColumn`,
+/// `setTaskStatus`, `dropBoardCard`, `addBoardCard`, `setTaskStatusRole` — so each takes the same
+/// four optional keys beside its own. All are optional, and a command that sends none behaves as
+/// before **except** that entering Waiting now needs a condition and clears the assignee:
+///
+/// - **`dueDateTime`** (ISO-8601) — wait until then. Written to the task's due date in the same
+///   operation; it counts only when strictly in the future (an all-day date, stored at midnight
+///   UTC, counts until its day starts). **`isAllDay`** goes with it.
+/// - **`waitOnTaskId`** — wait on this task. Attached as a blocker (`addTaskBlocker`) before the
+///   move; it counts while that task is incomplete.
+/// - **`keepAssignee`** — entering Waiting clears the assignee unless this is `true`.
+///
+/// A condition already on the task counts too (a future due date, an incomplete blocker). With
+/// none, the command fails with `{ kind: "refused", code: "WAITING_NEEDS_CONDITION" }` and writes
+/// nothing: the shell's cue to show the "wait until a date / wait on a task" picker and send the
+/// command again with the answer.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitOptions {
+    #[serde(default)]
+    pub due_date_time: Option<String>,
+    #[serde(default)]
+    pub is_all_day: Option<bool>,
+    #[serde(default)]
+    pub wait_on_task_id: Option<String>,
+    #[serde(default)]
+    pub keep_assignee: bool,
+}
+
+impl WaitOptions {
+    /// Whether the command named a condition of its own.
+    pub fn names_a_condition(&self) -> bool {
+        self.due_date_time.is_some() || self.wait_on_task_id.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, strum::VariantNames)]
 // `rename_all` names the variants, `rename_all_fields` names the fields inside them. Both are
 // needed: without the second, `{"kind":"list","listId":"l1"}` reads as a command with no id and
@@ -177,7 +216,8 @@ pub enum Command {
     ///
     /// Optimistic and journalled, like every other write. The server moves statuses off the back
     /// of it — a Ready task with a new blocker becomes Waiting — and those arrive as ordinary task
-    /// updates. No client writes `statusRole` for this.
+    /// updates. No client writes `statusRole` for this. To *move* a task to Waiting on a task in
+    /// one gesture, send the move with `waitOnTaskId` ([`WaitOptions`]).
     AddTaskBlocker {
         task_id: String,
         blocking_task_id: String,
@@ -276,14 +316,23 @@ pub enum Command {
         /// The slot among the column's cards as the board drew them: 0 is the top, the column's
         /// length the bottom.
         index: usize,
+        /// The wait condition and `keepAssignee`, for a drop on Waiting — see [`WaitOptions`].
+        #[serde(flatten)]
+        wait: WaitOptions,
     },
     /// Move a card to a column.
+    ///
+    /// Into Waiting, the move needs a wait condition and clears the assignee — see [`WaitOptions`]
+    /// for the optional `dueDateTime` / `isAllDay` / `waitOnTaskId` / `keepAssignee`, and for the
+    /// `WAITING_NEEDS_CONDITION` refusal.
     MoveTaskToColumn {
         task_id: String,
         column_id: String,
         /// The list the board was opened from, so the move knows which project's columns to
         /// resolve the target against.
         list_id: String,
+        #[serde(flatten)]
+        wait: WaitOptions,
     },
     /// Add a card at the bottom of a column (task 95c7a68f).
     ///
@@ -296,6 +345,9 @@ pub enum Command {
         list_id: String,
         column_id: String,
         title: String,
+        /// A card typed into Waiting needs its condition — see [`WaitOptions`].
+        #[serde(flatten)]
+        wait: WaitOptions,
     },
     /// When to be reminded about one task, as offsets from its due time.
     ReminderOptions {
@@ -515,6 +567,12 @@ pub enum Command {
     },
     /// Edit a task. The body is the same shape the API takes, so a field the shell learns about
     /// needs no change here — see [`crate::services::TaskChanges`] for how absent and null differ.
+    ///
+    /// The Waiting rules apply here too (`astrid_rules::waiting`): `statusRole: "waiting"` needs a
+    /// condition (a future `dueDateTime` in the same body or already on the task, or an
+    /// incomplete blocker) or fails with `WAITING_NEEDS_CONDITION`, and clears the assignee unless
+    /// the body says `"keepAssignee": true` or sets `assigneeId` itself. An edit of a Waiting task
+    /// that takes away its last condition (clears or passes its date) moves it to Ready.
     UpdateTask {
         task_id: String,
         changes: serde_json::Value,
@@ -558,10 +616,13 @@ pub enum Command {
         task_id: String,
     },
     /// Put a task in a column by id from its menu: the same move a dragged card makes, so the two
-    /// cannot disagree — including that Done means completed.
+    /// cannot disagree — including that Done means completed, and that Waiting needs a condition
+    /// ([`WaitOptions`]).
     SetTaskStatus {
         task_id: String,
         column_id: String,
+        #[serde(flatten)]
+        wait: WaitOptions,
     },
     /// Mint a link to the task that other people can open, as the web's Share does. Online-only.
     ShareTask {
@@ -661,10 +722,14 @@ pub enum Command {
         #[serde(default)]
         time_zone: Option<String>,
     },
+    /// Set a task's role directly. Into Waiting it follows the same rule as a move —
+    /// [`WaitOptions`].
     SetTaskStatusRole {
         task_id: String,
         #[serde(default)]
         status_role: Option<String>,
+        #[serde(flatten)]
+        wait: WaitOptions,
     },
     CreateList {
         name: String,
@@ -1558,7 +1623,17 @@ impl From<crate::services::ServiceError> for Failure {
         match error {
             ServiceError::Api(ApiError::Unauthorized) => Failure::unauthorized(),
             ServiceError::Api(ApiError::Http { status, message }) => {
-                Failure::refused(status, message)
+                // The server's machine-readable reason, when its body names one —
+                // `WAITING_NEEDS_CONDITION` most of all, which a shell turns into the picker
+                // whichever side refused.
+                let code = serde_json::from_str::<serde_json::Value>(&message)
+                    .ok()
+                    .and_then(|body| body.get("code")?.as_str().map(str::to_string));
+                let failure = Failure::refused(status, message);
+                match code {
+                    Some(code) => failure.with_code(code),
+                    None => failure,
+                }
             }
             ServiceError::Api(ApiError::Transport(error)) => Failure::offline(error.to_string()),
             // A decode failure or a refused path: the server was reached, or would have been, and

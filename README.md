@@ -3,7 +3,7 @@
 The shared core of the [Astrid](https://astrid.cc) clients, in Rust: models, the API client, the
 offline SQLite cache, the Outbox write journal, sync, and every rule that must read identically on
 web, Apple and Windows — repeating-task rollover, permissions, the keyboard scheme, search and
-smart-task parsing, the editing session, board columns, connections.
+smart-task parsing, the editing session, board columns and the Waiting lane, connections.
 
 Who uses it, and how:
 
@@ -57,7 +57,10 @@ other: two sites called the `/api/v1`-only rule rule 5 and a third called it rul
    fixture in `contracts/fixtures/` is a cross-repo change: web, then regenerate, then here, then
    the clients. The fixtures are generated, never hand-edited. Where this crate and the iOS app
    disagree, this crate takes iOS's behaviour and web adopts it later (Jon, 2026-10-03; see
-   [docs/CONTRACTS.md](./docs/CONTRACTS.md)).
+   [docs/CONTRACTS.md](./docs/CONTRACTS.md)). **The exception is a core-first rule** — the
+   Waiting lane (`astrid_rules::waiting`, Jon 2026-11-12): canonical here from day one, its
+   fixture generated here (`cargo xtask gen-core-contracts`) and copied by web, whose TypeScript
+   mirrors it ([contracts/README.md](./contracts/README.md) "Core-first fixtures").
 7. **Port from Swift test-first.** The Swift tests are the specification: write the Rust tests
    red, port green, refactor. Do not improve behaviour while porting — a divergence found on the
    way goes in [docs/CONTRACTS.md](./docs/CONTRACTS.md), not into the code.
@@ -78,6 +81,7 @@ each client's own format by `cargo xtask gen-design`. Nothing from it is linked 
 cargo test --workspace          # the inner loop
 cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
+cargo xtask check-core-contracts  # the core-first fixtures (waiting.json) are what the rules answer
 cargo xtask check-design        # design/generated is what design/tokens.json produces
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 cargo deny check                # advisories, licences, wildcards, where the crates came from

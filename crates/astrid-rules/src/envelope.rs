@@ -42,6 +42,12 @@ pub struct Failure {
     /// What was not found.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// A machine-readable reason within the kind, when there is one — `WAITING_NEEDS_CONDITION`
+    /// (a move into Waiting with no date and no task to wait on: show the picker). The server's
+    /// own `code`, when a refusal carried one. Absent otherwise; a shell that does not know a code
+    /// treats the failure by its kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 impl Failure {
@@ -51,6 +57,7 @@ impl Failure {
             message: message.into(),
             status: None,
             id: None,
+            code: None,
         }
     }
 
@@ -78,6 +85,25 @@ impl Failure {
         Failure {
             id: Some(id.clone()),
             ..Self::of(FailureKind::NotFound, format!("no {what} with id {id}"))
+        }
+    }
+
+    /// R2 of `crate::waiting`: a move into Waiting with neither a future date nor an incomplete
+    /// blocker. `refused` with no HTTP status (this core said no, not the server) and
+    /// `code: "WAITING_NEEDS_CONDITION"`, which is a shell's cue to show the date / task picker.
+    pub fn waiting_needs_condition() -> Self {
+        let error = crate::waiting::WaitingError::WaitingNeedsCondition;
+        Failure {
+            code: Some(error.code().to_string()),
+            ..Self::of(FailureKind::Refused, error.message())
+        }
+    }
+
+    /// The same failure, carrying a machine-readable `code`.
+    pub fn with_code(self, code: impl Into<String>) -> Self {
+        Failure {
+            code: Some(code.into()),
+            ..self
         }
     }
 

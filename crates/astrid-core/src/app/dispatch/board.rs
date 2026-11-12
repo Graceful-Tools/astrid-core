@@ -29,19 +29,26 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             column_id,
             list_id,
             index,
-        } => drop_board_card(app, &task_id, &column_id, &list_id, index),
+            wait,
+        } => drop_board_card(app, &task_id, &column_id, &list_id, index, &wait).await,
         Command::MoveTaskToColumn {
             task_id,
             column_id,
             list_id,
-        } => move_task_to_column(app, &task_id, &column_id, &list_id),
+            wait,
+        } => move_task_to_column(app, &task_id, &column_id, &list_id, &wait).await,
         Command::AddBoardCard {
             list_id,
             column_id,
             title,
-        } => add_board_card(app, &list_id, &column_id, title),
+            wait,
+        } => add_board_card(app, &list_id, &column_id, title, &wait).await,
         Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
-        Command::SetTaskStatus { task_id, column_id } => set_task_status(app, &task_id, &column_id),
+        Command::SetTaskStatus {
+            task_id,
+            column_id,
+            wait,
+        } => set_task_status(app, &task_id, &column_id, &wait).await,
         Command::AddBoardStatus { list_id, name } => {
             status_outcome(app.context.boards().add_status(&list_id, &name).await)
         }
@@ -274,11 +281,12 @@ pub(super) fn board(
 /// dragged to Done must roll forward to its next occurrence like every other completion — rule 2 of
 /// README.md does not stop applying because the gesture is a drag. Coming back out of
 /// Done un-completes through the same service, for the same reason.
-pub(super) fn move_task_to_column(
+pub(super) async fn move_task_to_column(
     app: &App,
     task_id: &str,
     column_id: &str,
     list_id: &str,
+    wait: &WaitOptions,
 ) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
@@ -291,7 +299,7 @@ pub(super) fn move_task_to_column(
         .find(|list| list.id == list_id)
         .and_then(|list| list.project_id.clone());
     let columns = board_columns(app, project_id.as_deref());
-    move_to_column(app, &task, &lists, &columns, column_id)
+    move_to_column(app, &task, &lists, &columns, column_id, wait).await
 }
 
 /// Add a card at the bottom of a column (task 95c7a68f).
@@ -303,7 +311,18 @@ pub(super) fn move_task_to_column(
 /// Done completes through the completion service for the same reason a card dragged there does
 /// (see [`move_task_to_column`]): `update(completed: true)` skips the repeat rollover, and a
 /// repeating card is repeating whichever gesture finished it — rule 2 of README.md.
-pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: String) -> Response {
+///
+/// A card typed into Waiting needs its condition like any move there (`WaitOptions`): checked
+/// before anything is created, so a refusal leaves no card behind. A date is the card's due date
+/// from birth; a task to wait on can only be attached once the card exists, so such a card is born
+/// in the Inbox, given its blocker, and then moved — never left in Waiting with nothing to wait on.
+pub(super) async fn add_board_card(
+    app: &App,
+    list_id: &str,
+    column_id: &str,
+    title: String,
+    wait: &WaitOptions,
+) -> Response {
     let lists = app.store.lists().unwrap_or_default();
     let Some(opened) = lists.iter().find(|list| list.id == list_id) else {
         return Response::failed(Failure::not_found("list", list_id));
@@ -316,6 +335,22 @@ pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: S
     // The board's own list is the card's domain list: the column is a state, not somewhere a task
     // can be filed, and `resolve_create` is what keeps a role out of `listIds`.
     let born = crate::board::resolve_create(target, Some(list_id));
+    let into_waiting = born.status_role.as_deref() == Some(crate::board::WAITING_STATUS_ROLE);
+    let wait_due = match parse_wait_due(wait) {
+        Ok(due) => due,
+        Err(failure) => return Response::failed(failure),
+    };
+    if into_waiting {
+        let unborn = crate::model::Task {
+            due_date_time: wait_due,
+            ..crate::model::Task::new("", title.trim())
+        };
+        if let Err(failure) =
+            resolve_waiting(app, &unborn, Some(born.status_role.clone()), None, wait)
+        {
+            return Response::failed(failure);
+        }
+    }
     let created = match create_task(
         app,
         NewTask {
@@ -323,11 +358,16 @@ pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: S
             description: None,
             list_ids: born.list_ids.unwrap_or_default(),
             priority: None,
-            due_date_time: None,
-            is_all_day: None,
+            due_date_time: wait_due.map(date::format),
+            is_all_day: wait.is_all_day,
             assignee_id: None,
             parent_task_id: None,
-            status_role: born.status_role,
+            // Into Waiting, the role is written by the move below, once the condition is on it.
+            status_role: if into_waiting {
+                None
+            } else {
+                born.status_role.clone()
+            },
             // Not the quick-add box: a card typed into a column is a title, and the web's board
             // form does not read `#list` tags out of one either.
             quick_add: false,
@@ -345,6 +385,16 @@ pub(super) fn add_board_card(app: &App, list_id: &str, column_id: &str, title: S
 
     if target.kind == crate::board::ColumnKind::Done {
         return answer(app.context.tasks().complete(&created.id, true, None, None));
+    }
+    if into_waiting {
+        // The date is on the card already; what is left is the blocker, the role and the
+        // assignee — the same tail every move into Waiting takes.
+        let rest = WaitOptions {
+            due_date_time: None,
+            is_all_day: None,
+            ..wait.clone()
+        };
+        return write_status(app, &created, born.status_role, &rest).await;
     }
     Response::ok(created)
 }
@@ -426,7 +476,12 @@ pub(super) fn task_status_options(app: &App, task_id: &str) -> Response {
 
 /// The menu's "Set status": the very move a dragged card makes, against the same columns the menu
 /// was shown (task 016ce981).
-pub(super) fn set_task_status(app: &App, task_id: &str, column_id: &str) -> Response {
+pub(super) async fn set_task_status(
+    app: &App,
+    task_id: &str,
+    column_id: &str,
+    wait: &WaitOptions,
+) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
@@ -434,17 +489,18 @@ pub(super) fn set_task_status(app: &App, task_id: &str, column_id: &str) -> Resp
     };
     let lists = app.store.lists().unwrap_or_default();
     let columns = task_columns(app, &task);
-    move_to_column(app, &task, &lists, &columns, column_id)
+    move_to_column(app, &task, &lists, &columns, column_id, wait).await
 }
 
 /// Put `task` in the column called `column_id`, out of `columns`. The shared tail of a drag and a
 /// menu choice; see [`move_task_to_column`] for why Done goes through the completion service.
-pub(super) fn move_to_column(
+pub(super) async fn move_to_column(
     app: &App,
     task: &crate::model::Task,
     lists: &[crate::model::TaskList],
     columns: &[crate::board::BoardColumn],
     column_id: &str,
+    wait: &WaitOptions,
 ) -> Response {
     let task_id = &task.id;
     let Some(target) = columns.iter().find(|column| column.id == column_id) else {
@@ -452,12 +508,30 @@ pub(super) fn move_to_column(
     };
 
     // Already there: nothing to write (AITD-461, D45). A card nudged and released inside its own
-    // column, or the lit chip tapped again, used to send an edit of nothing.
-    if crate::board::column_for(task, columns) == target.id {
+    // column, or the lit chip tapped again, used to send an edit of nothing. A move that names a
+    // wait condition is not nothing: it is how a Waiting card is given a new date or blocker.
+    if crate::board::column_for(task, columns) == target.id && !wait.names_a_condition() {
         return Response::ok(task.clone());
     }
 
     let moved = crate::board::resolve_move(task, target, lists);
+
+    // The Waiting rules decide before anything is written, so a refusal leaves the task as it was
+    // — including in Done, which a move out of would otherwise have un-completed first.
+    let wait_due = match parse_wait_due(wait) {
+        Ok(due) => due,
+        Err(failure) => return Response::failed(failure),
+    };
+    let resolved = match resolve_waiting(
+        app,
+        task,
+        Some(moved.status_role.clone()),
+        wait_due.map(Some),
+        wait,
+    ) {
+        Ok(resolved) => resolved,
+        Err(failure) => return Response::failed(failure),
+    };
 
     // Leaving Done un-completes FIRST, then moves (AITD-461, D45) — iOS's order: the task is open
     // before it is given its new column, so nothing reads a finished task in a status column.
@@ -479,10 +553,10 @@ pub(super) fn move_to_column(
         }
     }
 
-    let changes = crate::services::TaskChanges {
-        status_role: Some(moved.status_role.clone()),
-        ..Default::default()
-    };
+    if let Err(failure) = attach_wait_blocker(app, task_id, wait).await {
+        return Response::failed(failure);
+    }
+    let changes = waiting_changes(&resolved, wait_due, wait);
     if let Err(error) = app.context.tasks().update(task_id, &changes) {
         return Response::failed(error.into());
     }
@@ -503,12 +577,13 @@ pub(super) fn move_to_column(
 /// rolls forward); then the card's lists and role; then the opened list's manual order with the
 /// card at the slot it was dropped on, and the list's sort set to manual so the order shows.
 /// A drop onto the card's own column still rearranges it — that is what a drop there is for.
-pub(super) fn drop_board_card(
+pub(super) async fn drop_board_card(
     app: &App,
     task_id: &str,
     column_id: &str,
     list_id: &str,
     index: usize,
+    wait: &WaitOptions,
 ) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
@@ -542,6 +617,22 @@ pub(super) fn drop_board_card(
     );
     let moved = &placed.column_move;
 
+    // The Waiting rules first, before anything is written — see `move_to_column`.
+    let wait_due = match parse_wait_due(wait) {
+        Ok(due) => due,
+        Err(failure) => return Response::failed(failure),
+    };
+    let resolved = match resolve_waiting(
+        app,
+        &task,
+        Some(moved.status_role.clone()),
+        wait_due.map(Some),
+        wait,
+    ) {
+        Ok(resolved) => resolved,
+        Err(failure) => return Response::failed(failure),
+    };
+
     if moved.completed != task.completed {
         if let Err(error) = app
             .context
@@ -560,10 +651,10 @@ pub(super) fn drop_board_card(
             return Response::failed(error.into());
         }
     }
-    let changes = crate::services::TaskChanges {
-        status_role: Some(moved.status_role.clone()),
-        ..Default::default()
-    };
+    if let Err(failure) = attach_wait_blocker(app, task_id, wait).await {
+        return Response::failed(failure);
+    }
+    let changes = waiting_changes(&resolved, wait_due, wait);
     let task = match app.context.tasks().update(task_id, &changes) {
         Ok(task) => task,
         Err(error) => return Response::failed(error.into()),
@@ -579,4 +670,143 @@ pub(super) fn drop_board_card(
         Err(error) => return Response::failed(error.into()),
     };
     Response::ok(serde_json::json!({ "task": task, "list": list }))
+}
+
+// ─── The Waiting lane (astrid_rules::waiting, Jon 2026-11-12) ─────────────────────────────────
+//
+// Every command that can put a task in Waiting asks `resolve_status_write` first, with the task's
+// blockers as this machine knows them, and writes what it answers: the role, the condition the
+// command carried, and — entering — an empty assignee unless the mover kept it. A refusal is
+// `WAITING_NEEDS_CONDITION`, before any write, which the shell turns into the picker.
+
+/// One blocker as this cache knows it. A blocker the cache does not hold counts as **incomplete**:
+/// the server named it, and the server answers the same refusal if it is wrong, where refusing a
+/// move the server would take leaves the person no way to make it.
+fn cached_blocker(app: &App, id: &str) -> astrid_rules::waiting::Blocker {
+    let completed = matches!(app.store.task(id), Ok(Some(task)) if task.completed);
+    astrid_rules::waiting::Blocker::new(id, completed)
+}
+
+/// The blockers `task` has now, with their completion, from the cache.
+pub(super) fn cached_blockers(
+    app: &App,
+    task: &crate::model::Task,
+) -> Vec<astrid_rules::waiting::Blocker> {
+    task.blocked_by
+        .iter()
+        .flatten()
+        .map(|id| cached_blocker(app, id))
+        .collect()
+}
+
+/// The date a command's [`WaitOptions`] carry, or a bad request for one that is not a date.
+pub(super) fn parse_wait_due(
+    wait: &WaitOptions,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, Failure> {
+    match wait.due_date_time.as_deref() {
+        None | Some("") => Ok(None),
+        Some(text) => date::parse(text)
+            .map(Some)
+            .ok_or_else(|| Failure::bad_request(format!("{text} is not a date"))),
+    }
+}
+
+/// Ask the Waiting rules about a write of `status_role` (absent: unchanged) and `due` (absent:
+/// unchanged; `Some(None)`: cleared) to `task`, with the blocker `wait` names as attached.
+pub(super) fn resolve_waiting(
+    app: &App,
+    task: &crate::model::Task,
+    status_role: Option<Option<String>>,
+    due: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    wait: &WaitOptions,
+) -> Result<astrid_rules::waiting::ResolvedStatus, Failure> {
+    let change = astrid_rules::waiting::StatusChange {
+        status_role,
+        due_date_time: due,
+        add_blockers: wait
+            .wait_on_task_id
+            .iter()
+            .map(|id| cached_blocker(app, id))
+            .collect(),
+        remove_blocker_ids: Vec::new(),
+        keep_assignee: wait.keep_assignee,
+    };
+    astrid_rules::waiting::resolve_status_write(
+        task,
+        &cached_blockers(app, task),
+        &change,
+        app.clock.now(),
+    )
+    .map_err(|_| Failure::waiting_needs_condition())
+}
+
+/// Attach the blocker a command's [`WaitOptions`] name, at once — the same call `addTaskBlocker`
+/// makes, so a cycle the server refuses fails the move rather than becoming a dead letter.
+pub(super) async fn attach_wait_blocker(
+    app: &App,
+    task_id: &str,
+    wait: &WaitOptions,
+) -> Result<(), Failure> {
+    let Some(blocking) = wait.wait_on_task_id.as_deref() else {
+        return Ok(());
+    };
+    let already = app
+        .store
+        .task(task_id)
+        .ok()
+        .flatten()
+        .and_then(|task| task.blocked_by)
+        .is_some_and(|ids| ids.iter().any(|id| id == blocking));
+    if already {
+        return Ok(());
+    }
+    app.context
+        .dependencies()
+        .add_now(task_id, blocking)
+        .await
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
+/// The task write a resolved status asks for: the role, the date the command carried, and the
+/// assignee cleared when entering Waiting cleared it.
+pub(super) fn waiting_changes(
+    resolved: &astrid_rules::waiting::ResolvedStatus,
+    due: Option<chrono::DateTime<chrono::Utc>>,
+    wait: &WaitOptions,
+) -> crate::services::TaskChanges {
+    crate::services::TaskChanges {
+        status_role: Some(resolved.status_role.clone()),
+        due_date_time: due.map(Some),
+        is_all_day: due.and(wait.is_all_day),
+        assignee_id: (resolved.assignee == astrid_rules::waiting::AssigneeWrite::Clear)
+            .then_some(None),
+        ..Default::default()
+    }
+}
+
+/// Set `task`'s role to `status_role` through the Waiting rules — `setTaskStatusRole`, and the
+/// tail of a card typed into Waiting.
+pub(super) async fn write_status(
+    app: &App,
+    task: &crate::model::Task,
+    status_role: Option<String>,
+    wait: &WaitOptions,
+) -> Response {
+    let wait_due = match parse_wait_due(wait) {
+        Ok(due) => due,
+        Err(failure) => return Response::failed(failure),
+    };
+    let resolved = match resolve_waiting(app, task, Some(status_role), wait_due.map(Some), wait) {
+        Ok(resolved) => resolved,
+        Err(failure) => return Response::failed(failure),
+    };
+    if let Err(failure) = attach_wait_blocker(app, &task.id, wait).await {
+        return Response::failed(failure);
+    }
+    answer(
+        app.context
+            .tasks()
+            .update(&task.id, &waiting_changes(&resolved, wait_due, wait)),
+    )
 }
