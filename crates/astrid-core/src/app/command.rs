@@ -564,6 +564,16 @@ pub enum Command {
         /// importing a task that must arrive exactly as it was (a sync provider's).
         #[serde(default = "yes")]
         apply_list_defaults: bool,
+        /// Born in Waiting on a task (`statusRole: "waiting"`): attached as a blocker once the
+        /// task exists. A new task has no blockers, so it enters Waiting only with this or a
+        /// future `dueDateTime`; with neither the create fails with `WAITING_NEEDS_CONDITION`
+        /// and nothing is written (`astrid_rules::waiting`, R2; [`WaitOptions`]).
+        #[serde(default)]
+        wait_on_task_id: Option<String>,
+        /// Born in Waiting, a task is unassigned — `assigneeId` and any list default included —
+        /// unless this is `true`.
+        #[serde(default)]
+        keep_assignee: bool,
     },
     /// Edit a task. The body is the same shape the API takes, so a field the shell learns about
     /// needs no change here — see [`crate::services::TaskChanges`] for how absent and null differ.

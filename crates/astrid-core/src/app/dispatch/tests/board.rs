@@ -987,3 +987,96 @@ fn a_server_refusal_carries_its_code() {
     assert_eq!(failure.code.as_deref(), Some("WAITING_NEEDS_CONDITION"));
     assert_eq!(failure.status, Some(400));
 }
+
+/// R2 at birth: `createTask` into Waiting needs a future date or a task to wait on — a new task
+/// has no blockers — and is born unassigned unless kept. Refused, nothing is written.
+#[tokio::test]
+async fn a_task_created_in_waiting_needs_its_condition_and_is_born_unassigned() {
+    let app = waiting_app(StubTransport::new(), json!([])).await;
+    for command in [
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting", "assigneeId": "u1" }),
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "dueDateTime": "2026-09-01T00:00:00Z" }),
+    ] {
+        let refused = call(&app, command.clone()).await;
+        assert_eq!(
+            refused["error"]["code"], "WAITING_NEEDS_CONDITION",
+            "{command}"
+        );
+    }
+    assert!(app
+        .store
+        .tasks_in_lists(&["l1".to_string()])
+        .expect("reads")
+        .is_empty());
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+
+    let dated = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "dueDateTime": "2026-09-10T00:00:00Z", "isAllDay": true }),
+    )
+    .await;
+    assert_eq!(dated["ok"], true, "{dated}");
+    assert_eq!(dated["value"]["statusRole"], "waiting");
+    assert!(dated["value"]["assigneeId"].is_null(), "{dated}");
+
+    let kept = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "dueDateTime": "2026-09-10T00:00:00Z", "keepAssignee": true }),
+    )
+    .await;
+    assert_eq!(kept["value"]["assigneeId"], "u1", "{kept}");
+
+    // A plain create is untouched by the rule.
+    let plain = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Now", "listIds": ["l1"], "statusRole": "ready", "assigneeId": "u1" }),
+    )
+    .await;
+    assert_eq!(plain["value"]["assigneeId"], "u1");
+}
+
+/// R2 at birth, waiting on a task: born, given its blocker, then moved to Waiting.
+#[tokio::test]
+async fn a_task_created_waiting_on_a_task_gets_its_blocker_then_its_role() {
+    let transport = StubTransport::new().push_json(
+        "/blockers",
+        201,
+        json!({ "blockingTaskId": "t2", "blockedBy": [{ "id": "t2", "title": "Upstream" }] }),
+    );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    let tasks: Vec<crate::model::Task> =
+        serde_json::from_value(json!([{ "id": "t2", "title": "Upstream", "listIds": ["l1"] }]))
+            .expect("tasks");
+    app.store.upsert_tasks(&tasks).expect("stores");
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "After it", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "waitOnTaskId": "t2" }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["statusRole"], "waiting", "{made}");
+    assert!(made["value"]["assigneeId"].is_null(), "{made}");
+    // The new task is not on the server yet, so the blocker waits in the journal behind its
+    // create, as any write to a task with a temporary id does.
+    let _ = transport;
+    let id = made["value"]["id"].as_str().expect("an id");
+    let journal = crate::outbox::journal::all(&app.store).expect("reads");
+    assert!(
+        journal
+            .iter()
+            .any(|entry| format!("{entry:?}").contains("t2") && format!("{entry:?}").contains(id)),
+        "the blocker is journalled: {journal:?}"
+    );
+}

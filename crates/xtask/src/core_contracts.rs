@@ -225,6 +225,57 @@ fn waiting_cases() -> Vec<Case> {
             ),
             entered("clear"),
         ),
+        // ── R2 at birth: a new task (no role, no blockers) created in Waiting ──────────────
+        case(
+            "create/with-a-future-date-is-born-waiting-unassigned",
+            "R2",
+            write(
+                json!({ "id": "", "assigneeId": "jon" }),
+                json!([]),
+                json!({ "statusRole": "waiting", "dueDateTime": "2026-11-13T00:00:00.000Z" }),
+            ),
+            entered("clear"),
+        ),
+        case(
+            "create/waiting-on-a-task-is-born-waiting",
+            "R2",
+            write(
+                json!({ "id": "" }),
+                json!([]),
+                json!({ "statusRole": "waiting", "addBlockers": [{ "id": "b1", "completed": false }] }),
+            ),
+            entered("keep"),
+        ),
+        case(
+            "create/keep-assignee-keeps-it",
+            "R2",
+            write(
+                json!({ "id": "", "assigneeId": "jon" }),
+                json!([]),
+                json!({ "statusRole": "waiting", "dueDateTime": "2026-11-13T00:00:00.000Z", "keepAssignee": true }),
+            ),
+            entered("keep"),
+        ),
+        case(
+            "create/with-no-condition-is-refused",
+            "R2",
+            write(
+                json!({ "id": "", "assigneeId": "jon" }),
+                json!([]),
+                json!({ "statusRole": "waiting" }),
+            ),
+            refused(),
+        ),
+        case(
+            "create/with-a-past-date-is-refused",
+            "R2",
+            write(
+                json!({ "id": "" }),
+                json!([]),
+                json!({ "statusRole": "waiting", "dueDateTime": "2026-11-12T00:00:00.000Z" }),
+            ),
+            refused(),
+        ),
         // ── R2: a task already in Waiting is not entering ──────────────────────────────────
         case(
             "within/an-edit-that-keeps-the-condition-stays",
