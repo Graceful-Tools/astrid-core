@@ -5,6 +5,7 @@
 
 use std::process::ExitCode;
 
+mod assets;
 mod core_contracts;
 mod design;
 
@@ -27,7 +28,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "gen-design",
-        "write design/generated from design/tokens.json",
+        "write design/generated from design/tokens.json and design/assets",
     ),
     (
         "check-design",

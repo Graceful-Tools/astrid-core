@@ -7,6 +7,10 @@
 *.json    text eol=lf
 *.mjs     text eol=lf
 *.yml     text eol=lf
+# design/assets are hashed in design/assets/manifest.json, and the generated art is compared byte for byte.
+*.svg     text eol=lf
+*.xml     text eol=lf
+*.xaml    text eol=lf
 
 # PowerShell and the .NET project files are read by Windows tooling; keep them CRLF.
 *.ps1     text eol=crlf

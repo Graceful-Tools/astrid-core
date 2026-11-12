@@ -11,7 +11,7 @@ the component specs and the rules for platform differences — is defined in ast
 except where the register below records that another client was right.
 
 ```bash
-cargo xtask gen-design                   # write design/generated from tokens.json
+cargo xtask gen-design                   # write design/generated from tokens.json and assets/
 cargo xtask check-design [../astrid-web] # fail if generated is stale, or web's copy is not ours
 ```
 
@@ -30,13 +30,40 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | `Astrid App/Utilities/AstridTokens.swift`, hash-checked by `check:contracts` (AITD-605/610) |
 | `tokens.resolved.json` | every client: the source with each theme's `extends` flattened | `packages/astrid-design/` in astrid-web |
 
-Android (Compose) and Windows (XAML) emitters are added to `crates/xtask/src/design.rs` in the
+| `web/checkbox-art.json` | astrid-web: the checkbox's shapes as data, drawn inline so a task list loads no images | `packages/astrid-design/` |
+| `apple/AstridDesign.xcassets` | astrid-ios (iOS and Mac): the checkbox layers (`checkbox-box`, `checkbox-repeat` as template images that take the priority tint, `checkbox-check` in its own colours) and the agent marks (`agent-*`), all vectors | a second asset catalog in each app target |
+| `android/drawable/checkbox_*.xml` | astrid-android: the three layers as vector drawables; `box` and `repeat` are white, for a tint | `app/src/main/res/drawable/` |
+| `windows/AstridCheckbox.xaml` | astrid-windows: a resource dictionary with one `ContentControl` style per layer; `box` and `repeat` take the control's `Foreground` | merged into `App.xaml` |
+
+Android (Compose) and Windows (XAML) token emitters are added to `crates/xtask/src/design.rs` in the
 change that adopts them, so each one is written against the project that compiles it. Until then
 those clients can read `tokens.resolved.json` in a test.
 
 Every generated source file starts with a `body-sha256` line: a hash of everything below it. A
 consumer checks that hash in its own gate, with no access to this repository, so a hand-edited
 copy fails there.
+
+## Shared art
+
+`assets/` holds the art every client draws, so none of them keeps its own copy (AWTD-1605):
+
+| Path | What |
+|---|---|
+| `assets/checkbox/checkbox{,-checked,-repeat,-repeat-checked}.svg` | The task checkbox, four variants on a 56-unit canvas. The box and the repeat arrows are `currentColor`: the client sets the priority colour (`priority-*`), so the art follows the tokens and a partner's brand (DS21). The check is the `checkbox-check` token, `#89A912`, the same in every theme, over a black shadow at 85%, offset 2 and blurred 0.8 |
+| `assets/agents/*.svg` | The agent marks astrid-web shows for each harness, as it shipped them |
+| `assets/manifest.json` | Every file, its `sha256` (of its text with LF endings) and its owner: whose mark it is, or where the drawing came from |
+
+The four checkbox variants are three layers, `<g id="box">`, `<g id="repeat">` and `<g id="check">`,
+and the generator refuses a variant whose layers differ from the others', a box or arrows in a fixed
+colour, a check in any green but the token's, and any SVG element other than `<path>`: Android and
+Windows are given the paths, so what they cannot draw is refused rather than dropped. The shadow's
+blur is drawn only on web; elsewhere it is unblurred, 0.8 of the canvas being under a pixel at the
+sizes a checkbox is shown.
+
+To change the art: edit the SVG, then `cargo xtask gen-design`, which writes the platform outputs and
+the manifest's new hash. A new file is listed in the manifest with its owner first; the generator
+refuses a file under `assets/` that the manifest does not list. A client vendors `assets/` at the
+same revision as the tokens, and checks the hashes against the manifest in its own gate.
 
 ## Changing a value
 
@@ -115,7 +142,7 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | # | What | Tokens say | Who differs | State |
 |---|---|---|---|---|
 | DS1 | Ocean text colours | Web's, one step darker than light's (web AWTD-1496: grey on cyan measured 3.1:1) | iOS, Mac, Android use light's | open on Apple and Android |
-| DS2 | Priority colours | iOS's `#6B7280`, accent, `#FBBF24`, `#EF4444` | Windows samples the checkbox art (`#B3B6BA`, `#328ACC`, `#F5AF39`, `#D5392E`) | open on Windows |
+| DS2 | Priority colours | iOS's `#6B7280`, accent, `#FBBF24`, `#EF4444` | Windows samples the checkbox art (`#B3B6BA`, `#328ACC`, `#F5AF39`, `#D5392E`). The art no longer has colours of its own to sample: `design/assets/checkbox` is `currentColor`, and `generated/windows/AstridCheckbox.xaml` draws it in the control's `Foreground` (AWTD-1605) | open on Windows until it draws the shared art in the priority tokens and drops `PriorityPalette`'s sampled values |
 | DS3 | Surfaces and borders | iOS's | Windows follows the web's old values (light border `#EBEDF0`, selection `#F3F8FF`) | open on Windows; web adopts with its first vendored copy |
 | DS4 | Leading control size, touch | 34 | Nobody: web draws 34 from the token (`size.leading-control`) | closed on web |
 | DS5 | Selection outline | The Mac's (Jon, 2026-11-10): the accent at `state.selection-outline-opacity` (55%), 1.5 wide on pointer layouts and 2.5 on touch | iOS draws it solid. Web adopts with its next vendored copy | open on iOS (opacity) |
@@ -134,7 +161,7 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS18 | A completed task: title struck through and muted, its mark at `state.completed-mark-opacity` | iOS and Mac | Web also dims the whole row to 75% | open on web |
 | DS19 | Title in a row | iOS's (Jon, 2026-11-10): it wraps without limit by default, and an appearance setting on every client chooses wrap, two lines or one line. The choice belongs to the machine, like the theme | The Mac stops at two lines with no setting | open on Mac, iOS, Android, Windows (the setting); web adopts now |
 | DS20 | Hairline width | 0.5 | Web draws 1 px | open on web; 0.5 px only on high-density screens |
-| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent | Under a partner accent the square follows the brand and the checkbox art stays Astrid blue, on iOS and web alike. Since DS26 the same holds for Astrid itself: low priority drawn from the token is the darker accent `#2563EB`, the art the blue it was drawn in | accepted as it is (Jon, 2026-11-10); the art against the darker accent has not been looked at |
+| DS21 | The checkbox art is fixed-colour images | priority colours, low being the brand accent (Dark: the accent's dark ink); the shared art in `design/assets/checkbox` takes them as `currentColor`, the check is `checkbox-check` (AWTD-1605) | iOS, Mac, Windows and Android still draw the PNGs, in the art's colours (`#328ACC` low, `#F5AF39` medium, `#D5392E` high, `#B3B6BA` none), so under a partner accent their square stays Astrid blue. Web draws the checkbox in the priority tokens (AWTD-1581), so low priority is the darker accent and follows a partner's brand | closed on web; open on iOS, Mac, Windows and Android until they draw the shared SVG (`generated/apple/AstridDesign.xcassets`, `android/drawable`, `windows/AstridCheckbox.xaml`) |
 | DS22 | Priority glyphs as text (`!!` in a header or menu) | the priority colour | Medium's amber is 1.7:1 on white; the web used a darker orange (2.8:1) before adopting the token. "None" as text uses muted text on web. The generator holds each priority colour to 3:1 on the card and lists the amber on a light card (1.67:1 in Light and Ocean) as the one that fails; "none" passes on Dark's card at 3.04:1 | open: text variants of the priority colours, checked for contrast |
 | DS23 | Trade-off grid and Decision cards: the five rating fills and their text colours, cells 84-150 wide with a 3 gap and radius 4, a 10 swatch in the key, cards at radius 10 with a 24 number badge | iOS (`DecisionViews.swift`) | Web draws a 4 gap, radius 6 cells and a 12 swatch. iOS draws the dark text as black at 87%, the token is `#111827` | open on web |
 | DS24 | Markdown headings | not tokens yet | iOS sizes them with Dynamic Type; web writes 1.75 / 1.375 / 1.125 / 1 rem | open: heading sizes join `type` |

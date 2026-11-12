@@ -27,6 +27,8 @@ use std::process::ExitCode;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::assets;
+
 /// Where the source lives, relative to the repository root.
 pub const SOURCE: &str = "design/tokens.json";
 
@@ -43,7 +45,14 @@ const WEB_VENDORED: &[(&str, &str)] = &[
         "tokens.resolved.json",
         "packages/astrid-design/tokens.resolved.json",
     ),
+    (
+        "web/checkbox-art.json",
+        "packages/astrid-design/checkbox-art.json",
+    ),
 ];
+
+/// Where the web vendors `design/assets`: the manifest and every file it lists.
+const WEB_ASSETS: &str = "packages/astrid-design/assets";
 
 /// The revision file beside a consumer's vendored copies.
 const WEB_REVISION: &str = "packages/astrid-design/REVISION";
@@ -110,6 +119,10 @@ const PRIORITIES: &[&str] = &[
 /// amber is 1.67:1 on a white card.
 const FAINT_PRIORITIES: &[(&str, &str)] = &[("light", "priority-medium")];
 
+/// Colours that are one value in every theme: the art's own colours, which a theme does not
+/// restyle. The check mark is the checkbox art's green (`design/assets/checkbox`, AWTD-1605).
+pub const THEME_INVARIANT: &[&str] = &["checkbox-check"];
+
 /// One colour: a literal, or the brand's, which a partner build replaces.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Colour {
@@ -118,7 +131,7 @@ pub enum Colour {
 }
 
 impl Colour {
-    fn parse(text: &str) -> Option<Colour> {
+    pub fn parse(text: &str) -> Option<Colour> {
         if let Some(name) = text
             .strip_prefix("{brand.")
             .and_then(|t| t.strip_suffix('}'))
@@ -133,7 +146,7 @@ impl Colour {
         Some(Colour::Hex(byte(0)?, byte(2)?, byte(4)?))
     }
 
-    fn source(&self) -> String {
+    pub fn source(&self) -> String {
         match self {
             Colour::Hex(r, g, b) => format!("#{r:02X}{g:02X}{b:02X}"),
             Colour::Brand(name) => format!("{{brand.{name}}}"),
@@ -307,6 +320,30 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
             if ratio < AA_LINE {
                 problems.push(format!(
                     "themes.{name}: {priority} on {card} is {ratio:.2}:1, under {AA_LINE}:1"
+                ));
+            }
+        }
+    }
+
+    // The art's colours are the same in every theme: a literal, so no theme or brand restyles it.
+    for key in THEME_INVARIANT {
+        let mut values = themes
+            .iter()
+            .map(|(name, theme)| (name, theme.colours.get(*key)));
+        let Some((first_name, first)) = values.next() else {
+            continue;
+        };
+        // Absent is the art's problem (it refuses a check with no token), not the palette's.
+        if first.is_some() && !matches!(first, Some(Colour::Hex(..))) {
+            problems.push(format!(
+                "themes.{first_name}.colors.{key} must be a #RRGGBB literal, the same in every theme"
+            ));
+            continue;
+        }
+        for (name, value) in values {
+            if value != first {
+                problems.push(format!(
+                    "themes.{name}.colors.{key} differs from {first_name}'s; it is the same in every theme"
                 ));
             }
         }
@@ -872,14 +909,36 @@ fn load(root: &Path) -> Result<Tokens, ExitCode> {
     })
 }
 
+/// Everything `gen-design` writes, relative to the repository root: the tokens' outputs, then the
+/// shared art's (`design/assets`, the manifest's hashes included).
+fn all_outputs(root: &Path) -> Result<Vec<(String, String)>, ExitCode> {
+    let tokens = load(root)?;
+    let mut out: Vec<(String, String)> = outputs(&tokens)
+        .into_iter()
+        .map(|(relative, contents)| (format!("{GENERATED}/{relative}"), contents))
+        .collect();
+    let assets = assets::load(root).and_then(|sources| assets::outputs(&sources, &tokens));
+    match assets {
+        Ok(mut files) => out.append(&mut files),
+        Err(problems) => {
+            eprintln!("{} is not valid:", assets::ASSETS);
+            for problem in problems {
+                eprintln!("  {problem}");
+            }
+            return Err(ExitCode::FAILURE);
+        }
+    }
+    Ok(out)
+}
+
 /// `cargo xtask gen-design`: write every generated file.
 pub fn generate(root: &Path) -> ExitCode {
-    let tokens = match load(root) {
-        Ok(tokens) => tokens,
+    let files = match all_outputs(root) {
+        Ok(files) => files,
         Err(code) => return code,
     };
-    for (relative, contents) in outputs(&tokens) {
-        let path = root.join(GENERATED).join(relative);
+    for (relative, contents) in files {
+        let path = root.join(&relative);
         if let Some(parent) = path.parent() {
             if let Err(err) = std::fs::create_dir_all(parent) {
                 eprintln!("cannot create {}: {err}", parent.display());
@@ -890,7 +949,7 @@ pub fn generate(root: &Path) -> ExitCode {
             eprintln!("cannot write {}: {err}", path.display());
             return ExitCode::FAILURE;
         }
-        println!("wrote {GENERATED}/{relative}");
+        println!("wrote {relative}");
     }
     ExitCode::SUCCESS
 }
@@ -898,30 +957,31 @@ pub fn generate(root: &Path) -> ExitCode {
 /// `cargo xtask check-design [astrid-web checkout]`: the generated files are what the source
 /// produces, and a consumer's vendored copies are this repository's at the revision it names.
 pub fn check(root: &Path, web: Option<PathBuf>) -> ExitCode {
-    let tokens = match load(root) {
-        Ok(tokens) => tokens,
+    let files = match all_outputs(root) {
+        Ok(files) => files,
         Err(code) => return code,
     };
     let mut stale = 0;
-    for (relative, expected) in outputs(&tokens) {
-        let path = root.join(GENERATED).join(relative);
+    for (relative, expected) in files {
+        let path = root.join(&relative);
         match std::fs::read_to_string(&path) {
             Ok(actual) if lf(&actual) == lf(&expected) => {
-                println!("ok       {GENERATED}/{relative}")
+                println!("ok       {relative}")
             }
             Ok(_) => {
-                println!("STALE    {GENERATED}/{relative}");
+                println!("STALE    {relative}");
                 stale += 1;
             }
             Err(_) => {
-                println!("MISSING  {GENERATED}/{relative}");
+                println!("MISSING  {relative}");
                 stale += 1;
             }
         }
     }
     if stale > 0 {
         eprintln!(
-            "\n{stale} generated file(s) do not match {SOURCE}. Run `cargo xtask gen-design`."
+            "\n{stale} generated file(s) do not match {SOURCE} and {}. Run `cargo xtask gen-design`.",
+            assets::ASSETS
         );
         return ExitCode::FAILURE;
     }
@@ -965,24 +1025,58 @@ fn vendored_differences(root: &Path, web: &Path) -> Vendored {
         return Vendored::NotAdopted;
     };
     let revision = revision.trim();
-    let mut differences = Vec::new();
-    for (generated, vendored) in WEB_VENDORED {
-        let spec = format!("{revision}:{GENERATED}/{generated}");
+    let show = |path: &str| -> Option<String> {
         let output = std::process::Command::new("git")
             .arg("-C")
             .arg(root)
-            .args(["show", &spec])
-            .output();
-        let ours = match output {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            }
-            _ => return Vendored::Unavailable(format!("{spec} is not in this checkout's history")),
-        };
-        match std::fs::read_to_string(web.join(vendored)) {
-            Ok(theirs) if lf(&theirs) == lf(&ours) => {}
-            Ok(_) => differences.push(format!("{vendored} differs from {spec}")),
-            Err(_) => differences.push(format!("{vendored} is missing")),
+            .args(["show", &format!("{revision}:{path}")])
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+    };
+    let known = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "-e", &format!("{revision}^{{commit}}")])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !known {
+        return Vendored::Unavailable(format!("{revision} is not in this checkout's history"));
+    }
+
+    // Each file the web vendors, and where. A file this revision does not have and the web does
+    // not either is one the web has not adopted yet (the art arrived after the tokens).
+    let mut pairs: Vec<(String, String)> = WEB_VENDORED
+        .iter()
+        .map(|(generated, vendored)| (format!("{GENERATED}/{generated}"), vendored.to_string()))
+        .collect();
+    let manifest = format!("{}/{}", assets::ASSETS, assets::MANIFEST);
+    pairs.push((
+        manifest.clone(),
+        format!("{WEB_ASSETS}/{}", assets::MANIFEST),
+    ));
+    if let Some(entries) = show(&manifest).and_then(|text| assets::parse_manifest(&text).ok()) {
+        for entry in entries {
+            pairs.push((
+                format!("{}/{}", assets::ASSETS, entry.file),
+                format!("{WEB_ASSETS}/{}", entry.file),
+            ));
+        }
+    }
+
+    let mut differences = Vec::new();
+    for (ours, vendored) in pairs {
+        let spec = format!("{revision}:{ours}");
+        match (show(&ours), std::fs::read_to_string(web.join(&vendored))) {
+            (None, Err(_)) => {}
+            (None, Ok(_)) => differences.push(format!("{vendored} is not in {spec}")),
+            (Some(_), Err(_)) => differences.push(format!("{vendored} is missing")),
+            (Some(ours), Ok(theirs)) if lf(&theirs) == lf(&ours) => {}
+            (Some(_), Ok(_)) => differences.push(format!("{vendored} differs from {spec}")),
         }
     }
     Vendored::Compared(differences)
@@ -1286,6 +1380,36 @@ mod tests {
             assert_eq!(theme.colours["priority-none"], Colour::Hex(107, 114, 128));
             assert_eq!(theme.colours["priority-medium"], Colour::Hex(251, 191, 36));
             assert_eq!(theme.colours["priority-high"], Colour::Hex(239, 68, 68));
+        }
+    }
+
+    /// AWTD-1605: the check mark's green is the art's, not a theme's, so a theme that restates it
+    /// is refused, and the committed value is the one the art was drawn in.
+    #[test]
+    fn the_check_green_is_the_same_in_every_theme() {
+        let with_check = |dark: &str| {
+            source(dark, "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                r##""accent": "{brand.accent}", "checkbox-check": "#89A912""##,
+            )
+        };
+        assert!(parse(&with_check(""), THEMES).is_ok());
+        let problems =
+            parse(&with_check(r##", "checkbox-check": "#A3C61A""##), THEMES).unwrap_err();
+        assert_eq!(
+            problems,
+            vec!["themes.dark.colors.checkbox-check differs from light's; it is the same in every theme".to_string()]
+        );
+
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        for (name, theme) in &tokens.themes {
+            assert_eq!(
+                theme.colours["checkbox-check"],
+                Colour::Hex(0x89, 0xA9, 0x12),
+                "{name}"
+            );
         }
     }
 
