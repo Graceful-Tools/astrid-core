@@ -20,7 +20,7 @@ week.
 | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `98596ed9cc6927461e690c2b30ef00aaa3711439` |
 | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `8c3274dba50a3760d7c38043ba8f446015523d21` |
 | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI | `core/` (see its `docs/CORE_MIGRATION.md`) | `98596ed9cc6927461e690c2b30ef00aaa3711439` |
-| [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI | `core/` | `2cf2b5fb202ce99147d6a00c01e3041b1cdccf0a` |
+| [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI | `core/` | `facf1408c2bb66ec472ffb4f4bf3842e76dce5d9` |
 
 **Full forty-character shas, never short ones.** A short sha is ambiguous as the history grows,
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
