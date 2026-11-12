@@ -67,7 +67,33 @@ const READABLE_ON: &[&str] = &["bg-primary", "bg-secondary"];
 /// A meaning drawn as text or an icon: the `<meaning>-ink` colours. The base colour (`accent`,
 /// `error`, …) is one mid-tone that is right as a fill and too light as text on a light surface;
 /// the ink is the same meaning dark enough (or, on a dark theme, light enough) to read.
-const INK_MEANINGS: &[&str] = &["accent", "error", "success", "warning", "info"];
+/// `agent` is the colour that marks an agent's name or icon (astrid-web AWTD-1612).
+const INK_MEANINGS: &[&str] = &["accent", "error", "success", "warning", "info", "agent"];
+
+/// The categorical palette: a hue per category, for decorative and per-category icons (a
+/// settings section's tile, a filter's icon), where the colour tells things apart and means
+/// nothing else. Each hue is a theme colour pair, `category-<hue>` (the fill, one mid-tone in
+/// every theme) and `category-<hue>-ink` (the icon or label, held to what a status ink is held
+/// to). astrid-web AWTD-1612.
+pub const CATEGORIES: &[&str] = &[
+    "red", "orange", "amber", "green", "teal", "blue", "purple", "pink",
+];
+
+/// Every colour drawn as a glyph and checked as an ink: the meanings, then the categories.
+fn ink_meanings() -> impl Iterator<Item = String> {
+    INK_MEANINGS
+        .iter()
+        .map(|meaning| (*meaning).to_string())
+        .chain(CATEGORIES.iter().map(|hue| format!("category-{hue}")))
+}
+
+/// An ink drawn inside a surface of its own, as well as on the card: an agent's name in its bubble.
+const INK_ON_OWN_SURFACE: &[(&str, &str)] = &[("agent-ink", "agent-bubble")];
+
+/// A surface that is dark in every theme by design: a media viewer, a code block, a landing
+/// footer. What is drawn on it is the dark theme's (web scopes the panel to `.dark`), so each dark
+/// theme's text is held to body text on it.
+const SURFACE_INVERSE: &str = "surface-inverse";
 
 /// How strong a status wash is: the meaning's base colour at this opacity over the surface, behind
 /// a notice or a badge whose label is the ink. The web's `--theme-wash-opacity`.
@@ -121,7 +147,8 @@ const FAINT_PRIORITIES: &[(&str, &str)] = &[("light", "priority-medium")];
 
 /// Colours that are one value in every theme: the art's own colours, which a theme does not
 /// restyle. The check mark is the checkbox art's green (`design/assets/checkbox`, AWTD-1605).
-pub const THEME_INVARIANT: &[&str] = &["checkbox-check"];
+/// `surface-inverse` is the same dark in every theme: that is what it is for.
+pub const THEME_INVARIANT: &[&str] = &["checkbox-check", SURFACE_INVERSE];
 
 /// One colour: a literal, or the brand's, which a partner build replaces.
 #[derive(Debug, Clone, PartialEq)]
@@ -241,9 +268,9 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
         Colour::Brand(reference) => brand.get(reference).copied(),
     };
     for (name, theme) in &themes {
-        for meaning in INK_MEANINGS {
+        for meaning in ink_meanings() {
             let ink_name = format!("{meaning}-ink");
-            let (Some(ink), Some(base)) = (literal(theme, &ink_name), literal(theme, meaning))
+            let (Some(ink), Some(base)) = (literal(theme, &ink_name), literal(theme, &meaning))
             else {
                 continue;
             };
@@ -267,6 +294,38 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
                          {ratio:.2}:1, under {AA_BODY}:1"
                     ));
                 }
+            }
+        }
+    }
+
+    for (name, theme) in &themes {
+        for (ink_name, surface) in INK_ON_OWN_SURFACE {
+            let (Some(ink), Some(on)) = (literal(theme, ink_name), literal(theme, surface)) else {
+                continue;
+            };
+            let ratio = contrast(ink, on);
+            if ratio < AA_BODY {
+                problems.push(format!(
+                    "themes.{name}: {ink_name} on {surface} is {ratio:.2}:1, under {AA_BODY}:1"
+                ));
+            }
+        }
+    }
+
+    // What sits on the inverse surface is the dark theme's text (astrid-web AWTD-1612).
+    for (name, theme) in themes.iter().filter(|(_, t)| t.appearance == "dark") {
+        let Some(on) = literal(theme, SURFACE_INVERSE) else {
+            continue;
+        };
+        for text in READABLE_TEXT {
+            let Some(colour) = literal(theme, text) else {
+                continue;
+            };
+            let ratio = contrast(colour, on);
+            if ratio < AA_BODY {
+                problems.push(format!(
+                    "themes.{name}: {text} on {SURFACE_INVERSE} is {ratio:.2}:1, under {AA_BODY}:1"
+                ));
             }
         }
     }
@@ -1410,6 +1469,108 @@ mod tests {
                 Colour::Hex(0x89, 0xA9, 0x12),
                 "{name}"
             );
+        }
+    }
+
+    /// astrid-web AWTD-1612: the categorical palette is a fill and an ink per hue, and the ink is
+    /// held to what a status ink is: 4.5:1 on the card, on `bg-secondary` and on its own wash.
+    #[test]
+    fn a_category_ink_a_theme_cannot_read_is_refused() {
+        let with_ink = |ink: &str| {
+            source("", "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                &format!(
+                    r##""accent": "{{brand.accent}}", "bg-hover": "#FFFFFF", "category-blue": "#3B82F6", "category-blue-ink": "{ink}""##
+                ),
+            )
+        };
+        // The fill as text: 3.68:1 on white.
+        let problems = parse(&with_ink("#3B82F6"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.light: category-blue-ink on bg-hover")),
+            "{problems:?}"
+        );
+        // A blue that reads on white is too dark on Dark's card, which inherits it.
+        let problems = parse(&with_ink("#1D4ED8"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.starts_with("themes.dark: category-blue-ink")),
+            "{problems:?}"
+        );
+    }
+
+    /// An agent's name or icon is drawn on the card and inside its own bubble, so its ink reads on
+    /// both (astrid-web AWTD-1612).
+    #[test]
+    fn an_agent_ink_its_bubble_hides_is_refused() {
+        let with_agent = |ink: &str| {
+            source("", "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                &format!(
+                    r##""accent": "{{brand.accent}}", "bg-hover": "#FFFFFF", "agent": "#A855F7", "agent-ink": "{ink}", "agent-bubble": "#C4B5FD""##
+                ),
+            )
+        };
+        let problems = parse(&with_agent("#9333EA"), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.light: agent-ink on agent-bubble")),
+            "{problems:?}"
+        );
+    }
+
+    /// A surface that is dark in every theme (a media viewer, a code block, a landing footer) is
+    /// one colour everywhere, and the dark theme's text reads on it, because that is what a client
+    /// draws there (astrid-web AWTD-1612).
+    #[test]
+    fn the_inverse_surface_is_one_dark_colour() {
+        let with_inverse = |light: &str, dark: &str| {
+            source(dark, "#6B7280").replace(
+                r##""accent": "{brand.accent}""##,
+                &format!(r##""accent": "{{brand.accent}}", "surface-inverse": "{light}""##),
+            )
+        };
+        assert!(parse(&with_inverse("#111827", ""), THEMES).is_ok());
+        let problems = parse(
+            &with_inverse("#111827", r##", "surface-inverse": "#1F2937""##),
+            THEMES,
+        )
+        .unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.dark.colors.surface-inverse differs")),
+            "{problems:?}"
+        );
+        let problems = parse(&with_inverse("#6B7280", ""), THEMES).unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("themes.dark: text-muted on surface-inverse")),
+            "{problems:?}"
+        );
+    }
+
+    /// The committed palette has every hue in every theme, fill and ink.
+    #[test]
+    fn the_committed_categories_have_a_fill_and_an_ink() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        assert!((6..=8).contains(&CATEGORIES.len()));
+        for (name, theme) in &tokens.themes {
+            for hue in CATEGORIES {
+                for key in [format!("category-{hue}"), format!("category-{hue}-ink")] {
+                    assert!(theme.colours.contains_key(&key), "{name} has no {key}");
+                }
+            }
+            for key in ["agent", "agent-ink", "surface-inverse"] {
+                assert!(theme.colours.contains_key(key), "{name} has no {key}");
+            }
         }
     }
 
