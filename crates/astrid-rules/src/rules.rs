@@ -113,6 +113,10 @@ pub enum Rule {
     /// [`crate::agent_name`]. Through this door rather than the async one because it is asked on
     /// every keystroke, and because the answer depends on nothing but the name.
     CustomAgentName { name: String },
+    /// Every colour that follows from one brand accent, or why the accent cannot be used — see
+    /// [`crate::brand_colors`]. Through this door because the answer depends on nothing but the
+    /// accent, and because a partner deployment needs it at runtime as well as at build time.
+    BrandColors { accent: String },
     /// A project's board as iOS draws it: its columns in order, each with its cards in order —
     /// see [`crate::board_cards`]. `custom_states` is the project's `customStates` as the wire
     /// carries it; `board_list_id` the list whose manual order and Done window the board follows
@@ -299,6 +303,12 @@ pub fn run(rule: Rule) -> Response {
             None => crate::markdown::render(&text),
         }),
         Rule::CustomAgentName { name } => Response::ok(crate::agent_name::check(&name)),
+        // A refused accent is a bad request, not an error: the caller sent a colour that cannot
+        // carry a label, and the reason names the contrast so a partner can act on it.
+        Rule::BrandColors { accent } => match crate::brand_colors::derive(&accent) {
+            Ok(colours) => Response::ok(colours),
+            Err(refusal) => Response::failed(Failure::bad_request(refusal.reason)),
+        },
         Rule::Board {
             project_id,
             custom_states,

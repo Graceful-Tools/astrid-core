@@ -15,6 +15,7 @@
 pub mod agent_name;
 pub mod board;
 pub mod board_cards;
+pub mod brand_colors;
 pub mod editing;
 pub mod envelope;
 pub mod filters;

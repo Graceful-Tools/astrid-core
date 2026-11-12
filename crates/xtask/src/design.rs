@@ -492,32 +492,11 @@ fn is_kebab(key: &str) -> bool {
         && !key.ends_with('-')
 }
 
-/// WCAG 2.x contrast ratio.
-pub fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
-    fn luminance((r, g, b): (u8, u8, u8)) -> f64 {
-        let linear = |channel: u8| {
-            let s = f64::from(channel) / 255.0;
-            if s <= 0.03928 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-    }
-    let (la, lb) = (luminance(a), luminance(b));
-    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-}
-
-/// `top` at `alpha` over `under`, as a browser composites it: per channel, rounded.
-pub fn over(top: (u8, u8, u8), under: (u8, u8, u8), alpha: f64) -> (u8, u8, u8) {
-    let mix = |t: u8, u: u8| (f64::from(t) * alpha + f64::from(u) * (1.0 - alpha)).round() as u8;
-    (
-        mix(top.0, under.0),
-        mix(top.1, under.1),
-        mix(top.2, under.2),
-    )
-}
+// The contrast budget is one implementation, in `astrid_rules::brand_colors`, because the
+// generator CHECKS Astrid's committed values against it and `gen-brand` DERIVES a partner's from
+// it. Two copies would mean a partner's accent being judged by a slightly different rule than the
+// one that approved Astrid's — which is the shape of bug this whole area keeps producing.
+pub use astrid_rules::brand_colors::{contrast, over};
 
 // ── Emitters ──────────────────────────────────────────────────────────────────────────────────
 

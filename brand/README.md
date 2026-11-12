@@ -51,7 +51,7 @@ Astrid Code's ids are a hash of the bundle id and the id's own purpose rather th
 because a regenerated id orphans every installed copy's settings. Same profile, same id, on any
 machine.
 
-## What it does not write, and why
+## What it does not write
 
 **Icons.** The task that asked for this ("one 1024-px icon … the icon in all sizes") would need a
 rasteriser, and that is a dependency and a `cargo deny` decision rather than another emitter. It is
@@ -59,10 +59,24 @@ also against the grain of [`../design/assets`](../design/assets): `crates/xtask/
 *because* the checkbox used to be sixteen fixed-colour PNGs copied by hand, and fixed-colour bitmaps
 cannot take the priority tokens or a partner's brand (register DS21). Filed separately.
 
-**Derived colours.** `colors.accent-hover`, `accent-ink`, `accent-ink-dark` and `accent-text` are
-marked `"derived": true` and are only passed through if a profile states them. Deriving them from
-the accent — and refusing an accent whose label fails contrast — is its own task, because it is a
-rule with a contrast budget rather than a mapping.
+## Colours a profile does not have to state
+
+`colors.accent-hover`, `accent-ink`, `accent-ink-dark` and `accent-text` are marked
+`"derived": true`: state them and they are used, leave them out and
+[`astrid_rules::brand_colors`](../crates/astrid-rules/src/brand_colors.rs) derives them from the
+accent. One rule, so a partner's brand looks the same on every client — before this each client
+derived them differently and iOS fell back to **Astrid's blue**, so a purple brand had a blue hover
+on one platform out of four.
+
+**A stated value always wins.** Astrid's own hover and inks are hand-picked on a designed ramp that
+no formula reproduces (`#2563EB` → `#1D4ED8` is the next step on it, not a multiply), and they
+reach a profile as defaults from `design/tokens.json`'s `brand` block rather than being derived.
+
+**An accent that cannot carry a label is refused**, with the contrast in the message. `accent-text`
+is white in every theme (DS26), so an accent white cannot be read on is not a brand accent. That
+check existed for Astrid's committed values and never ran on a partner's, which is the hole this
+closes — and the first thing it did was fail a shipped fixture: `acme.brand.json`'s `#a855f7` is
+3.96:1 and needs to be darker.
 
 ## Astrid's own defaults
 

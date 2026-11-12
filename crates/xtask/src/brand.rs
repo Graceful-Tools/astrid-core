@@ -85,6 +85,9 @@ struct Field {
     required: bool,
     /// The `NEXT_PUBLIC_*`/`BRAND_*` key this field is also readable as.
     env: Option<String>,
+    /// Astrid's own value, used when a profile states none. This is what lets
+    /// `astrid.brand.json` set nothing at all and still describe Astrid.
+    default: Option<String>,
 }
 
 /// `brand/schema.json`, parsed.
@@ -143,6 +146,10 @@ fn fields(raw: &Value, what: &str) -> Result<BTreeMap<String, Field>, Vec<String
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
                         env: spec.get("env").and_then(Value::as_str).map(str::to_string),
+                        default: spec
+                            .get("default")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     },
                 );
             }
@@ -218,7 +225,21 @@ impl Schema {
     /// Every problem names its field as `section.field`, because the point of the schema is that a
     /// partner's broken profile says which line to fix rather than failing somewhere downstream in
     /// a generated file.
+    /// With no defaults beyond the schema's own. Every caller in the binary has Astrid's colours
+    /// to pass, so this exists for the tests that are checking the schema rather than the tokens.
+    #[cfg(test)]
     pub fn read(&self, source: &str) -> Result<Profile, Vec<String>> {
+        self.read_with(source, &BTreeMap::new())
+    }
+
+    /// As [`Schema::read`], with `defaults` overlaying the schema's own — `gen-brand` passes the
+    /// `brand` block of `design/tokens.json`, so Astrid's accent has ONE home rather than being
+    /// restated in the schema and drifting from the tokens the way the other four copies did.
+    pub fn read_with(
+        &self,
+        source: &str,
+        defaults: &BTreeMap<String, String>,
+    ) -> Result<Profile, Vec<String>> {
         let raw: Value = serde_json::from_str(source)
             .map_err(|error| vec![format!("profile is not JSON: {error}")])?;
         let Some(object) = raw.as_object() else {
@@ -249,7 +270,12 @@ impl Schema {
 
             // A section wins over its alias: a profile that has migrated says so by having the
             // section, and leaving the old key behind must not silently override the new one.
-            let Some(value) = from_section.or(from_env) else {
+            let fallback = defaults
+                .get(&key)
+                .cloned()
+                .or_else(|| field.default.clone());
+
+            let Some(value) = from_section.or(from_env).or(fallback) else {
                 if field.required {
                     problems.push(match &field.env {
                         Some(alias) => format!("{key} is required (or env.{alias})"),
@@ -282,6 +308,26 @@ impl Schema {
             .to_string();
         if name.is_empty() {
             problems.push("name is required".to_string());
+        }
+
+        // The accent is checked, and the colours that follow from it filled in, by the one rule
+        // every client shares (task 5ea48ab1). A stated value always wins: Astrid's own hover and
+        // inks are hand-picked on a designed ramp that no formula reproduces, and derivation is
+        // for a partner who supplies an accent and nothing else.
+        if let Some(accent) = values.get("colors.accent").cloned() {
+            match astrid_rules::brand_colors::derive(&accent) {
+                Ok(derived) => {
+                    for (key, value) in [
+                        ("colors.accent-hover", derived.accent_hover),
+                        ("colors.accent-ink", derived.accent_ink),
+                        ("colors.accent-ink-dark", derived.accent_ink_dark),
+                        ("colors.accent-text", derived.accent_text),
+                    ] {
+                        values.entry(key.to_string()).or_insert(value);
+                    }
+                }
+                Err(refusal) => problems.push(format!("colors.accent: {}", refusal.reason)),
+            }
         }
 
         if problems.is_empty() {
@@ -391,8 +437,11 @@ fn web_env(schema: &Schema, profile: &Profile) -> String {
 }
 
 fn web_css(profile: &Profile) -> String {
-    let mut text = banner("/*", profile);
-    text.push_str("*/\n:root {\n");
+    // One block comment with continuation lines, rather than a `/*` on each: nested `/*` is legal
+    // CSS but reads as a mistake in a file somebody is meant to be able to open.
+    let mut text = String::from("/*\n");
+    text.push_str(&banner(" *", profile));
+    text.push_str(" */\n:root {\n");
     for (token, key) in [
         ("--brand-accent", "colors.accent"),
         ("--brand-accent-hover", "colors.accent-hover"),
@@ -601,6 +650,33 @@ fn xml(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Astrid's own brand colours, read from `design/tokens.json`'s `brand` block.
+///
+/// Task 77367032's third point: that block is the single home of Astrid's defaults. The accent was
+/// written in five places and they disagreed — the tokens said `#2563EB` while web's `config.ts`,
+/// iOS's `Brand.swift` and Android's README still said `#3b82f6`. Reading it here rather than
+/// restating it in the schema means this generator cannot become a sixth copy.
+fn astrid_colours(root: &Path) -> BTreeMap<String, String> {
+    let Ok(source) = std::fs::read_to_string(root.join(crate::design::SOURCE)) else {
+        return BTreeMap::new();
+    };
+    let Ok(tokens) = serde_json::from_str::<Value>(&source) else {
+        return BTreeMap::new();
+    };
+    let Some(brand) = tokens.get("brand").and_then(Value::as_object) else {
+        return BTreeMap::new();
+    };
+
+    brand
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .as_str()
+                .map(|hex| (format!("colors.{name}"), hex.to_string()))
+        })
+        .collect()
+}
+
 fn load_schema(root: &Path) -> Result<Schema, ExitCode> {
     let path = root.join(SCHEMA);
     let source = match std::fs::read_to_string(&path) {
@@ -639,7 +715,7 @@ pub fn generate(root: &Path, profile_path: Option<String>, out: Option<String>) 
         }
     };
 
-    let profile = match schema.read(&source) {
+    let profile = match schema.read_with(&source, &astrid_colours(root)) {
         Ok(profile) => profile,
         Err(problems) => {
             eprintln!("{profile_path} does not match brand/schema.json:");
@@ -683,14 +759,18 @@ mod tests {
       "version": 1,
       "sections": {
         "identity": {
-          "name": { "type": "string", "required": true, "env": "NEXT_PUBLIC_BRAND_NAME" },
+          "name": { "type": "string", "required": true, "env": "NEXT_PUBLIC_BRAND_NAME", "default": "Astrid" },
           "title": { "type": "string", "env": "NEXT_PUBLIC_BRAND_TITLE" },
-          "domain": { "type": "domain", "required": true, "env": "NEXT_PUBLIC_BRAND_DOMAIN" },
-          "url-scheme": { "type": "scheme", "required": true, "env": "NEXT_PUBLIC_BRAND_APP_URL_SCHEME" },
+          "domain": { "type": "domain", "required": true, "env": "NEXT_PUBLIC_BRAND_DOMAIN", "default": "astrid.cc" },
+          "url-scheme": { "type": "scheme", "required": true, "env": "NEXT_PUBLIC_BRAND_APP_URL_SCHEME", "default": "astrid" },
           "support-email": { "type": "email", "env": "NEXT_PUBLIC_BRAND_SUPPORT_EMAIL" }
         },
         "colors": {
-          "accent": { "type": "color", "required": true, "env": "NEXT_PUBLIC_BRAND_ACCENT_COLOR" }
+          "accent": { "type": "color", "required": true, "env": "NEXT_PUBLIC_BRAND_ACCENT_COLOR" },
+          "accent-hover": { "type": "color", "derived": true },
+          "accent-ink": { "type": "color", "derived": true },
+          "accent-ink-dark": { "type": "color", "derived": true },
+          "accent-text": { "type": "color", "derived": true }
         },
         "capabilities": {
           "mcp": { "type": "bool", "env": "NEXT_PUBLIC_BRAND_ENABLE_MCP" }
@@ -715,7 +795,7 @@ mod tests {
         "NEXT_PUBLIC_BRAND_DOMAIN": "tasks.acme.example",
         "NEXT_PUBLIC_BRAND_APP_URL_SCHEME": "acmetasks",
         "NEXT_PUBLIC_BRAND_SUPPORT_EMAIL": "helpdesk@acme.example",
-        "NEXT_PUBLIC_BRAND_ACCENT_COLOR": "#a855f7",
+        "NEXT_PUBLIC_BRAND_ACCENT_COLOR": "#7e22ce",
         "NEXT_PUBLIC_BRAND_APP_STORE_URL": ""
       }
     }"##;
@@ -729,7 +809,7 @@ mod tests {
         assert_eq!(profile.name, "Acme");
         assert_eq!(profile.get("identity.name"), Some("Acme"));
         assert_eq!(profile.get("identity.url-scheme"), Some("acmetasks"));
-        assert_eq!(profile.get("colors.accent"), Some("#a855f7"));
+        assert_eq!(profile.get("colors.accent"), Some("#7e22ce"));
     }
 
     /// An empty string is how web's profiles spell "unset". It is absent, not invalid — otherwise
@@ -748,7 +828,7 @@ mod tests {
         let source = r##"{
           "name": "Acme",
           "identity": { "name": "Acme", "domain": "new.example", "url-scheme": "acme" },
-          "colors": { "accent": "#A855F7" },
+          "colors": { "accent": "#7E22CE" },
           "env": { "NEXT_PUBLIC_BRAND_DOMAIN": "old.example" }
         }"##;
 
@@ -787,6 +867,10 @@ mod tests {
     }
 
     /// A missing required field names itself AND the key a profile may still be using for it.
+    ///
+    /// The accent, because it is the one required field with no Astrid default to fall back on:
+    /// a partner's brand IS its accent, and quietly giving them Astrid's blue is the iOS bug this
+    /// whole area exists to stop.
     #[test]
     fn a_missing_required_field_names_its_alias_77367032() {
         let source = r#"{ "name": "Acme", "env": { "NEXT_PUBLIC_BRAND_NAME": "Acme" } }"#;
@@ -795,7 +879,7 @@ mod tests {
 
         assert!(
             problems.contains(
-                &"identity.domain is required (or env.NEXT_PUBLIC_BRAND_DOMAIN)".to_string()
+                &"colors.accent is required (or env.NEXT_PUBLIC_BRAND_ACCENT_COLOR)".to_string()
             ),
             "{problems:?}"
         );
@@ -856,11 +940,83 @@ mod tests {
 
         assert!(env.contains("NEXT_PUBLIC_BRAND_NAME=Acme\n"), "{env}");
         assert!(
-            env.contains("NEXT_PUBLIC_BRAND_ACCENT_COLOR=#a855f7\n"),
+            env.contains("NEXT_PUBLIC_BRAND_ACCENT_COLOR=#7e22ce\n"),
             "{env}"
         );
         // Absent stays absent: an empty key would set it to "" in a real deployment.
         assert!(!env.contains("NEXT_PUBLIC_BRAND_APP_STORE_URL"), "{env}");
+    }
+
+    /// A partner states one accent and gets the rest, from the same rule every client shares
+    /// (task 5ea48ab1). Before this, each client derived them differently and iOS fell back to
+    /// Astrid's blue, so a purple brand had a blue hover on one platform out of four.
+    #[test]
+    fn one_accent_fills_the_colours_that_follow_from_it_5ea48ab1() {
+        let profile = schema().read(ENV_ONLY).expect("valid");
+
+        assert_eq!(profile.get("colors.accent"), Some("#7e22ce"));
+        assert_eq!(profile.get("colors.accent-hover"), Some("#6B1DAF"));
+        assert_eq!(profile.get("colors.accent-text"), Some("#FFFFFF"));
+        assert!(profile.get("colors.accent-ink").is_some());
+        assert!(profile.get("colors.accent-ink-dark").is_some());
+    }
+
+    /// An accent whose label cannot be read is refused by the generator too, not only by the
+    /// rule — a partner finds out when they configure the brand rather than from a user.
+    #[test]
+    fn an_accent_that_cannot_carry_a_label_is_refused_5ea48ab1() {
+        let source = r##"{
+          "name": "Acme",
+          "identity": { "name": "Acme", "domain": "a.example", "url-scheme": "acme" },
+          "colors": { "accent": "#FFFF00" }
+        }"##;
+
+        let problems = schema().read(source).expect_err("refused");
+
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("colors.accent:") && p.contains("under the 4.5:1")),
+            "{problems:?}"
+        );
+    }
+
+    /// A stated value wins over a derived one: Astrid's own hover and inks are hand-picked on a
+    /// designed ramp that no formula reproduces, and re-deriving them would overwrite the design.
+    #[test]
+    fn a_stated_colour_is_not_overwritten_by_derivation_5ea48ab1() {
+        let source = r##"{
+          "name": "Astrid",
+          "identity": { "name": "Astrid", "domain": "a.example", "url-scheme": "astrid" },
+          "colors": { "accent": "#2563EB", "accent-hover": "#1D4ED8" }
+        }"##;
+
+        let profile = schema().read(source).expect("valid");
+
+        // Derivation would give #1F54C8 here; the designed next step on the ramp is #1D4ED8.
+        assert_eq!(profile.get("colors.accent-hover"), Some("#1D4ED8"));
+    }
+
+    /// `astrid.brand.json` sets **nothing** — `"env": {}` — on purpose: it is the profile that
+    /// proves the whitelabel refactor changed no behaviour. So a profile that states nothing must
+    /// resolve to Astrid, and its colours must come from `design/tokens.json`'s `brand` block
+    /// rather than from a sixth copy of the accent living in this generator.
+    #[test]
+    fn a_profile_that_states_nothing_is_astrid_77367032() {
+        let defaults = BTreeMap::from([
+            ("colors.accent".to_string(), "#2563EB".to_string()),
+            ("colors.accent-hover".to_string(), "#1D4ED8".to_string()),
+        ]);
+
+        let profile = schema()
+            .read_with(r#"{ "name": "Astrid", "env": {} }"#, &defaults)
+            .expect("the empty profile is Astrid");
+
+        assert_eq!(profile.get("identity.name"), Some("Astrid"));
+        assert_eq!(profile.get("identity.domain"), Some("astrid.cc"));
+        assert_eq!(profile.get("colors.accent"), Some("#2563EB"));
+        // The tokens' hand-picked hover, NOT the derived #1F54C8 — the designed ramp wins.
+        assert_eq!(profile.get("colors.accent-hover"), Some("#1D4ED8"));
     }
 
     /// The schema in the repository is the one the generator is written against, not a sample.
