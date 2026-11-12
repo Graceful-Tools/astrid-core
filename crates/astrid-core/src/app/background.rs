@@ -541,6 +541,8 @@ mod tests {
             repeat_from: None,
             is_private: None,
             apply_list_defaults: true,
+            wait_on_task_id: None,
+            keep_assignee: false,
         })
         .await;
         // Let the loop take its turn. No time passes: the wake-up is the bell, not a timer.

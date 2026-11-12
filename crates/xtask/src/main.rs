@@ -5,12 +5,21 @@
 
 use std::process::ExitCode;
 
+mod core_contracts;
 mod design;
 
 const COMMANDS: &[(&str, &str)] = &[
     (
         "check-contracts",
         "verify contracts/fixtures still says what astrid-web's does [path, default ../astrid-web]",
+    ),
+    (
+        "gen-core-contracts",
+        "write the core-first fixtures (contracts/fixtures/waiting.json) from this crate's rules",
+    ),
+    (
+        "check-core-contracts",
+        "verify the core-first fixtures are what this crate's rules answer",
     ),
     (
         "check-pins",
@@ -35,6 +44,8 @@ fn main() -> ExitCode {
     match command.as_str() {
         "check-contracts" => check_contracts(),
         "check-pins" => check_pins(),
+        "gen-core-contracts" => core_contracts::write_all(&repo_root()),
+        "check-core-contracts" => core_contracts::check_all(&repo_root()),
         "gen-design" => design::generate(&repo_root()),
         "check-design" => design::check(
             &repo_root(),
@@ -103,6 +114,12 @@ fn check_contracts() -> ExitCode {
     let mut stale = 0usize;
     for name in &names {
         let display = name.to_string_lossy();
+        // A core-first fixture is ours, and web's copy follows the revision web pins: a newer one
+        // here is web being behind, which its own gate reports, not drift in this repository.
+        if core_contracts::CORE_OWNED.contains(&display.as_ref()) {
+            println!("ok  contracts/fixtures/{display} (core-owned; web copies it)");
+            continue;
+        }
         match (
             std::fs::read(theirs.join(name)),
             std::fs::read(ours.join(name)),
@@ -131,6 +148,13 @@ fn check_contracts() -> ExitCode {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name();
             if !name.to_string_lossy().ends_with(".json") {
+                continue;
+            }
+            if core_contracts::CORE_OWNED.contains(&name.to_string_lossy().as_ref()) {
+                println!(
+                    "ok  contracts/fixtures/{} (core-owned; generated here)",
+                    name.to_string_lossy()
+                );
                 continue;
             }
             if !theirs.join(&name).exists() {

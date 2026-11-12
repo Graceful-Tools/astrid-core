@@ -739,3 +739,344 @@ async fn a_column_that_is_not_on_this_board_is_refused() {
     .await;
     assert_eq!(answered["error"]["kind"], "badRequest");
 }
+
+// ─── The Waiting lane through the door (astrid_rules::waiting, Jon 2026-11-12) ────────────────
+
+/// A board app holding `tasks` as given, the clock at 2026-09-07T12:00:00Z.
+async fn waiting_app(transport: StubTransport, tasks: serde_json::Value) -> super::App {
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Ship it" })).expect("a project"),
+        ])
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    let tasks: Vec<crate::model::Task> = serde_json::from_value(tasks).expect("tasks");
+    app.store.upsert_tasks(&tasks).expect("stores");
+    app
+}
+
+async fn detail(app: &super::App, id: &str) -> serde_json::Value {
+    call(app, json!({ "kind": "taskDetail", "taskId": id })).await["value"]["task"].clone()
+}
+
+/// R2: a move into Waiting with nothing to wait on is refused with the code the picker keys on,
+/// and nothing is written.
+#[tokio::test]
+async fn a_move_to_waiting_with_no_condition_is_refused_and_writes_nothing() {
+    let app = waiting_app(
+        StubTransport::new(),
+        json!([{ "id": "t1", "title": "Ship", "listIds": ["l1"], "statusRole": "doing", "assigneeId": "u1" }]),
+    )
+    .await;
+    for command in [
+        json!({ "kind": "moveTaskToColumn", "taskId": "t1", "columnId": "waiting", "listId": "l1" }),
+        json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "waiting" }),
+        json!({ "kind": "setTaskStatusRole", "taskId": "t1", "statusRole": "waiting" }),
+        json!({ "kind": "dropBoardCard", "taskId": "t1", "columnId": "waiting", "listId": "l1", "index": 0 }),
+        json!({ "kind": "updateTask", "taskId": "t1", "changes": { "statusRole": "waiting" } }),
+        // A date that has passed is no condition.
+        json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "waiting", "dueDateTime": "2026-09-01T00:00:00Z" }),
+    ] {
+        let refused = call(&app, command.clone()).await;
+        assert_eq!(refused["ok"], false, "{command}");
+        assert_eq!(refused["error"]["kind"], "refused", "{command}");
+        assert_eq!(
+            refused["error"]["code"], "WAITING_NEEDS_CONDITION",
+            "{command}"
+        );
+    }
+    let task = detail(&app, "t1").await;
+    assert_eq!(task["statusRole"], "doing");
+    assert_eq!(task["assigneeId"], "u1");
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+}
+
+/// R2: a date given with the move is written with it, and entering clears the assignee.
+#[tokio::test]
+async fn a_move_to_waiting_with_a_date_writes_it_and_clears_the_assignee() {
+    let app = waiting_app(
+        StubTransport::new(),
+        json!([{ "id": "t1", "title": "Ship", "listIds": ["l1"], "statusRole": "doing", "assigneeId": "u1" }]),
+    )
+    .await;
+    let moved = call(
+        &app,
+        json!({ "kind": "moveTaskToColumn", "taskId": "t1", "columnId": "waiting", "listId": "l1",
+                "dueDateTime": "2026-09-10T00:00:00Z", "isAllDay": true }),
+    )
+    .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    let task = detail(&app, "t1").await;
+    assert_eq!(task["statusRole"], "waiting");
+    assert_eq!(task["dueDateTime"], "2026-09-10T00:00:00Z");
+    assert_eq!(task["isAllDay"], true);
+    assert!(task["assigneeId"].is_null(), "{task}");
+}
+
+/// R2: `keepAssignee` keeps it, and a future date already on the task is condition enough.
+#[tokio::test]
+async fn keep_assignee_keeps_it_and_a_date_already_on_the_task_counts() {
+    let app = waiting_app(
+        StubTransport::new(),
+        json!([{ "id": "t1", "title": "Ship", "listIds": ["l1"], "statusRole": "ready",
+                 "assigneeId": "u1", "dueDateTime": "2026-09-20T09:00:00Z" }]),
+    )
+    .await;
+    let moved = call(
+        &app,
+        json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "waiting", "keepAssignee": true }),
+    )
+    .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    let task = detail(&app, "t1").await;
+    assert_eq!(task["statusRole"], "waiting");
+    assert_eq!(task["assigneeId"], "u1");
+}
+
+/// R2: waiting on a task attaches it as a blocker, at once, then moves.
+#[tokio::test]
+async fn a_move_to_waiting_on_a_task_attaches_the_blocker_then_moves() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/tasks/t1/blockers",
+        201,
+        json!({ "taskId": "t1", "blockingTaskId": "t2",
+                "blockedBy": [{ "id": "t2", "title": "Upstream" }] }),
+    );
+    let (app, transport) = {
+        let (app, transport) = app_and_transport(transport);
+        app.store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Ship it" }))
+                    .expect("a project"),
+            ])
+            .expect("stores");
+        app.store
+            .upsert_list(
+                &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                    .expect("a list"),
+            )
+            .expect("stores");
+        let tasks: Vec<crate::model::Task> = serde_json::from_value(json!([
+            { "id": "t1", "title": "Ship", "listIds": ["l1"], "assigneeId": "u1" },
+            { "id": "t2", "title": "Upstream", "listIds": ["l1"] }
+        ]))
+        .expect("tasks");
+        app.store.upsert_tasks(&tasks).expect("stores");
+        (app, transport)
+    };
+    let moved = call(
+        &app,
+        json!({ "kind": "moveTaskToColumn", "taskId": "t1", "columnId": "waiting", "listId": "l1",
+                "waitOnTaskId": "t2" }),
+    )
+    .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    assert!(
+        transport
+            .requests()
+            .iter()
+            .any(|request| request.url.contains("/api/v1/tasks/t1/blockers")),
+        "the blocker went to the server"
+    );
+    let task = detail(&app, "t1").await;
+    assert_eq!(task["statusRole"], "waiting");
+    assert!(task["assigneeId"].is_null());
+}
+
+/// R2: a waiting task's only blocker being complete is no condition.
+#[tokio::test]
+async fn a_complete_blocker_is_no_condition() {
+    let app = waiting_app(
+        StubTransport::new(),
+        json!([
+            { "id": "t1", "title": "Ship", "listIds": ["l1"], "blockedBy": ["t2"] },
+            { "id": "t2", "title": "Upstream", "listIds": ["l1"], "completed": true }
+        ]),
+    )
+    .await;
+    let refused = call(
+        &app,
+        json!({ "kind": "setTaskStatus", "taskId": "t1", "columnId": "waiting" }),
+    )
+    .await;
+    assert_eq!(
+        refused["error"]["code"], "WAITING_NEEDS_CONDITION",
+        "{refused}"
+    );
+}
+
+/// R2 + R3: clearing a Waiting task's date — its last condition — wakes it to Ready instead of
+/// being refused, and keeps its assignee.
+#[tokio::test]
+async fn clearing_the_last_date_of_a_waiting_task_wakes_it() {
+    let app = waiting_app(
+        StubTransport::new(),
+        json!([{ "id": "t1", "title": "Ship", "listIds": ["l1"], "statusRole": "waiting",
+                 "assigneeId": "u1", "dueDateTime": "2026-09-20T09:00:00Z" }]),
+    )
+    .await;
+    let edited = call(
+        &app,
+        json!({ "kind": "updateTask", "taskId": "t1", "changes": { "dueDateTime": null } }),
+    )
+    .await;
+    assert_eq!(edited["ok"], true, "{edited}");
+    let task = detail(&app, "t1").await;
+    assert_eq!(task["statusRole"], "ready");
+    assert_eq!(task["assigneeId"], "u1");
+}
+
+/// R2: a card typed into Waiting with nothing to wait on is refused before anything is created;
+/// with a date it is born waiting on it.
+#[tokio::test]
+async fn a_card_typed_into_waiting_needs_its_condition() {
+    let app = waiting_app(StubTransport::new(), json!([])).await;
+    let refused = call(
+        &app,
+        json!({ "kind": "addBoardCard", "listId": "l1", "columnId": "waiting", "title": "Later" }),
+    )
+    .await;
+    assert_eq!(
+        refused["error"]["code"], "WAITING_NEEDS_CONDITION",
+        "{refused}"
+    );
+    let board = call(
+        &app,
+        json!({ "kind": "board", "listId": "l1", "idsOnly": true }),
+    )
+    .await;
+    let total: u64 = board["value"]["columns"]
+        .as_array()
+        .expect("columns")
+        .iter()
+        .map(|column| column["total"].as_u64().unwrap_or(0))
+        .sum();
+    assert_eq!(total, 0, "nothing was created");
+
+    let added = call(
+        &app,
+        json!({ "kind": "addBoardCard", "listId": "l1", "columnId": "waiting", "title": "Later",
+                "dueDateTime": "2026-09-10T00:00:00Z", "isAllDay": true }),
+    )
+    .await;
+    assert_eq!(added["ok"], true, "{added}");
+    assert_eq!(added["value"]["statusRole"], "waiting", "{added}");
+    assert_eq!(added["value"]["dueDateTime"], "2026-09-10T00:00:00Z");
+}
+
+/// The server's own `code` reaches the shell: a refusal it answers as
+/// `{ "code": "WAITING_NEEDS_CONDITION" }` is the same failure the core's own refusal is.
+#[test]
+fn a_server_refusal_carries_its_code() {
+    let failure: crate::app::Failure =
+        crate::services::ServiceError::Api(crate::api::ApiError::Http {
+            status: 400,
+            message:
+                r#"{"error":"Waiting needs a date or a task","code":"WAITING_NEEDS_CONDITION"}"#
+                    .into(),
+        })
+        .into();
+    assert_eq!(failure.code.as_deref(), Some("WAITING_NEEDS_CONDITION"));
+    assert_eq!(failure.status, Some(400));
+}
+
+/// R2 at birth: `createTask` into Waiting needs a future date or a task to wait on — a new task
+/// has no blockers — and is born unassigned unless kept. Refused, nothing is written.
+#[tokio::test]
+async fn a_task_created_in_waiting_needs_its_condition_and_is_born_unassigned() {
+    let app = waiting_app(StubTransport::new(), json!([])).await;
+    for command in [
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting", "assigneeId": "u1" }),
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "dueDateTime": "2026-09-01T00:00:00Z" }),
+    ] {
+        let refused = call(&app, command.clone()).await;
+        assert_eq!(
+            refused["error"]["code"], "WAITING_NEEDS_CONDITION",
+            "{command}"
+        );
+    }
+    assert!(app
+        .store
+        .tasks_in_lists(&["l1".to_string()])
+        .expect("reads")
+        .is_empty());
+    assert!(crate::outbox::journal::all(&app.store)
+        .expect("reads")
+        .is_empty());
+
+    let dated = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "dueDateTime": "2026-09-10T00:00:00Z", "isAllDay": true }),
+    )
+    .await;
+    assert_eq!(dated["ok"], true, "{dated}");
+    assert_eq!(dated["value"]["statusRole"], "waiting");
+    assert!(dated["value"]["assigneeId"].is_null(), "{dated}");
+
+    let kept = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Later", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "dueDateTime": "2026-09-10T00:00:00Z", "keepAssignee": true }),
+    )
+    .await;
+    assert_eq!(kept["value"]["assigneeId"], "u1", "{kept}");
+
+    // A plain create is untouched by the rule.
+    let plain = call(
+        &app,
+        json!({ "kind": "createTask", "title": "Now", "listIds": ["l1"], "statusRole": "ready", "assigneeId": "u1" }),
+    )
+    .await;
+    assert_eq!(plain["value"]["assigneeId"], "u1");
+}
+
+/// R2 at birth, waiting on a task: born, given its blocker, then moved to Waiting.
+#[tokio::test]
+async fn a_task_created_waiting_on_a_task_gets_its_blocker_then_its_role() {
+    let transport = StubTransport::new().push_json(
+        "/blockers",
+        201,
+        json!({ "blockingTaskId": "t2", "blockedBy": [{ "id": "t2", "title": "Upstream" }] }),
+    );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+    let tasks: Vec<crate::model::Task> =
+        serde_json::from_value(json!([{ "id": "t2", "title": "Upstream", "listIds": ["l1"] }]))
+            .expect("tasks");
+    app.store.upsert_tasks(&tasks).expect("stores");
+    let made = call(
+        &app,
+        json!({ "kind": "createTask", "title": "After it", "listIds": ["l1"], "statusRole": "waiting",
+                "assigneeId": "u1", "waitOnTaskId": "t2" }),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["statusRole"], "waiting", "{made}");
+    assert!(made["value"]["assigneeId"].is_null(), "{made}");
+    // The new task is not on the server yet, so the blocker waits in the journal behind its
+    // create, as any write to a task with a temporary id does.
+    let _ = transport;
+    let id = made["value"]["id"].as_str().expect("an id");
+    let journal = crate::outbox::journal::all(&app.store).expect("reads");
+    assert!(
+        journal
+            .iter()
+            .any(|entry| format!("{entry:?}").contains("t2") && format!("{entry:?}").contains(id)),
+        "the blocker is journalled: {journal:?}"
+    );
+}

@@ -155,6 +155,56 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             repeat_from,
             is_private,
             apply_list_defaults,
+            wait_on_task_id,
+            keep_assignee,
+        } if status_role.as_deref() == Some(crate::board::WAITING_STATUS_ROLE) => {
+            create_waiting_task(
+                app,
+                NewTask {
+                    title,
+                    description,
+                    list_ids,
+                    priority,
+                    due_date_time,
+                    is_all_day,
+                    assignee_id,
+                    parent_task_id,
+                    status_role,
+                    quick_add,
+                    locale,
+                    repeating,
+                    repeating_data,
+                    repeat_from,
+                    is_private,
+                    apply_list_defaults,
+                },
+                WaitOptions {
+                    due_date_time: None,
+                    is_all_day: None,
+                    wait_on_task_id,
+                    keep_assignee,
+                },
+            )
+            .await
+        }
+        Command::CreateTask {
+            title,
+            description,
+            list_ids,
+            priority,
+            due_date_time,
+            is_all_day,
+            assignee_id,
+            parent_task_id,
+            status_role,
+            quick_add,
+            locale,
+            repeating,
+            repeating_data,
+            repeat_from,
+            is_private,
+            apply_list_defaults,
+            ..
         } => answer(create_task(
             app,
             NewTask {
@@ -176,10 +226,19 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 apply_list_defaults,
             },
         )),
-        Command::UpdateTask { task_id, changes } => match changes_from_json(&changes) {
-            Ok(changes) => answer(app.context.tasks().update(&task_id, &changes)),
-            Err(failure) => Response::failed(failure),
-        },
+        Command::UpdateTask { task_id, changes } => {
+            // Not a task field: the mover's choice when the edit puts the task in Waiting.
+            let keep_assignee = changes
+                .get("keepAssignee")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            match changes_from_json(&changes)
+                .and_then(|parsed| waiting_update(app, &task_id, parsed, keep_assignee))
+            {
+                Ok(changes) => answer(app.context.tasks().update(&task_id, &changes)),
+                Err(failure) => Response::failed(failure),
+            }
+        }
         // The only path to a completion, and the reason `TaskChanges::completed` is never set by
         // the shell: see `crate::services::task`.
         Command::CompleteTask {
@@ -263,13 +322,103 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         Command::SetTaskStatusRole {
             task_id,
             status_role,
-        } => answer(app.context.tasks().set_status_role(&task_id, status_role)),
+            wait,
+        } => match app.context.tasks().task(&task_id) {
+            Ok(Some(task)) => write_status(app, &task, status_role, &wait).await,
+            Ok(None) => Response::failed(Failure::not_found("task", &task_id)),
+            Err(error) => Response::failed(error.into()),
+        },
         Command::StartTimer { task_id } => start_timer(app, &task_id),
         Command::StopTimer { task_id } => stop_timer(app, &task_id),
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("tasks"),
     }
+}
+
+/// An edit through the Waiting rules (`astrid_rules::waiting`, R1–R3): into Waiting it needs a
+/// condition and clears the assignee (unless kept, or the edit sets one itself); an edit that takes
+/// a Waiting task's last condition away moves it to Ready (or, with none ever, to the Inbox). An
+/// edit that touches neither the role nor the date is not the rules' business.
+fn waiting_update(
+    app: &App,
+    task_id: &str,
+    mut changes: TaskChanges,
+    keep_assignee: bool,
+) -> Result<TaskChanges, Failure> {
+    if changes.status_role.is_none() && changes.due_date_time.is_none() {
+        return Ok(changes);
+    }
+    // A task this cache does not hold is the update's to report.
+    let Some(task) = app.context.tasks().task(task_id).map_err(Failure::from)? else {
+        return Ok(changes);
+    };
+    let wait = WaitOptions {
+        keep_assignee,
+        ..Default::default()
+    };
+    let resolved = resolve_waiting(
+        app,
+        &task,
+        changes.status_role.clone(),
+        changes.due_date_time,
+        &wait,
+    )?;
+    use astrid_rules::waiting::{AssigneeWrite, Transition};
+    match resolved.transition {
+        Transition::None | Transition::Stay => {}
+        Transition::Enter => {
+            if resolved.assignee == AssigneeWrite::Clear && changes.assignee_id.is_none() {
+                changes.assignee_id = Some(None);
+            }
+        }
+        Transition::Wake | Transition::Inbox => changes.status_role = Some(resolved.status_role),
+    }
+    Ok(changes)
+}
+
+/// A task born in Waiting (`astrid_rules::waiting`, R2): checked before anything is written.
+///
+/// A new task has no blockers, so its condition is the `dueDateTime` it is created with or the
+/// `waitOnTaskId` it will be given. Unless the creator keeps it, it is born unassigned — the
+/// `assigneeId` it was given and any list default alike (`"unassigned"` is the create's own
+/// spelling of a deliberate nobody, which a list default does not overrule). With a date it is
+/// born in Waiting in one write; waiting on a task, it is born in the Inbox, given its blocker,
+/// and then moved, so it is never in Waiting with nothing to wait on.
+async fn create_waiting_task(app: &App, mut new: NewTask, wait: WaitOptions) -> Response {
+    let due = match new.due_date_time.as_deref() {
+        None | Some("") => None,
+        Some(text) => match date::parse(text) {
+            Some(due) => Some(due),
+            None => return Response::failed(Failure::bad_request(format!("{text} is not a date"))),
+        },
+    };
+    let unborn = crate::model::Task {
+        due_date_time: due,
+        assignee_id: new.assignee_id.clone(),
+        ..crate::model::Task::new("", new.title.trim())
+    };
+    if let Err(failure) = resolve_waiting(app, &unborn, Some(new.status_role.clone()), None, &wait)
+    {
+        return Response::failed(failure);
+    }
+    if !wait.keep_assignee {
+        new.assignee_id = Some("unassigned".to_string());
+    }
+    let Some(_) = wait.wait_on_task_id else {
+        return answer(create_task(app, new));
+    };
+    let role = new.status_role.take();
+    let created = match create_task(app, new) {
+        Ok(task) => task,
+        Err(error) => return Response::failed(error.into()),
+    };
+    // The assignee was settled at birth; what is left is the blocker and the role.
+    let rest = WaitOptions {
+        keep_assignee: true,
+        ..wait
+    };
+    write_status(app, &created, role, &rest).await
 }
 
 /// Everything a new task can be told, as `createTask` says it.

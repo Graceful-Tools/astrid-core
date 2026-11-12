@@ -15,7 +15,7 @@
 //! that grew a rule would be a rule the shell's vocabulary had quietly acquired, in a file where
 //! nobody would look for it.
 
-use super::command::{Command, Failure, Response};
+use super::command::{Command, Failure, Response, WaitOptions};
 use super::App;
 use crate::filters;
 use crate::model::date;
@@ -333,9 +333,11 @@ mod tasks;
 // Glob-imported so that a domain file can reach another domain's helper through `use super::*`,
 // which is the only reason anything is re-exported here. `board`, `chat`, `list_filters` and
 // `reminders` are absent deliberately: once task 8a91c5b0 moved the arms into the domain modules,
-// nothing outside each of those four used anything in it, and the compiler said so.
+// nothing outside each of those four used anything in it, and the compiler said so. From `board`,
+// only the Waiting helpers: `setTaskStatusRole` and `updateTask` take the same rule as a move.
 use account::*;
 use attachments::*;
+use board::{resolve_waiting, write_status};
 use comments::*;
 use lists::*;
 pub(in crate::app) use reminders::due_reminders;

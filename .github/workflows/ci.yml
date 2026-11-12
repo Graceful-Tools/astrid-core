@@ -306,3 +306,10 @@ jobs:
       - name: Check fixtures are astrid-web's
         working-directory: astrid-core
         run: cargo xtask check-contracts ../astrid-web
+
+      # The other direction: a core-first fixture (waiting.json) is generated HERE from the rules,
+      # and web copies it. `cargo test` already fails on a stale one (the xtask's own test); this
+      # step says so by name in the job a reader opens for contracts.
+      - name: Check core-first fixtures are current
+        working-directory: astrid-core
+        run: cargo xtask check-core-contracts

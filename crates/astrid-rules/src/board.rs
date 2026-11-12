@@ -21,6 +21,14 @@
 //! A card whose role matches no rendered column is in *none* of them: gone from the board while
 //! still present in the list. That is reachable whenever a board's custom columns have not loaded
 //! yet. Showing a card in the wrong column is recoverable; losing it is not.
+//!
+//! ## Waiting has rules of its own
+//!
+//! Which tasks may *be* in the Waiting column, what entering it does to the assignee, and when a
+//! card leaves it by itself are [`crate::waiting`]'s — canonical in this crate, not ported from
+//! web (Jon, 2026-11-12). [`resolve_move`] says what a drop writes; a caller asks
+//! [`crate::waiting::resolve_status_write`] whether it may. The optional preset columns
+//! ([`preset_states`], R7) are here, as data beside the defaults, and like them are canonical here.
 
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +75,86 @@ const DEFAULT_STATES: [(&str, &str, &str); 3] = [
         "Paused until the circumstances are right.",
     ),
 ];
+
+/// The role of the optional Testing preset (R7, Jon 2026-11-12). Fixed rather than minted
+/// (`custom-…`) so the deploy check can find a task in it on any board that added it.
+pub const TESTING_STATUS_ROLE: &str = "testing";
+
+/// Columns a board may add from a preset, not shown by default (R7). A task in one is not Waiting
+/// and needs no wait condition. Canonical here; web's board settings offer these as presets.
+const PRESET_STATES: [(&str, &str, &str); 1] = [(
+    TESTING_STATUS_ROLE,
+    "Testing",
+    "Deploying, in canary, or in an experiment.",
+)];
+
+/// One optional preset column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetState {
+    pub role: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// Every optional preset column, in the order a picker offers them.
+pub fn preset_states() -> Vec<PresetState> {
+    PRESET_STATES
+        .iter()
+        .map(|(role, name, description)| PresetState {
+            role: role.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+        })
+        .collect()
+}
+
+/// The presets this board can still add: not ones it already has by role, nor by name (a board
+/// with its own "Testing" column would be refused the preset as a duplicate name anyway).
+pub fn available_presets(raw: Option<&serde_json::Value>) -> Vec<PresetState> {
+    let states = parse_custom_states(raw);
+    preset_states()
+        .into_iter()
+        .filter(|preset| {
+            !states.iter().any(|state| {
+                state.role == preset.role || state.name.to_lowercase() == preset.name.to_lowercase()
+            })
+        })
+        .collect()
+}
+
+/// Add a preset column: its fixed role, name and description, ordered after every existing one.
+pub fn add_preset_state(
+    raw: Option<&serde_json::Value>,
+    role: &str,
+) -> Result<StateWrite, StateError> {
+    let Some(preset) = preset_states()
+        .into_iter()
+        .find(|preset| preset.role == role)
+    else {
+        return Err(StateError::new(
+            StateErrorKind::NotFound,
+            "That preset does not exist",
+        ));
+    };
+    if !available_presets(raw).iter().any(|held| held.role == role) {
+        return Err(StateError::new(
+            StateErrorKind::Duplicate,
+            "A status with that name already exists",
+        ));
+    }
+    let states = parse_custom_states(raw);
+    let max_order = states.iter().map(|state| state.order).max().unwrap_or(-1);
+    let state = CustomState {
+        role: preset.role,
+        name: preset.name,
+        description: Some(preset.description),
+        order: max_order + 1,
+    };
+    let mut all = states;
+    all.push(state.clone());
+    Ok(StateWrite { states: all, state })
+}
 
 /// A board's own column, as stored in `Project.customStates`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -834,6 +922,35 @@ mod tests {
         assert_eq!(
             resolve_create(&built[0], Some("domain-1")).status_role,
             None
+        );
+    }
+
+    /// R7: the Testing preset is offered until the board has it, and is never a default column.
+    #[test]
+    fn the_testing_preset_is_offered_until_the_board_has_it() {
+        assert!(!columns(None)
+            .iter()
+            .any(|column| column.id == TESTING_STATUS_ROLE));
+        assert_eq!(available_presets(None).len(), 1);
+        let added = add_preset_state(None, TESTING_STATUS_ROLE).expect("adds");
+        assert_eq!(added.state.role, "testing");
+        assert_eq!(
+            added.state.description.as_deref(),
+            Some("Deploying, in canary, or in an experiment.")
+        );
+        let stored = states_to_json(&added.states);
+        assert!(available_presets(Some(&stored)).is_empty());
+        assert_eq!(
+            add_preset_state(Some(&stored), TESTING_STATUS_ROLE)
+                .unwrap_err()
+                .kind,
+            StateErrorKind::Duplicate
+        );
+        let named = json!([{ "role": "custom-testing", "name": "testing", "order": 0 }]);
+        assert!(available_presets(Some(&named)).is_empty());
+        assert_eq!(
+            add_preset_state(None, "nope").unwrap_err().kind,
+            StateErrorKind::NotFound
         );
     }
 

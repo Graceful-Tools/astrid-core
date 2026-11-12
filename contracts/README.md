@@ -1,7 +1,8 @@
 # Cross-platform contract fixtures
 
 The JSON in `fixtures/` is **generated in astrid-web**, by its
-`scripts/export-contract-fixtures.ts`, and copied here. Never hand-edit it — a rule that is retyped
+`scripts/export-contract-fixtures.ts`, and copied here — all of it except the **core-first**
+fixtures, which are generated here and copied the other way (below). Never hand-edit it — a rule that is retyped
 is a rule that drifts, which is the failure this whole mechanism exists to prevent. The files here
 are copies: to change one, change the rule in astrid-web and regenerate there.
 
@@ -50,6 +51,33 @@ rather than going unnoticed at runtime.
 | `agent-modes.json` | `app/api/v1/users/me/agent-modes/route.ts` (AWTD-1566) | no consumer here yet |
 | `fixall-claim.json` | `app/api/v1/tasks/[id]/claim-fixall/route.ts` (AWTD-1566) | no consumer here yet |
 | `agent-registry.json` | `lib/brand/agent-emails.ts`, `lib/ai/harness-agents.ts` (AWTD-1566) | no consumer here yet |
+| `waiting.json` | **core-first**: astrid-core `crates/astrid-rules/src/waiting.rs` and the presets in `board.rs`, **executed** through the rules door (`run_json`, the wasm `runJson`) by `cargo xtask gen-core-contracts`: 57 request/answer pairs — creating in Waiting, entering Waiting with and without a condition (date, blocker, both supplied in the write or already held, past, now, all-day), `keepAssignee`, edits inside Waiting that wake it, wake on date / all-day / last blocker, legacy no-condition → Inbox, Ready-with-a-future-date → Waiting unassigned, the hand-back, and the Testing preset | `astrid_rules::waiting`, `board::available_presets`; web's TypeScript mirror and server; the native apps through dispatch |
+
+## Core-first fixtures
+
+A rule that is **canonical in astrid-core from its first day** has no web implementation to
+execute, so its fixture is generated here. The first is `waiting.json` (the Waiting lane, Jon
+2026-11-12). The direction is the only thing reversed:
+
+```bash
+# here
+cargo xtask gen-core-contracts     # regenerate (fails if any case answers other than its `expect`)
+cargo xtask check-core-contracts   # fail if stale; `cargo test --workspace` checks the same
+
+# in astrid-web, at the core revision it pins (packages/astrid-rules/REVISION)
+#   copy contracts/fixtures/waiting.json and test its mirror against it
+```
+
+- Each case is a **request to the rules door and the answer it gave** — the same JSON the
+  WebAssembly `runJson` takes — so web can replay it against the wasm *and* against its
+  TypeScript mirror, and a native shell against the same door through UniFFI.
+- Each case in the generator (`crates/xtask/src/core_contracts.rs`) also carries an `expect`, the
+  half a person wrote down; generation fails when the rule answers otherwise, so regenerating
+  cannot quietly record a regression as the new truth.
+- `cargo xtask check-contracts` skips the core-owned names (`core_contracts::CORE_OWNED`): web's
+  copy follows the revision web pins, so a newer one here is web being behind, which web's own
+  check reports.
+- `crates/astrid-rules/tests/waiting_contract.rs` replays every case through `run_json`.
 
 ## Two kinds of export
 
