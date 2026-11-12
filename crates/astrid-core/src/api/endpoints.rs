@@ -145,6 +145,11 @@ pub const SEARCH: &str = "/api/v1/search";
 /// The people this account has imported to suggest as collaborators (task 438494c7): `GET` lists
 /// them, `DELETE` clears them all. Windows has no address book to `POST` from.
 pub const CONTACTS: &str = "/api/v1/contacts";
+/// Autocomplete over the imported contacts, for the add-member field (AWTD-1610): `GET` with
+/// `q` (two characters at least, or the route answers 400), `limit` and `excludeListId`.
+pub const CONTACTS_SEARCH: &str = "/api/v1/contacts/search";
+/// The Astrid users in this account's imported contacts, mutual ones first (AWTD-1610).
+pub const CONTACTS_RECOMMENDED: &str = "/api/v1/contacts/recommended";
 /// The account's passkeys (task 19fd9289, web c4ad9e68): `GET` lists them; one is renamed with
 /// `PATCH` and revoked with `DELETE` at [`passkey`]. Registering one is
 /// [`WEBAUTHN_REGISTER_OPTIONS`].

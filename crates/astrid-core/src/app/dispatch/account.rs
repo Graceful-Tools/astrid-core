@@ -84,11 +84,36 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 .save_credential(&service_id, &key)
                 .await,
         ),
-        Command::TestAgentCredential { service_id } => {
-            match app.context.agents().test_credential(&service_id).await {
-                Ok(works) => Response::ok(serde_json::json!({ "works": works })),
-                Err(error) => Response::failed(error.into()),
-            }
+        Command::TestAgentCredential { service_id } => answer(
+            app.context
+                .agents()
+                .test_credential_outcome(&service_id)
+                .await,
+        ),
+        Command::AgentCredentials => match app.context.agents().credentials().await {
+            Ok(answer) => Response::ok(serde_json::json!({
+                "keys": answer.get("keys").cloned().unwrap_or_else(|| serde_json::json!({})),
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::AgentModes => match app.context.agents().modes().await {
+            Ok(answer) => Response::ok(serde_json::json!({
+                "agents": answer.get("agents").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "modes": answer.get("modes").cloned().unwrap_or_else(|| serde_json::json!({})),
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::CopilotStatus => match app.context.agents().copilot_status().await {
+            Ok(answer) => Response::ok(serde_json::json!({
+                "connected": answer
+                    .get("connected")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            })),
+            Err(error) => Response::failed(error.into()),
+        },
+        Command::AvailableAgents { server_run_only } => {
+            answer(app.context.agents().available_agents(server_run_only).await)
         }
         Command::DeleteAgentCredential { service_id } => {
             answer_done(app.context.agents().delete_credential(&service_id).await)
@@ -124,6 +149,7 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             answer_done(app.context.external().unlink(provider, &link_id).await)
         }
         Command::Features => features(app),
+        Command::FeatureFlags => answer(app.context.account().feature_flags().await),
         Command::MyTasksFilters => match app.context.account().my_tasks_preferences() {
             Ok(filters) => Response::ok(filters),
             Err(error) => Response::failed(error.into()),
@@ -191,14 +217,26 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 None => Response::failed(Failure::unauthorized()),
             }
         }
-        Command::UpdateProfile { name, photo_path } => {
+        Command::UpdateProfile {
+            name,
+            photo_path,
+            image,
+        } => {
             let account = app.context.account();
-            let image = match photo_path {
-                Some(path) => match account.upload_photo(std::path::Path::new(&path)).await {
-                    Ok(url) => Some(url),
-                    Err(error) => return Response::failed(error.into()),
-                },
-                None => None,
+            let image = match (photo_path, image) {
+                (Some(_), Some(_)) => {
+                    return Response::failed(Failure::bad_request(
+                        "send photoPath or image, not both",
+                    ))
+                }
+                (Some(path), None) => {
+                    match account.upload_photo(std::path::Path::new(&path)).await {
+                        Ok(url) => Some(url),
+                        Err(error) => return Response::failed(error.into()),
+                    }
+                }
+                // Already uploaded: the screen put the photo on the server when it was picked.
+                (None, image) => image,
             };
             match account
                 .update_profile(name.as_deref(), image.as_deref())
@@ -208,12 +246,15 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
-        Command::ResendVerification => match app.context.account().resend_verification().await {
-            Ok(answer) => Response::ok(serde_json::json!({
-                "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
-            })),
-            Err(error) => Response::failed(error.into()),
-        },
+        Command::ResendVerification => {
+            verification_message(app.context.account().resend_verification().await)
+        }
+        Command::SendVerification => {
+            verification_message(app.context.account().send_verification().await)
+        }
+        Command::CancelVerification => {
+            verification_message(app.context.account().cancel_verification().await)
+        }
         Command::ChangeEmail { email } => {
             if email.trim().is_empty() {
                 return Response::failed(Failure::bad_request("an email address is required"));
@@ -287,6 +328,38 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
+        Command::SearchContacts {
+            query,
+            exclude_list_id,
+            limit,
+        } => {
+            let query = query.trim();
+            // The route answers 400 under two characters; a request that is going to be refused
+            // is not worth sending.
+            if query.chars().count() < 2 {
+                return Response::failed(Failure::bad_request(
+                    "a contact search needs at least two characters",
+                ));
+            }
+            match app
+                .context
+                .account()
+                .search_contacts(query, exclude_list_id.as_deref(), limit.unwrap_or(10))
+                .await
+            {
+                Ok(results) => Response::ok(serde_json::json!({ "results": results })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::RecommendedCollaborators {
+            exclude_list_id,
+            limit,
+        } => answer(
+            app.context
+                .account()
+                .recommended_collaborators(exclude_list_id.as_deref(), limit.unwrap_or(20))
+                .await,
+        ),
         Command::DeleteAccount { confirmation } => {
             // The server requires the phrase typed exactly, and so does this: a request that is
             // going to be refused is not worth sending, and a button that sends one looks like it
@@ -367,6 +440,16 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("account"),
+    }
+}
+
+/// What the verify-email route said, as `{ message }` — the same for resend, send and cancel.
+fn verification_message(result: crate::services::Result<serde_json::Value>) -> Response {
+    match result {
+        Ok(answer) => Response::ok(serde_json::json!({
+            "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
+        })),
+        Err(error) => Response::failed(error.into()),
     }
 }
 

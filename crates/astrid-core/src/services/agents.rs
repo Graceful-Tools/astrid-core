@@ -56,6 +56,15 @@ pub struct Credential {
     pub configured: bool,
 }
 
+/// What testing a stored key found (AWTD-1610).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialTest {
+    pub works: bool,
+    /// The server's reason, when it gave one. A key that works has none.
+    pub error: Option<String>,
+}
+
 pub struct AgentService {
     context: Context,
 }
@@ -103,17 +112,32 @@ impl AgentService {
 
     /// Ask the server whether a stored key actually works.
     pub async fn test_credential(&self, service_id: &str) -> Result<bool> {
+        Ok(self.test_credential_outcome(service_id).await?.works)
+    }
+
+    /// Ask the server whether a stored key works, and **why not** when it does not (AWTD-1610).
+    ///
+    /// The route answers 200 with `{ success, error }` for a key the provider refused — the
+    /// error is the provider's own text ("HTTP 401: invalid x-api-key") — and the key rows show
+    /// it. A missing key or an unreadable one is a 4xx/5xx, and stays a failure.
+    pub async fn test_credential_outcome(&self, service_id: &str) -> Result<CredentialTest> {
         let request = self
             .context
             .client
             .post(endpoints::AI_CREDENTIALS_TEST)
             .value(json!({ "serviceId": service_id }));
         let answer = self.context.client.send(request).await?;
-        Ok(answer
-            .get("ok")
-            .or_else(|| answer.get("success"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false))
+        Ok(CredentialTest {
+            works: answer
+                .get("ok")
+                .or_else(|| answer.get("success"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+            error: answer
+                .get("error")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        })
     }
 
     pub async fn delete_credential(&self, service_id: &str) -> Result<()> {
@@ -259,6 +283,23 @@ impl AgentService {
     }
 
     // ─── The model behind @astrid (task 810e1876) ──────────────────────────────────────────
+
+    /// The agents this account can assign, mention or chat with (AWTD-1610, iOS
+    /// `getAvailableAgents`), as the route answers them: `{ agents: [{ id, name, email, image,
+    /// service }] }`. `server_run_only` narrows to what the server can run itself — api-mode
+    /// built-ins with a credential, and Custom Agents — which is what can power the default
+    /// assistant; the whole list is for assignee pickers and includes polling agents (AITD-297).
+    pub async fn available_agents(&self, server_run_only: bool) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::AVAILABLE_AGENTS)
+            .query("serverRun", server_run_only.then(|| "true".to_string()));
+        let answer = self.context.client.send(request).await?;
+        Ok(json!({
+            "agents": answer.get("agents").cloned().unwrap_or_else(|| json!([])),
+        }))
+    }
 
     /// The agents that could power `@astrid`, and which one does — as the web's selector reads
     /// them (`components/Settings/AgentsSettings.tsx`): the agents the server can run, minus

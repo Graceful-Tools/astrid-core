@@ -26,6 +26,9 @@ const CURRENT_USER_KEY: &str = "account.current-user";
 const MY_TASKS_PREFERENCES_KEY: &str = "account.myTasksPreferences";
 const CAPABILITIES_KEY: &str = "account.capabilities";
 const FEATURES_KEY: &str = "account.features";
+/// The server's whole flag answer, `{ version, features }` (AWTD-1610), beside the bare map
+/// [`FEATURES_KEY`] keeps. A row of its own so that nothing reading the bare map changes.
+const FEATURE_FLAGS_KEY: &str = "account.feature-flags";
 const SETTINGS_KEY: &str = "account.settings";
 const SMART_TASKS_KEY: &str = "account.smartTasks";
 
@@ -232,12 +235,32 @@ impl AccountService {
     /// The action goes in the query string, which is where the v1 route reads it, and in the body
     /// as well, which is where the web's own settings page puts it — whichever the server honours.
     pub async fn resend_verification(&self) -> Result<serde_json::Value> {
+        self.verify_email("resend").await
+    }
+
+    /// Send the verification email for the address on the account (AWTD-1610, iOS
+    /// `verifyEmail(action: "send")`).
+    pub async fn send_verification(&self) -> Result<serde_json::Value> {
+        self.verify_email("send").await
+    }
+
+    /// Withdraw a pending email change (AWTD-1610, iOS `verifyEmail(action: "cancel")`): the
+    /// account keeps the address it had.
+    pub async fn cancel_verification(&self) -> Result<serde_json::Value> {
+        self.verify_email("cancel").await
+    }
+
+    /// One of the verify-email route's actions — `resend`, `send` or `cancel`. In the query
+    /// string, where the v1 route reads it, and in the body, where the web's settings page puts
+    /// it. The route answers 400 with `{ success: false, message }` when it declines, which
+    /// arrives here as a refusal.
+    async fn verify_email(&self, action: &str) -> Result<serde_json::Value> {
         let request = self
             .context
             .client
             .post(endpoints::VERIFY_EMAIL)
-            .query("action", Some("resend".to_string()))
-            .value(json!({ "action": "resend" }));
+            .query("action", Some(action.to_string()))
+            .value(json!({ "action": action }));
         Ok(self.context.client.send(request).await?)
     }
 
@@ -437,6 +460,53 @@ impl AccountService {
             stats = answer.get("stats").cloned().unwrap_or(json!({}));
         }
         Ok(stats)
+    }
+
+    /// Autocomplete over the imported contacts, for adding a member (AWTD-1610, iOS
+    /// `searchContacts`): each row `{ id, email, name, phoneNumber, isAstridUser,
+    /// astridUserName, astridUserImage }` as the route answers it, Astrid users first. Online-only.
+    pub async fn search_contacts(
+        &self,
+        query: &str,
+        exclude_list_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<serde_json::Value>> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::CONTACTS_SEARCH)
+            .query("q", Some(query.to_string()))
+            .query("limit", Some(limit.to_string()))
+            .query("excludeListId", exclude_list_id.map(str::to_string));
+        let answer = self.context.client.send(request).await?;
+        Ok(answer
+            .get("results")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// The Astrid users in this account's imported contacts, mutual ones first (AWTD-1610, iOS
+    /// `getRecommendedCollaborators`). Answers the route's `{ recommended, stats, message }`
+    /// without its `meta`; `stats` and `message` are each absent in some answers (no contacts,
+    /// none on Astrid), and arrive as null. Online-only.
+    pub async fn recommended_collaborators(
+        &self,
+        exclude_list_id: Option<&str>,
+        limit: u32,
+    ) -> Result<serde_json::Value> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::CONTACTS_RECOMMENDED)
+            .query("limit", Some(limit.to_string()))
+            .query("excludeListId", exclude_list_id.map(str::to_string));
+        let answer = self.context.client.send(request).await?;
+        Ok(json!({
+            "recommended": answer.get("recommended").cloned().unwrap_or_else(|| json!([])),
+            "stats": answer.get("stats").cloned().unwrap_or(serde_json::Value::Null),
+            "message": answer.get("message").cloned().unwrap_or(serde_json::Value::Null),
+        }))
     }
 
     /// Remove every imported contact. The server answers with how many went.
@@ -641,11 +711,52 @@ impl AccountService {
         let Some(value) = fresh else {
             return Ok(self.features()?.unwrap_or(serde_json::Value::Null));
         };
+        Ok(self.remember_features(value)?["features"].take())
+    }
+
+    /// Keep a body of `GET /features`: the bare map for [`Self::features`], and the whole
+    /// `{ version, features }` for [`Self::feature_flags`]. Answers the whole.
+    fn remember_features(&self, value: serde_json::Value) -> Result<serde_json::Value> {
+        let version = value
+            .get("version")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let features = value.get("features").cloned().unwrap_or(value);
         self.context
             .store
             .set_metadata(FEATURES_KEY, &features.to_string())?;
-        Ok(features)
+        let whole = json!({ "version": version, "features": features });
+        self.context
+            .store
+            .set_metadata(FEATURE_FLAGS_KEY, &whole.to_string())?;
+        Ok(whole)
+    }
+
+    /// The server's whole flag answer, `{ version, features }`, fresh (AWTD-1610).
+    ///
+    /// iOS's `FeatureFlagService` keeps every flag the server sends — rollouts included — and the
+    /// `version` it compares a `featureFlagsUpdated` frame against, where [`Self::features`]'
+    /// readers name five flags. Asked conditionally like the tick, so a 304 answers the kept copy.
+    /// Fails when the server cannot be reached: the shell keeps its own copy for offline, as iOS
+    /// does, and an answer from here would look fresher than it is.
+    pub async fn feature_flags(&self) -> Result<serde_json::Value> {
+        self.refresh_features().await?;
+        let kept = self
+            .context
+            .store
+            .metadata(FEATURE_FLAGS_KEY)?
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+        if let Some(kept) = kept {
+            return Ok(kept);
+        }
+        // A 304 against a tag stored before the whole answer was kept: nothing to answer with,
+        // so ask once more without the tag.
+        let value = self
+            .context
+            .client
+            .send(self.context.client.get(endpoints::FEATURES))
+            .await?;
+        self.remember_features(value)
     }
 
     // ─── Capabilities ─────────────────────────────────────────────────────────────────────────
