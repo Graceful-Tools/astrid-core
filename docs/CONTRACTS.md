@@ -380,6 +380,8 @@ list on their screen for no visible reason.
 
 ### D7 — an unrecognised due-date filter hides undated tasks
 
+**Closed 2026-11-12: astrid-web now answers as iOS and this crate do** (AWTD-1583): an unknown due-date filter keeps dated tasks and drops undated ones. `filters.json` no longer disputes it. The paragraphs below are the history.
+
 iOS answers a task with **no due date** before it looks at the filter value:
 
 ```
@@ -671,6 +673,8 @@ ignores, so that snooze never reached the server; the due date does.
 
 ### D25 — My Tasks on iOS is only what is assigned to you
 
+**Closed 2026-11-12: astrid-web adopted this scope** (AWTD-1583). It now keeps only what is assigned to the reader (the nested assignee counts), is empty signed out, and ignores `filterAssignee`. `my-tasks.json` no longer disputes it.
+
 **Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS). `filters::my_tasks::filter` keeps only tasks assigned to the reader (iOS's
 `task.assigneeId == currentUserId`; the nested `assignee` stands in for a missing id). Unassigned
 tasks — even ones the reader created — are out, and signed out it is empty. `filterAssignee` is
@@ -794,6 +798,8 @@ four markdown corners listed under D38.
 
 ### D33 — sort orders: the core's are iOS's
 
+**Closed 2026-11-12: astrid-web sorts as in the right-hand column** (AWTD-1583), and the web-only orders left its menus. `filters.json` and `manual-order.json` no longer dispute it.
+
 **Resolved 2026-10-03 toward iOS** (Jon: on disagreement follow iOS); the core already answered
 this way. iOS (`sortTasksByListSetting`) and this crate differ from web's `sortTasksForList` in:
 
@@ -811,6 +817,8 @@ undated after, completed last, as iOS and this crate do.
 
 ### D34 — a timed task due earlier today is overdue on web, not on iOS
 
+**Closed 2026-11-12: astrid-web compares days for the list filter** (AWTD-1583). `filters.json` no longer disputes it.
+
 Web's `isTaskOverdue` compares instants for a timed task, so 9am today is overdue at 10:30. iOS's
 `applyListDueDateFilter` (and `filters::matches_due_date`) compares days: it is due today, and
 overdue tomorrow. **Resolved 2026-10-03 toward iOS.** (`filters::is_overdue`, used for row
@@ -818,12 +826,16 @@ styling, compares instants like web — a separate rule, not part of the list fi
 
 ### D35 — `tomorrow`, `this_calendar_week`, `this_calendar_month` exist only on web
 
+**Closed 2026-11-12: astrid-web retired the three windows** (AWTD-1583). Read as a filter, they are unknown values (D7). A value already saved in a web saved filter or in the My Tasks preferences is read as `this_week` (tomorrow, the calendar week) or `this_month` (the calendar month), and the preferences route rewrites it.
+
 Web filters by them; iOS does not know them and, like any unknown value, keeps every dated task
 and drops undated ones (D7). **Resolved 2026-10-03 toward iOS** — the core does the same. If the
 windows are wanted on every client, they are added on iOS and here together, from web's
 `date-filter-utils.ts` (whose answers this fixture already records).
 
 ### D36 — two edges of the recently-completed window
+
+**Closed 2026-11-12: astrid-web clamps, and counts from now for an unreadable date** (AWTD-1583). `filters.json` no longer disputes it.
 
 - **"Since the Nth" when last month has no Nth.** On 9 March, "since the 31st": web's
   `setMonth(-1)` then `setDate(31)` rolls on to **3 March**; iOS's `Calendar` arithmetic and this
@@ -839,6 +851,8 @@ windows are wanted on every client, they are added on iOS and here together, fro
   in the future. Resolved toward iOS.
 
 ### D37 — web caps a reminder at five snoozes
+
+**Closed 2026-11-12: astrid-web removed the cap** (AWTD-1583). `reminders.json` no longer disputes it.
 
 `lib/reminder-snooze.ts` refuses a sixth snooze of one server reminder. iOS snoozes as often as
 asked (and, per D24, moves the due date rather than a queue row), and so does this crate. Both

@@ -5,8 +5,9 @@
 //! `shouldShowCompletedByFilter` and `sortTasksForList` — over a case table, at a pinned clock in
 //! UTC. Each case here runs through the core at the same instant with a zero offset.
 //!
-//! Disputed cases are the ones where the core follows iOS and web has not moved (D7, D33–D36).
-//! Each entry must still disagree with web somewhere, and the core's iOS answer is asserted.
+//! Nothing is disputed: D7 and D33–D36 were, until astrid-web adopted iOS's answers (AWTD-1583),
+//! and those cases are ordinary ones now. A future divergence goes back in through web's driver,
+//! and `each_disputed_entry_still_disagrees_with_web` holds it to its reason.
 
 mod common;
 
@@ -127,107 +128,5 @@ fn each_disputed_entry_still_disagrees_with_web() {
         "filters.json",
         &common::declared(&f.raw["disputes"]),
         &answered,
-    );
-}
-
-fn disputed<'a>(f: &'a Fixture, entry: &'a str) -> impl Iterator<Item = &'a Value> + 'a {
-    f.raw["disputed"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(move |c| c["entry"] == entry)
-}
-
-/// D7: an unrecognised due-date filter keeps dated tasks and drops undated ones on iOS
-/// (`applyListDueDateFilter`'s guard) and here; web keeps both.
-#[test]
-fn d7_unknown_due_filter_drops_undated_tasks_as_ios_does() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D7") {
-        seen += 1;
-        assert_eq!(answer(&f, case), false, "{}", case["id"]);
-    }
-    assert!(seen > 0);
-}
-
-/// D34: on iOS a timed task due earlier today is not overdue until its day has passed; web calls
-/// it overdue the moment its time does.
-#[test]
-fn d34_a_timed_task_due_earlier_today_is_not_overdue_as_on_ios() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D34") {
-        seen += 1;
-        assert_eq!(answer(&f, case), false, "{}", case["id"]);
-    }
-    assert!(seen > 0);
-}
-
-/// D35: iOS does not read `tomorrow`, `this_calendar_week` or `this_calendar_month`; like any
-/// value it does not know, they keep every dated task and drop undated ones (D7).
-#[test]
-fn d35_web_only_windows_read_as_unknown_values_as_on_ios() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D35") {
-        seen += 1;
-        let dated = f.due_tasks[case["task"].as_str().unwrap()]
-            .due_date_time
-            .is_some();
-        assert_eq!(answer(&f, case), dated, "{}", case["id"]);
-    }
-    assert!(seen > 0);
-}
-
-/// D36: "since the 31st" on 9 March reaches back to the last day February has, as iOS's
-/// `Calendar` arithmetic does; web rolls on into 3 March.
-#[test]
-fn d36_since_a_day_last_month_lacks_clamps_as_on_ios() {
-    let f = load();
-    let shown = |id: &str| {
-        let case = disputed(&f, "D36")
-            .find(|c| c["id"] == id)
-            .unwrap_or_else(|| panic!("{id} is disputed"));
-        answer(&f, case)
-    };
-    assert_eq!(
-        shown("completion/2026-03-09/since-31st/default/done-feb-28-noon"),
-        true
-    );
-    assert_eq!(
-        shown("completion/2026-03-09/since-31st/default/done-mar-2-noon"),
-        true
-    );
-    assert_eq!(
-        shown("completion/2026-10-09/since-31st/default/done-sep-30-noon"),
-        true
-    );
-}
-
-/// D33: iOS's sort orders (`sortTasksByListSetting`).
-#[test]
-fn d33_sort_orders_are_ios() {
-    let f = load();
-    let order = |sort: &str| {
-        let case = disputed(&f, "D33")
-            .find(|c| c["sortBy"] == sort)
-            .unwrap_or_else(|| panic!("sort {sort} is disputed"));
-        answer(&f, case)
-    };
-    let auto = ["s3", "s2", "s5", "s4", "s9", "s1", "s6", "s8", "s7"];
-    // Completed sink; then priority, then due date.
-    assert_eq!(order("priority"), Value::from(auto.to_vec()));
-    // "when" is no longer disputed: web adopted this order in AWTD-1325 (by due date, ties by
-    // priority, undated after, completed last), so `sort/when` is an ordinary case that
-    // `every_undisputed_case_answers_as_web_does` checks.
-    // Orders iOS does not have read as auto.
-    for sort in ["assignee", "completed", "incomplete"] {
-        assert_eq!(order(sort), Value::from(auto.to_vec()), "{sort}");
-    }
-    // Newest first.
-    assert_eq!(
-        order("createdAt"),
-        Value::from(vec!["s9", "s8", "s7", "s6", "s5", "s4", "s3", "s2", "s1"])
     );
 }
