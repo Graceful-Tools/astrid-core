@@ -508,7 +508,9 @@ longer a wait condition once that day has begun.
 `waitingSettle`, `handBack`, `boardPresets`. App door (dispatch): `moveTaskToColumn`,
 `setTaskStatus`, `dropBoardCard`, `addBoardCard` and `setTaskStatusRole` take the optional
 `dueDateTime`, `isAllDay`, `waitOnTaskId` and `keepAssignee` (`app::command::WaitOptions`), and
-`updateTask` reads `keepAssignee` beside its changes; each refuses with
+`updateTask` reads `keepAssignee` beside its changes, and `createTask` with
+`statusRole: "waiting"` takes `waitOnTaskId` and `keepAssignee` beside its own `dueDateTime` (a new
+task has no blockers, so it needs one of the two, and is born unassigned unless kept); each refuses with
 `{ kind: "refused", code: "WAITING_NEEDS_CONDITION" }` before writing anything. A server refusal
 that carries a `code` in its body now reaches the shell as `Failure.code` too.
 
