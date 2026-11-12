@@ -11,12 +11,10 @@
 //! completed rows (`assigned-to-me-completed`) visible, and what makes the clock irrelevant:
 //! `the_clock_cannot_change_an_answer` holds that claim to its word rather than trusting it.
 //!
-//! The disputed cases are all **D25**, chosen by input: the reader signed out, the task has no
-//! `assigneeId`, or `filterAssignee` is non-empty. Web keeps unassigned tasks the reader created,
-//! reads `assigneeId` alone, and applies `filterAssignee`; the core follows iOS and does none of
-//! the three (`docs/CONTRACTS.md` D25, resolved toward iOS 2026-10-03). Each of those three
-//! behaviours is asserted below in its own right, so this file says what the core *does* and not
-//! only that it differs.
+//! Nothing is disputed. The cases were all **D25** — the reader signed out, the task with no
+//! `assigneeId`, or a non-empty `filterAssignee` — until astrid-web adopted iOS's scope (AWTD-1583):
+//! only what is assigned to the reader, the nested `assignee` standing in for a missing id, empty
+//! signed out, `filterAssignee` not applied. Those cases are ordinary ones now.
 
 mod common;
 
@@ -137,91 +135,5 @@ fn awtd_1262_each_disputed_entry_still_disagrees_with_web() {
         "my-tasks.json",
         &common::declared(&f.raw["disputes"]),
         &answered,
-    );
-}
-
-fn disputed<'a>(f: &'a Fixture, entry: &'a str) -> impl Iterator<Item = &'a Value> + 'a {
-    f.raw["disputed"]
-        .as_array()
-        .expect("disputed")
-        .iter()
-        .filter(move |case| case["entry"] == entry)
-}
-
-/// D25: signed out, My Tasks is empty — iOS shows nothing rather than everybody's tasks.
-#[test]
-fn d25_signed_out_my_tasks_is_empty_as_on_ios() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D25").filter(|case| case["reader"].is_null()) {
-        seen += 1;
-        assert!(
-            !answer(&f, case, now()),
-            "{} is shown to a reader who is not signed in",
-            case["id"]
-        );
-    }
-    assert!(seen > 0, "the fixture no longer varies a signed-out reader");
-}
-
-/// D25: an unassigned task is held by nobody, so it is in nobody's My Tasks — not even the My
-/// Tasks of whoever created it. Web keeps those; iOS never did, and this crate followed iOS.
-#[test]
-fn d25_an_unassigned_task_is_in_nobodys_my_tasks_as_on_ios() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D25").filter(|case| {
-        case["reader"].is_string()
-            && f.tasks[case["task"].as_str().expect("a task id")]
-                .assignee_id
-                .is_none()
-    }) {
-        seen += 1;
-        let task = &f.tasks[case["task"].as_str().expect("a task id")];
-        // The nested `assignee` stands in for a missing `assigneeId`, so an unassigned task is one
-        // with neither — `assigned-to-me-nested-only` carries only the relation and IS the
-        // reader's. That is the second half of D25: web reads `assigneeId` alone.
-        let held_by_reader =
-            task.assignee.as_ref().map(|user| user.id.as_str()) == case["reader"].as_str();
-        // With the priority filter cleared, since this is the scope question and some of these
-        // cases also carry one — a `priority: 0` task hidden by a "high" filter would otherwise
-        // read as a scope decision it is not.
-        let mut scope_only = case.clone();
-        scope_only["filterPriority"] = Value::Array(Vec::new());
-        assert_eq!(
-            answer(&f, &scope_only, now()),
-            held_by_reader,
-            "{}: an unassigned task is shown only when the nested assignee is the reader",
-            case["id"]
-        );
-    }
-    assert!(seen > 0, "the fixture no longer varies an unassigned task");
-}
-
-/// D25: `filterAssignee` narrows nothing here. My Tasks already *is* "assigned to me", so a value
-/// another client left in the preferences must not empty the view.
-#[test]
-fn d25_filter_assignee_narrows_nothing_as_on_ios() {
-    let f = load();
-    let mut seen = 0;
-    for case in disputed(&f, "D25").filter(|case| {
-        case["filterAssignee"]
-            .as_array()
-            .is_some_and(|chosen| !chosen.is_empty())
-    }) {
-        seen += 1;
-        // The same case with the assignee filter cleared: the two must answer alike.
-        let mut cleared = case.clone();
-        cleared["filterAssignee"] = Value::Array(Vec::new());
-        assert_eq!(
-            answer(&f, case, now()),
-            answer(&f, &cleared, now()),
-            "{}: the assignee filter changed the answer",
-            case["id"]
-        );
-    }
-    assert!(
-        seen > 0,
-        "the fixture no longer varies a non-empty filterAssignee"
     );
 }
