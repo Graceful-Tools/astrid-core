@@ -1590,3 +1590,415 @@ async fn aitd_463_an_apple_ledger_imports_in_one_command() {
     .await;
     assert_eq!(bare["ok"], true, "{bare}");
 }
+
+// ─── AWTD-1610: the commands iOS needs to move off AstridAPIClient ──────────────────────────────
+
+fn json_response(status: u16, body: serde_json::Value) -> crate::api::transport::HttpResponse {
+    crate::api::transport::HttpResponse {
+        status,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: body.to_string().into_bytes(),
+    }
+}
+
+/// The key rows show why a test failed. The route answers 200 with `{ success: false, error }`
+/// for a key the provider refused, and `testAgentCredential` used to keep only `works`.
+#[tokio::test]
+async fn testing_a_key_keeps_the_servers_reason_awtd_1610() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "ai-credentials/test",
+                200,
+                json!({ "success": false, "error": "HTTP 401: invalid x-api-key",
+                        "meta": { "apiVersion": "v1" } }),
+            )
+            .push_json("ai-credentials/test", 200, json!({ "success": true })),
+    );
+
+    let refused = call(
+        &app,
+        json!({ "kind": "testAgentCredential", "serviceId": "claude" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], true, "{refused}");
+    assert_eq!(refused["value"]["works"], false);
+    assert_eq!(refused["value"]["error"], "HTTP 401: invalid x-api-key");
+
+    let works = call(
+        &app,
+        json!({ "kind": "testAgentCredential", "serviceId": "claude" }),
+    )
+    .await;
+    assert_eq!(works["value"]["works"], true);
+    assert!(works["value"]["error"].is_null(), "{works}");
+
+    let body: serde_json::Value =
+        serde_json::from_slice(transport.requests()[0].body.as_deref().expect("a body"))
+            .expect("json");
+    assert_eq!(body["serviceId"], "claude");
+}
+
+/// The AI-keys screen reads the stored keys on its own, not as one part of the whole hub.
+#[tokio::test]
+async fn the_stored_keys_are_read_on_their_own_awtd_1610() {
+    let keys = json!({
+        "claude": { "hasKey": true, "keyPreview": "sk-ant...abcd", "isValid": false,
+                    "lastTested": "2026-11-01T00:00:00Z", "error": "HTTP 401: nope" },
+    });
+    let (app, transport) = app_and_transport(StubTransport::new().push_json(
+        "/users/me/ai-credentials",
+        200,
+        json!({ "keys": keys.clone(), "meta": { "apiVersion": "v1" } }),
+    ));
+
+    let read = call(&app, json!({ "kind": "agentCredentials" })).await;
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["value"], json!({ "keys": keys }));
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1, "one read, not the whole hub");
+    assert_eq!(requests[0].method.as_str(), "GET");
+
+    // Unlike the hub, which draws around a missing part, a read on its own says it failed: the
+    // app keeps what it drew rather than drawing "no keys".
+    let offline = app_with(StubTransport::new());
+    let failed = call(&offline, json!({ "kind": "agentCredentials" })).await;
+    assert_eq!(failed["ok"], false, "{failed}");
+}
+
+/// The modes and the Copilot status, each on its own, as the server answers them.
+#[tokio::test]
+async fn the_agent_modes_and_copilot_status_are_read_on_their_own_awtd_1610() {
+    let agents = json!([
+        { "mailbox": "claude", "email": "claude@astrid.cc", "mode": "api", "locked": false },
+        { "mailbox": "muse", "email": "muse@astrid.cc", "mode": "polling", "locked": true },
+    ]);
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "/users/me/agent-modes",
+                200,
+                json!({ "agents": agents.clone(), "modes": { "claude": "api", "muse": "polling" },
+                        "meta": { "apiVersion": "v1" } }),
+            )
+            .push_json(
+                "/integrations/copilot/status",
+                200,
+                json!({ "connected": true }),
+            ),
+    );
+
+    let modes = call(&app, json!({ "kind": "agentModes" })).await;
+    assert_eq!(modes["ok"], true, "{modes}");
+    assert_eq!(modes["value"]["agents"], agents);
+    assert_eq!(modes["value"]["modes"]["muse"], "polling");
+    assert!(modes["value"].get("meta").is_none());
+
+    let copilot = call(&app, json!({ "kind": "copilotStatus" })).await;
+    assert_eq!(copilot["ok"], true, "{copilot}");
+    assert_eq!(copilot["value"], json!({ "connected": true }));
+
+    assert_eq!(transport.requests().len(), 2);
+}
+
+/// The assignee and mention list is `/users/me/available-agents`, whole for a picker and
+/// narrowed with `serverRun=true` for what can power the default assistant (AITD-297).
+#[tokio::test]
+async fn the_available_agents_are_listed_whole_or_server_run_only_awtd_1610() {
+    let agents = json!([
+        { "id": "claude-agent", "name": "Claude", "email": "claude@astrid.cc",
+          "image": null, "service": "claude" },
+    ]);
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "/available-agents",
+                200,
+                json!({ "agents": agents.clone() }),
+            )
+            .push_json(
+                "/available-agents",
+                200,
+                json!({ "agents": agents.clone() }),
+            ),
+    );
+
+    let whole = call(&app, json!({ "kind": "availableAgents" })).await;
+    assert_eq!(whole["ok"], true, "{whole}");
+    assert_eq!(whole["value"], json!({ "agents": agents }));
+
+    let narrowed = call(
+        &app,
+        json!({ "kind": "availableAgents", "serverRunOnly": true }),
+    )
+    .await;
+    assert_eq!(narrowed["ok"], true, "{narrowed}");
+
+    let requests = transport.requests();
+    assert!(
+        !requests[0].url.contains("serverRun"),
+        "the picker's list is not narrowed: {}",
+        requests[0].url
+    );
+    assert!(
+        requests[1].url.contains("serverRun=true"),
+        "{}",
+        requests[1].url
+    );
+}
+
+/// `FeatureFlagService` keeps every flag — rollouts included — and the version it compares a
+/// `featureFlagsUpdated` frame against. `features` names five; `featureFlags` answers them all.
+#[tokio::test]
+async fn the_whole_flag_map_comes_back_with_its_version_awtd_1610() {
+    let whole = json!({ "version": 7, "features": {
+        "project_mode": true, "google_tasks": false, "a_rollout_nobody_named": true,
+    } });
+    let mut tagged = json_response(200, whole.clone());
+    tagged
+        .headers
+        .push(("etag".into(), "\"features-7-101\"".into()));
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push("/api/v1/features", Ok(tagged))
+            // Unchanged since: answered from what was kept, version and all.
+            .push(
+                "/api/v1/features",
+                Ok(crate::api::transport::HttpResponse {
+                    status: 304,
+                    headers: vec![],
+                    body: vec![],
+                }),
+            ),
+    );
+
+    let fresh = call(&app, json!({ "kind": "featureFlags" })).await;
+    assert_eq!(fresh["ok"], true, "{fresh}");
+    assert_eq!(fresh["value"], whole);
+
+    // The five-flag command reads the same fetch, unchanged.
+    let named = call(&app, json!({ "kind": "features" })).await;
+    assert_eq!(named["value"]["projectMode"], true);
+    assert_eq!(named["value"]["googleTasks"], false);
+
+    let unchanged = call(&app, json!({ "kind": "featureFlags" })).await;
+    assert_eq!(unchanged["ok"], true, "{unchanged}");
+    assert_eq!(unchanged["value"], whole);
+    let second = &transport.requests()[1];
+    assert_eq!(
+        second
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("if-none-match"))
+            .map(|(_, value)| value.as_str()),
+        Some("\"features-7-101\""),
+        "asked conditionally, like the tick"
+    );
+}
+
+/// A tag stored by a build that kept only the bare map: a 304 against it has no version to
+/// answer with, so the command asks once more, unconditionally.
+#[tokio::test]
+async fn a_304_with_no_whole_map_kept_asks_again_awtd_1610() {
+    let whole = json!({ "version": 3, "features": { "project_mode": true } });
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push(
+                "/api/v1/features",
+                Ok(crate::api::transport::HttpResponse {
+                    status: 304,
+                    headers: vec![],
+                    body: vec![],
+                }),
+            )
+            .push_json("/api/v1/features", 200, whole.clone()),
+    );
+    app.store
+        .set_metadata("etag:features", "\"features-3-1\"")
+        .expect("stores");
+    app.store
+        .set_metadata("account.features", r#"{"project_mode":true}"#)
+        .expect("stores");
+
+    let flags = call(&app, json!({ "kind": "featureFlags" })).await;
+    assert_eq!(flags["ok"], true, "{flags}");
+    assert_eq!(flags["value"], whole);
+    assert_eq!(transport.requests().len(), 2);
+}
+
+/// Offline, the command fails rather than answering an old copy as if it were fresh: iOS keeps
+/// its own copy and stays on it.
+#[tokio::test]
+async fn the_flag_map_fails_offline_awtd_1610() {
+    let app = app_with(StubTransport::new());
+    let flags = call(&app, json!({ "kind": "featureFlags" })).await;
+    assert_eq!(flags["ok"], false, "{flags}");
+}
+
+/// The iOS screens upload a photo the moment it is picked and keep only its address, so
+/// `updateProfile` takes that address as it is — no second upload.
+#[tokio::test]
+async fn a_profile_photo_already_uploaded_is_put_on_the_account_by_address_awtd_1610() {
+    let me = json!({ "user": { "id": "me", "name": "Jon", "image": "https://blob.test/new.png" } });
+    let (app, transport) =
+        app_and_transport(StubTransport::new().fallback(Ok(json_response(200, me))));
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+
+    let pictured = call(
+        &app,
+        json!({ "kind": "updateProfile", "image": "https://blob.test/new.png" }),
+    )
+    .await;
+    assert_eq!(pictured["ok"], true, "{pictured}");
+    let requests = transport.requests();
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.url.contains("/upload")),
+        "nothing uploaded twice"
+    );
+    let put = requests
+        .iter()
+        .find(|request| request.method.as_str() == "PUT")
+        .expect("a PUT");
+    assert!(put.url.ends_with("/api/v1/users/me"), "{}", put.url);
+    let body: serde_json::Value =
+        serde_json::from_slice(put.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body, json!({ "image": "https://blob.test/new.png" }));
+
+    // A file AND an address is two answers to one question.
+    let sent = transport.requests().len();
+    let both = call(
+        &app,
+        json!({ "kind": "updateProfile", "photoPath": "/tmp/x.png",
+                "image": "https://blob.test/new.png" }),
+    )
+    .await;
+    assert_eq!(both["ok"], false, "{both}");
+    assert_eq!(
+        transport.requests().len(),
+        sent,
+        "refused before any request"
+    );
+}
+
+/// Send and cancel go where resend goes, with their own action.
+#[tokio::test]
+async fn verification_can_be_sent_and_cancelled_awtd_1610() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "action=send",
+                200,
+                json!({ "success": true, "message": "Verification email sent" }),
+            )
+            .push_json(
+                "action=cancel",
+                200,
+                json!({ "success": true, "message": "Email change cancelled" }),
+            )
+            .push_json(
+                "action=cancel",
+                400,
+                json!({ "success": false, "message": "No pending email change" }),
+            ),
+    );
+
+    let sent = call(&app, json!({ "kind": "sendVerification" })).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    assert_eq!(
+        sent["value"],
+        json!({ "message": "Verification email sent" })
+    );
+
+    let cancelled = call(&app, json!({ "kind": "cancelVerification" })).await;
+    assert_eq!(cancelled["ok"], true, "{cancelled}");
+    assert_eq!(cancelled["value"]["message"], "Email change cancelled");
+
+    let declined = call(&app, json!({ "kind": "cancelVerification" })).await;
+    assert_eq!(declined["ok"], false, "a 400 is a refusal: {declined}");
+
+    let requests = transport.requests();
+    assert!(requests
+        .iter()
+        .all(|request| request.method.as_str() == "POST"
+            && request.url.contains("/api/v1/users/me/verify-email")));
+    let body: serde_json::Value =
+        serde_json::from_slice(requests[0].body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["action"], "send");
+}
+
+/// Member autocomplete and recommended collaborators, as the routes answer them.
+#[tokio::test]
+async fn contacts_are_searched_and_collaborators_recommended_awtd_1610() {
+    let hit = json!({ "id": "c1", "email": "ann@x.io", "name": "Ann", "phoneNumber": null,
+                      "isAstridUser": true, "astridUserName": "Ann B",
+                      "astridUserImage": "https://img.test/ann.png" });
+    let recommended = json!([{ "id": "u1", "email": "ann@x.io", "name": null,
+                               "image": null, "contactName": "Ann", "isMutual": true }]);
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "/contacts/search",
+                200,
+                json!({ "results": [hit.clone()], "meta": { "apiVersion": "v1" } }),
+            )
+            .push_json(
+                "/contacts/recommended",
+                200,
+                json!({ "recommended": recommended.clone(),
+                        "stats": { "mutual": 1, "nonMutual": 0, "total": 1 },
+                        "meta": { "apiVersion": "v1" } }),
+            )
+            .push_json(
+                "/contacts/recommended",
+                200,
+                json!({ "recommended": [],
+                        "message": "No contacts uploaded yet. Sync your address book to get recommendations.",
+                        "meta": { "apiVersion": "v1" } }),
+            ),
+    );
+
+    let found = call(
+        &app,
+        json!({ "kind": "searchContacts", "query": " an ", "excludeListId": "l1" }),
+    )
+    .await;
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["value"], json!({ "results": [hit] }));
+
+    let suggested = call(
+        &app,
+        json!({ "kind": "recommendedCollaborators", "excludeListId": "l1", "limit": 5 }),
+    )
+    .await;
+    assert_eq!(suggested["ok"], true, "{suggested}");
+    assert_eq!(suggested["value"]["recommended"], recommended);
+    assert_eq!(suggested["value"]["stats"]["mutual"], 1);
+    assert!(suggested["value"]["message"].is_null());
+
+    let none = call(&app, json!({ "kind": "recommendedCollaborators" })).await;
+    assert_eq!(none["ok"], true, "{none}");
+    assert_eq!(none["value"]["recommended"], json!([]));
+    assert!(none["value"]["stats"].is_null());
+    assert!(none["value"]["message"]
+        .as_str()
+        .is_some_and(|message| message.starts_with("No contacts")));
+
+    let requests = transport.requests();
+    let search = &requests[0].url;
+    assert!(search.contains("q=an"), "trimmed: {search}");
+    assert!(search.contains("limit=10"), "the app's default: {search}");
+    assert!(search.contains("excludeListId=l1"), "{search}");
+    assert!(requests[1].url.contains("limit=5"), "{}", requests[1].url);
+    assert!(requests[1].url.contains("excludeListId=l1"));
+    assert!(requests[2].url.contains("limit=20"), "{}", requests[2].url);
+    assert!(!requests[2].url.contains("excludeListId"));
+
+    // Under two characters the route answers 400; it is not asked.
+    let short = call(&app, json!({ "kind": "searchContacts", "query": "a" })).await;
+    assert_eq!(short["ok"], false, "{short}");
+    assert_eq!(transport.requests().len(), 3);
+}

@@ -163,6 +163,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::SetAgentMode { .. }
         | Command::SaveAgentCredential { .. }
         | Command::TestAgentCredential { .. }
+        | Command::AgentCredentials
+        | Command::AgentModes
+        | Command::CopilotStatus
+        | Command::AvailableAgents { .. }
         | Command::DeleteAgentCredential { .. }
         | Command::ExternalSync { .. }
         | Command::ExternalAccounts
@@ -172,6 +176,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::LinkList { .. }
         | Command::UnlinkList { .. }
         | Command::Features
+        | Command::FeatureFlags
         | Command::MyTasksFilters
         | Command::RefreshMyTasks
         | Command::SetMyTasksFilters { .. }
@@ -182,6 +187,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::ProfileStats
         | Command::UpdateProfile { .. }
         | Command::ResendVerification
+        | Command::SendVerification
+        | Command::CancelVerification
         | Command::ChangeEmail { .. }
         | Command::Passkeys
         | Command::RenamePasskey { .. }
@@ -191,6 +198,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::Contacts
         | Command::ClearContacts
         | Command::UploadContacts { .. }
+        | Command::SearchContacts { .. }
+        | Command::RecommendedCollaborators { .. }
         | Command::DeleteAccount { .. }
         | Command::ExportAccount { .. }
         | Command::Settings

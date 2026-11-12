@@ -1041,9 +1041,29 @@ pub enum Command {
         service_id: String,
         key: String,
     },
-    /// Ask the server whether a stored key works.
+    /// Ask the server whether a stored key works. Answers `{ works, error }`: `error` is the
+    /// server's reason when the provider refused the key (AWTD-1610), else null.
     TestAgentCredential {
         service_id: String,
+    },
+    /// Which services have a key stored, on its own (AWTD-1610) — the read [`Command::Agents`]
+    /// makes as one part of the hub. Answers the server's map, `{ keys: { <serviceId>: { hasKey,
+    /// keyPreview, isValid, lastTested, error } } }`; a service with no key is absent. Never the
+    /// key. Online-only.
+    AgentCredentials,
+    /// The agents' modes, on its own (AWTD-1610): `{ agents, modes }` as
+    /// `/users/me/agent-modes` answers — `agents` the server's mailbox rows (`{ mailbox, email,
+    /// mode, locked }`), `modes` the map of mailbox to mode. Online-only.
+    AgentModes,
+    /// Whether Copilot is connected, on its own (AWTD-1610): `{ connected }`. Online-only.
+    CopilotStatus,
+    /// The agents this account can assign, mention or chat with (AWTD-1610, iOS
+    /// `getAvailableAgents`): `{ agents: [{ id, name, email, image, service }] }`.
+    /// `serverRunOnly` narrows to what the server runs itself — what can power the default
+    /// assistant (AITD-297). Online-only.
+    AvailableAgents {
+        #[serde(default)]
+        server_run_only: bool,
     },
     DeleteAgentCredential {
         service_id: String,
@@ -1169,15 +1189,24 @@ pub enum Command {
         path: String,
     },
     /// Change the signed-in user's name, photo, or both (task 19fd9289). `photoPath` is a file on
-    /// this machine, uploaded first. The answer is the account screen, redrawn.
+    /// this machine, uploaded first; `image` is the address of a photo already uploaded
+    /// (AWTD-1610 — iOS uploads as soon as one is picked). Not both. The answer is the account
+    /// screen, redrawn.
     UpdateProfile {
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
         photo_path: Option<String>,
+        #[serde(default)]
+        image: Option<String>,
     },
     /// Send the verification email again. Answers with the server's message.
     ResendVerification,
+    /// Send the verification email for the account's address (AWTD-1610). Answers
+    /// `{ message }`, the server's sentence.
+    SendVerification,
+    /// Withdraw a pending email change (AWTD-1610). Answers `{ message }`.
+    CancelVerification,
     /// Change the signed-in user's email address (task 4c285039). The address changes only when
     /// the link in the mail is followed, so the answer is `verificationRequired` and the server's
     /// sentence — not a new account screen.
@@ -1221,6 +1250,27 @@ pub enum Command {
     UploadContacts {
         #[serde(default)]
         contacts: Vec<serde_json::Value>,
+    },
+    /// Autocomplete over the imported contacts, for adding a member (AWTD-1610). `query` needs
+    /// two characters, as the server does; `limit` defaults to 10 (the server caps it at 50);
+    /// `excludeListId` leaves out that list's members. Answers `{ results: [{ id, email, name,
+    /// phoneNumber, isAstridUser, astridUserName, astridUserImage }] }`. Online-only.
+    SearchContacts {
+        query: String,
+        #[serde(default)]
+        exclude_list_id: Option<String>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// The Astrid users in this account's contacts, mutual ones first (AWTD-1610). `limit`
+    /// defaults to 20 (the server caps it at 100). Answers `{ recommended: [{ id, email, name,
+    /// image, contactName, isMutual }], stats: { mutual, nonMutual, total } | null, message |
+    /// null }`. Online-only.
+    RecommendedCollaborators {
+        #[serde(default)]
+        exclude_list_id: Option<String>,
+        #[serde(default)]
+        limit: Option<u32>,
     },
     /// Delete the account for good. `confirmation` must be the phrase the web requires, typed
     /// exactly; anything else is refused without a request. Signs out afterwards.
@@ -1302,6 +1352,10 @@ pub enum Command {
     /// This user's feature flags, from the cache: `projectMode`, `googleTasks`, `taskCost`,
     /// each `true`, `false`, or null when the server has never been asked (web task AWTD-566).
     Features,
+    /// The server's whole flag answer, `{ version, features }` — every flag, rollouts included,
+    /// and the version a `featureFlagsUpdated` frame is compared against (AWTD-1610). Asked
+    /// fresh; fails offline, where the shell keeps its own copy.
+    FeatureFlags,
     /// The global quick-add chord: what it is, and its parts for the shell to register.
     Hotkey,
     /// Choose another chord. Refused, with a reason, when it is not one the shell could register.
