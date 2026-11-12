@@ -18,7 +18,7 @@ week.
 | Repository | Takes | Pinned in | Revision |
 |---|---|---|---|
 | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `1c2adfd7e51e6d4e6bab383777df8fba1a606592` |
-| [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `8c3274dba50a3760d7c38043ba8f446015523d21` |
+| [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d73cdc3c19868fb59553d75e45d24c2f846077dc` |
 | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI | `core/` (see its `docs/CORE_MIGRATION.md`) | `98596ed9cc6927461e690c2b30ef00aaa3711439` |
 | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI | `core/` | `facf1408c2bb66ec472ffb4f4bf3842e76dce5d9` |
 
