@@ -6,6 +6,7 @@
 use std::process::ExitCode;
 
 mod assets;
+mod brand;
 mod core_contracts;
 mod design;
 
@@ -25,6 +26,10 @@ const COMMANDS: &[(&str, &str)] = &[
     (
         "check-pins",
         "verify CONSUMERS.md's revisions are real, merged commits [consumer checkout paths]",
+    ),
+    (
+        "gen-brand",
+        "write every client's brand resources from one profile [profile] --out <dir>",
     ),
     (
         "gen-design",
@@ -47,6 +52,16 @@ fn main() -> ExitCode {
         "check-pins" => check_pins(),
         "gen-core-contracts" => core_contracts::write_all(&repo_root()),
         "check-core-contracts" => core_contracts::check_all(&repo_root()),
+        "gen-brand" => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            let out = args
+                .iter()
+                .position(|a| a == "--out")
+                .and_then(|i| args.get(i + 1))
+                .cloned();
+            let profile = args.first().filter(|a| *a != "--out").cloned();
+            brand::generate(&repo_root(), profile, out)
+        }
         "gen-design" => design::generate(&repo_root()),
         "check-design" => design::check(
             &repo_root(),
