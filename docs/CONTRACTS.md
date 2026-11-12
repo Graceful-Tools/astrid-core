@@ -13,11 +13,22 @@ client together, and the entry says which behaviour this crate currently follows
 > still changes on web first, and the fixtures in `contracts/fixtures/` are still generated from
 > web and never hand-edited. Entries settled this way say "Resolved 2026-10-03 toward iOS".
 
+> **Where web's server decides through this crate, this crate is canonical for behaviour**
+> (astrid-web AWTD-1591, 2026-11-11). That covers repeating rollover (§1), list permissions (§5),
+> search parsing (`searchParse`) and the project board (`board` / `boardMove`). Web's TypeScript
+> copy of each is now its browser's rule and its server's fail-safe, nothing more. A change to one
+> of these rules is made here and in web's TypeScript as one pair of PRs. The fixture is still
+> generated from web, so web's half lands first, as §7 says. Each TypeScript copy retires on the
+> dated checklist in astrid-web
+> [`docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md).
+> At that point the rule's fixture is generated from here.
+
 ---
 
 ## 1. Repeating-task rollover
 
-Canonical: `astrid-web/types/repeating.ts` (`calculateTaskNextOccurrence`) and
+Canonical: this crate's `nextOccurrence`, which web's server runs (see the note at the top). The
+fixture is generated from `astrid-web/types/repeating.ts` (`calculateTaskNextOccurrence`) and
 `astrid-web/lib/repeating-task-handler.ts`.
 Apple: asks this crate (`rules` → `completion` / `nextOccurrence`) since 2026-09-28.
 Web: its server asks this crate (`rules` → `nextOccurrence`, WebAssembly) since AWTD-1063, with
@@ -260,7 +271,8 @@ must register the same scheme with its OS and the same id with its server.
 
 ## 5. List permissions
 
-Canonical: `astrid-web/lib/list-permissions.ts`.
+Canonical: this crate's `listAccess`, which web's server runs (see the note at the top). The
+fixture is generated from `astrid-web/lib/list-permissions.ts`.
 Apple: `astrid-ios/Astrid App/Models/TaskList.swift` (`role(for:)`) and `Core/Lists/ListPermissions.swift`.
 Here: `astrid_core::permissions`, locked by `contracts/fixtures/permissions.json`.
 
@@ -445,7 +457,8 @@ until the connection comes back.
 
 ## 7. Adding a contract
 
-1. Change the canonical implementation in astrid-web, with tests.
+1. Change the implementation in astrid-web, with tests. For a rule web's server already runs
+   through this crate (the note at the top), change it here in the paired PR.
 2. Teach astrid-web's `scripts/export-contract-fixtures.ts` to export the cases, regenerate there, and copy them here.
 3. Port or update the Rust module until its tests pass against the new fixture.
 4. Bump astrid-ios's pinned revision, which covers both iOS and Mac; mirror only what Swift still owns.
