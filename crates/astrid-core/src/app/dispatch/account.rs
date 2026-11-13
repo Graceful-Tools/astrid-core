@@ -64,12 +64,37 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         Command::DeleteCustomAgent { agent_id } => {
             answer_done(app.context.agents().delete_custom_agent(&agent_id).await)
         }
-        Command::SetCustomAgentPhoto { agent_id, image } => answer(
-            app.context
-                .agents()
-                .set_custom_agent_photo(&agent_id, image.as_deref())
-                .await,
-        ),
+        Command::SetCustomAgentPhoto {
+            agent_id,
+            image,
+            photo_path,
+        } => {
+            let image = match (photo_path, image) {
+                (Some(_), Some(_)) => {
+                    return Response::failed(Failure::bad_request(
+                        "send photoPath or image, not both",
+                    ))
+                }
+                // The same upload the profile photo goes through, and the web's own Custom
+                // Agents screen too (AWTD-1628).
+                (Some(path), None) => match app
+                    .context
+                    .account()
+                    .upload_photo(std::path::Path::new(&path))
+                    .await
+                {
+                    Ok(url) => Some(url),
+                    Err(error) => return Response::failed(error.into()),
+                },
+                (None, image) => image,
+            };
+            answer(
+                app.context
+                    .agents()
+                    .set_custom_agent_photo(&agent_id, image.as_deref())
+                    .await,
+            )
+        }
         Command::ConnectCopilot => match app.context.agents().copilot_authorize_url().await {
             Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
             Err(error) => Response::failed(error.into()),

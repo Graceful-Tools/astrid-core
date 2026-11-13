@@ -1031,13 +1031,17 @@ pub enum Command {
     DeleteCustomAgent {
         agent_id: String,
     },
-    /// Set a registered agent's photo, or clear it back to the default. A URL, not an upload: the
-    /// image is wherever it already lives. Answers with the image the server settled on, which
-    /// for a cleared one is the default rather than nothing.
+    /// Set a registered agent's photo, or clear it back to the default. `photoPath` is a file on
+    /// this machine, uploaded first through the route the profile photo uses (AWTD-1628);
+    /// `image` is the address of a photo that already lives somewhere. Not both, and neither
+    /// clears it. Answers with the image the server settled on, which for a cleared one is the
+    /// default rather than nothing.
     SetCustomAgentPhoto {
         agent_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        photo_path: Option<String>,
     },
     /// Start connecting Copilot, or stop.
     ///

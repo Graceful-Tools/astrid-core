@@ -2002,3 +2002,137 @@ async fn contacts_are_searched_and_collaborators_recommended_awtd_1610() {
     assert_eq!(short["ok"], false, "{short}");
     assert_eq!(transport.requests().len(), 3);
 }
+
+/// A Custom Agent's photo from a picked file, in one command (AWTD-1628): the file goes up through
+/// the same upload the profile photo uses, then its address is PATCHed onto the agent, and the
+/// answer is the image the server stored — not the one asked for.
+#[tokio::test]
+async fn a_custom_agent_photo_can_come_from_a_picked_file_awtd_1628() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "v1/upload",
+                200,
+                json!({ "url": "https://blob.test/agent.png" }),
+            )
+            .push_json(
+                "custom-agents/agents/a1",
+                200,
+                json!({ "success": true, "image": "https://blob.test/agent.png" }),
+            ),
+    );
+    let photo =
+        std::env::temp_dir().join(format!("astrid-agent-{}.png", crate::outbox::new_temp_id()));
+    std::fs::write(&photo, b"\x89PNG").expect("writes");
+
+    let set = call(
+        &app,
+        json!({ "kind": "setCustomAgentPhoto", "agentId": "a1",
+                "photoPath": photo.to_string_lossy() }),
+    )
+    .await;
+    let _ = std::fs::remove_file(&photo);
+
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["value"]["image"], "https://blob.test/agent.png");
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2, "an upload, then a PATCH");
+    assert!(
+        requests[0].url.ends_with("/api/v1/upload"),
+        "{}",
+        requests[0].url
+    );
+    let upload_body = String::from_utf8_lossy(requests[0].body.as_deref().expect("bytes"));
+    assert!(upload_body.contains("name=\"file\""));
+    assert!(upload_body.contains("image/png"));
+    assert_eq!(requests[1].method.as_str(), "PATCH");
+    assert!(
+        requests[1].url.ends_with("/api/v1/custom-agents/agents/a1"),
+        "{}",
+        requests[1].url
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(requests[1].body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body, json!({ "image": "https://blob.test/agent.png" }));
+}
+
+/// An address and a clear still go straight to the PATCH with nothing uploaded; a file AND an
+/// address is refused before any request; a failed upload PATCHes nothing (AWTD-1628).
+#[tokio::test]
+async fn a_custom_agent_photo_by_address_or_cleared_uploads_nothing_awtd_1628() {
+    let (app, transport) = app_and_transport(
+        StubTransport::new()
+            .push_json(
+                "custom-agents/agents/a1",
+                200,
+                json!({ "success": true, "image": "https://elsewhere.test/a.png" }),
+            )
+            .push_json(
+                "custom-agents/agents/a1",
+                200,
+                json!({ "success": true, "image": "/images/ai-agents/openclaw.svg" }),
+            )
+            .push_json(
+                "v1/upload",
+                500,
+                json!({ "error": "Internal server error" }),
+            ),
+    );
+
+    let by_address = call(
+        &app,
+        json!({ "kind": "setCustomAgentPhoto", "agentId": "a1",
+                "image": "https://elsewhere.test/a.png" }),
+    )
+    .await;
+    assert_eq!(by_address["ok"], true, "{by_address}");
+    assert_eq!(by_address["value"]["image"], "https://elsewhere.test/a.png");
+
+    let cleared = call(
+        &app,
+        json!({ "kind": "setCustomAgentPhoto", "agentId": "a1" }),
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert_eq!(cleared["value"]["image"], "/images/ai-agents/openclaw.svg");
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(!requests
+        .iter()
+        .any(|request| request.url.contains("/upload")));
+    let body: serde_json::Value =
+        serde_json::from_slice(requests[1].body.as_deref().expect("a body")).expect("json");
+    assert_eq!(
+        body,
+        json!({ "image": null }),
+        "a clear still sends image: null"
+    );
+
+    let both = call(
+        &app,
+        json!({ "kind": "setCustomAgentPhoto", "agentId": "a1",
+                "photoPath": "/tmp/x.png", "image": "https://elsewhere.test/a.png" }),
+    )
+    .await;
+    assert_eq!(both["ok"], false, "{both}");
+    assert_eq!(transport.requests().len(), 2, "refused before any request");
+
+    let photo =
+        std::env::temp_dir().join(format!("astrid-agent-{}.png", crate::outbox::new_temp_id()));
+    std::fs::write(&photo, b"\x89PNG").expect("writes");
+    let failed = call(
+        &app,
+        json!({ "kind": "setCustomAgentPhoto", "agentId": "a1",
+                "photoPath": photo.to_string_lossy() }),
+    )
+    .await;
+    let _ = std::fs::remove_file(&photo);
+    assert_eq!(failed["ok"], false, "{failed}");
+    let requests = transport.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "the upload, and no PATCH after it failed"
+    );
+    assert!(requests[2].url.ends_with("/api/v1/upload"));
+}

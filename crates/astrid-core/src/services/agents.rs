@@ -255,8 +255,8 @@ impl AgentService {
     /// (`PATCH /api/v1/custom-agents/agents/:id`), and the answer says which image it settled on,
     /// so a screen draws what was actually stored rather than what it asked for.
     ///
-    /// A URL, not an upload. The photo is wherever it already lives, which is how the web and iOS
-    /// both set one.
+    /// A URL, not an upload: a picked file is uploaded first by the `setCustomAgentPhoto` command
+    /// (AWTD-1628), with [`super::account::AccountService::upload_photo`], as the web does.
     pub async fn set_custom_agent_photo(
         &self,
         id: &str,
