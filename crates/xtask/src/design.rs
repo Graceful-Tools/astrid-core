@@ -501,18 +501,29 @@ pub use astrid_rules::brand_colors::{contrast, over};
 // ── Emitters ──────────────────────────────────────────────────────────────────────────────────
 
 /// Every generated file: (path under `GENERATED`, contents).
-pub fn outputs(tokens: &Tokens) -> Vec<(&'static str, String)> {
-    vec![
-        ("tokens.resolved.json", resolved_json(tokens)),
+pub fn outputs(tokens: &Tokens) -> Vec<(String, String)> {
+    let mut files = vec![
+        ("tokens.resolved.json".to_string(), resolved_json(tokens)),
         (
-            "web/astrid-tokens.css",
+            "web/astrid-tokens.css".to_string(),
             stamped("/*", " */", &web_css(tokens)),
         ),
         (
-            "apple/AstridTokens.swift",
+            "apple/AstridTokens.swift".to_string(),
             stamped("//", "", &apple_swift(tokens)),
         ),
-    ]
+        (
+            "android/AstridTokens.kt".to_string(),
+            stamped("//", "", &compose_kotlin(tokens)),
+        ),
+    ];
+    for (name, theme) in &tokens.themes {
+        files.push((
+            format!("vscode/astrid-{name}-color-theme.json"),
+            stamped("//", "", &vscode_theme(tokens, name, theme)),
+        ));
+    }
+    files
 }
 
 /// The header every generated source file carries: where it came from, and a hash of everything
@@ -860,6 +871,323 @@ fn capitalised(name: &str) -> String {
         Some(first) => first.to_uppercase().chain(characters).collect(),
         None => camel,
     }
+}
+
+/// The package the Compose tokens declare. A Kotlin file in the default package cannot be imported
+/// at all, so the generated file has to name one; the Android app vendors it into a directory
+/// matching this. It is changed here and re-vendored, never in the copy — editing the copy breaks
+/// the `body-sha256` the app's own gate checks.
+const ANDROID_PACKAGE: &str = "com.astrid.design";
+
+/// Astrid's colour names on Material 3's slots: (slot, token). An app themes standard Compose
+/// components from `colorScheme()` instead of keeping a second palette beside Astrid's. Material
+/// has no slot for a priority, an overdue date or a status wash; those stay `AstridPalette`'s.
+const MATERIAL_SLOTS: &[(&str, &str)] = &[
+    ("primary", "accent"),
+    ("onPrimary", "accent-text"),
+    ("primaryContainer", "bg-selected"),
+    ("onPrimaryContainer", "accent-ink"),
+    ("secondary", "accent-hover"),
+    ("onSecondary", "accent-text"),
+    ("tertiary", "info"),
+    ("onTertiary", "accent-text"),
+    ("background", "bg-primary"),
+    ("onBackground", "text-primary"),
+    ("surface", "bg-primary"),
+    ("onSurface", "text-primary"),
+    ("surfaceVariant", "bg-secondary"),
+    ("onSurfaceVariant", "text-secondary"),
+    ("outline", "border"),
+    ("outlineVariant", "border-hover"),
+    ("error", "error"),
+    ("onError", "accent-text"),
+];
+
+fn kotlin_colour(r: u8, g: u8, b: u8) -> String {
+    format!("Color(0xFF{r:02X}{g:02X}{b:02X})")
+}
+
+/// A ratio is a `Float`; a length is `Dp`. The same `-scale` suffix the CSS unit reads.
+fn kotlin_length(key: &str, value: &Value) -> String {
+    if unit(key).is_empty() {
+        format!("{}f", number(value))
+    } else {
+        format!("{}.dp", number(value))
+    }
+}
+
+/// Jetpack Compose. Brand colours are a parameter with Astrid's own as the default, so a partner
+/// build passes them from `BuildConfig` rather than regenerating this file — the Compose answer to
+/// the `Brand.*` the Apple apps read from Info.plist. Android's hand copy of iOS's `Theme.swift`
+/// (`ui/theme/AstridColors.kt`) is what this replaces.
+fn compose_kotlin(tokens: &Tokens) -> String {
+    let keys: Vec<&String> = tokens
+        .themes
+        .first()
+        .map(|(_, theme)| theme.colours.keys().collect())
+        .unwrap_or_default();
+
+    let mut kt = format!("package {ANDROID_PACKAGE}\n\n");
+    kt.push_str(
+        "import androidx.compose.material3.ColorScheme\n\
+         import androidx.compose.material3.darkColorScheme\n\
+         import androidx.compose.material3.lightColorScheme\n\
+         import androidx.compose.ui.graphics.Color\n\
+         import androidx.compose.ui.text.font.FontWeight\n\
+         import androidx.compose.ui.unit.Dp\n\
+         import androidx.compose.ui.unit.TextUnit\n\
+         import androidx.compose.ui.unit.dp\n\
+         import androidx.compose.ui.unit.sp\n\n\
+         enum class AstridAppearance { LIGHT, DARK }\n\n",
+    );
+
+    kt.push_str(
+        "/** A partner's brand colours, or Astrid's own: what `gen-brand` writes into `BuildConfig`. */\n\
+         data class AstridBrand(\n",
+    );
+    for (name, (r, g, b)) in &tokens.brand {
+        kt.push_str(&format!(
+            "    val {}: Color = {},\n",
+            camel(name),
+            kotlin_colour(*r, *g, *b)
+        ));
+    }
+    kt.push_str(")\n\n/** Every colour name a theme resolves. */\ndata class AstridPalette(\n    val appearance: AstridAppearance,\n");
+    for key in &keys {
+        kt.push_str(&format!("    val {}: Color,\n", camel(key)));
+    }
+    kt.push_str(")\n\n");
+
+    kt.push_str("/** A shadow as its three parts: Compose draws one per component. */\ndata class AstridShadow(val y: Dp, val blur: Dp, val alpha: Float)\n\n");
+    kt.push_str("/** A text style's measurements. The family stays the platform's. */\ndata class AstridTextStyle(val size: TextUnit, val weight: FontWeight)\n\n");
+
+    // `palette.` rather than the bare property: Material's slot names and Astrid's token names
+    // overlap (`error`), and a named argument beside a same-named property reads as a typo.
+    kt.push_str("/** Astrid's names on Material 3's slots, for the standard components. */\nfun AstridPalette.colorScheme(): ColorScheme {\n    val palette = this\n    val base = if (palette.appearance == AstridAppearance.DARK) darkColorScheme() else lightColorScheme()\n    return base.copy(\n");
+    for (slot, token) in MATERIAL_SLOTS {
+        if keys.iter().any(|key| *key == token) {
+            kt.push_str(&format!("        {slot} = palette.{},\n", camel(token)));
+        }
+    }
+    kt.push_str("    )\n}\n\nobject AstridTokens {\n");
+
+    for (name, theme) in &tokens.themes {
+        kt.push_str(&format!(
+            "    fun {}(brand: AstridBrand = AstridBrand()): AstridPalette = AstridPalette(\n        appearance = AstridAppearance.{},\n",
+            camel(name),
+            theme.appearance.to_uppercase()
+        ));
+        for key in &keys {
+            let value = match &theme.colours[*key] {
+                Colour::Hex(r, g, b) => kotlin_colour(*r, *g, *b),
+                Colour::Brand(reference) => format!("brand.{}", camel(reference)),
+            };
+            kt.push_str(&format!("        {} = {value},\n", camel(key)));
+        }
+        kt.push_str("    )\n\n");
+    }
+
+    kt.push_str("    /** Every theme by the name the core's theme mode travels under. */\n    fun theme(name: String, brand: AstridBrand = AstridBrand()): AstridPalette? = when (name) {\n");
+    for (name, _) in &tokens.themes {
+        kt.push_str(&format!("        \"{name}\" -> {}(brand)\n", camel(name)));
+    }
+    kt.push_str("        else -> null\n    }\n\n    object Space {\n");
+    for step in tokens
+        .raw
+        .get("space")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        kt.push_str(&format!("        val s{0}: Dp = {0}.dp\n", number(step)));
+    }
+    kt.push_str("    }\n\n    object Radius {\n");
+    for (name, value) in object(&tokens.raw, "radius") {
+        kt.push_str(&format!(
+            "        val {}: Dp = {}.dp\n",
+            camel(&name),
+            number(&value)
+        ));
+    }
+    kt.push_str("    }\n\n    object Shadow {\n");
+    for (name, shadow) in object(&tokens.raw, "shadow") {
+        kt.push_str(&format!(
+            "        val {}: AstridShadow = AstridShadow(y = {}.dp, blur = {}.dp, alpha = {}f)\n",
+            camel(&name),
+            number(&shadow["y"]),
+            number(&shadow["blur"]),
+            number(&shadow["alpha"])
+        ));
+    }
+    kt.push_str("    }\n\n    object TypeScale {\n");
+    for (density, styles) in object(&tokens.raw, "type") {
+        kt.push_str(&format!("        object {} {{\n", capitalised(&density)));
+        for (name, style) in styles.as_object().into_iter().flatten() {
+            kt.push_str(&format!(
+                "            val {}: AstridTextStyle = AstridTextStyle(size = {}.sp, weight = FontWeight({}))\n",
+                camel(name),
+                number(&style["size"]),
+                number(&style["weight"])
+            ));
+        }
+        kt.push_str("        }\n");
+    }
+    kt.push_str("    }\n\n    object Motion {\n");
+    for (name, motion) in object(&tokens.raw, "motion") {
+        kt.push_str(&format!(
+            "        val {}DurationMillis: Int = {}\n",
+            camel(&name),
+            number(&motion["ms"])
+        ));
+        if let Some(damping) = motion.get("damping") {
+            kt.push_str(&format!(
+                "        val {}Damping: Float = {}f\n",
+                camel(&name),
+                number(damping)
+            ));
+        }
+    }
+    kt.push_str("    }\n");
+    for section in ["size", "layout", "markdown"] {
+        kt.push_str(&format!("\n    object {} {{\n", capitalised(section)));
+        for (name, value) in object(&tokens.raw, section) {
+            match value.as_object() {
+                Some(sizes) => {
+                    kt.push_str(&format!("        object {} {{\n", capitalised(&name)));
+                    for (key, size) in sizes {
+                        kt.push_str(&format!(
+                            "            val {}: {} = {}\n",
+                            camel(key),
+                            kotlin_type(key),
+                            kotlin_length(key, size)
+                        ));
+                    }
+                    kt.push_str("        }\n");
+                }
+                None => kt.push_str(&format!(
+                    "        val {}: {} = {}\n",
+                    camel(&name),
+                    kotlin_type(&name),
+                    kotlin_length(&name, &value)
+                )),
+            }
+        }
+        kt.push_str("    }\n");
+    }
+    kt.push_str("\n    object State {\n");
+    for (name, value) in object(&tokens.raw, "state") {
+        kt.push_str(&format!(
+            "        val {}: Float = {}f\n",
+            camel(&name),
+            number(&value)
+        ));
+    }
+    kt.push_str("    }\n}\n");
+    kt
+}
+
+fn kotlin_type(key: &str) -> &'static str {
+    if unit(key).is_empty() {
+        "Float"
+    } else {
+        "Dp"
+    }
+}
+
+/// VS Code's workbench colours: (theme key, token). Without this the extension has no colour
+/// theme at all, so a partner's accent never reaches the workbench. The extension's own webviews
+/// are not here: they take the editor's colours through `--vscode-*` (DS10). Nor is syntax
+/// colouring — `tokens.json` has no code palette, so code stays `editor.foreground` rather than
+/// this emitter inventing eight colours no other client has.
+const VSCODE_COLOURS: &[(&str, &str)] = &[
+    ("foreground", "text-primary"),
+    ("descriptionForeground", "text-secondary"),
+    ("disabledForeground", "text-muted"),
+    ("focusBorder", "border-focus"),
+    ("errorForeground", "error-ink"),
+    ("editor.background", "bg-primary"),
+    ("editor.foreground", "text-primary"),
+    ("editor.selectionBackground", "bg-selected"),
+    ("editorError.foreground", "error-ink"),
+    ("editorWarning.foreground", "warning-ink"),
+    ("editorInfo.foreground", "info-ink"),
+    ("editorGroupHeader.tabsBackground", "bg-secondary"),
+    ("tab.activeBackground", "bg-primary"),
+    ("tab.activeForeground", "text-primary"),
+    ("tab.inactiveBackground", "bg-secondary"),
+    ("tab.inactiveForeground", "text-muted"),
+    ("tab.border", "border"),
+    ("sideBar.background", "bg-secondary"),
+    ("sideBar.foreground", "text-primary"),
+    ("sideBar.border", "border"),
+    ("sideBarSectionHeader.background", "bg-tertiary"),
+    ("sideBarSectionHeader.foreground", "text-secondary"),
+    ("activityBar.background", "bg-secondary"),
+    ("activityBar.foreground", "text-primary"),
+    ("activityBar.inactiveForeground", "text-muted"),
+    ("activityBar.border", "border"),
+    ("activityBarBadge.background", "accent"),
+    ("activityBarBadge.foreground", "accent-text"),
+    ("statusBar.background", "header-bg"),
+    ("statusBar.foreground", "text-primary"),
+    ("statusBar.border", "header-border"),
+    ("titleBar.activeBackground", "header-bg"),
+    ("titleBar.activeForeground", "text-primary"),
+    ("titleBar.border", "header-border"),
+    ("panel.background", "bg-secondary"),
+    ("panel.border", "border"),
+    ("button.background", "accent"),
+    ("button.foreground", "accent-text"),
+    ("button.hoverBackground", "accent-hover"),
+    ("badge.background", "accent"),
+    ("badge.foreground", "accent-text"),
+    ("progressBar.background", "accent"),
+    ("textLink.foreground", "accent-ink"),
+    ("textLink.activeForeground", "accent"),
+    ("input.background", "input-bg"),
+    ("input.foreground", "text-primary"),
+    ("input.border", "input-border"),
+    ("input.placeholderForeground", "input-placeholder"),
+    ("dropdown.background", "input-bg"),
+    ("dropdown.foreground", "text-primary"),
+    ("dropdown.border", "input-border"),
+    ("list.hoverBackground", "bg-hover"),
+    ("list.activeSelectionBackground", "bg-selected"),
+    ("list.activeSelectionForeground", "text-selected"),
+    ("list.inactiveSelectionBackground", "bg-active"),
+    ("list.errorForeground", "error-ink"),
+    ("list.warningForeground", "warning-ink"),
+    ("quickInput.background", "bg-primary"),
+    ("editorWidget.background", "bg-secondary"),
+    ("widget.border", "border"),
+    ("notifications.background", "bg-secondary"),
+    ("notifications.foreground", "text-primary"),
+    ("notifications.border", "border"),
+];
+
+/// One VS Code colour theme per Astrid theme. A theme file carries literals, so a partner's accent
+/// reaches it by regenerating from the partner's `tokens.json` — unlike Compose, there is nothing
+/// to pass in at run time.
+fn vscode_theme(tokens: &Tokens, name: &str, theme: &Theme) -> String {
+    let mut json = format!(
+        "{{\n  \"name\": \"Astrid {}\",\n  \"type\": \"{}\",\n  \"semanticHighlighting\": true,\n  \"colors\": {{\n",
+        capitalised(name),
+        theme.appearance
+    );
+    let entries: Vec<String> = VSCODE_COLOURS
+        .iter()
+        .filter_map(|(slot, token)| {
+            let colour = theme.colours.get(*token)?;
+            let (r, g, b) = match colour {
+                Colour::Hex(r, g, b) => (*r, *g, *b),
+                Colour::Brand(reference) => tokens.brand[reference],
+            };
+            Some(format!("    \"{slot}\": \"#{r:02X}{g:02X}{b:02X}\""))
+        })
+        .collect();
+    json.push_str(&entries.join(",\n"));
+    json.push_str("\n  }\n}\n");
+    json
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────────────────────
@@ -1447,6 +1775,120 @@ mod tests {
         );
     }
 
+    /// Compose takes the brand as a parameter rather than a literal, so a partner's build passes
+    /// `BuildConfig`'s accent instead of regenerating the file (AATD-85).
+    #[test]
+    fn compose_takes_the_brand_as_a_parameter() {
+        let tokens = parse(&source("", "#6B7280"), THEMES).expect("valid");
+        let kt = compose_kotlin(&tokens);
+        assert!(kt.starts_with("package com.astrid.design\n"), "{kt}");
+        assert!(
+            kt.contains("    val accent: Color = Color(0xFF3B82F6),\n"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("fun dark(brand: AstridBrand = AstridBrand()): AstridPalette = AstridPalette(\n        appearance = AstridAppearance.DARK,"),
+            "{kt}"
+        );
+        assert!(kt.contains("        accent = brand.accent,"), "{kt}");
+        assert!(
+            kt.contains("        bgPrimary = Color(0xFF111827),"),
+            "{kt}"
+        );
+        assert!(kt.contains("        \"dark\" -> dark(brand)"), "{kt}");
+        assert!(kt.contains("        val s4: Dp = 4.dp"), "{kt}");
+        assert!(kt.contains("        val sm: Dp = 6.dp"), "{kt}");
+        assert!(
+            kt.contains("AstridShadow(y = 1.dp, blur = 2.dp, alpha = 0.05f)"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("AstridTextStyle(size = 17.sp, weight = FontWeight(400))"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("        val fastDurationMillis: Int = 150"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("            val leadingControl: Dp = 34.dp"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("        val repeatFrameScale: Float = 1.25f"),
+            "{kt}"
+        );
+        assert!(kt.contains("        val pressScale: Float = 0.98f"), "{kt}");
+    }
+
+    /// Material's slots are filled from Astrid's names, so a standard Compose component needs no
+    /// second palette; a slot whose token a theme does not define is left at Material's own.
+    #[test]
+    fn compose_fills_materials_slots_from_astrids_names() {
+        let tokens = parse(&source("", "#6B7280"), THEMES).expect("valid");
+        let kt = compose_kotlin(&tokens);
+        assert!(kt.contains("        primary = palette.accent,\n"), "{kt}");
+        assert!(
+            kt.contains("        background = palette.bgPrimary,\n"),
+            "{kt}"
+        );
+        assert!(
+            kt.contains("        onBackground = palette.textPrimary,\n"),
+            "{kt}"
+        );
+        // The fixture has no `error`, so Material keeps its own.
+        assert!(!kt.contains("        error = palette.error,\n"), "{kt}");
+    }
+
+    /// A VS Code theme is literals: the accent reaches the workbench by being generated into it.
+    #[test]
+    fn a_vscode_theme_maps_the_workbench_onto_the_tokens() {
+        let tokens = parse(&source("", "#6B7280"), THEMES).expect("valid");
+        let (name, dark) = &tokens.themes[1];
+        let json = vscode_theme(&tokens, name, dark);
+        assert!(json.starts_with("{\n  \"name\": \"Astrid Dark\",\n  \"type\": \"dark\","));
+        assert!(
+            json.contains("    \"editor.background\": \"#111827\""),
+            "{json}"
+        );
+        assert!(
+            json.contains("    \"sideBar.background\": \"#1F2937\""),
+            "{json}"
+        );
+        assert!(json.contains("    \"foreground\": \"#FFFFFF\""), "{json}");
+        assert!(
+            json.contains("    \"descriptionForeground\": \"#D1D5DB\""),
+            "{json}"
+        );
+        // A key whose token the fixture does not define is left out, not emitted empty.
+        assert!(!json.contains("focusBorder"), "{json}");
+        let parsed: Value = serde_json::from_str(&json).expect("a theme file is JSON");
+        assert_eq!(parsed["semanticHighlighting"], Value::Bool(true));
+    }
+
+    /// Every key both emitters map names a token the real themes resolve. A token renamed in the
+    /// source would otherwise silently drop a workbench colour or a Material slot.
+    #[test]
+    fn both_emitters_map_tokens_the_committed_themes_define() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        for (name, theme) in &tokens.themes {
+            for (slot, token) in VSCODE_COLOURS {
+                assert!(
+                    theme.colours.contains_key(*token),
+                    "vscode {slot} names {token}, which themes.{name} does not define"
+                );
+            }
+            for (slot, token) in MATERIAL_SLOTS {
+                assert!(
+                    theme.colours.contains_key(*token),
+                    "material {slot} names {token}, which themes.{name} does not define"
+                );
+            }
+        }
+    }
+
     /// The stamp is a hash of the body, so a consumer can detect a hand edit on its own.
     #[test]
     fn a_generated_file_carries_a_hash_of_its_body() {
@@ -1486,7 +1928,7 @@ mod tests {
             "the theme the others extend comes first"
         );
         for (relative, expected) in outputs(&tokens) {
-            let actual = std::fs::read_to_string(root.join(GENERATED).join(relative))
+            let actual = std::fs::read_to_string(root.join(GENERATED).join(&relative))
                 .unwrap_or_else(|_| panic!("{relative} is missing; run cargo xtask gen-design"));
             assert_eq!(
                 lf(&actual),

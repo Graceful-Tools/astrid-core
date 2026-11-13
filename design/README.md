@@ -28,6 +28,8 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 |---|---|---|
 | `web/astrid-tokens.css` | astrid-web: CSS custom properties, colours as `r, g, b` triplets | `packages/astrid-design/` with a `REVISION` |
 | `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | `Astrid App/Utilities/AstridTokens.swift`, hash-checked by `check:contracts` (AITD-605/610) |
+| `android/AstridTokens.kt` | astrid-android: Compose values, one `AstridPalette` per theme and a Material 3 `ColorScheme` built from it; brand colours are a parameter (`AstridBrand`) with Astrid's own as the default, so a partner build passes `BuildConfig`'s instead of regenerating | `app/src/main/java/com/astrid/design/AstridTokens.kt`, the package the file declares (AATD-85) |
+| `vscode/astrid-{light,dark,ocean}-color-theme.json` | astrid-vscode: one workbench colour theme per Astrid theme, contributed under `themes` | the extension's `themes/` |
 | `tokens.resolved.json` | every client: the source with each theme's `extends` flattened | `packages/astrid-design/` in astrid-web |
 
 | `web/checkbox-art.json` | astrid-web: the checkbox's shapes as data, drawn inline so a task list loads no images | `packages/astrid-design/` |
@@ -35,9 +37,17 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | `android/drawable/checkbox_*.xml` | astrid-android: the three layers as vector drawables; `box` and `repeat` are white, for a tint | `app/src/main/res/drawable/` |
 | `windows/AstridCheckbox.xaml` | astrid-windows: a resource dictionary with one `ContentControl` style per layer; `box` and `repeat` take the control's `Foreground` | merged into `App.xaml` |
 
-Android (Compose) and Windows (XAML) token emitters are added to `crates/xtask/src/design.rs` in the
-change that adopts them, so each one is written against the project that compiles it. Until then
-those clients can read `tokens.resolved.json` in a test.
+The Windows (XAML) token emitter is added to `crates/xtask/src/design.rs` in the change that adopts
+it (AWTD2-155), so it is written against the project that compiles it. Until then Windows reads
+`tokens.resolved.json` in a test.
+
+Two things the emitters deliberately leave out. The Compose file declares a package, because a
+Kotlin file in the default package cannot be imported at all; it is changed in `design.rs` and
+re-vendored, never in the copy, which would break the `body-sha256` the Android gate checks. And a
+VS Code theme carries no syntax colours: `tokens.json` has no code palette, so code stays
+`editor.foreground` rather than the emitter inventing eight colours no other client has. A theme
+file is also literals, so a partner's accent reaches the workbench by regenerating from the
+partner's tokens — there is nothing to pass in at run time, as there is in Compose.
 
 Every generated source file starts with a `body-sha256` line: a hash of everything below it. A
 consumer checks that hash in its own gate, with no access to this repository, so a hand-edited
