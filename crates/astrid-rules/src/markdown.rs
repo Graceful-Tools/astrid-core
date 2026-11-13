@@ -19,6 +19,10 @@
 //! - **Only `http`, `https` and `mailto` links keep their address.** Anything else — a
 //!   `javascript:` in particular — is text, which is what the web's sanitiser leaves of it.
 //! - **HTML is text.** The web strips tags it does not allow and keeps what was inside them.
+//! - **A table whose body cells all lead with a rating is a trade-off grid** ([`Block::TradeoffGrid`],
+//!   AWTD-1626), so a shell colours it from this answer rather than recognising the shape itself.
+//!   A Decision is *not* a block: its cards belong to a whole comment, and only in comments, so a
+//!   shell asks [`crate::decisions::parse`] beside this renderer, as the web does.
 //!
 //! What comes out is a tree of [`Block`]s of [`Inline`]s rather than HTML, because a WinUI
 //! shell draws paragraphs and runs, not markup. The shell decides fonts and colours; nothing
@@ -61,6 +65,44 @@ pub enum Block {
         header: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
     },
+    /// A table whose body cells all lead with a rating (`++`, `~`, `🔴`): a trade-off grid, drawn
+    /// with each rated cell on its colour (astrid-web AWTD-1524; this block, AWTD-1626). Which
+    /// tables are grids is [`crate::decisions::is_tradeoff_grid`], on each cell's source text as
+    /// the web reads it.
+    ///
+    /// The shell numbers rows from 1 and letters criteria A, B, C by position
+    /// ([`crate::decisions::column_letter`]); neither is in the block.
+    TradeoffGrid {
+        /// One per column, the option column first: `left`, `center`, `right` or `none`.
+        alignments: Vec<String>,
+        /// The option column's heading, then one per criterion.
+        header: Vec<Vec<Inline>>,
+        rows: Vec<GridRow>,
+        /// The label keys the grid's key shows, worst to best: each rating used, once.
+        key: Vec<&'static str>,
+    },
+}
+
+/// One option of a trade-off grid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridRow {
+    /// The option, without the marker its writer put in front (`A. Lisbon` → `Lisbon`).
+    pub name: Vec<Inline>,
+    /// One per criterion.
+    pub cells: Vec<GridCell>,
+}
+
+/// One criterion's cell in a trade-off grid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridCell {
+    /// The rating's label key (`veryPoor`, `poor`, `mixed`, `good`, `veryGood`), or `None` for an
+    /// empty cell. The key, not the token: `-` and `🔴` are drawn alike.
+    pub rating: Option<&'static str>,
+    /// The reason, without its rating. A cell that is only a rating shows the token, so it still
+    /// reads where colour does not.
+    pub inlines: Vec<Inline>,
 }
 
 /// One item of a list: its own blocks, and a checkbox if it is a task-list item.
@@ -142,7 +184,10 @@ fn parse_blocks(with_sentinels: &str, references: Vec<Reference>) -> Vec<Block> 
     options.insert(Options::ENABLE_TASKLISTS);
 
     let mut builder = Builder::new(references);
-    for event in Parser::new_ext(with_sentinels, options) {
+    for (event, range) in Parser::new_ext(with_sentinels, options).into_offset_iter() {
+        if let Event::Start(Tag::TableCell) = &event {
+            builder.cell_source = cell_text(&with_sentinels[range]);
+        }
         builder.event(event);
     }
     builder.finish()
@@ -510,10 +555,18 @@ enum Frame {
         alignments: Vec<String>,
         header: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
+        /// Each body cell's source text, which decides whether the table is a trade-off grid.
+        sources: Vec<Vec<String>>,
         in_head: bool,
     },
-    Row(Vec<Vec<Inline>>),
-    Cell(Vec<Inline>),
+    Row {
+        cells: Vec<Vec<Inline>>,
+        sources: Vec<String>,
+    },
+    Cell {
+        inlines: Vec<Inline>,
+        source: String,
+    },
     /// Raw HTML, which the web strips to its text.
     Html(String),
 }
@@ -535,6 +588,8 @@ struct Builder {
     /// Inside an inline `<script>` or `<style>`, whose content the web's sanitiser drops along
     /// with the tag — a page never shows it, so neither does this.
     suppressed: usize,
+    /// The source text of the table cell about to open, for [`Frame::Cell`].
+    cell_source: String,
 }
 
 impl Builder {
@@ -548,6 +603,7 @@ impl Builder {
             links: Vec::new(),
             pending: String::new(),
             suppressed: 0,
+            cell_source: String::new(),
         }
     }
 
@@ -657,6 +713,7 @@ impl Builder {
                         .collect(),
                     header: Vec::new(),
                     rows: Vec::new(),
+                    sources: Vec::new(),
                     in_head: false,
                 });
             }
@@ -665,8 +722,17 @@ impl Builder {
                     *in_head = true;
                 }
             }
-            Tag::TableRow => self.stack.push(Frame::Row(Vec::new())),
-            Tag::TableCell => self.stack.push(Frame::Cell(Vec::new())),
+            Tag::TableRow => self.stack.push(Frame::Row {
+                cells: Vec::new(),
+                sources: Vec::new(),
+            }),
+            Tag::TableCell => {
+                let source = std::mem::take(&mut self.cell_source);
+                self.stack.push(Frame::Cell {
+                    inlines: Vec::new(),
+                    source,
+                })
+            }
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
@@ -766,19 +832,36 @@ impl Builder {
                 alignments,
                 header,
                 rows,
+                sources,
                 ..
-            } => self.push_block(Block::Table {
-                alignments,
-                header,
-                rows,
-            }),
-            Frame::Row(cells) => {
-                if let Some(Frame::Table { rows, .. }) = self.stack.last_mut() {
+            } => {
+                let block = if crate::decisions::is_tradeoff_grid(&sources) {
+                    tradeoff_grid(alignments, header, rows, &sources)
+                } else {
+                    Block::Table {
+                        alignments,
+                        header,
+                        rows,
+                    }
+                };
+                self.push_block(block)
+            }
+            Frame::Row { cells, sources } => {
+                if let Some(Frame::Table {
+                    rows,
+                    sources: table_sources,
+                    ..
+                }) = self.stack.last_mut()
+                {
                     rows.push(cells);
+                    table_sources.push(sources);
                 }
             }
-            Frame::Cell(inlines) => match self.stack.last_mut() {
-                Some(Frame::Row(cells)) => cells.push(inlines),
+            Frame::Cell { inlines, source } => match self.stack.last_mut() {
+                Some(Frame::Row { cells, sources }) => {
+                    cells.push(inlines);
+                    sources.push(source);
+                }
                 Some(Frame::Table {
                     header, in_head, ..
                 }) if *in_head => header.push(inlines),
@@ -809,7 +892,7 @@ impl Builder {
     fn inlines(&mut self) -> &mut Vec<Inline> {
         let needs_paragraph = !matches!(
             self.stack.last(),
-            Some(Frame::Paragraph { .. }) | Some(Frame::Heading { .. }) | Some(Frame::Cell(_))
+            Some(Frame::Paragraph { .. }) | Some(Frame::Heading { .. }) | Some(Frame::Cell { .. })
         );
         if needs_paragraph {
             self.stack.push(Frame::Paragraph {
@@ -820,7 +903,7 @@ impl Builder {
         match self.stack.last_mut() {
             Some(Frame::Paragraph { inlines, .. })
             | Some(Frame::Heading { inlines, .. })
-            | Some(Frame::Cell(inlines)) => inlines,
+            | Some(Frame::Cell { inlines, .. }) => inlines,
             _ => unreachable!("a paragraph was just pushed"),
         }
     }
@@ -1018,6 +1101,188 @@ impl Builder {
         out.push_str(rest);
         out
     }
+}
+
+// ── Trade-off grids (AWTD-1626) ───────────────────────────────────────────────────────────
+
+/// A cell's text as `marked` gives it to the web's grid test (`cell.text`): its source (the
+/// parser's range for a cell stops short of the pipes), trimmed, with an escaped pipe read as one.
+fn cell_text(source: &str) -> String {
+    source.trim().replace("\\|", "|")
+}
+
+/// A table the web draws as a trade-off grid, as the web's `table` renderer draws it
+/// (`lib/markdown.ts`): each rated cell without its rating, each option without its marker.
+fn tradeoff_grid(
+    alignments: Vec<String>,
+    header: Vec<Vec<Inline>>,
+    rows: Vec<Vec<Vec<Inline>>>,
+    sources: &[Vec<String>],
+) -> Block {
+    let mut used: Vec<crate::decisions::RatingStyle> = Vec::new();
+    let rows = rows
+        .into_iter()
+        .zip(sources)
+        .map(|(row, row_sources)| {
+            let mut cells = row.into_iter();
+            let name = cells.next().map(without_row_marker).unwrap_or_default();
+            let cells = cells
+                .zip(row_sources.iter().skip(1))
+                .map(|(inlines, source)| {
+                    let Some(rating) = crate::decisions::parse_rating(source) else {
+                        return GridCell {
+                            rating: None,
+                            inlines,
+                        };
+                    };
+                    let style = crate::decisions::rating_style(&rating.rating)
+                        .expect("parse_rating returns only known tokens");
+                    if !used.iter().any(|u| u.label_key == style.label_key) {
+                        used.push(style);
+                    }
+                    let inlines = if rating.rest.is_empty() {
+                        vec![Inline::Text {
+                            text: rating.rating.clone(),
+                            bold: false,
+                            italic: false,
+                            strike: false,
+                            code: false,
+                            link: None,
+                        }]
+                    } else {
+                        without_leading_rating(inlines, &rating.rating)
+                    };
+                    GridCell {
+                        rating: Some(style.label_key),
+                        inlines,
+                    }
+                })
+                .collect();
+            GridRow { name, cells }
+        })
+        .collect();
+    used.sort_by_key(|style| style.rank);
+    Block::TradeoffGrid {
+        alignments,
+        header,
+        rows,
+        key: used.into_iter().map(|style| style.label_key).collect(),
+    }
+}
+
+/// A plain run's text, or `None` for a styled run or a pill.
+fn plain_text(inline: &Inline) -> Option<&str> {
+    match inline {
+        Inline::Text {
+            text,
+            bold: false,
+            italic: false,
+            strike: false,
+            code: false,
+            link: None,
+        } => Some(text),
+        _ => None,
+    }
+}
+
+/// A bold run's text — `marked`'s `strong` token — or `None`.
+fn bold_text(inline: &Inline) -> Option<&str> {
+    match inline {
+        Inline::Text {
+            text,
+            bold: true,
+            italic: false,
+            strike: false,
+            code: false,
+            link: None,
+        } => Some(text),
+        _ => None,
+    }
+}
+
+/// Replace a run's text, keeping its style; `None` when nothing is left of it.
+fn with_text(inline: Inline, new_text: &str) -> Option<Inline> {
+    if new_text.is_empty() {
+        return None;
+    }
+    match inline {
+        Inline::Text {
+            bold,
+            italic,
+            strike,
+            code,
+            link,
+            ..
+        } => Some(Inline::Text {
+            text: new_text.to_string(),
+            bold,
+            italic,
+            strike,
+            code,
+            link,
+        }),
+        other => Some(other),
+    }
+}
+
+/// A rated cell's runs with the leading rating removed — the web's `withoutLeadingRating`.
+fn without_leading_rating(mut inlines: Vec<Inline>, rating: &str) -> Vec<Inline> {
+    let Some(text) = inlines.first().and_then(plain_text) else {
+        return inlines;
+    };
+    let Some(rest) = text.trim_start().strip_prefix(rating) else {
+        return inlines;
+    };
+    let rest = rest.trim_start().to_string();
+    let first = inlines.remove(0);
+    if let Some(first) = with_text(first, &rest) {
+        inlines.insert(0, first);
+    }
+    inlines
+}
+
+/// A grid row's option cell without its writer's marker — the web's `withoutRowMarker`, which
+/// follows Apple's `droppingMarker`: a marker followed by more words needs its punctuation
+/// (`A. Lisbon`, `**2)** Cabin`), and a bare one (`B`) goes only when it is the whole cell, so
+/// `I **am** here` keeps its `I`.
+fn without_row_marker(mut inlines: Vec<Inline>) -> Vec<Inline> {
+    let Some(first) = inlines.first() else {
+        return inlines;
+    };
+    let (text, bold) = match (plain_text(first), bold_text(first)) {
+        (Some(text), _) => (text, false),
+        (None, Some(text)) => (text, true),
+        _ => return inlines,
+    };
+    if inlines.len() == 1 && crate::decisions::is_bare_marker(text) {
+        return Vec::new();
+    }
+    if bold {
+        if crate::decisions::punctuated_marker_len(text).is_none()
+            || text.trim().chars().count() > 3
+        {
+            return inlines;
+        }
+        inlines.remove(0);
+        let Some(next) = inlines.first().and_then(plain_text) else {
+            return inlines;
+        };
+        let rest = next.trim_start().to_string();
+        let next = inlines.remove(0);
+        if let Some(next) = with_text(next, &rest) {
+            inlines.insert(0, next);
+        }
+        return inlines;
+    }
+    let Some(len) = crate::decisions::punctuated_marker_len(text) else {
+        return inlines;
+    };
+    let rest = text[len..].to_string();
+    let first = inlines.remove(0);
+    if let Some(first) = with_text(first, &rest) {
+        inlines.insert(0, first);
+    }
+    inlines
 }
 
 fn heading_level(level: HeadingLevel) -> u8 {
@@ -1462,6 +1727,82 @@ mod tests {
     }
 
     // ── Task ids in prose (task 5f3453e2) ──────────────────────────────────────────────────────
+
+    fn grid_of(text: &str) -> Block {
+        render(text).into_iter().next().expect("one block")
+    }
+
+    #[test]
+    fn a_rated_table_is_a_trade_off_grid_awtd_1626() {
+        let Block::TradeoffGrid {
+            alignments,
+            header,
+            rows,
+            key,
+        } = grid_of("| Option | Cost |\n|---|:-:|\n| A. Lisbon | ++ **cheap** |\n| **2)** Porto | 🔴 |\n| B |  |")
+        else {
+            panic!("not a grid");
+        };
+        assert_eq!(alignments, vec!["none", "center"]);
+        assert_eq!(header, vec![vec![plain("Option")], vec![plain("Cost")]]);
+        // Markers are gone: the shell numbers rows itself.
+        assert_eq!(rows[0].name, vec![plain("Lisbon")]);
+        assert_eq!(rows[1].name, vec![plain("Porto")]);
+        assert_eq!(rows[2].name, Vec::<Inline>::new());
+        assert_eq!(
+            rows[0].cells,
+            vec![GridCell {
+                rating: Some("veryGood"),
+                inlines: vec![styled("cheap", true, false)],
+            }]
+        );
+        // A rating-only cell shows its token.
+        assert_eq!(
+            rows[1].cells,
+            vec![GridCell {
+                rating: Some("poor"),
+                inlines: vec![plain("🔴")],
+            }]
+        );
+        assert_eq!(
+            rows[2].cells,
+            vec![GridCell {
+                rating: None,
+                inlines: vec![],
+            }]
+        );
+        assert_eq!(key, vec!["poor", "veryGood"]);
+    }
+
+    #[test]
+    fn a_table_that_is_not_all_rated_stays_a_table_awtd_1626() {
+        for text in [
+            "| Option | Cost |\n|---|---|\n| One | + cheap |\n| Two | dear |",
+            "| Option | Cost |\n|---|---|\n| One | - |\n| Two | - |",
+            "| Option | Cost |\n|---|---|\n| One | ++cheap |",
+            "| Option | Cost |\n|---|---|\n| One | **+** cheap |",
+        ] {
+            assert!(matches!(grid_of(text), Block::Table { .. }), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_escaped_pipe_is_part_of_the_cell_awtd_1626() {
+        let Block::TradeoffGrid { rows, .. } =
+            grid_of("| Option | Cost |\n|---|---|\n| One | + a \\| b |\n| Two | - c |")
+        else {
+            panic!("not a grid");
+        };
+        assert_eq!(rows[0].cells[0].rating, Some("good"));
+    }
+
+    #[test]
+    fn the_grid_block_is_tagged_like_every_other_awtd_1626() {
+        let json = serde_json::to_value(grid_of("| O | C |\n|---|---|\n| One | ~ |")).unwrap();
+        assert_eq!(json["kind"], "tradeoffGrid");
+        assert_eq!(json["rows"][0]["cells"][0]["rating"], "mixed");
+        assert_eq!(json["key"], serde_json::json!(["mixed"]));
+    }
 
     fn keys(project_key: Option<&str>) -> crate::identifier::LinkContext {
         crate::identifier::LinkContext {

@@ -226,6 +226,37 @@ fn row_marker_len(text: &str) -> Option<usize> {
     None
 }
 
+/// The byte length of a leading marker followed by its punctuation and then space or the end —
+/// the web's `PUNCTUATED_MARKER`, `^\s*(?:[A-Za-z]|\d{1,2})[.):](?:\s+|$)`, which
+/// `markdown::render` uses to drop a grid row's marker from its runs (AWTD-1626).
+pub(crate) fn punctuated_marker_len(text: &str) -> Option<usize> {
+    let body = text.trim_start();
+    let leading = text.len() - body.len();
+    for &marker in marker_lengths(body)? {
+        let Some(after) = body[marker..].strip_prefix(['.', ')', ':']) else {
+            continue;
+        };
+        let tail = after.trim_start();
+        if after.is_empty() || tail.len() < after.len() {
+            return Some(leading + marker + 1 + (after.len() - tail.len()));
+        }
+    }
+    None
+}
+
+/// Is this text a marker and nothing else — the web's `BARE_MARKER`,
+/// `^\s*(?:[A-Za-z]|\d{1,2})[.):]?\s*$` (AWTD-1626)?
+pub(crate) fn is_bare_marker(text: &str) -> bool {
+    let body = text.trim();
+    let Some(lengths) = marker_lengths(body) else {
+        return false;
+    };
+    lengths.iter().any(|&marker| {
+        let rest = &body[marker..];
+        rest.is_empty() || matches!(rest, "." | ")" | ":")
+    })
+}
+
 /// The marker lengths to try at the start of `body`, longest first: two digits then one, or the
 /// single letter there is. `None` when it starts with neither.
 fn marker_lengths(body: &str) -> Option<&'static [usize]> {
@@ -531,4 +562,23 @@ fn code_lines(lines: &[&str]) -> Vec<bool> {
         }
     }
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markers_for_a_grid_row_as_the_web_reads_them_awtd_1626() {
+        assert_eq!(punctuated_marker_len("A. Lisbon"), Some(3));
+        assert_eq!(punctuated_marker_len("12) x"), Some(4));
+        assert_eq!(punctuated_marker_len("2)"), Some(2));
+        assert_eq!(punctuated_marker_len("A.Lisbon"), None);
+        assert_eq!(punctuated_marker_len("123. x"), None);
+        assert_eq!(punctuated_marker_len("I am"), None);
+        assert!(is_bare_marker(" B "));
+        assert!(is_bare_marker("12:"));
+        assert!(!is_bare_marker("Bo"));
+        assert!(!is_bare_marker("123"));
+    }
 }
