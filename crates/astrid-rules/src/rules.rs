@@ -186,6 +186,18 @@ pub enum Rule {
         #[serde(default)]
         custom_states: Option<serde_json::Value>,
     },
+    /// Is this comment a Decision, and what does it ask — [`crate::decisions::parse`]. `null` back
+    /// means it is not one, and the shell draws the markdown it already has.
+    Decision { text: String },
+    /// Is this table a trade-off grid, and what does each cell rate —
+    /// [`crate::decisions::read_grid`]. `rows` is each body row's cell text, first column included.
+    TradeoffGrid {
+        #[serde(default)]
+        rows: Vec<Vec<String>>,
+    },
+    /// The rating key a shell draws beside a grid, worst to best —
+    /// [`crate::decisions::rating_key`].
+    RatingKey,
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -389,6 +401,9 @@ pub fn run(rule: Rule) -> Response {
         Rule::BoardPresets { custom_states } => {
             Response::ok(crate::board::available_presets(custom_states.as_ref()))
         }
+        Rule::Decision { text } => Response::ok(crate::decisions::parse(&text)),
+        Rule::TradeoffGrid { rows } => Response::ok(crate::decisions::read_grid(&rows)),
+        Rule::RatingKey => Response::ok(crate::decisions::rating_key()),
     }
 }
 
