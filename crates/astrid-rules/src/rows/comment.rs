@@ -684,6 +684,7 @@ mod tests {
                 project_key: None,
                 keys: vec!["AWTD".to_string()],
                 hidden: Vec::new(),
+                origin: "https://astrid.cc".to_string(),
             },
         );
         let Some(crate::markdown::Block::Paragraph { inlines }) = projected[0].blocks.first()

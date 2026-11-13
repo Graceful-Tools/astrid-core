@@ -11,6 +11,12 @@ repository.workspace = true
 # arrives as an argument. That is what lets the web run these rules as WebAssembly, and it is
 # checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
 # getrandom, uuid or iana-time-zone — and chrono without `clock`.
+[features]
+# No Astrid server in the binary: a `renderMarkdown` request that names no `origin` leaves a
+# relative link relative instead of resolving it on astrid.cc (AWTD-1630). Turned on by
+# astrid-core's feature of the same name (astrid-web AWTD-1627).
+require-base-url = []
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 chrono-tz = { workspace = true }

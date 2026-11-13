@@ -211,6 +211,8 @@ fn every_autolink_case_matches_web() {
             project_key: case.context.project_key.clone(),
             keys: case.context.keys.clone(),
             hidden: case.context.hidden.clone(),
+            // Finding ids does not resolve them; the origin only matters when rendering.
+            origin: String::new(),
         };
         let found = find_links(&case.text, &context);
 

@@ -27,6 +27,11 @@ fn strings(value: &Value) -> Vec<String> {
 
 fn ours(case: &Value) -> Value {
     let text = case["text"].as_str().unwrap();
+    // The reader's server, which a relative link resolves against: an input each case carries,
+    // not a constant here (AWTD-1630).
+    let origin = case["origin"]
+        .as_str()
+        .expect("every markdown case names its origin (AWTD-1630)");
     let blocks = match case["context"].as_object() {
         Some(context) => render_with_identifiers(
             text,
@@ -37,9 +42,10 @@ fn ours(case: &Value) -> Value {
                     .map(str::to_string),
                 keys: strings(&context["keys"]),
                 hidden: context.get("hidden").map(strings).unwrap_or_default(),
+                origin: origin.to_string(),
             },
         ),
-        None => render(text),
+        None => render(text, origin),
     };
     serde_json::to_value(blocks).expect("blocks serialise")
 }
@@ -62,6 +68,29 @@ fn every_undisputed_text_renders_as_web_renders_it() {
         })
         .collect();
     common::no_failures("markdown.json", &failures);
+}
+
+/// AWTD-1630: the origin is an input, so the fixture reads some cases on a server that is not
+/// astrid.cc — and those must not name astrid.cc anywhere in what they draw.
+#[test]
+fn a_partner_origin_draws_no_astrid_link_awtd_1630() {
+    let fixture: Value = serde_json::from_str(FIXTURE).expect("the fixture parses");
+    let partner: Vec<&Value> = fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| case["origin"] != "https://astrid.cc")
+        .collect();
+    assert!(partner.len() >= 2, "the partner-origin cases went missing");
+    for case in partner {
+        let drawn = ours(case).to_string();
+        assert!(!drawn.contains("astrid.cc"), "{}: {drawn}", case["id"]);
+        assert!(
+            drawn.contains(case["origin"].as_str().unwrap()),
+            "{}",
+            case["id"]
+        );
+    }
 }
 
 #[test]

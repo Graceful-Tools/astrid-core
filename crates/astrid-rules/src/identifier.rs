@@ -91,6 +91,11 @@ pub struct LinkContext {
     pub keys: Vec<String>,
     /// Individual ids known to be hidden from the reader.
     pub hidden: Vec<String>,
+    /// The reader's server — the App's `Config.base_url`, the web page's own origin — which a
+    /// relative link resolves against when the text is rendered (`/t/<id>` becomes
+    /// `<origin>/t/<id>`). Passed in, never named here, so a partner build links to the partner's
+    /// site (AWTD-1630). Empty leaves the link relative.
+    pub origin: String,
 }
 
 /// One reference found in a text, ready to be drawn as a link.
@@ -200,7 +205,13 @@ pub fn find_links(text: &str, context: &LinkContext) -> Vec<IdentifierLink> {
 /// is invisible to the reader without asking — which is exactly the lookup this design avoids — so
 /// the key check is the guard here, and a stale reference resolves to "not found" at `/t/<id>`
 /// rather than leaking anything.
-pub fn context_for(projects: &[crate::model::Project], project_id: Option<&str>) -> LinkContext {
+///
+/// `origin` is the reader's server, carried into [`LinkContext::origin`].
+pub fn context_for(
+    projects: &[crate::model::Project],
+    project_id: Option<&str>,
+    origin: &str,
+) -> LinkContext {
     LinkContext {
         project_key: project_id.and_then(|id| {
             projects
@@ -213,6 +224,7 @@ pub fn context_for(projects: &[crate::model::Project], project_id: Option<&str>)
             .filter_map(|project| project.key.clone())
             .collect(),
         hidden: Vec::new(),
+        origin: origin.to_string(),
     }
 }
 
@@ -425,6 +437,7 @@ mod tests {
             project_key: project_key.map(str::to_string),
             keys: keys.iter().map(|key| key.to_string()).collect(),
             hidden: Vec::new(),
+            origin: String::new(),
         }
     }
 
@@ -561,15 +574,16 @@ mod tests {
             project("p3", None),
         ];
 
-        let inside = context_for(&projects, Some("p2"));
+        let inside = context_for(&projects, Some("p2"), "https://tasks.partner.example");
+        assert_eq!(inside.origin, "https://tasks.partner.example");
         assert_eq!(inside.project_key.as_deref(), Some("AITD"));
         assert_eq!(inside.keys, vec!["AWTD".to_string(), "AITD".to_string()]);
         assert!(inside.hidden.is_empty());
 
-        let outside = context_for(&projects, None);
+        let outside = context_for(&projects, None, "");
         assert_eq!(outside.project_key, None);
 
         // A board from before identifiers existed lends no key to anything.
-        assert_eq!(context_for(&projects, Some("p3")).project_key, None);
+        assert_eq!(context_for(&projects, Some("p3"), "").project_key, None);
     }
 }

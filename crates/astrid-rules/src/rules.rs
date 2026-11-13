@@ -94,10 +94,14 @@ pub enum Rule {
     /// A description, comment or chat message as blocks to draw — see [`crate::markdown`].
     /// With `identifiers` (the reader's project keys), task ids in the prose link as well —
     /// [`crate::markdown::render_with_identifiers`]; without it nothing links, as on the web.
+    /// `origin` is the reader's server, which a relative link (`/lists/…`, an id's `/t/…`)
+    /// resolves against (AWTD-1630) — see [`UNNAMED_ORIGIN`] for a request that leaves it out.
     RenderMarkdown {
         text: String,
         #[serde(default)]
         identifiers: Option<Identifiers>,
+        #[serde(default)]
+        origin: Option<String>,
     },
     /// The words for a repeat being edited, before it is saved — the custom editor's Preview
     /// (iOS CustomRepeatingPatternEditor, AATD-50). Same parts as a saved task's `repeatSummary`.
@@ -422,6 +426,19 @@ impl From<crate::rows::nesting::Outcome> for NestingAnswer {
     }
 }
 
+/// What [`Rule::RenderMarkdown`] resolves a relative link against when the request names no
+/// `origin`: astrid.cc, which is what every such link meant before the origin was an argument, so
+/// a shell that has not started passing its server yet draws what it always drew (AWTD-1630).
+///
+/// Built with `require-base-url` (white-label binaries, astrid-web AWTD-1627) there is no Astrid
+/// server in the binary to fall back to, and the link stays relative: the shell's own origin is the
+/// only one it could mean, and a shell that wants it absolute passes it.
+#[cfg(not(feature = "require-base-url"))]
+pub const UNNAMED_ORIGIN: &str = "https://astrid.cc";
+/// See the definition without `require-base-url`: here a relative link stays relative.
+#[cfg(feature = "require-base-url")]
+pub const UNNAMED_ORIGIN: &str = "";
+
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
 /// web's names (`lib/task-identifier-links.ts`, `IdentifierLinkContext`).
 #[derive(Debug, Default, Deserialize)]
@@ -521,21 +538,29 @@ pub fn run(rule: Rule) -> Response {
             repeating_data.as_ref(),
             repeat_from,
         )),
-        Rule::RenderMarkdown { text, identifiers } => Response::ok(match identifiers {
-            Some(Identifiers {
-                project_key,
-                keys,
-                hidden,
-            }) => crate::markdown::render_with_identifiers(
-                &text,
-                &crate::identifier::LinkContext {
+        Rule::RenderMarkdown {
+            text,
+            identifiers,
+            origin,
+        } => {
+            let origin = origin.unwrap_or_else(|| UNNAMED_ORIGIN.to_string());
+            Response::ok(match identifiers {
+                Some(Identifiers {
                     project_key,
                     keys,
                     hidden,
-                },
-            ),
-            None => crate::markdown::render(&text),
-        }),
+                }) => crate::markdown::render_with_identifiers(
+                    &text,
+                    &crate::identifier::LinkContext {
+                        project_key,
+                        keys,
+                        hidden,
+                        origin,
+                    },
+                ),
+                None => crate::markdown::render(&text, &origin),
+            })
+        }
         Rule::CustomAgentName { name } => Response::ok(crate::agent_name::check(&name)),
         // A refused accent is a bad request, not an error: the caller sent a colour that cannot
         // carry a label, and the reason names the contrast so a partner can act on it.
@@ -1118,6 +1143,7 @@ mod tests {
         let reply = answer(json!({
             "kind": "renderMarkdown",
             "text": "Fixed by AWTD-12",
+            "origin": "https://astrid.cc",
             "identifiers": { "projectKey": "AWTD", "keys": ["AWTD"], "hidden": [] }
         }));
         assert_eq!(reply["ok"], true);
@@ -1130,6 +1156,50 @@ mod tests {
             without["value"][0]["inlines"][0]["text"],
             "Fixed by AWTD-12"
         );
+    }
+
+    /// AWTD-1630: a relative link opens on the server the request names — the reader's — and the
+    /// id's `/t/…` with it, so a partner build never sends its reader to astrid.cc.
+    #[test]
+    fn a_relative_link_opens_on_the_origin_the_request_names_awtd_1630() {
+        let reply = answer(json!({
+            "kind": "renderMarkdown",
+            "text": "[home](/lists/abc) and AWTD-12",
+            "origin": "https://tasks.partner.example/",
+            "identifiers": { "projectKey": "AWTD", "keys": ["AWTD"], "hidden": [] }
+        }));
+        assert_eq!(reply["ok"], true);
+        let inlines = &reply["value"][0]["inlines"];
+        assert_eq!(
+            inlines[0]["link"],
+            "https://tasks.partner.example/lists/abc"
+        );
+        assert_eq!(
+            inlines[2]["link"],
+            "https://tasks.partner.example/t/AWTD-12"
+        );
+
+        let plain = answer(json!({
+            "kind": "renderMarkdown",
+            "text": "[home](/lists/abc)",
+            "origin": "https://tasks.partner.example"
+        }));
+        assert_eq!(
+            plain["value"][0]["inlines"][0]["link"],
+            "https://tasks.partner.example/lists/abc"
+        );
+    }
+
+    /// AWTD-1630: a shell that names no origin yet (iOS, Android today) draws what it always drew;
+    /// a `require-base-url` build has no Astrid server to fall back to, so the link stays relative.
+    #[test]
+    fn a_request_without_an_origin_falls_back_per_build_awtd_1630() {
+        let reply = answer(json!({ "kind": "renderMarkdown", "text": "[home](/lists/abc)" }));
+        let link = &reply["value"][0]["inlines"][0]["link"];
+        #[cfg(not(feature = "require-base-url"))]
+        assert_eq!(link, "https://astrid.cc/lists/abc");
+        #[cfg(feature = "require-base-url")]
+        assert_eq!(link, "/lists/abc");
     }
 
     /// R2 through the door: a move into Waiting with nothing to wait on is refused with the code
