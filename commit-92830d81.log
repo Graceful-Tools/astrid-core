@@ -1,0 +1,37 @@
+A list's defaults editor asks the core what it may offer (task 92830d81)
+
+Four hand-written tables decided what a list's defaults editor could offer, and every client had
+its own set. Windows' `ListSettingsViewModel` held `Repeats`, `Whens`, `PriorityKeys` and an
+inline range of hours, under a comment saying the core had no command for them; iOS and Android
+hold their own copies. Four tables for one question is four places for a fifth option to be
+added in three.
+
+`astrid_rules::rows::list_default_picks` now answers it, through the rules door as
+`listDefaultPicks` — so a shell asks while it draws, with no handle, no clock and no cache
+(`astrid_rule`, the eighth ABI function, landed in a8591a93).
+
+What the rule decides, beyond the lists themselves:
+
+- **Unset is not "nothing ticked".** Web reads `defaultRepeating || "never"`,
+  `defaultDueDate || "none"` and `defaultPriority || 0`, so a list nobody has configured shows the
+  one-time, no-date, no-priority rows ticked rather than four empty pickers.
+- **A stored value the picker cannot draw ticks nothing** — different from unset. A picker that
+  quietly moved somebody's `custom` repeat to "never" would lose it on the next save.
+- **A free-form time is offered, not rounded.** The web's `TimePicker` can store any minute; a
+  09:15 set there lands between 09:00 and 10:00 in the hour list rather than disappearing.
+- **The hours are the native clients'**, 06:00 to 22:00, because web has no list to follow there.
+- **An hour carries no label key.** `06:00` reads as "6 AM" or as "06:00" depending on the
+  reader's clock, and a clock face is a locale's business rather than a rule's, so the shell
+  formats it. Every other label is a catalog key, so no client writes the words.
+
+`contracts/fixtures/list-default-picks.json` locks it, and is the **second core-first fixture**.
+It shows the other way a rule becomes core-first: web *has* these options, but as inline
+`SelectItem`s in `DefaultTaskSettingsSection.tsx` rather than as a table an exporter could read,
+so there is no implementation there to execute. The eight cases' `expect` spells every picker out,
+hours included — where a free-form time belongs in clock order is written down rather than
+computed, so the fixture cannot agree with the rule by sharing its arithmetic.
+
+The generator's rendering half is now shared (`render`) rather than copied per fixture;
+`waiting.json` regenerates byte for byte.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
