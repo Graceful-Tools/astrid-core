@@ -21,7 +21,7 @@ by `<checkout>/<copy>`, not by its repository.
 |---|---|---|---|---|
 | `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `af42ba531f84eb58441a82ef0906dc01f286f072` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `e2ae84a930946cef9900fc102179ab889fdd6960` |
-| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `24926c36d257192209c55ea5ade8f1ae49a609ab` |
+| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `1e7077db9c921c9ffe489f20471ea04b74ad0bf9` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `1c2adfd7e51e6d4e6bab383777df8fba1a606592` |
 | `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `9128b8a9d3da9ea0c022c358d661c8a31c0ffd42` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `a503a62039fca9a19ce7802a2d9f6d38ae5f89d8` |
