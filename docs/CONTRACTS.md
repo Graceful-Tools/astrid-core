@@ -1362,3 +1362,15 @@ one SQLite would decline to use, and the win here is the decode, not the scan.
 
 The mention popup and the two search surfaces stay unbounded, deliberately. They are not slow by
 oversight; they are correct by reading everything.
+
+### D59 — a list's *Next month* default: Apple offers it, web does not
+
+**This crate reads it.** `astrid_rules::list_defaults` (AITD-646).
+
+The Apple apps' list settings offer *Next month* (`defaultDueDate: "next_month"`) beside today,
+tomorrow and next week, and their quick-add honoured it. The web's list admin offers only the
+three, and its `types/api.ts` union leaves `next_month` out. When the Apple quick-add moved onto
+this crate, dropping the word would have silently cost such a list its default, and divergences
+follow iOS — so it is read here: the same day next month, or that month's last day when the next
+month is shorter (Jan 31 → Feb 28). The Swift it replaces let `Calendar` overflow instead
+(Jan 31 → Mar 3). The web should offer and read it too.

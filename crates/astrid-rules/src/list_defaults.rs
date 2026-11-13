@@ -18,7 +18,7 @@
 //! bug the task itself warns about ("an all-day default is `all_day_instant`, not a local
 //! midnight"), so this client stores the calendar day.
 
-use chrono::{DateTime, Duration, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, TimeZone, Utc};
 
 use crate::model::{Priority, Repeating, TaskDraft, TaskList};
 use crate::rows::due_picks;
@@ -91,7 +91,8 @@ pub fn apply<Z: TimeZone + Copy>(
     }
 
     if !given.due {
-        let days = days_for(list.default_due_date.as_deref());
+        let today = now.with_timezone(&zone).date_naive();
+        let days = days_for(list.default_due_date.as_deref(), today);
         let time = list.default_due_time.as_deref().and_then(parse_time);
         match (days, time) {
             (Some(days), Some(time)) => {
@@ -112,12 +113,18 @@ pub fn apply<Z: TimeZone + Copy>(
     }
 }
 
-/// The *When* default as days from today, or `None` for no date.
-fn days_for(default_due_date: Option<&str>) -> Option<i64> {
+/// The *When* default as days from `today`, or `None` for no date.
+///
+/// `next_month` is the Apple apps' (AITD-646): their list settings offer it, the web's do not.
+/// It is the same day next month, or that month's last day when it is shorter.
+fn days_for(default_due_date: Option<&str>, today: NaiveDate) -> Option<i64> {
     match default_due_date.map(|value| value.trim().to_ascii_lowercase()) {
         Some(value) if value == "today" => Some(0),
         Some(value) if value == "tomorrow" => Some(1),
         Some(value) if value == "next_week" || value == "next week" => Some(7),
+        Some(value) if value == "next_month" || value == "next month" => today
+            .checked_add_months(Months::new(1))
+            .map(|day| (day - today).num_days()),
         _ => None,
     }
 }
@@ -397,6 +404,46 @@ mod tests {
             draft.assignee_id.as_deref(),
             Some("sam"),
             "somebody was picked, so neither the list nor the creator"
+        );
+    }
+
+    /// AITD-646: the Apple apps' list settings offer *Next month* (`next_month`), and their
+    /// quick-add honoured it. A list set up that way must not lose its default when quick-add asks
+    /// the core instead. A month on from a day the next month lacks is that month's last day.
+    #[test]
+    fn next_month_is_the_same_day_next_month_aitd_646() {
+        let mut list = TaskList::new("l1", "Work");
+        list.default_due_date = Some("next_month".into());
+        let mut draft = TaskDraft::new("Buy milk");
+        apply(
+            &mut draft,
+            Given::default(),
+            &list,
+            Some("me"),
+            noon_utc(),
+            california(),
+        );
+        assert_eq!(
+            draft.due_date_time.map(|at| at.to_rfc3339()),
+            Some("2026-10-07T00:00:00+00:00".into())
+        );
+        assert!(draft.is_all_day);
+
+        list.default_due_time = Some("09:00".into());
+        let end_of_january = "2027-01-31T20:00:00Z".parse().expect("a time");
+        let mut draft = TaskDraft::new("Buy milk");
+        apply(
+            &mut draft,
+            Given::default(),
+            &list,
+            Some("me"),
+            end_of_january,
+            california(),
+        );
+        // Feb 28 at 09:00 at UTC-7 is 16:00 UTC.
+        assert_eq!(
+            draft.due_date_time.map(|at| at.to_rfc3339()),
+            Some("2027-02-28T16:00:00+00:00".into())
         );
     }
 
