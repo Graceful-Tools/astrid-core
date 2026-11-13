@@ -45,41 +45,88 @@ use crate::sync::SyncManager;
 
 /// What the shell has to tell the core before anything else happens.
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(try_from = "StartConfig")]
 pub struct Config {
     /// Where the cache lives. A path the shell owns — the core has no opinion about where an app's
     /// data belongs on Windows, and guessing would be the first Windows dependency in a crate that
     /// has none.
     pub cache_path: String,
-    /// The server. Overridable so a developer can point at a local astrid-web, which is what M0's
-    /// exit criterion needs.
-    #[serde(default = "default_base_url")]
+    /// The server (`baseUrl`): the shell's brand's, or a local astrid-web for a developer.
+    ///
+    /// Absent, it is Astrid's ([`crate::api::DEFAULT_BASE_URL`]) — unless the crate is built with
+    /// the `require-base-url` feature, which compiles Astrid's server out of the binary and refuses
+    /// a start that does not name one ([`CONFIG_BASE_URL_REQUIRED`]). A white-label binary must not
+    /// carry Astrid's server, and must fail loudly rather than reach it (astrid-web AWTD-1627).
+    /// Required is where every shell is headed; the default goes once they all pass one.
     pub base_url: String,
     /// Which client this is, stated on every request (`x-platform`). Windows when absent.
-    #[serde(default)]
     pub platform: crate::api::Platform,
     /// The URL scheme the shell registered for the sign-in callback, without `://`
     /// (`urlScheme`). Astrid's `astrid` when absent; a white-label build names its own so it and
     /// Astrid can be installed side by side (AWTD2-95).
-    #[serde(default = "default_url_scheme")]
     pub url_scheme: String,
     /// The id the server's desktop hand-off registry knows this app by (`handoffClientId`). The
     /// platform's own (`windows`, `android`, …) when absent — see
     /// [`crate::api::Platform::handoff_client`]. A partner server that registers its app under a
     /// different id names it here.
-    #[serde(default)]
     pub handoff_client_id: Option<String>,
 }
+
+/// The start config as the shell writes it: every key but `cachePath` may be left out (or sent
+/// `null`), and [`Config`] fills it in or refuses it.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartConfig {
+    cache_path: String,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    platform: crate::api::Platform,
+    #[serde(default)]
+    url_scheme: Option<String>,
+    #[serde(default)]
+    handoff_client_id: Option<String>,
+}
+
+impl TryFrom<StartConfig> for Config {
+    type Error = String;
+
+    fn try_from(raw: StartConfig) -> Result<Self, Self::Error> {
+        Ok(Config {
+            cache_path: raw.cache_path,
+            base_url: match raw.base_url {
+                Some(base_url) => base_url,
+                None => absent_base_url()?,
+            },
+            platform: raw.platform,
+            url_scheme: raw
+                .url_scheme
+                .unwrap_or_else(|| DEFAULT_URL_SCHEME.to_string()),
+            handoff_client_id: raw.handoff_client_id,
+        })
+    }
+}
+
+/// The code a start fails with when the config names no server and the build has no default
+/// (`require-base-url`). It leads the error's text, which is what every binding hands its shell.
+pub const CONFIG_BASE_URL_REQUIRED: &str = "CONFIG_BASE_URL_REQUIRED";
 
 /// Astrid's sign-in callback scheme — what [`Config::url_scheme`] is when a shell leaves it out.
 pub const DEFAULT_URL_SCHEME: &str = crate::services::auth::URL_SCHEME;
 
-fn default_base_url() -> String {
-    crate::api::DEFAULT_BASE_URL.to_string()
+/// What `baseUrl` is when the shell leaves it out: Astrid's server, or — built with
+/// `require-base-url` — a refusal, so the binary holds no server but the one its shell names.
+#[cfg(not(feature = "require-base-url"))]
+fn absent_base_url() -> Result<String, String> {
+    Ok(crate::api::DEFAULT_BASE_URL.to_string())
 }
 
-fn default_url_scheme() -> String {
-    DEFAULT_URL_SCHEME.to_string()
+#[cfg(feature = "require-base-url")]
+fn absent_base_url() -> Result<String, String> {
+    Err(format!(
+        "{CONFIG_BASE_URL_REQUIRED}: the start config names no baseUrl, and this build has no \
+         default server; pass the brand's own"
+    ))
 }
 
 /// The running client.
@@ -297,10 +344,53 @@ mod tests {
         .expect("starts")
     }
 
+    /// astrid-web AWTD-1627. A shell that names its server gets it, in every build.
+    #[test]
+    fn awtd_1627_a_named_server_is_used_in_every_build() {
+        let config: Config = serde_json::from_str(
+            r#"{"cachePath":":memory:","baseUrl":"https://tasks.partner.example"}"#,
+        )
+        .expect("reads");
+        assert_eq!(config.base_url, "https://tasks.partner.example");
+    }
+
+    /// astrid-web AWTD-1627. Without `require-base-url`, a shell that leaves the server out — or
+    /// sends it `null` — still gets Astrid's, exactly as before.
+    #[cfg(not(feature = "require-base-url"))]
+    #[test]
+    fn awtd_1627_an_absent_server_is_astrids_by_default() {
+        for json in [
+            r#"{"cachePath":":memory:"}"#,
+            r#"{"cachePath":":memory:","baseUrl":null}"#,
+        ] {
+            let config: Config = serde_json::from_str(json).expect("reads");
+            assert_eq!(config.base_url, crate::api::DEFAULT_BASE_URL, "{json}");
+        }
+    }
+
+    /// astrid-web AWTD-1627. Built with `require-base-url`, a start that names no server fails
+    /// with the code, rather than reaching a server the brand never chose.
+    #[cfg(feature = "require-base-url")]
+    #[test]
+    fn awtd_1627_an_absent_server_is_refused_when_required() {
+        for json in [
+            r#"{"cachePath":":memory:"}"#,
+            r#"{"cachePath":":memory:","baseUrl":null}"#,
+        ] {
+            let error = serde_json::from_str::<Config>(json).expect_err("refused");
+            assert!(
+                error.to_string().starts_with(CONFIG_BASE_URL_REQUIRED),
+                "{json}: {error}"
+            );
+        }
+    }
+
     /// AWTD2-95. A shell that says nothing about its identity is Astrid, exactly as before.
     #[test]
     fn awtd2_95_a_config_without_an_identity_is_astrids() {
-        let config: Config = serde_json::from_str(r#"{"cachePath":":memory:"}"#).expect("reads");
+        let config: Config =
+            serde_json::from_str(r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc"}"#)
+                .expect("reads");
         assert_eq!(config.url_scheme, "astrid");
         assert_eq!(config.url_scheme, DEFAULT_URL_SCHEME);
         assert_eq!(config.handoff_client_id, None);
@@ -320,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn awtd2_95_a_shell_names_its_scheme_and_client_in_the_config() {
         let config: Config = serde_json::from_str(
-            r#"{"cachePath":":memory:","platform":"android-app","urlScheme":"partner","handoffClientId":"partner-android"}"#,
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc","platform":"android-app","urlScheme":"partner","handoffClientId":"partner-android"}"#,
         )
         .expect("reads");
         assert_eq!(config.url_scheme, "partner");

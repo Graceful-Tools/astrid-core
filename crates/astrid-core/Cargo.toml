@@ -16,6 +16,10 @@ repository.workspace = true
 [features]
 default = ["bundled-sqlite"]
 bundled-sqlite = ["rusqlite/bundled"]
+# Compiles Astrid's server out: a start config must name `baseUrl`, and one that does not fails
+# with CONFIG_BASE_URL_REQUIRED (astrid-web AWTD-1627). For white-label builds whose shell always
+# passes its brand's server; the default once every shell does.
+require-base-url = []
 
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0" }

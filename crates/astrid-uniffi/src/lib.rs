@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn a_listener_hears_changes_in_the_cores_words() {
         let core = CoreClient::start(
-            r#"{"cachePath":":memory:","platform":"ios-app"}"#.into(),
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc","platform":"ios-app"}"#.into(),
             Arc::new(MemoryCredentials::default()),
             false,
         )
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn a_blocking_read_answers_on_the_calling_thread() {
         let core = CoreClient::start(
-            r#"{"cachePath":":memory:"}"#.into(),
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc"}"#.into(),
             Arc::new(MemoryCredentials::default()),
             false,
         )
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn the_client_door_runs_a_command_on_its_own_pool() {
         let core = CoreClient::start(
-            r#"{"cachePath":":memory:"}"#.into(),
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc"}"#.into(),
             Arc::new(MemoryCredentials::default()),
             false,
         )
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn ab249b76_background_starts_every_loop_and_stop_ends_them() {
         let core = CoreClient::start(
-            r#"{"cachePath":":memory:"}"#.into(),
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc"}"#.into(),
             Arc::new(MemoryCredentials::default()),
             true,
         )
@@ -387,7 +387,7 @@ mod tests {
         assert!(!core.loops.lock().unwrap().as_ref().unwrap().is_running());
 
         let quiet = CoreClient::start(
-            r#"{"cachePath":":memory:"}"#.into(),
+            r#"{"cachePath":":memory:","baseUrl":"https://astrid.cc"}"#.into(),
             Arc::new(MemoryCredentials::default()),
             false,
         )
