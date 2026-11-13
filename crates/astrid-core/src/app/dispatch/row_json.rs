@@ -45,6 +45,7 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             my_tasks_id,
             current_user_id,
         } => list_badges(app, &lists, my_tasks_id, current_user_id),
+        Command::Sidebar { current_user_id } => sidebar(app, current_user_id),
         Command::ProfileTasks { user_id } => row_json::profile_rows(app, user_id.as_deref()).await,
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
@@ -337,16 +338,31 @@ pub(super) fn list_badges(
     my_tasks_id: Option<String>,
     current_user_id: Option<String>,
 ) -> Response {
+    match badge_map(app, lists, my_tasks_id, current_user_id) {
+        Ok(badges) => Response::ok(serde_json::Value::Object(badges)),
+        Err(failed) => failed,
+    }
+}
+
+/// The badges themselves, for the two commands that answer with them: `listBadges` sends them as
+/// they are, `sidebar` puts each one on its list. Factored out rather than read back out of a
+/// `Response`, so the sidebar cannot drift from the numbers `listBadges` gives.
+fn badge_map(
+    app: &App,
+    lists: &[crate::model::TaskList],
+    my_tasks_id: Option<String>,
+    current_user_id: Option<String>,
+) -> Result<serde_json::Map<String, serde_json::Value>, Response> {
     let current_user_id = match current_user_id {
         Some(held) => Some(held),
         None => match app.context.account().current_user_id() {
             Ok(user) => user,
-            Err(error) => return Response::failed(error.into()),
+            Err(error) => return Err(Response::failed(error.into())),
         },
     };
     let tasks = match app.store.tasks() {
         Ok(tasks) => tasks,
-        Err(error) => return Response::failed(error.into()),
+        Err(error) => return Err(Response::failed(error.into())),
     };
     let virtual_lists: Vec<crate::model::TaskList> = lists
         .iter()
@@ -384,7 +400,34 @@ pub(super) fn list_badges(
         });
         badges.insert(id, serde_json::json!(mine));
     }
-    Response::ok(serde_json::Value::Object(badges))
+    Ok(badges)
+}
+
+/// The sidebar, whole: the places, in order, each carrying its badge (task e22621e2).
+///
+/// Three calls and a filter in every shell before this — `lists`, `myTasksList`, `listBadges` —
+/// and the filter was wrong on Android. The lists are the cache's, as `lists` answers them, so
+/// this says the same as the three calls it replaces; what it adds is that the filtering and the
+/// ordering are [`astrid_rules::rows::sidebar::sections`]' and nobody else's.
+fn sidebar(app: &App, current_user_id: Option<String>) -> Response {
+    let lists = match app.context.lists().all() {
+        Ok(lists) => lists,
+        Err(error) => return Response::failed(error.into()),
+    };
+    let my_tasks = app.context.lists().my_tasks();
+    let badges = match badge_map(app, &lists, Some(my_tasks.id.clone()), current_user_id) {
+        Ok(badges) => badges,
+        Err(failed) => return failed,
+    };
+    let badges: std::collections::HashMap<String, i64> = badges
+        .into_iter()
+        .filter_map(|(id, count)| count.as_i64().map(|count| (id, count)))
+        .collect();
+    Response::ok(crate::rows::sidebar::sections(
+        &lists,
+        Some(my_tasks),
+        &badges,
+    ))
 }
 
 /// A featured public list's rows: the server's tasks plus this account's unsent ones for it,

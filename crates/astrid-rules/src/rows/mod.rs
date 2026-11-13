@@ -29,6 +29,7 @@ pub mod list_picks;
 pub mod nesting;
 pub mod reminder_picks;
 pub mod repeat;
+pub mod sidebar;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 

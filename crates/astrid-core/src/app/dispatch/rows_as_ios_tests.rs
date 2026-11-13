@@ -290,6 +290,78 @@ async fn aatd39_list_badges_count_as_ios_sidebar_does() {
     );
 }
 
+/// Task e22621e2: the whole sidebar in one call — the places only, in order, each with the badge
+/// `listBadges` gives it. Android (`SidebarViewModel.kt`) hid board columns and labels but offered
+/// GitHub milestones and iterations as lists, which is the divergence this command ends.
+#[tokio::test]
+async fn e22621e2_the_sidebar_answers_with_the_places_in_order_and_their_badges() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let seeded = call(
+        &app,
+        json!({
+            "kind": "seedCache",
+            "lists": [
+                { "id": "l1", "name": "Work" },
+                { "id": "l2", "name": "home" },
+                { "id": "fav", "name": "Shopping", "isFavorite": true, "favoriteOrder": 0 },
+                { "id": "col", "name": "Doing", "listType": "status" },
+                { "id": "lab", "name": "Bugs", "listType": "label" },
+                { "id": "mile", "name": "v2.1", "listType": "milestone" },
+                { "id": "iter", "name": "Sprint 4", "listType": "iteration" },
+            ],
+            "tasks": [
+                task("mine", json!({ "assigneeId": "me" })),
+                task("theirs", json!({ "assigneeId": "them" })),
+                task("shopping", json!({ "assigneeId": "me", "listIds": ["fav"] })),
+            ],
+        }),
+    )
+    .await;
+    assert_eq!(seeded["value"]["seeded"], true, "{seeded}");
+
+    let sidebar = call(&app, json!({ "kind": "sidebar" })).await;
+
+    let section = |name: &str| -> Vec<(String, Value)> {
+        sidebar["value"][name]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: {sidebar}"))
+            .iter()
+            .map(|list| {
+                (
+                    list["name"].as_str().expect("a name").to_string(),
+                    list["taskCount"].clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        section("favorites"),
+        [("Shopping".to_string(), json!(1))],
+        "{sidebar}"
+    );
+    assert_eq!(
+        section("lists"),
+        [
+            ("home".to_string(), json!(0)),
+            ("Work".to_string(), json!(2)),
+        ],
+        "a column, a label, a milestone and an iteration are not places: {sidebar}"
+    );
+    assert_eq!(
+        sidebar["value"]["myTasks"]["id"],
+        json!(crate::filters::my_tasks::VIRTUAL_ID),
+        "{sidebar}"
+    );
+    assert_eq!(
+        sidebar["value"]["myTasks"]["taskCount"],
+        json!(2),
+        "My Tasks counts the reader's open tasks: {sidebar}"
+    );
+}
+
 /// iOS draws a search result's subtasks under it; asked to, the search splices them in by the
 /// default completion window. Unasked, results stay flat (the Mac, web).
 #[tokio::test]

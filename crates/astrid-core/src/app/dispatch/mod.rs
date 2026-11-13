@@ -66,6 +66,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::ReminderTriageDeck { .. }
         | Command::FeaturedRows { .. }
         | Command::ListBadges { .. }
+        | Command::Sidebar { .. }
         | Command::ProfileTasks { .. }) => row_json::run(app, command).await,
         // ── Lists, sharing and membership ──
         command @ (Command::Lists

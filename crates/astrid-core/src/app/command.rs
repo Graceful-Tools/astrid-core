@@ -132,6 +132,20 @@ pub enum Command {
         #[serde(default)]
         current_user_id: Option<String>,
     },
+    /// The sidebar, whole: My Tasks, the favourites and the rest of the places, each in order and
+    /// carrying the badge `listBadges` would give it (task e22621e2).
+    ///
+    /// One command rather than three calls and a filter, because "which of these is somewhere to
+    /// go" is a product question and every shell had been answering it in its own language —
+    /// Android's answer (`SidebarViewModel.kt`) hid board columns and labels but offered GitHub
+    /// milestones and iterations as lists you could file a task into. The rule is
+    /// `astrid_rules::rows::sidebar::sections`.
+    Sidebar {
+        /// Whose My Tasks badge to count. Absent means the signed-in reader, which is what a
+        /// sidebar wants; it is here because `listBadges` takes it and a test must be able to say.
+        #[serde(default)]
+        current_user_id: Option<String>,
+    },
     /// One task in full, for the detail view.
     Task {
         task_id: String,
