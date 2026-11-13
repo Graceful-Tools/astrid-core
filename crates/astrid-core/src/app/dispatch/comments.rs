@@ -84,7 +84,11 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                     let lists = app.store.lists().unwrap_or_default();
                     let identifiers = match app.store.task(&task_id).ok().flatten() {
                         Some(task) => identifier_context(app, &task, &lists),
-                        None => crate::identifier::LinkContext::default(),
+                        // No board to read keys from, but links still open on this server.
+                        None => crate::identifier::LinkContext {
+                            origin: app.context.client.base_url().to_string(),
+                            ..Default::default()
+                        },
                     };
                     let mut rows = rows::comment::rows(&comments, me.as_deref(), &identifiers);
                     fill_local_paths(app, &task_id, &mut rows);
@@ -159,7 +163,8 @@ pub(super) fn comment_suggestions(app: &App, task_id: &str, text: &str, caret: u
 ///
 /// The reader's own boards are the keys that link, and the board this task sits on is the one whose
 /// key a bare `#12` means. Both come from this device's own cache, so drawing a comment still costs
-/// no request — see [`crate::identifier::context_for`].
+/// no request — see [`crate::identifier::context_for`]. Links open on this App's own server
+/// (`Config.base_url`, AWTD-1630).
 pub(super) fn identifier_context(
     app: &App,
     task: &crate::model::Task,
@@ -168,6 +173,7 @@ pub(super) fn identifier_context(
     crate::identifier::context_for(
         &app.store.projects().unwrap_or_default(),
         crate::rows::detail::project_id_for_task(task, lists).as_deref(),
+        app.context.client.base_url(),
     )
 }
 

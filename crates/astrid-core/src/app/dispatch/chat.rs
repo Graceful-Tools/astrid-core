@@ -136,6 +136,7 @@ pub(super) fn chat(app: &App, list_id: &str) -> Response {
     let identifiers = crate::identifier::context_for(
         &app.store.projects().unwrap_or_default(),
         project_id.as_deref(),
+        app.context.client.base_url(),
     );
 
     Response::ok(serde_json::json!({

@@ -1766,3 +1766,32 @@ async fn aatd51_toggle_assignee_adds_and_removes_people() {
     let options = call(&app, json!({ "kind": "assigneeOptions", "taskId": "t1" })).await;
     assert_eq!(options["value"]["assigneeIds"], json!(["bo"]), "{options}");
 }
+
+/// AWTD-1630: a relative link in a description opens on the App's own server
+/// (`Config.base_url`), so a partner build sends its reader to the partner's site, not astrid.cc.
+#[tokio::test]
+async fn awtd_1630_a_relative_description_link_opens_on_the_apps_server() {
+    let app = App::with_parts(
+        &Config {
+            cache_path: ":memory:".into(),
+            base_url: "https://tasks.partner.example".into(),
+            platform: Default::default(),
+            url_scheme: crate::app::DEFAULT_URL_SCHEME.into(),
+            handoff_client_id: None,
+        },
+        std::sync::Arc::new(crate::platform::MemorySecureStore::new()),
+        std::sync::Arc::new(StubTransport::new()),
+        std::sync::Arc::new(crate::platform::FixedClock::parsed("2026-09-07T12:00:00Z")),
+    )
+    .expect("starts");
+    let mut task = crate::model::Task::new("t1", "Read the plan");
+    task.description = Some("see [the plan](/lists/abc)".into());
+    app.store.upsert_task(&task).expect("stores");
+
+    let detail = call(&app, json!({ "kind": "taskDetail", "taskId": "t1" })).await;
+    assert_eq!(
+        detail["value"]["descriptionBlocks"][0]["inlines"][1]["link"],
+        "https://tasks.partner.example/lists/abc",
+        "{detail}"
+    );
+}

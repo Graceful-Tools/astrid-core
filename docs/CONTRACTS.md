@@ -286,8 +286,16 @@ all do, the feature becomes the only behaviour and the default is deleted.
 | iOS / Mac | the app always does (`Constants.API.baseURL`) | once its tests name a server |
 | Windows | **not when the server is the brand's own**: `ServerSelection.Parse` answers null for it, so a partner build without `ASTRID_SERVER_URL` reaches astrid.cc through the core | after it passes `ServerOrigin` |
 
-The other Astrid literal in a core binary is `astrid_rules::markdown`'s origin for a relative link,
-which needs the origin as an argument (AWTD-1630; the rules are pure, so it is passed in).
+**A relative link opens on the reader's server (AWTD-1630).** Markdown's relative links
+(`/lists/…`, `/u/…`, an id's `/t/…`) resolve against an origin the caller passes in, never a
+constant: `markdown::render(text, origin)`, and `LinkContext::origin` for
+`render_with_identifiers`. The App passes its own `Config.base_url`, so a partner build's link opens
+the partner's site. The markdown fixture carries each case's `origin`, with cases on a partner's
+server. The rules door's `renderMarkdown` takes `origin`: **pass your server.** A request without
+one resolves on astrid.cc (`rules::UNNAMED_ORIGIN`), so iOS and Android, which do not pass it yet,
+draw what they always drew. In a `require-base-url` build it stays relative. That build carries no
+`astrid.cc` literal at all (a release `astrid-uniffi --features require-base-url` dylib: 0 matches;
+2 without the feature).
 
 ---
 

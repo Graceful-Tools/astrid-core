@@ -147,18 +147,24 @@ pub enum ReferenceKind {
 }
 
 /// Render markdown to blocks, the way the web renders it to HTML.
-pub fn render(text: &str) -> Vec<Block> {
+///
+/// `origin` is the reader's server (`Config.base_url` in the App, the page's own origin on the
+/// web): a link written relative to it (`/lists/…`, `/u/…`) opens there, so a partner build's link
+/// opens the partner's site and no server is named in this crate (AWTD-1630). An empty origin
+/// leaves such a link relative.
+pub fn render(text: &str, origin: &str) -> Vec<Block> {
     if text.trim().is_empty() {
         return Vec::new();
     }
     let (with_sentinels, references) = extract_references(text);
-    parse_blocks(&with_sentinels, references)
+    parse_blocks(&with_sentinels, references, origin)
 }
 
 /// Render markdown, and turn task ids in the prose into links (task 5f3453e2).
 ///
 /// What `context` holds decides what links: without the reader's own project keys nothing does, so
-/// `UTF-8` stays `UTF-8`. See [`crate::identifier::find_links`] for the rule and the fixture behind
+/// `UTF-8` stays `UTF-8`. Its [`origin`](crate::identifier::LinkContext::origin) is what a relative
+/// link — an id's `/t/<id>` among them — resolves against, as in [`render`]. See [`crate::identifier::find_links`] for the rule and the fixture behind
 /// it.
 ///
 /// Ids are linked AFTER the references are masked, which is web's order and matters: an id inside
@@ -174,16 +180,16 @@ pub fn render_with_identifiers(text: &str, context: &crate::identifier::LinkCont
     let linked = crate::identifier::replace_links(&with_sentinels, context, |link| {
         format!("[{}]({})", link.matched, link.href)
     });
-    parse_blocks(&linked, references)
+    parse_blocks(&linked, references, &context.origin)
 }
 
-fn parse_blocks(with_sentinels: &str, references: Vec<Reference>) -> Vec<Block> {
+fn parse_blocks(with_sentinels: &str, references: Vec<Reference>, origin: &str) -> Vec<Block> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let mut builder = Builder::new(references);
+    let mut builder = Builder::new(references, origin);
     for (event, range) in Parser::new_ext(with_sentinels, options).into_offset_iter() {
         if let Event::Start(Tag::TableCell) = &event {
             builder.cell_source = cell_text(&with_sentinels[range]);
@@ -288,14 +294,12 @@ fn parse_reference(text: &str) -> Option<(&str, &str, usize)> {
 
 // ── Links ──────────────────────────────────────────────────────────────────────────────────
 
-/// The web's origin, for a link written relative to it (`/lists/…`, `/u/…`).
-const APP_ORIGIN: &str = "https://astrid.cc";
-
 /// The address a link keeps, or `None` when the web's sanitiser would have dropped it.
 ///
-/// `http`, `https` and `mailto` survive. A relative path is the app's own page. Anything else —
-/// `javascript:`, `data:`, an unparseable string — is text.
-fn safe_link(destination: &str) -> Option<String> {
+/// `http`, `https` and `mailto` survive. A relative path is the app's own page, on `origin` — the
+/// reader's server, passed in rather than named here (AWTD-1630). Anything else — `javascript:`,
+/// `data:`, an unparseable string — is text.
+fn safe_link(destination: &str, origin: &str) -> Option<String> {
     let trimmed = destination.trim();
     if trimmed.is_empty() {
         return None;
@@ -306,7 +310,7 @@ fn safe_link(destination: &str) -> Option<String> {
         return Some(trimmed.to_string());
     }
     if trimmed.starts_with('/') && !trimmed.starts_with("//") {
-        return Some(format!("{APP_ORIGIN}{trimmed}"));
+        return Some(format!("{}{trimmed}", origin.trim_end_matches('/')));
     }
     if lower.starts_with("www.") {
         return Some(format!("https://{trimmed}"));
@@ -590,10 +594,12 @@ struct Builder {
     suppressed: usize,
     /// The source text of the table cell about to open, for [`Frame::Cell`].
     cell_source: String,
+    /// The reader's server, which a relative link resolves against — see [`render`].
+    origin: String,
 }
 
 impl Builder {
-    fn new(references: Vec<Reference>) -> Self {
+    fn new(references: Vec<Reference>, origin: &str) -> Self {
         Self {
             stack: vec![Frame::Blocks(Vec::new())],
             references,
@@ -604,6 +610,7 @@ impl Builder {
             pending: String::new(),
             suppressed: 0,
             cell_source: String::new(),
+            origin: origin.to_string(),
         }
     }
 
@@ -736,9 +743,9 @@ impl Builder {
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
-            Tag::Link { dest_url, .. } => {
-                self.links.push(safe_link(&dest_url).and_then(browser_href))
-            }
+            Tag::Link { dest_url, .. } => self
+                .links
+                .push(safe_link(&dest_url, &self.origin).and_then(browser_href)),
             // Every `![…](…)` was taken out as a task reference before parsing, so an image here
             // is one with an empty label or id — drawn as its text, which is what is left of it.
             Tag::Image { .. } => self.links.push(None),
@@ -1309,6 +1316,13 @@ fn alignment_name(alignment: Alignment) -> &'static str {
 mod tests {
     use super::*;
 
+    /// The origin these tests read on: web's own.
+    const ORIGIN: &str = "https://astrid.cc";
+
+    fn render(text: &str) -> Vec<Block> {
+        super::render(text, ORIGIN)
+    }
+
     fn plain(text: &str) -> Inline {
         Inline::Text {
             text: text.to_string(),
@@ -1809,6 +1823,7 @@ mod tests {
             project_key: project_key.map(str::to_string),
             keys: vec!["AWTD".to_string()],
             hidden: Vec::new(),
+            origin: ORIGIN.to_string(),
         }
     }
 
@@ -1843,7 +1858,13 @@ mod tests {
     #[test]
     fn no_context_means_no_links_task_5f3453e2() {
         let text = "Encode as UTF-8 and see AWTD-1007.";
-        let bare = render_with_identifiers(text, &crate::identifier::LinkContext::default());
+        let bare = render_with_identifiers(
+            text,
+            &crate::identifier::LinkContext {
+                origin: ORIGIN.to_string(),
+                ..Default::default()
+            },
+        );
         assert_eq!(bare, render(text));
     }
 
