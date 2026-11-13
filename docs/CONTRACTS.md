@@ -287,7 +287,7 @@ all do, the feature becomes the only behaviour and the default is deleted.
 | Windows | **not when the server is the brand's own**: `ServerSelection.Parse` answers null for it, so a partner build without `ASTRID_SERVER_URL` reaches astrid.cc through the core | after it passes `ServerOrigin` |
 
 The other Astrid literal in a core binary is `astrid_rules::markdown`'s origin for a relative link,
-which needs the origin as an argument (a separate change; it is pure).
+which needs the origin as an argument (AWTD-1630; the rules are pure, so it is passed in).
 
 ---
 
