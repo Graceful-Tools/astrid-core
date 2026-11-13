@@ -286,6 +286,36 @@ pub enum Rule {
         #[serde(default)]
         is_modal_presented: bool,
     },
+    /// What a new task in `list` starts as, before anything is typed —
+    /// [`crate::list_defaults::apply`], the same rule `createTask` fills a draft in with. iOS's
+    /// `Tasks/NewTaskDefaults.swift` (task `75a27f7f`), asked as the quick-add control draws.
+    ///
+    /// `list` is the list as the wire carries it, because this door has no cache to find one in.
+    /// **Absent** is My Tasks and the other synthesised views: `ListService::my_tasks` is never
+    /// cached, so there is no row there to read defaults from, and the creator is still the
+    /// fallback rather than nobody.
+    ///
+    /// `priority` and `assignee_id` are what the person has already picked, and sending one is
+    /// what makes that field said — a default never overrides a choice. Nothing here parses the
+    /// title: a control that changed as somebody typed "urgent" would fight the choice they made
+    /// in it.
+    QuickAddDefaults {
+        #[serde(default)]
+        list: Option<Box<crate::model::TaskList>>,
+        /// The signed-in user's id, the fallback assignee. Absent before anybody is signed in.
+        #[serde(default)]
+        user_id: Option<String>,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes: which calendar day "tomorrow" is.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+        #[serde(default)]
+        priority: Option<i64>,
+        /// A user id, or `unassigned` — the same spelling a list's own default uses.
+        #[serde(default)]
+        assignee_id: Option<String>,
+    },
 }
 
 /// Where a drop happened, as the wire spells it: `{"on": "<id>"}`, `"line"`, `"outdent"` or
@@ -313,6 +343,27 @@ impl From<NestingZone> for crate::rows::nesting::Zone {
             NestingZone::Indent(rows) => Self::Indent(rows),
         }
     }
+}
+
+/// [`Rule::QuickAddDefaults`]'s answer: the fields of the draft the list's defaults just filled
+/// in, which are exactly the fields `createTask` would have sent.
+///
+/// Every one is present, including the empty answers, so a shell reads one shape — a control that
+/// had to tell "no default" from "field omitted" would be deciding something.
+///
+/// The App door's `quickAddDefaults` answers two more things, `leading` and `options`, and neither
+/// belongs here: `options` is built from every loaded user and list, which is the cache, and
+/// `leading` is `dispatch::row_json`'s wire shape rather than this crate's.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QuickAddDefaultsAnswer {
+    priority: i64,
+    assignee_id: Option<String>,
+    #[serde(with = "date::optional")]
+    due_date_time: Option<DateTime<Utc>>,
+    is_all_day: bool,
+    repeating: Option<crate::model::Repeating>,
+    is_private: bool,
 }
 
 /// [`Rule::Nesting`]'s answer: what the drop means, and the parent it nests under when it makes
@@ -592,6 +643,69 @@ pub fn run(rule: Rule) -> Response {
             let (text, caret) =
                 crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
             Response::ok(MentionInsertAnswer { text, caret })
+        }
+        Rule::QuickAddDefaults {
+            list,
+            user_id,
+            now,
+            utc_offset_minutes,
+            priority,
+            assignee_id,
+        } => {
+            let Some(zone) = utc_offset_minutes
+                .checked_mul(60)
+                .and_then(chrono::FixedOffset::east_opt)
+            else {
+                return Response::failed(Failure::bad_request(format!(
+                    "{utc_offset_minutes} minutes is not an offset from UTC"
+                )));
+            };
+
+            // The draft `createTask` would make, read back — rather than a second copy of the same
+            // rules. The control is a PREVIEW of the task about to exist, so if it said one thing
+            // and the created task came out another, it would be lying about its own effect.
+            let mut draft = crate::model::TaskDraft::new("");
+            let given = crate::list_defaults::Given {
+                assignee: assignee_id.is_some(),
+                priority: priority.is_some(),
+                ..Default::default()
+            };
+            if let Some(assignee) = assignee_id.as_deref() {
+                draft.assignee_id = match assignee {
+                    "unassigned" | "" => None,
+                    id => Some(id.to_string()),
+                };
+            }
+            if let Some(priority) = priority {
+                draft.priority = crate::model::Priority::from_i64(priority);
+            }
+
+            match list {
+                Some(list) => {
+                    draft.list_ids = vec![list.id.clone()];
+                    crate::list_defaults::apply(
+                        &mut draft,
+                        given,
+                        &list,
+                        user_id.as_deref(),
+                        now,
+                        zone,
+                    );
+                }
+                // A synthesised view — My Tasks — has no defaults to apply, and the creator is
+                // still the fallback there rather than nobody.
+                None if !given.assignee => draft.assignee_id = user_id,
+                None => {}
+            }
+
+            Response::ok(QuickAddDefaultsAnswer {
+                priority: draft.priority.as_i64(),
+                assignee_id: draft.assignee_id,
+                due_date_time: draft.due_date_time,
+                is_all_day: draft.is_all_day,
+                repeating: draft.repeating,
+                is_private: draft.is_private,
+            })
         }
         Rule::CopyOnly {
             task,
@@ -1025,6 +1139,102 @@ mod tests {
             answer(json!({ "kind": "identifierFormat", "key": "awtd", "sequence": 1007 }))["value"],
             json!("AWTD-1007")
         );
+    }
+
+    /// Task 75a27f7f: `Tasks/NewTaskDefaults.swift`. A list set up as high, weekly, Dana's, due
+    /// tomorrow at five hands quick-add exactly that — from a list **passed over the wire**, since
+    /// this door has no cache to look one up in and no clock to ask what tomorrow is.
+    #[test]
+    fn task_75a27f7f_the_door_resolves_a_new_task_s_defaults() {
+        let reply = answer(json!({
+            "kind": "quickAddDefaults",
+            "list": {
+                "id": "l1", "name": "Work",
+                "defaultPriority": 3,
+                "defaultRepeating": "weekly",
+                "defaultAssigneeId": "dana",
+                "defaultDueDate": "tomorrow",
+                "defaultDueTime": "17:00"
+            },
+            "userId": "jon",
+            "now": "2026-09-07T12:00:00.000Z",
+            "utcOffsetMinutes": -420
+        }));
+
+        assert_eq!(reply["ok"], true, "{reply}");
+        let value = &reply["value"];
+        assert_eq!(value["priority"], 3);
+        assert_eq!(value["assigneeId"], "dana");
+        assert_eq!(value["repeating"], "weekly");
+        // Tomorrow in California is Sep 8, and 17:00 there is midnight UTC on the 9th.
+        assert_eq!(value["dueDateTime"], "2026-09-09T00:00:00Z");
+        assert_eq!(value["isAllDay"], false);
+        assert_eq!(value["isPrivate"], false);
+    }
+
+    /// Task 75a27f7f: the two things the answer turns on besides the list.
+    ///
+    /// A default never overrides a choice — that is what sending `priority` or `assigneeId`
+    /// means. And a request with **no list** is one of the synthesised views: My Tasks is never
+    /// cached, so there is no row to read defaults from, and the creator is still the fallback
+    /// there rather than nobody (the web's `components/quick-add.tsx`).
+    #[test]
+    fn task_75a27f7f_a_choice_beats_a_default_and_a_view_still_starts_out_mine() {
+        let chosen = answer(json!({
+            "kind": "quickAddDefaults",
+            "list": { "id": "l1", "name": "Work", "defaultPriority": 3, "defaultAssigneeId": "dana" },
+            "userId": "jon",
+            "now": "2026-09-07T12:00:00.000Z",
+            "utcOffsetMinutes": -420,
+            "priority": 1,
+            "assigneeId": "sam"
+        }));
+        assert_eq!(chosen["value"]["priority"], 1, "{chosen}");
+        assert_eq!(chosen["value"]["assigneeId"], "sam");
+
+        // `unassigned` is a choice, not a user id — the same spelling a list's own default uses.
+        let nobody = answer(json!({
+            "kind": "quickAddDefaults",
+            "list": { "id": "l1", "name": "Work", "defaultAssigneeId": "dana" },
+            "userId": "jon",
+            "now": "2026-09-07T12:00:00.000Z",
+            "assigneeId": "unassigned"
+        }));
+        assert_eq!(nobody["value"]["assigneeId"], Value::Null, "{nobody}");
+
+        // No list at all: My Tasks and the rest of the views.
+        let view = answer(json!({
+            "kind": "quickAddDefaults",
+            "userId": "jon",
+            "now": "2026-09-07T12:00:00.000Z"
+        }));
+        assert_eq!(view["ok"], true, "{view}");
+        assert_eq!(view["value"]["assigneeId"], "jon");
+        assert_eq!(view["value"]["dueDateTime"], Value::Null);
+        assert_eq!(
+            view["value"]["isAllDay"], true,
+            "all-day until a time is chosen, as `TaskDraft::new` has it"
+        );
+
+        // Signed out, and an offset too large to be one, are both answered rather than guessed.
+        let signed_out = answer(json!({
+            "kind": "quickAddDefaults",
+            "list": { "id": "l1", "name": "Work" },
+            "now": "2026-09-07T12:00:00.000Z"
+        }));
+        assert_eq!(
+            signed_out["value"]["assigneeId"],
+            Value::Null,
+            "{signed_out}"
+        );
+
+        let absurd = answer(json!({
+            "kind": "quickAddDefaults",
+            "list": { "id": "l1", "name": "Work" },
+            "now": "2026-09-07T12:00:00.000Z",
+            "utcOffsetMinutes": 2147483647
+        }));
+        assert_eq!(absurd["ok"], false, "{absurd}");
     }
 
     /// Task 75a27f7f: `Filters/DragNesting.swift` and `SubtaskPromotion.swift` decide what a

@@ -39,7 +39,7 @@ pub use notification::{Inbox, Notification, NotificationTask};
 pub use project::{Project, ProjectMember};
 pub use task::{
     Attachment, Comment, CommentType, CustomRepeatingPattern, MonthWeekday, Priority, ReminderType,
-    RepeatFromMode, Repeating, SecureFile, Task, TaskRemote,
+    RepeatFromMode, Repeating, SecureFile, Task, TaskDraft, TaskRemote,
 };
 pub use user::User;
 

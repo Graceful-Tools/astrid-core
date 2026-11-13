@@ -292,6 +292,53 @@ impl Comment {
     }
 }
 
+/// What a new task is made of.
+///
+/// A draft rather than a [`Task`]: the id does not exist yet, and half of `Task` is server-owned.
+///
+/// It lives in the rules crate rather than beside `TaskService`, where it was written, because
+/// [`crate::list_defaults::apply`] is what fills it in and that rule is answered without a cache
+/// or a clock (task `75a27f7f`). `astrid_core::services::TaskDraft` still names it.
+#[derive(Debug, Clone, Default)]
+pub struct TaskDraft {
+    pub title: String,
+    pub description: String,
+    pub list_ids: Vec<String>,
+    pub priority: Priority,
+    pub due_date_time: Option<DateTime<Utc>>,
+    pub is_all_day: bool,
+    pub assignee_id: Option<String>,
+    pub repeating: Option<Repeating>,
+    pub repeating_data: Option<CustomRepeatingPattern>,
+    pub repeat_from: Option<RepeatFromMode>,
+    pub is_private: bool,
+    pub parent_task_id: Option<String>,
+    pub status_role: Option<String>,
+}
+
+impl TaskDraft {
+    pub fn new(title: impl Into<String>) -> Self {
+        TaskDraft {
+            title: title.into(),
+            // All-day unless a time is chosen — the same default the model decodes with, so a task
+            // created here and one fetched back read identically.
+            is_all_day: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn in_list(mut self, list_id: impl Into<String>) -> Self {
+        self.list_ids.push(list_id.into());
+        self
+    }
+
+    pub fn due(mut self, at: DateTime<Utc>, all_day: bool) -> Self {
+        self.due_date_time = Some(at);
+        self.is_all_day = all_day;
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
