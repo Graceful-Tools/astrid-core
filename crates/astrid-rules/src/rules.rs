@@ -198,6 +198,22 @@ pub enum Rule {
     /// The rating key a shell draws beside a grid, worst to best —
     /// [`crate::decisions::rating_key`].
     RatingKey,
+    /// What a list's defaults editor offers for repeat, when, priority and time, with the list's
+    /// own defaults ticked — [`crate::rows::list_default_picks`] (task 92830d81).
+    ///
+    /// The fields are the list's `default*` columns as the wire spells them; all four are
+    /// optional, because an unconfigured list has none of them and that is itself an answer.
+    ListDefaultPicks {
+        #[serde(default)]
+        priority: Option<i64>,
+        #[serde(default)]
+        repeating: Option<String>,
+        #[serde(default)]
+        due_date: Option<String>,
+        /// `HH:MM`, or absent for all-day.
+        #[serde(default)]
+        due_time: Option<String>,
+    },
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -404,6 +420,19 @@ pub fn run(rule: Rule) -> Response {
         Rule::Decision { text } => Response::ok(crate::decisions::parse(&text)),
         Rule::TradeoffGrid { rows } => Response::ok(crate::decisions::read_grid(&rows)),
         Rule::RatingKey => Response::ok(crate::decisions::rating_key()),
+        Rule::ListDefaultPicks {
+            priority,
+            repeating,
+            due_date,
+            due_time,
+        } => Response::ok(crate::rows::list_default_picks::picks(
+            crate::rows::list_default_picks::Chosen {
+                priority,
+                repeating: repeating.as_deref(),
+                due_date: due_date.as_deref(),
+                due_time: due_time.as_deref(),
+            },
+        )),
     }
 }
 

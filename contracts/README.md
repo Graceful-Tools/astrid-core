@@ -53,13 +53,16 @@ rather than going unnoticed at runtime.
 | `agent-registry.json` | `lib/brand/agent-emails.ts`, `lib/ai/harness-agents.ts` (AWTD-1566) | no consumer here yet |
 | `decisions.json` | `lib/comment-formats.ts` (`parseDecision`, `isTradeoffGrid`, `parseRating`, `chosenNumber`, `decisionReply`, `rowName`, `columnLetter`) — **executed**: the canonical example from `lib/decision-examples.ts` plus 11 near-misses (fenced, indented and list-item code examples, a three-digit marker, one option, an unlettered item), 5 tables, 18 replies against a numbered and a lettered option set, 8 row markers and 9 column letters | `astrid_rules::decisions`, and the rules door's `decision`, `tradeoffGrid` and `ratingKey` |
 | `sync-existence.json` | `lib/sync/v1-existence.ts` — **executed** over fixed requests, recording what `POST /api/v1/sync/existence` answers: which of up to 200 ids are gone, in the order asked, where "gone" means the per-row GET would answer 403, 404 or 410 | no consumer here yet: core still prunes from per-row reads, so the batch probe is held for whoever adopts it |
+| `list-default-picks.json` | **core-first**: astrid-core `crates/astrid-rules/src/rows/list_default_picks.rs`, **executed** through the rules door by `cargo xtask gen-core-contracts`: 8 cases — what the repeat, when, priority and time pickers of a list's defaults editor offer, and which row each stored value ticks (unset, set, unrecognised, and a free-form time landing in clock order). Web's own options are inline `SelectItem`s in `components/list-admin/DefaultTaskSettingsSection.tsx` rather than a table, so there was nothing there to export | `astrid_rules::rows::list_default_picks`, and the rules door's `listDefaultPicks`; Windows' `ListSettingsViewModel` (task 92830d81) |
 | `waiting.json` | **core-first**: astrid-core `crates/astrid-rules/src/waiting.rs` and the presets in `board.rs`, **executed** through the rules door (`run_json`, the wasm `runJson`) by `cargo xtask gen-core-contracts`: 57 request/answer pairs — creating in Waiting, entering Waiting with and without a condition (date, blocker, both supplied in the write or already held, past, now, all-day), `keepAssignee`, edits inside Waiting that wake it, wake on date / all-day / last blocker, legacy no-condition → Inbox, Ready-with-a-future-date → Waiting unassigned, the hand-back, and the Testing preset | `astrid_rules::waiting`, `board::available_presets`; web's TypeScript mirror and server; the native apps through dispatch |
 
 ## Core-first fixtures
 
 A rule that is **canonical in astrid-core from its first day** has no web implementation to
 execute, so its fixture is generated here. The first is `waiting.json` (the Waiting lane, Jon
-2026-11-12). The direction is the only thing reversed:
+2026-11-12); `list-default-picks.json` is the second, and shows the other way a rule becomes
+core-first — web *has* the options, but as inline JSX rather than as a table an exporter can read,
+so there is no function to execute. The direction is the only thing reversed:
 
 ```bash
 # here
@@ -79,7 +82,8 @@ cargo xtask check-core-contracts   # fail if stale; `cargo test --workspace` che
 - `cargo xtask check-contracts` skips the core-owned names (`core_contracts::CORE_OWNED`): web's
   copy follows the revision web pins, so a newer one here is web being behind, which web's own
   check reports.
-- `crates/astrid-rules/tests/waiting_contract.rs` replays every case through `run_json`.
+- `crates/astrid-rules/tests/waiting_contract.rs` and
+  `crates/astrid-rules/tests/list_default_picks_contract.rs` replay every case through `run_json`.
 
 ## Two kinds of export
 

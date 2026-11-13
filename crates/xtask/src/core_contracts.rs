@@ -17,7 +17,7 @@ use std::path::Path;
 
 /// The fixtures this repository generates, which `check-contracts` does not expect astrid-web to
 /// generate.
-pub const CORE_OWNED: &[&str] = &["waiting.json"];
+pub const CORE_OWNED: &[&str] = &["waiting.json", "list-default-picks.json"];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
 
@@ -632,10 +632,195 @@ fn contains(actual: &Value, expected: &Value) -> bool {
     }
 }
 
-/// The text of `waiting.json`, or the first case whose answer is not what its `expect` says.
-pub fn waiting_fixture() -> Result<String, String> {
-    let mut cases = Vec::new();
-    for case in waiting_cases() {
+/// One pick of a list-defaults picker, as the door serialises it.
+fn pick(value: Value, key: Value, is_selected: bool) -> Value {
+    json!({ "value": value, "key": key, "isSelected": is_selected })
+}
+
+/// `listDefaultPicks` with only the fields a case cares about; the rest are absent, which is what
+/// an unconfigured list sends.
+fn defaults(chosen: Value) -> Value {
+    let mut request = json!({ "kind": "listDefaultPicks" });
+    if let (Value::Object(request), Value::Object(chosen)) = (&mut request, chosen) {
+        request.extend(chosen);
+    }
+    request
+}
+
+/// The hours a native client offers for a list's default time, written out.
+const QUICK_HOURS: [&str; 17] = [
+    "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00",
+    "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00",
+];
+
+/// The time picker: all-day, then these times in this order, with `selected` ticked.
+fn times(order: &[&str], selected: Option<&str>) -> Value {
+    let mut rows = vec![pick(
+        Value::Null,
+        json!("defaults.all_day"),
+        selected.is_none(),
+    )];
+    rows.extend(
+        order
+            .iter()
+            .map(|time| pick(json!(time), Value::Null, selected == Some(*time))),
+    );
+    Value::Array(rows)
+}
+
+/// [`QUICK_HOURS`] with one more time, claimed to belong at `at` — the ordering each case asserts.
+fn hours_plus(at: usize, time: &'static str) -> Vec<&'static str> {
+    let mut order = QUICK_HOURS.to_vec();
+    order.insert(at, time);
+    order
+}
+
+/// What a list's defaults editor offers (task 92830d81).
+///
+/// `expect` spells every picker out, hours included: where a free-form time lands in clock order
+/// is the claim worth writing down, and `at` is written rather than computed so the fixture
+/// cannot agree with the rule by sharing its arithmetic.
+fn list_default_picks_cases() -> Vec<Case> {
+    let rule = "rows::list_default_picks";
+    let priorities = |selected: i64| {
+        json!([
+            pick(json!("0"), json!("priority.none"), selected == 0),
+            pick(json!("1"), json!("priority.low"), selected == 1),
+            pick(json!("2"), json!("priority.medium"), selected == 2),
+            pick(json!("3"), json!("priority.high"), selected == 3),
+        ])
+    };
+    let repeats = |selected: &str| {
+        json!([
+            pick(
+                json!("never"),
+                json!("repeating.one_time_only"),
+                selected == "never"
+            ),
+            pick(
+                json!("daily"),
+                json!("repeating.daily"),
+                selected == "daily"
+            ),
+            pick(
+                json!("weekly"),
+                json!("repeating.weekly"),
+                selected == "weekly"
+            ),
+            pick(
+                json!("monthly"),
+                json!("repeating.monthly"),
+                selected == "monthly"
+            ),
+            pick(
+                json!("yearly"),
+                json!("repeating.yearly"),
+                selected == "yearly"
+            ),
+        ])
+    };
+    let whens = |selected: &str| {
+        json!([
+            pick(
+                json!("none"),
+                json!("picker.no_due_date"),
+                selected == "none"
+            ),
+            pick(json!("today"), json!("picker.today"), selected == "today"),
+            pick(
+                json!("tomorrow"),
+                json!("picker.tomorrow"),
+                selected == "tomorrow"
+            ),
+            pick(
+                json!("next_week"),
+                json!("picker.next_week"),
+                selected == "next_week"
+            ),
+        ])
+    };
+
+    vec![
+        // ── What is offered, and what an unconfigured list ticks ────────────────────────────
+        case(
+            "unset/a-list-nobody-has-configured",
+            rule,
+            defaults(json!({})),
+            ok(json!({
+                "priority": priorities(0),
+                "repeating": repeats("never"),
+                "dueDate": whens("none"),
+                // `defaultDueTime` absent means all-day, and all-day leads the picker.
+                "dueTime": times(&QUICK_HOURS, None),
+            })),
+        ),
+        // ── The list's own defaults are the ones ticked ─────────────────────────────────────
+        case(
+            "selected/priority-and-repeat-and-when",
+            rule,
+            defaults(json!({ "priority": 3, "repeating": "weekly", "dueDate": "tomorrow" })),
+            ok(json!({
+                "priority": priorities(3),
+                "repeating": repeats("weekly"),
+                "dueDate": whens("tomorrow"),
+            })),
+        ),
+        case(
+            "selected/the-middle-of-each-picker",
+            rule,
+            defaults(json!({ "priority": 1, "repeating": "monthly", "dueDate": "today" })),
+            ok(json!({
+                "priority": priorities(1),
+                "repeating": repeats("monthly"),
+                "dueDate": whens("today"),
+            })),
+        ),
+        // ── Unset and unrecognised are different ───────────────────────────────────────────
+        case(
+            "unrecognised/a-stored-value-the-picker-cannot-draw-ticks-nothing",
+            rule,
+            defaults(json!({ "priority": 9, "repeating": "custom", "dueDate": "next_month" })),
+            ok(json!({
+                "priority": priorities(-1),
+                "repeating": repeats(""),
+                "dueDate": whens(""),
+            })),
+        ),
+        // ── The time picks ─────────────────────────────────────────────────────────────────
+        case(
+            "time/a-quick-hour-is-ticked-and-not-duplicated",
+            rule,
+            defaults(json!({ "dueTime": "14:00" })),
+            ok(json!({ "dueTime": times(&QUICK_HOURS, Some("14:00")) })),
+        ),
+        case(
+            "time/a-free-form-time-is-offered-in-clock-order",
+            rule,
+            defaults(json!({ "dueTime": "09:15" })),
+            // The web's TimePicker can store any minute; 09:15 belongs after 09:00, which is the
+            // fourth hour offered.
+            ok(json!({ "dueTime": times(&hours_plus(4, "09:15"), Some("09:15")) })),
+        ),
+        case(
+            "time/a-time-before-the-working-day",
+            rule,
+            defaults(json!({ "dueTime": "05:30" })),
+            ok(json!({ "dueTime": times(&hours_plus(0, "05:30"), Some("05:30")) })),
+        ),
+        case(
+            "time/a-time-after-the-working-day",
+            rule,
+            defaults(json!({ "dueTime": "23:45" })),
+            ok(json!({ "dueTime": times(&hours_plus(17, "23:45"), Some("23:45")) })),
+        ),
+    ]
+}
+
+/// Runs every case through the door, checks it against what a person wrote down, and renders the
+/// fixture.
+fn render(cases: Vec<Case>, generated_from: &str, extra: Value) -> Result<String, String> {
+    let mut recorded = Vec::new();
+    for case in cases {
         let answer: Value =
             serde_json::from_str(&astrid_rules::rules::run_json(&case.request.to_string()))
                 .map_err(|error| format!("{}: the door answered non-JSON: {error}", case.name))?;
@@ -645,28 +830,53 @@ pub fn waiting_fixture() -> Result<String, String> {
                 case.name, case.expect, answer
             ));
         }
-        cases.push(json!({
+        recorded.push(json!({
             "name": case.name,
             "rule": case.rule,
             "request": case.request,
             "answer": answer,
         }));
     }
-    let fixture = json!({
+    let mut fixture = json!({
         "$comment": "GENERATED by astrid-core `cargo xtask gen-core-contracts` — do not edit. Source of truth: astrid-core (a core-first contract; contracts/README.md).",
-        "generatedFrom": "crates/astrid-rules/src/waiting.rs, crates/astrid-rules/src/board.rs (presets)",
+        "generatedFrom": generated_from,
         "door": "astrid_rules::rules::run_json — the WebAssembly build's runJson. Send `request`, expect `answer`.",
-        "waitingNeedsCondition": "WAITING_NEEDS_CONDITION",
-        "cases": cases,
+        "cases": recorded,
     });
+    if let (Value::Object(fixture), Value::Object(extra)) = (&mut fixture, extra) {
+        fixture.extend(extra);
+    }
     serde_json::to_string_pretty(&fixture)
         .map(|text| text + "\n")
         .map_err(|error| error.to_string())
 }
 
+/// The text of `waiting.json`, or the first case whose answer is not what its `expect` says.
+pub fn waiting_fixture() -> Result<String, String> {
+    render(
+        waiting_cases(),
+        "crates/astrid-rules/src/waiting.rs, crates/astrid-rules/src/board.rs (presets)",
+        json!({ "waitingNeedsCondition": "WAITING_NEEDS_CONDITION" }),
+    )
+}
+
+/// The text of `list-default-picks.json` (task 92830d81).
+pub fn list_default_picks_fixture() -> Result<String, String> {
+    render(
+        list_default_picks_cases(),
+        "crates/astrid-rules/src/rows/list_default_picks.rs",
+        json!({
+            "canonicalSource": "astrid-web components/list-admin/DefaultTaskSettingsSection.tsx — its repeat and when options are inline SelectItems, so there is no table to export and the rule is core-first. Web's TimePicker is free-form, so the hours are the native clients'.",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
-    Ok(vec![("waiting.json", waiting_fixture()?)])
+    Ok(vec![
+        ("waiting.json", waiting_fixture()?),
+        ("list-default-picks.json", list_default_picks_fixture()?),
+    ])
 }
 
 pub fn write_all(root: &Path) -> std::process::ExitCode {
