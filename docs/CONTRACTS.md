@@ -272,6 +272,23 @@ values fall back the same way, so a shell that says nothing is Astrid byte for b
 side of the same choice is `BRAND.appUrlScheme` and its `DesktopClient` registry: a partner build
 must register the same scheme with its OS and the same id with its server.
 
+**The server is the shell's to name too, and will be required (AWTD-1627).** `baseUrl` is
+Astrid's (`api::DEFAULT_BASE_URL`) when absent or `null`, today, so that no shell breaks. Built with
+the `require-base-url` feature (`astrid-core`, passed through by `astrid-uniffi`), the binary
+carries no Astrid server and a start without `baseUrl` fails with `CONFIG_BASE_URL_REQUIRED` at the
+head of the error's text. A white-label build must fail loudly rather than reach Astrid. The
+contract every shell is moving to is the feature's: **always pass your brand's server.** Once they
+all do, the feature becomes the only behaviour and the default is deleted.
+
+| Shell | Passes `baseUrl` | Can turn the feature on |
+|---|---|---|
+| Android | the app always does (`Brand.baseUrl`) | once its tests name a server |
+| iOS / Mac | the app always does (`Constants.API.baseURL`) | once its tests name a server |
+| Windows | **not when the server is the brand's own**: `ServerSelection.Parse` answers null for it, so a partner build without `ASTRID_SERVER_URL` reaches astrid.cc through the core | after it passes `ServerOrigin` |
+
+The other Astrid literal in a core binary is `astrid_rules::markdown`'s origin for a relative link,
+which needs the origin as an argument (AWTD-1630; the rules are pure, so it is passed in).
+
 ---
 
 ## 5. List permissions
