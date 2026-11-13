@@ -236,6 +236,56 @@ pub enum Rule {
         #[serde(default)]
         tasks: Vec<Task>,
     },
+    /// Whether the caret sits inside an `@`, `#` or `!` the person is still typing, and what they
+    /// have typed after it — [`crate::parse::mentions::find_trigger`]. iOS's
+    /// `AutocompleteSupport.swift` (task `75a27f7f`), asked on every keystroke in the comment box.
+    ///
+    /// `caret` is in **UTF-16 units**, which is what a TextBox's caret and the web's `substring`
+    /// both count in. `null` back means no popup — the usual answer, not a failure.
+    MentionTrigger { text: String, caret: usize },
+    /// What picking a row from that popup writes into the box —
+    /// [`crate::parse::mentions::insert`]. The server resolves `@[Name](id)` and nothing else, so
+    /// the shell asks for the text rather than assembling the reference itself.
+    ///
+    /// With no trigger at the caret the text comes back untouched.
+    MentionInsert {
+        text: String,
+        caret: usize,
+        /// `mention`, `list` or `task`.
+        trigger_kind: crate::parse::mentions::TriggerKind,
+        label: String,
+        id: String,
+    },
+    /// Whether this reader can only copy `task` rather than edit it — [`crate::rows::copy_only`].
+    /// iOS's `Tasks/TaskCapabilities.swift` (task `75a27f7f`), asked as a row draws its leading
+    /// control. `lists` is the lists the task is on, as the wire carries them.
+    CopyOnly {
+        task: Box<Task>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        user_id: Option<String>,
+    },
+    /// What of a comment is drawn at all — [`crate::rows::comment`]'s `shows_text`, `is_empty` and
+    /// `renders_inline`. iOS's `CommentVisibility.swift` (task `75a27f7f`), asked as a bubble
+    /// draws.
+    CommentVisibility { comment: Box<crate::model::Comment> },
+    /// What a bare key press does right now, or `null` — [`crate::keyboard::action_for`]. The
+    /// Mac's `Keyboard/*` (task `75a27f7f`).
+    ///
+    /// Suppression is part of the answer, not the caller's job: a key pressed into a text field or
+    /// under a modal is text, and an unbound key is `null` too. A shell that decided that itself
+    /// would be a second copy of the guard.
+    Shortcut {
+        /// The canonical key, an alias, or a Windows event name (`ArrowDown`).
+        key: String,
+        #[serde(default)]
+        has_selection: bool,
+        #[serde(default)]
+        is_text_field_focused: bool,
+        #[serde(default)]
+        is_modal_presented: bool,
+    },
 }
 
 /// Where a drop happened, as the wire spells it: `{"on": "<id>"}`, `"line"`, `"outdent"` or
@@ -529,7 +579,101 @@ pub fn run(rule: Rule) -> Response {
                 &by_id,
             )))
         }
+        Rule::MentionTrigger { text, caret } => {
+            Response::ok(crate::parse::mentions::find_trigger(&text, caret))
+        }
+        Rule::MentionInsert {
+            text,
+            caret,
+            trigger_kind,
+            label,
+            id,
+        } => {
+            let (text, caret) =
+                crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
+            Response::ok(MentionInsertAnswer { text, caret })
+        }
+        Rule::CopyOnly {
+            task,
+            lists,
+            user_id,
+        } => Response::ok(crate::rows::copy_only(&task, &lists, user_id.as_deref())),
+        Rule::CommentVisibility { comment } => Response::ok(CommentVisibilityAnswer {
+            shows_text: crate::rows::comment::shows_text(&comment.content),
+            is_empty: crate::rows::comment::is_empty(&comment),
+            files: crate::rows::comment::files_of(&comment)
+                .into_iter()
+                .map(|file| VisibleFile {
+                    id: file.id.clone(),
+                    name: file.name.clone(),
+                    mime_type: file.mime_type.clone(),
+                    renders_inline: crate::rows::comment::renders_inline(&file.mime_type),
+                })
+                .collect(),
+        }),
+        Rule::Shortcut {
+            key,
+            has_selection,
+            is_text_field_focused,
+            is_modal_presented,
+        } => {
+            let context = crate::keyboard::Context {
+                has_selection,
+                is_text_field_focused,
+                is_modal_presented,
+            };
+            // `action_for` already applies the guards, so the binding is looked up again only to
+            // name it — and only once the guards have let the press through.
+            Response::ok(
+                crate::keyboard::action_for(&key, context).and_then(|action| {
+                    crate::keyboard::binding_for(&key).map(|binding| ShortcutAnswer {
+                        action: crate::keyboard::action_name(action),
+                        title: binding.title,
+                        requires_selection: binding.requires_selection,
+                    })
+                }),
+            )
+        }
     }
+}
+
+/// [`Rule::MentionInsert`]'s answer: the new text, and where the caret lands in it (UTF-16).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MentionInsertAnswer {
+    text: String,
+    caret: usize,
+}
+
+/// [`Rule::CommentVisibility`]'s answer: whether a text bubble is drawn, whether there is
+/// anything to draw at all, and how each file is drawn.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommentVisibilityAnswer {
+    shows_text: bool,
+    is_empty: bool,
+    files: Vec<VisibleFile>,
+}
+
+/// One file of [`Rule::CommentVisibility`]'s answer. Deliberately not
+/// [`crate::rows::comment::FileRow`]: that carries a size and a `localPath` this question has no
+/// opinion about, and a shell drawing a bubble should not have to ignore two fields to read one.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VisibleFile {
+    id: String,
+    name: String,
+    mime_type: String,
+    renders_inline: bool,
+}
+
+/// [`Rule::Shortcut`]'s answer, when a key does something.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShortcutAnswer {
+    action: &'static str,
+    title: &'static str,
+    requires_selection: bool,
 }
 
 /// [`Rule::WaitingWake`]'s answer.
@@ -951,5 +1095,150 @@ mod tests {
         }));
         assert_eq!(reply["ok"], false, "{reply}");
         assert_eq!(reply["error"]["kind"], "badRequest");
+    }
+
+    /// Task 75a27f7f: `AutocompleteSupport.swift` asks on every keystroke in the comment box
+    /// whether a popup is open and what has been typed into it, so it goes through this door.
+    /// `null` is the answer when no trigger is live — the usual case, and not a failure.
+    #[test]
+    fn task_75a27f7f_the_door_finds_the_trigger_the_caret_is_inside() {
+        let reply = answer(json!({ "kind": "mentionTrigger", "text": "hi @jo", "caret": 6 }));
+        assert_eq!(
+            reply["value"],
+            json!({ "kind": "mention", "start": 3, "query": "jo" })
+        );
+        // A finished reference earlier in the line does not re-open anything.
+        let settled = answer(json!({
+            "kind": "mentionTrigger", "text": "@[Jon](u1) and then some", "caret": 24
+        }));
+        assert_eq!(settled["ok"], true, "{settled}");
+        assert_eq!(settled["value"], Value::Null);
+        // The caret counts UTF-16 units, as a TextBox and `substring` both do.
+        let after_emoji = answer(json!({ "kind": "mentionTrigger", "text": "🎉 #bu", "caret": 6 }));
+        assert_eq!(
+            after_emoji["value"],
+            json!({ "kind": "list", "start": 3, "query": "bu" })
+        );
+    }
+
+    /// Task 75a27f7f: the other half — what the chosen row writes into the box. The server
+    /// resolves `@[Name](id)` and nothing else, so the shell must not assemble it itself.
+    #[test]
+    fn task_75a27f7f_the_door_writes_a_chosen_mention_into_the_text() {
+        let reply = answer(json!({
+            "kind": "mentionInsert", "text": "hi @jo", "caret": 6,
+            "triggerKind": "mention", "label": "Jon", "id": "u1"
+        }));
+        assert_eq!(
+            reply["value"],
+            json!({ "text": "hi @[Jon](u1) ", "caret": 14 })
+        );
+        // No trigger at the caret: the text comes back untouched rather than corrupted.
+        let untouched = answer(json!({
+            "kind": "mentionInsert", "text": "plain words", "caret": 11,
+            "triggerKind": "task", "label": "T", "id": "t1"
+        }));
+        assert_eq!(
+            untouched["value"],
+            json!({ "text": "plain words", "caret": 11 })
+        );
+    }
+
+    /// Task 75a27f7f: `Tasks/TaskCapabilities.swift` decides, as a row draws, whether its leading
+    /// control is a checkbox or a copy — a passer-by on a public list can only copy (D15).
+    #[test]
+    fn task_75a27f7f_the_door_says_when_a_task_is_only_copyable() {
+        let lists = json!([{ "id": "pub", "ownerId": "owner", "privacy": "PUBLIC" }]);
+        let task = json!({ "id": "t", "listIds": ["pub"], "creatorId": "owner" });
+
+        let passer_by = answer(json!({
+            "kind": "copyOnly", "task": task, "lists": lists, "userId": "stranger"
+        }));
+        assert_eq!(passer_by["value"], json!(true));
+
+        let owner = answer(json!({
+            "kind": "copyOnly", "task": task, "lists": lists, "userId": "owner"
+        }));
+        assert_eq!(owner["value"], json!(false));
+
+        // A private list is never copy-only, whoever is reading.
+        let private = answer(json!({
+            "kind": "copyOnly",
+            "task": { "id": "t", "listIds": ["p"], "creatorId": "owner" },
+            "lists": [{ "id": "p", "ownerId": "owner", "privacy": "PRIVATE" }],
+            "userId": "stranger"
+        }));
+        assert_eq!(private["value"], json!(false));
+    }
+
+    /// Task 75a27f7f: `CommentVisibility.swift` decides what of a comment is drawn at all — a
+    /// caption-less attachment gets no text bubble, and an image is shown where it sits while a
+    /// document is a chip to open.
+    #[test]
+    fn task_75a27f7f_the_door_says_what_of_a_comment_is_drawn() {
+        let reply = answer(json!({
+            "kind": "commentVisibility",
+            "comment": {
+                "id": "c1", "content": "   ",
+                "secureFiles": [
+                    { "id": "f1", "originalName": "shot.PNG", "mimeType": "image/png" },
+                    { "id": "f2", "originalName": "notes.pdf", "mimeType": "application/pdf" }
+                ]
+            }
+        }));
+        assert_eq!(
+            reply["value"],
+            json!({
+                "showsText": false,
+                "isEmpty": false,
+                "files": [
+                    { "id": "f1", "name": "shot.PNG", "mimeType": "image/png", "rendersInline": true },
+                    { "id": "f2", "name": "notes.pdf", "mimeType": "application/pdf", "rendersInline": false }
+                ]
+            })
+        );
+
+        // Neither text nor a file: nothing to draw, which is the row that must not be drawn.
+        let nothing = answer(json!({
+            "kind": "commentVisibility", "comment": { "id": "c2", "content": "" }
+        }));
+        assert_eq!(nothing["value"]["isEmpty"], json!(true));
+        assert_eq!(nothing["value"]["files"], json!([]));
+
+        let spoken = answer(json!({
+            "kind": "commentVisibility", "comment": { "id": "c3", "content": "Done" }
+        }));
+        assert_eq!(spoken["value"]["showsText"], json!(true));
+        assert_eq!(spoken["value"]["isEmpty"], json!(false));
+    }
+
+    /// Task 75a27f7f: the Mac's `Keyboard/*` resolves a bare key press to an action while a view
+    /// has focus. Suppression is part of the answer — a key pressed into a text field is text.
+    #[test]
+    fn task_75a27f7f_the_door_resolves_a_pressed_key_to_its_action() {
+        let reply = answer(json!({ "kind": "shortcut", "key": "n" }));
+        assert_eq!(
+            reply["value"],
+            json!({ "action": "newTask", "title": "New task", "requiresSelection": false })
+        );
+
+        // An arrow reaches the door under either name: the web's glyph or a Windows VirtualKey.
+        for key in ["ArrowDown", "\u{2193}"] {
+            let moved = answer(json!({ "kind": "shortcut", "key": key, "hasSelection": true }));
+            assert_eq!(moved["value"]["action"], "selectNext", "{key}");
+        }
+
+        // Selection-scoped without a selection, inside a text field, inside a modal, unbound:
+        // all four are `null`, which is the answer the shell acts on, not a failure.
+        for request in [
+            json!({ "kind": "shortcut", "key": "x" }),
+            json!({ "kind": "shortcut", "key": "n", "isTextFieldFocused": true }),
+            json!({ "kind": "shortcut", "key": "n", "isModalPresented": true }),
+            json!({ "kind": "shortcut", "key": "\u{00e7}" }),
+        ] {
+            let reply = answer(request.clone());
+            assert_eq!(reply["ok"], true, "{request}: {reply}");
+            assert_eq!(reply["value"], Value::Null, "{request}");
+        }
     }
 }
