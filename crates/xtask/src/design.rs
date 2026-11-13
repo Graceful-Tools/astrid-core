@@ -2098,4 +2098,45 @@ mod tests {
             );
         }
     }
+
+    /// astrid-web AWTD-1625 (register DS24): Markdown headings are type tokens, so web stops
+    /// writing rem sizes. Every density names h1 to h4, a heading never grows as its level
+    /// deepens, and each one is at least the density's body text, which it introduces.
+    #[test]
+    fn markdown_headings_are_type_tokens_in_every_density() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        let body = |density: &str| match density {
+            "comfortable" => "body",
+            _ => "detail-body",
+        };
+        for (density, styles) in object(&tokens.raw, "type") {
+            let size = |name: &str| {
+                styles[name]["size"]
+                    .as_f64()
+                    .unwrap_or_else(|| panic!("type.{density}.{name} has no size"))
+            };
+            let mut previous = f64::INFINITY;
+            for level in 1..=4 {
+                let name = format!("markdown-h{level}");
+                let this = size(&name);
+                assert!(
+                    this <= previous,
+                    "type.{density}.{name} grows past h{}",
+                    level - 1
+                );
+                assert!(
+                    this >= size(body(&density)),
+                    "type.{density}.{name} is smaller than the body it introduces"
+                );
+                previous = this;
+            }
+        }
+        let css = web_css(&tokens);
+        assert!(
+            css.contains("  --astrid-type-comfortable-markdown-h1-size: 28px;"),
+            "{css}"
+        );
+    }
 }
