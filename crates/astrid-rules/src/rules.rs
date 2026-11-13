@@ -214,6 +214,76 @@ pub enum Rule {
         #[serde(default)]
         due_time: Option<String>,
     },
+    /// Read `AWTD-1007` into its parts, or `null` when it is not an identifier —
+    /// [`crate::identifier::parse_identifier`]. iOS's `Board/TaskIdentifiers.swift` (task
+    /// `75a27f7f`), which a search box calls as the person types, so it has to be synchronous.
+    ///
+    /// `null` is an answer, not a failure: a title is a normal thing to type into that box.
+    IdentifierParse { value: String },
+    /// Write an identifier out from parts somebody else holds —
+    /// [`crate::identifier::format_identifier`]. The server is the only minter; this derives
+    /// nothing.
+    IdentifierFormat { key: String, sequence: u64 },
+    /// What a dragged or indented row's drop means — [`crate::rows::nesting::outcome`]. iOS's
+    /// `Filters/DragNesting.swift` and `SubtaskPromotion.swift` (task `75a27f7f`), called from a
+    /// drag-hover zone while the drag is in flight.
+    ///
+    /// `tasks` is the rows as drawn, and must include `dragged_id` — the whole answer turns on
+    /// the dragged row's own parent, so a missing one is refused rather than answered `none`.
+    Nesting {
+        zone: NestingZone,
+        dragged_id: String,
+        #[serde(default)]
+        tasks: Vec<Task>,
+    },
+}
+
+/// Where a drop happened, as the wire spells it: `{"on": "<id>"}`, `"line"`, `"outdent"` or
+/// `{"indent": ["<id>", …]}`. The shell's half of [`crate::rows::nesting::Zone`], which carries
+/// no `Deserialize` of its own because nothing else sends it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NestingZone {
+    /// On a row: become its subtask.
+    On(String),
+    /// On the insertion line between rows.
+    Line,
+    /// In the leading gutter: up one level.
+    Outdent,
+    /// The keyboard's indent, among these rows as drawn.
+    Indent(Vec<String>),
+}
+
+impl From<NestingZone> for crate::rows::nesting::Zone {
+    fn from(zone: NestingZone) -> Self {
+        match zone {
+            NestingZone::On(id) => Self::OnRow(id),
+            NestingZone::Line => Self::Line,
+            NestingZone::Outdent => Self::Outdent,
+            NestingZone::Indent(rows) => Self::Indent(rows),
+        }
+    }
+}
+
+/// [`Rule::Nesting`]'s answer: what the drop means, and the parent it nests under when it makes
+/// one. `parent_id` is always present so a shell can read one shape rather than two.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NestingAnswer {
+    outcome: &'static str,
+    parent_id: Option<String>,
+}
+
+impl From<crate::rows::nesting::Outcome> for NestingAnswer {
+    fn from(outcome: crate::rows::nesting::Outcome) -> Self {
+        Self {
+            outcome: outcome.name(),
+            parent_id: match outcome {
+                crate::rows::nesting::Outcome::MakeSubtask { parent_id } => Some(parent_id),
+                _ => None,
+            },
+        }
+    }
 }
 
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
@@ -433,6 +503,32 @@ pub fn run(rule: Rule) -> Response {
                 due_time: due_time.as_deref(),
             },
         )),
+        Rule::IdentifierParse { value } => {
+            Response::ok(crate::identifier::parse_identifier(&value))
+        }
+        Rule::IdentifierFormat { key, sequence } => {
+            Response::ok(crate::identifier::format_identifier(&key, sequence))
+        }
+        Rule::Nesting {
+            zone,
+            dragged_id,
+            tasks,
+        } => {
+            let by_id: std::collections::HashMap<String, &Task> =
+                tasks.iter().map(|task| (task.id.clone(), task)).collect();
+            // The outcome turns on the dragged row's own parent, so answering `none` for a row
+            // the shell forgot to send would read as a refused drop and swallow it silently.
+            let Some(dragged) = by_id.get(&dragged_id) else {
+                return Response::failed(Failure::bad_request(format!(
+                    "{dragged_id} is not among the rows sent"
+                )));
+            };
+            Response::ok(NestingAnswer::from(crate::rows::nesting::outcome(
+                &zone.into(),
+                dragged,
+                &by_id,
+            )))
+        }
     }
 }
 
@@ -756,6 +852,104 @@ mod tests {
             "now": "2026-09-28T12:00:00Z", "timeZone": "Mars/Olympus_Mons"
         }));
         assert_eq!(reply["ok"], false);
+        assert_eq!(reply["error"]["kind"], "badRequest");
+    }
+
+    /// Task 75a27f7f: `Board/TaskIdentifiers.swift` reads a typed `AWTD-1007` into its parts
+    /// from a view body, so the door answers it synchronously rather than through an `App`
+    /// command. Not an identifier is `null`, which is the answer a search box acts on.
+    #[test]
+    fn task_75a27f7f_the_door_reads_an_identifier_into_its_parts() {
+        assert_eq!(
+            answer(json!({ "kind": "identifierParse", "value": " awtd-1007 " }))["value"],
+            json!({ "key": "AWTD", "sequence": 1007 })
+        );
+        // Everything that merely looks close is `null`, not an error: a title is a normal thing
+        // to type into the box this answers for.
+        for not_one in ["Just a title", "A-1007", "AWTD-0", "#1007", "AWTD-1007a"] {
+            let reply = answer(json!({ "kind": "identifierParse", "value": not_one }));
+            assert_eq!(reply["ok"], true, "{not_one}: {reply}");
+            assert_eq!(reply["value"], Value::Null, "{not_one}");
+        }
+    }
+
+    /// Task 75a27f7f: the other half of `TaskIdentifiers` — writing one out. The server is the
+    /// only minter, so this formats parts somebody else already holds.
+    #[test]
+    fn task_75a27f7f_the_door_writes_an_identifier_out() {
+        assert_eq!(
+            answer(json!({ "kind": "identifierFormat", "key": "awtd", "sequence": 1007 }))["value"],
+            json!("AWTD-1007")
+        );
+    }
+
+    /// Task 75a27f7f: `Filters/DragNesting.swift` and `SubtaskPromotion.swift` decide what a
+    /// drop means while the drag is in flight, so this has to be synchronous too. A drop ON a
+    /// row nests; a drop on the LINE leaves the parent; a cycle is refused.
+    #[test]
+    fn task_75a27f7f_the_door_says_what_a_drop_nests() {
+        let tasks = json!([
+            { "id": "parent" },
+            { "id": "child", "parentTaskId": "parent" },
+            { "id": "loose" }
+        ]);
+
+        // On a row: become its subtask.
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": { "on": "parent" },
+                "draggedId": "loose", "tasks": tasks
+            }))["value"],
+            json!({ "outcome": "makeSubtask", "parentId": "parent" })
+        );
+        // Never under itself, and never under its own descendant.
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": { "on": "child" },
+                "draggedId": "parent", "tasks": tasks
+            }))["value"],
+            json!({ "outcome": "none", "parentId": Value::Null })
+        );
+        // On the line between rows: a subtask leaves its parent, a top-level row only reorders.
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": "line", "draggedId": "child", "tasks": tasks
+            }))["value"]["outcome"],
+            json!("moveToTopLevel")
+        );
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": "line", "draggedId": "loose", "tasks": tasks
+            }))["value"]["outcome"],
+            json!("reorderOnly")
+        );
+        // The outdent gutter climbs one level.
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": "outdent", "draggedId": "child", "tasks": tasks
+            }))["value"]["outcome"],
+            json!("moveToTopLevel")
+        );
+        // The keyboard's indent nests under the previous sibling, among the rows as drawn.
+        assert_eq!(
+            answer(json!({
+                "kind": "nesting", "zone": { "indent": ["loose", "parent"] },
+                "draggedId": "parent", "tasks": tasks
+            }))["value"],
+            json!({ "outcome": "makeSubtask", "parentId": "loose" })
+        );
+    }
+
+    /// Task 75a27f7f: a dragged id the shell did not send among `tasks` is a bug in the shell,
+    /// and the door says so rather than answering `none` — which would look like a refused drop
+    /// and silently swallow it.
+    #[test]
+    fn task_75a27f7f_a_dragged_row_the_shell_did_not_send_is_refused() {
+        let reply = answer(json!({
+            "kind": "nesting", "zone": "line", "draggedId": "ghost",
+            "tasks": [{ "id": "loose" }]
+        }));
+        assert_eq!(reply["ok"], false, "{reply}");
         assert_eq!(reply["error"]["kind"], "badRequest");
     }
 }
