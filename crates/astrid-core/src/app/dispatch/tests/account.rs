@@ -463,6 +463,7 @@ async fn setting_a_my_tasks_filter_writes_it_to_the_account() {
 
 /// The mode is the account's, so the screen has to read it back rather than remember what it
 /// last set — somebody who turned on "every list" at a desk sees that on their laptop.
+#[cfg(feature = "sync-google")]
 #[tokio::test]
 async fn the_google_sync_mode_is_read_from_the_account() {
     let app = app_with(StubTransport::new().push_json(
@@ -479,6 +480,39 @@ async fn the_google_sync_mode_is_read_from_the_account() {
     let answer = call(&app, json!({ "kind": "googleSyncMode" })).await;
     assert_eq!(answer["value"]["mode"], "all_bidirectional");
     assert_eq!(answer["value"]["suffix"], "(G)");
+}
+
+/// Without `sync-google` the command is still known, and says why it cannot — task `b92569a8`.
+///
+/// The half of the decision a manifest assertion cannot make. `tests/build_features.rs` proves the
+/// vocabulary did not change shape; this proves the shell gets an answer it can act on rather than
+/// a `BadRequest` indistinguishable from a typo, or — worse — a silent `ok` and a list that never
+/// mirrors.
+#[cfg(not(feature = "sync-google"))]
+#[tokio::test]
+async fn a_google_command_is_refused_by_name_in_a_build_without_the_pass() {
+    let app = app_with(StubTransport::new());
+
+    // `externalSync` is deliberately absent: it reads the panel — what is connected, what is
+    // linked — and connect / link / unlink still work against a server that still has the
+    // integration. Only the pass went away.
+    for kind in [
+        "googleSyncMode",
+        "setGoogleSyncMode",
+        "createAndLinkGoogleList",
+        "syncExternal",
+    ] {
+        let answer = call(
+            &app,
+            json!({ "kind": kind, "listId": "l1", "name": "Shopping", "mode": "manual" }),
+        )
+        .await;
+        assert_eq!(answer["ok"], false, "{kind} should be refused, not served");
+        assert_eq!(
+            answer["error"]["code"], "SYNC_GOOGLE_UNAVAILABLE",
+            "{kind} must be refused by a code the shell can read, not by a bare message"
+        );
+    }
 }
 
 /// The panel reads "connected" by matching the server's own provider name, so a name we
@@ -600,6 +634,7 @@ async fn the_account_panel_names_both_ends_of_every_link_it_has() {
 
 /// Task 6db679c3. "New List" is one gesture, so it is one command: make the list on Google and
 /// bind it, rather than leaving the client to do the second half and get it wrong.
+#[cfg(feature = "sync-google")]
 #[tokio::test]
 async fn new_list_creates_the_google_list_and_links_it() {
     let transport = StubTransport::new()
@@ -639,6 +674,7 @@ async fn new_list_creates_the_google_list_and_links_it() {
 
 /// A pull applies what came back and commits the cursor only after it has — a client killed
 /// mid-pass re-pulls rather than skipping what it never wrote down.""
+#[cfg(feature = "sync-google")]
 #[tokio::test]
 async fn a_google_pass_applies_what_it_pulled_and_then_commits() {
     let transport = StubTransport::new()

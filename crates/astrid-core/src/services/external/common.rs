@@ -75,6 +75,10 @@ impl ExternalSyncService {
     pub async fn status(&self) -> Result<serde_json::Value> {
         let request = self.context.client.get(endpoints::INTEGRATIONS);
         let answer = self.context.client.send(request).await?;
+        // Only a build that mirrors has anything to stop re-importing (task `b92569a8`). Without
+        // `sync-google` the tombstones still arrive in `answer` — the shell may want to say what
+        // the account has connected — they simply have no local pass to correct.
+        #[cfg(feature = "sync-google")]
         self.merge_server_tombstones(&answer)?;
         Ok(answer)
     }
@@ -183,6 +187,9 @@ impl ExternalSyncService {
         container_id: &str,
     ) -> Result<serde_json::Value> {
         let answer = self.create_link(provider, list_id, container_id).await?;
+        // The exclusion it takes back is an auto-link setting, which is the pass's own; a build
+        // without `sync-google` has no mode to re-run and nothing to un-refuse (task `b92569a8`).
+        #[cfg(feature = "sync-google")]
         if provider == Provider::GoogleTasks {
             self.clear_exclusion(container_id).await;
         }

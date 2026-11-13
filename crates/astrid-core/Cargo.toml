@@ -14,8 +14,16 @@ repository.workspace = true
 # `tests/build_features.rs`, which is the only layer of the gate that can see build configuration
 # (task `f1210dd8`).
 [features]
-default = ["bundled-sqlite"]
+default = ["bundled-sqlite", "sync-google"]
 bundled-sqlite = ["rusqlite/bundled"]
+# Google Tasks mirroring — the only provider with a client-side pass, and so the only one there is
+# anything to compile out of a partner build. GitHub sync is a cron on astrid-web, which is why
+# `services/external/github.rs` is 27 lines of names and `services/external/google/` is 3,805.
+# ON by default: every client that says nothing goes on mirroring. Turning it off keeps the
+# commands in the vocabulary — `Command::kinds()` has one shape under every feature combination, or
+# three repositories' bindings gates would each need a matrix — and refuses them with
+# SYNC_GOOGLE_UNAVAILABLE, the way `require-base-url` refuses a start (task `b92569a8`).
+sync-google = []
 # Compiles Astrid's server out: a start config must name `baseUrl`, and one that does not fails
 # with CONFIG_BASE_URL_REQUIRED (astrid-web AWTD-1627). For white-label builds whose shell always
 # passes its brand's server; the default once every shell does.

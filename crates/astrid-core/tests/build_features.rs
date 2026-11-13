@@ -95,6 +95,65 @@ fn bundled_sqlite_is_a_default_feature_that_reaches_rusqlite() {
     );
 }
 
+/// `sync-google` is declared and on by default — task `b92569a8`.
+///
+/// Google Tasks is the only provider with a client-side pass: a cron on astrid-web does GitHub, so
+/// `services/external/github.rs` is 27 lines of names, while `services/external/google/` is 3,805
+/// and owns most of `external/{auto_link,decisions,ledger}.rs` besides. That is what a partner
+/// build which turns Google off in configuration is still compiling in, and this feature is how it
+/// stops.
+///
+/// **On by default**, like `bundled-sqlite`: every consumer that says nothing keeps today's
+/// behaviour, and leaving Google out is the partner build's explicit `default-features = false`.
+#[test]
+fn sync_google_is_a_default_feature() {
+    let manifest = read(&crate_dir().join("Cargo.toml"));
+
+    let default = entry(&manifest, "features", "default");
+    assert!(
+        default.contains("sync-google"),
+        "`default` must carry `sync-google`: every client that says nothing mirrors Google Tasks \
+         today, so dropping it from `default` silently stops a shipped feature. Found: {default}"
+    );
+
+    // Declared at all. A `default = [..., "sync-google"]` naming a feature no `[features]` entry
+    // defines is a manifest error, but one `cargo check` reports and no test records the reason
+    // for, so assert it here beside the reason.
+    entry(&manifest, "features", "sync-google");
+}
+
+/// The command vocabulary does not change shape with the feature — task `b92569a8`.
+///
+/// This is the decision the task asked to be made first, asserted rather than written down: a
+/// gated command stays in `Command::kinds()` and answers [`astrid_core::app::SYNC_GOOGLE_UNAVAILABLE`],
+/// exactly as `require-base-url` refuses a start rather than removing `start` from the surface.
+///
+/// The alternative — gating the variants — would give `Command::kinds()` one shape per feature
+/// combination, and every shell reads its own bindings against that list: astrid-windows'
+/// `bindings_contract.rs` and the Apple and Android equivalents. One gated command would then be a
+/// gated binding in three repositories, and `contracts/fixtures/` would have to say whether it
+/// describes the full vocabulary or the built one. It describes the full one, because this test
+/// makes the built one equal to it.
+///
+/// Compiled under both feature combinations; it is `--no-default-features` that makes it bite.
+#[test]
+fn the_google_commands_stay_in_the_vocabulary_without_the_feature() {
+    let kinds = astrid_core::app::command_kinds();
+    for kind in [
+        "googleSyncMode",
+        "setGoogleSyncMode",
+        "createAndLinkGoogleList",
+        "syncExternal",
+    ] {
+        assert!(
+            kinds.contains(kind),
+            "`{kind}` left the vocabulary. A build without `sync-google` must still KNOW the \
+             command and refuse it, or every shell's bindings gate reads a different list per \
+             feature combination"
+        );
+    }
+}
+
 /// The feature is not only declared — the SQLite that linked is the one rusqlite bundles.
 ///
 /// A mistyped feature path is the failure this catches: the manifest reads correctly, the build is

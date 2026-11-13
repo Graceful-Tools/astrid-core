@@ -93,6 +93,14 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The partner build: no Google pass compiled in (task `b92569a8`). `--all-features` above
+      # never compiles this combination, and a feature that is only declared is a feature that
+      # rots — the `cfg`s go stale the first time somebody adds a call site, and the break appears
+      # in a partner's build rather than here. `bundled-sqlite` is kept on because Windows and
+      # Android have no system SQLite to link; it is `sync-google` that is being left out.
+      - name: Test without the Google pass
+        run: cargo test -p astrid-core --no-default-features --features bundled-sqlite
+
   # astrid-rules is the half of the core the web loads as WebAssembly. It builds for
   # wasm32-unknown-unknown only while it stays pure — no clock, disk, socket or OS entropy — so a
   # dependency that reaches for one fails here, the day it lands, rather than in the web's build.

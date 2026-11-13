@@ -111,6 +111,15 @@ impl TryFrom<StartConfig> for Config {
 /// (`require-base-url`). It leads the error's text, which is what every binding hands its shell.
 pub const CONFIG_BASE_URL_REQUIRED: &str = "CONFIG_BASE_URL_REQUIRED";
 
+/// The code a Google command is refused with in a build without `sync-google` — task `b92569a8`.
+///
+/// The command is still in [`command_kinds`]: a vocabulary that changes shape with a feature is a
+/// vocabulary every shell's bindings gate has to read a matrix of (astrid-windows'
+/// `bindings_contract.rs`, and the Apple and Android equivalents). So a partner build that does not
+/// mirror Google answers rather than forgets, and a shell can tell this refusal from a server one
+/// by the code.
+pub const SYNC_GOOGLE_UNAVAILABLE: &str = "SYNC_GOOGLE_UNAVAILABLE";
+
 /// Astrid's sign-in callback scheme — what [`Config::url_scheme`] is when a shell leaves it out.
 pub const DEFAULT_URL_SCHEME: &str = crate::services::auth::URL_SCHEME;
 

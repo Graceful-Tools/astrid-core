@@ -247,6 +247,7 @@ pub const EXTERNAL_INTERVAL: Duration = Duration::from_secs(300);
 ///
 /// Only Google: GitHub is a cron on the server, so a list linked to a repository syncs whether or
 /// not this app is open. Never while signed out, for the same reason the sync pass is not.
+#[cfg(feature = "sync-google")]
 pub async fn external_loop(
     app: Arc<App>,
     should_continue: impl Fn() -> bool + Send,
@@ -308,6 +309,19 @@ pub async fn external_loop(
             });
         }
     }
+}
+
+/// The same loop in a build with no Google pass: there is nothing to poll, so it returns — task
+/// `b92569a8`.
+///
+/// Kept as a function rather than removed because a shell spawns it by name. Returning at once is
+/// also what makes the five-minute timer go away: no sleep, no wake, no battery.
+#[cfg(not(feature = "sync-google"))]
+pub async fn external_loop(
+    _app: Arc<App>,
+    _should_continue: impl Fn() -> bool + Send,
+    _interval: Duration,
+) {
 }
 
 /// The default interval: sixty seconds, matching the other clients.

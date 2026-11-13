@@ -45,6 +45,9 @@ mod google;
 use super::Context;
 
 pub use common::{Container, ExternalLink, Provider};
+/// The pass's own report types, and so behind `sync-google` with the pass (task `b92569a8`).
+/// [`Provider`] is not: it is a model type the server fills regardless of what this build mirrors.
+#[cfg(feature = "sync-google")]
 pub use google::{AutoLinkReport, AutoLinkSettings, PassReport};
 
 pub struct ExternalSyncService {

@@ -145,12 +145,15 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         }
         Command::ExternalSync { list_id } => external_sync(app, &list_id).await,
         Command::ExternalAccounts => external_accounts(app).await,
+        #[cfg(feature = "sync-google")]
         Command::CreateAndLinkGoogleList { list_id, name } => answer(
             app.context
                 .external()
                 .create_and_link_google_list(&list_id, &name)
                 .await,
         ),
+        #[cfg(not(feature = "sync-google"))]
+        Command::CreateAndLinkGoogleList { .. } => sync_google_unavailable(),
         Command::ConnectProvider { provider } => {
             match app.context.external().authorize_url(provider).await {
                 Ok(url) => Response::ok(serde_json::json!({ "authorizeUrl": url })),
@@ -198,6 +201,7 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
+        #[cfg(feature = "sync-google")]
         Command::GoogleSyncMode => match app.context.external().auto_link_settings().await {
             Ok(settings) => Response::ok(serde_json::json!({
                 "mode": settings.mode,
@@ -205,12 +209,17 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             })),
             Err(error) => Response::failed(error.into()),
         },
+        #[cfg(not(feature = "sync-google"))]
+        Command::GoogleSyncMode => sync_google_unavailable(),
+        #[cfg(feature = "sync-google")]
         Command::SetGoogleSyncMode { mode, suffix } => answer_done(
             app.context
                 .external()
                 .set_auto_link_mode(mode, suffix.as_deref())
                 .await,
         ),
+        #[cfg(not(feature = "sync-google"))]
+        Command::SetGoogleSyncMode { .. } => sync_google_unavailable(),
         Command::ImportExternalLedger {
             provider,
             pending,
@@ -818,7 +827,21 @@ fn connected_as(integration: Option<&serde_json::Value>) -> Option<&str> {
         .and_then(|value| value.as_str())
 }
 
+/// The refusal a Google command gets in a build without `sync-google` — task `b92569a8`.
+///
+/// Not a panic and not a silent success: the command is in the vocabulary, so it has to answer,
+/// and a shell reads [`SYNC_GOOGLE_UNAVAILABLE`](crate::app::SYNC_GOOGLE_UNAVAILABLE) to tell this
+/// from the server refusing.
+#[cfg(not(feature = "sync-google"))]
+fn sync_google_unavailable() -> Response {
+    Response::failed(crate::app::Failure::unavailable_in_this_build(
+        crate::app::SYNC_GOOGLE_UNAVAILABLE,
+        "this build does not mirror Google Tasks; it was compiled without `sync-google`",
+    ))
+}
+
 /// One Google pass over every linked list.
+#[cfg(feature = "sync-google")]
 pub(super) async fn sync_external(app: &App) -> Response {
     let external = app.context.external();
     // Before the passes, so a list added on either side since the last one is linked and then
@@ -852,4 +875,10 @@ pub(super) async fn sync_external(app: &App) -> Response {
         "autoLinked": auto_linked,
         "myTasks": my_tasks,
     }))
+}
+
+/// `externalSync` in a build with no pass — task `b92569a8`.
+#[cfg(not(feature = "sync-google"))]
+pub(super) async fn sync_external(_app: &App) -> Response {
+    sync_google_unavailable()
 }

@@ -99,6 +99,21 @@ impl Failure {
         }
     }
 
+    /// A command this build knows but cannot serve, because the feature it needs was compiled out
+    /// (astrid-core's `sync-google`, task `b92569a8`).
+    ///
+    /// `Refused` with no HTTP status, like [`Self::waiting_needs_condition`]: this core said no,
+    /// not the server. The command stays in the vocabulary deliberately — removing it would give
+    /// `Command::kinds()` one shape per feature combination, and three repositories' bindings gates
+    /// each read that list — so "unavailable" has to be something a shell can *read*, which is what
+    /// `code` is for.
+    pub fn unavailable_in_this_build(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Failure {
+            code: Some(code.into()),
+            ..Self::of(FailureKind::Refused, message)
+        }
+    }
+
     /// The same failure, carrying a machine-readable `code`.
     pub fn with_code(self, code: impl Into<String>) -> Self {
         Failure {
