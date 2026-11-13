@@ -29,7 +29,13 @@ use serde::Deserialize;
 
 use crate::model::TaskList;
 
-const FIXTURE: &str = include_str!("../../../../contracts/fixtures/smart.json");
+/// The `keywords` object of `contracts/fixtures/smart.json`, minified, and nothing else of it.
+///
+/// `build.rs` extracts it so the fixture's test `cases` and provenance do not ride along in every
+/// binary on every platform — 84,448 bytes embedded to read 9 KB, which is what task `4d05306d`
+/// was about. The fixture itself stays the source; see `build.rs` for why it is narrowed there
+/// rather than committed twice.
+const EMBEDDED_KEYWORDS: &str = include_str!(concat!(env!("OUT_DIR"), "/smart_keywords.json"));
 
 /// One locale's words.
 #[derive(Debug, Clone, Deserialize)]
@@ -39,17 +45,11 @@ pub struct Keywords {
     pub repeating: HashMap<String, Vec<String>>,
 }
 
-#[derive(Deserialize)]
-struct Tables {
-    keywords: HashMap<String, Keywords>,
-}
-
 fn tables() -> &'static HashMap<String, Keywords> {
     static TABLES: OnceLock<HashMap<String, Keywords>> = OnceLock::new();
     TABLES.get_or_init(|| {
-        serde_json::from_str::<Tables>(FIXTURE)
+        serde_json::from_str::<HashMap<String, Keywords>>(EMBEDDED_KEYWORDS)
             .expect("contracts/fixtures/smart.json carries the keyword tables")
-            .keywords
     })
 }
 
@@ -428,6 +428,58 @@ mod tests {
 
     fn wednesday() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 9, 9).expect("a date")
+    }
+
+    /// Regression for astrid-windows task `4d05306d`: this module used to `include_str!` the whole
+    /// of `contracts/fixtures/smart.json` — 84,448 bytes — to read the 9 KB of `keywords` out of
+    /// it at first use. The rest rode along in the `.rodata` of every binary on every platform:
+    /// 37,754 bytes of the fixture's 220 `cases`, plus the pretty-printing, none of which any
+    /// client can reach. It mattered most for `astrid-rules-wasm`, which the browser has to
+    /// download, but the Windows `astrid_ffi.dll` and the Apple and Android builds paid it too.
+    ///
+    /// `build.rs` now re-emits only the `keywords` object, minified, so the budget below is the
+    /// shape of the embedded blob rather than a size the next edit has to guess at. The `cases`
+    /// are still checked — by `tests/smart_contract.rs`, which reads the fixture from disk, which
+    /// is where a test's inputs belong.
+    #[test]
+    fn only_the_keyword_tables_are_embedded() {
+        assert!(
+            !EMBEDDED_KEYWORDS.contains("\"cases\""),
+            "the fixture's test cases are in the binary again: embedding {} bytes",
+            EMBEDDED_KEYWORDS.len()
+        );
+        assert!(
+            !EMBEDDED_KEYWORDS.contains("\"generatedFrom\""),
+            "the whole fixture is in the binary again, not just its keywords"
+        );
+        assert!(
+            EMBEDDED_KEYWORDS.len() < 16 * 1024,
+            "the embedded keyword tables grew to {} bytes; they were 9 KB when this budget was \
+             set, and the point of task 4d05306d was that nothing unreachable ships with them",
+            EMBEDDED_KEYWORDS.len()
+        );
+    }
+
+    /// The narrowing is only sound if every locale survived it, so prove the tables still answer
+    /// for one of each kind: a plain language, a region tag, and the CJK table whose word
+    /// boundaries differ.
+    #[test]
+    fn narrowing_the_embed_kept_every_locale() {
+        for locale in ["en", "en-US", "de", "fr", "zh-CN", "ja"] {
+            let keywords = Keywords::for_locale(locale);
+            assert!(
+                !keywords.dates.is_empty(),
+                "{locale} lost its date words when the embed was narrowed"
+            );
+            assert!(
+                !keywords.priorities.is_empty(),
+                "{locale} lost its priority words when the embed was narrowed"
+            );
+            assert!(
+                !keywords.repeating.is_empty(),
+                "{locale} lost its repeat words when the embed was narrowed"
+            );
+        }
     }
 
     #[test]

@@ -17,3 +17,9 @@ chrono-tz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 pulldown-cmark = { workspace = true }
+
+# `build.rs` narrows `contracts/fixtures/smart.json` to its `keywords` before they are embedded
+# (task 4d05306d). It runs on the host at build time, so this is not a wasm or runtime dependency,
+# and it is a crate the lockfile already carries.
+[build-dependencies]
+serde_json = { workspace = true }
