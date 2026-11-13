@@ -196,8 +196,8 @@ jobs:
       - name: Check
         run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-features --all-targets
 
-  # Four repositories pin this core by revision, and nothing recorded what those revisions were
-  # until CONSUMERS.md did. The November 2026 platform assessment read the Windows pin as 96
+  # Nine copies of this core live in six repositories, each pinned by revision, and nothing
+  # recorded what those revisions were until CONSUMERS.md did. The November 2026 platform assessment read the Windows pin as 96
   # commits behind off a manifest that had already been bumped three times, which is what a table
   # nobody checks costs. `check-pins` asks whether every consumer is listed, whether each revision
   # is a real commit, and whether it is an ancestor of main — a pin at an unmerged branch means a
@@ -227,8 +227,8 @@ jobs:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
 
-      # The other three are PRIVATE, and `secrets.GITHUB_TOKEN` is scoped to this repository
-      # alone — so reading their manifests needs a token with read access to all three
+      # The others are PRIVATE, and `secrets.GITHUB_TOKEN` is scoped to this repository
+      # alone — so reading their manifests needs a token with read access to them
       # (`CONSUMER_PINS_TOKEN`). Until 4c891314 the workflow had none, and those rows were checked
       # for shape and history while nothing compared them to the manifests they claim to describe:
       # all three could drift silently, which is the exact failure CONSUMERS.md was written to end.
@@ -257,17 +257,38 @@ jobs:
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-android
 
+      # The two Astrid Code repositories vendor the rules wasm and were in no row until 97285677.
+      # The token predates them, so until its access is widened (task fd7cf5c6) these two steps
+      # fail to find the repository and their rows report as unchecked — which is the same answer
+      # the check gives a fork, and is why that is not a failure.
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        continue-on-error: true
+        with:
+          repository: Graceful-Tools/astrid-vscode
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-vscode
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        continue-on-error: true
+        with:
+          repository: Graceful-Tools/astrid-code
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-code
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: astrid-core
           key: pins
 
-      # All four paths, every run. A path that is not there is reported unchecked, so the same
+      # All six paths, every run. A path that is not there is reported unchecked, so the same
       # command is right with the secret and without it — one invocation rather than two that can
-      # disagree.
+      # disagree. One path per REPOSITORY, not per row: astrid-web, astrid-windows and astrid-ios
+      # each hold two copies of this core, and naming the checkout once serves both of its rows.
       - name: Check the pins table
         working-directory: astrid-core
-        run: cargo xtask check-pins ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
+        run: cargo xtask check-pins ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android ../astrid-vscode ../astrid-code
 
       # The design tokens are pinned the same way: astrid-web vendors design/generated at the
       # revision in its packages/astrid-design/REVISION. Here because the comparison reads that
