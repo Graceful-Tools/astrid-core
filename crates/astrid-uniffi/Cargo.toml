@@ -1,0 +1,39 @@
+[package]
+name = "astrid-uniffi"
+description = "UniFFI bindings from astrid-core to the Apple apps (Swift) and the Android app (Kotlin)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# One binding crate for every UniFFI shell (Jon, 2026-11-12, reversing "each client keeps its own
+# binding layer"): astrid-ios's `core/astrid-apple` and astrid-android's `core/astrid-android` were
+# the same file with different doc comments, so a fix to one had to be carried to the other by hand.
+# astrid-windows keeps its C ABI (`astrid-ffi`) beside its shell — UniFFI has no C# generator.
+#
+# A shell overrides the crate type for its own build: Apple builds the staticlib ALONE
+# (`cargo rustc --crate-type staticlib`), because with a second crate type rustc skips LTO and keeps
+# every crate's bitcode (astrid-ios AITD-625); Android builds the cdylib its JNA loads. `lib` is what
+# the bindgen reads the metadata from.
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "astrid_uniffi"
+
+# Which SQLite the shell links, passed straight through to `astrid-core`'s own feature: Android needs
+# it compiled in (no `libsqlite3` an NDK link can find); Apple can take `default-features = false`
+# and link the system copy it already carries.
+[features]
+default = ["bundled-sqlite"]
+bundled-sqlite = ["astrid-core/bundled-sqlite"]
+
+[dependencies]
+astrid-core = { path = "../astrid-core", version = "0.1.0", default-features = false }
+uniffi = "0.32"
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

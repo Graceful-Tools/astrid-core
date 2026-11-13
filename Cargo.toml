@@ -6,14 +6,15 @@
 # It has NO platform dependency — platform services arrive through callback traits a shell
 # implements — so it builds and tests on Windows, macOS and Linux alike.
 #
-# Each client keeps its own binding layer beside its shell: astrid-windows has `astrid-ffi`, the
-# C ABI its WinUI shell calls; the Apple apps are expected to bind through UniFFI. What is shared
-# is here, and only what is shared.
+# The UniFFI binding layer is shared too: `crates/astrid-uniffi`, which the Apple apps (Swift) and
+# Android (Kotlin) both build — one crate since 2026-11-12, where each used to keep a copy.
+# astrid-windows keeps `astrid-ffi`, the C ABI its WinUI shell calls, beside its shell. What is
+# shared is here, and only what is shared.
 #
 # See README.md for the rules that govern what may live where.
 [workspace]
 resolver = "2"
-members = ["crates/astrid-rules", "crates/astrid-rules-wasm", "crates/astrid-core", "crates/xtask"]
+members = ["crates/astrid-rules", "crates/astrid-rules-wasm", "crates/astrid-core", "crates/astrid-uniffi", "crates/xtask"]
 
 [workspace.package]
 version = "0.1.0"

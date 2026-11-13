@@ -10,9 +10,9 @@ Who uses it, and how:
 | Repository | Uses | Through |
 |---|---|---|
 | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules` only (the pure rules), on its Node server | WebAssembly committed to `packages/astrid-rules`, pinned in its `REVISION` file |
-| [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) (iOS, iPadOS, Mac) | the whole core | UniFFI (`core/astrid-apple`), pinned by revision; see its `docs/CORE_MIGRATION.md` |
+| [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) (iOS, iPadOS, Mac) | the whole core | UniFFI, through this repository's `crates/astrid-uniffi`, pinned by revision; see its `docs/CORE_MIGRATION.md` |
 | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) (the first consumer) | the whole core | a C ABI (`crates/astrid-ffi`), pinned by revision |
-| [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core | UniFFI (`core/`), pinned by revision |
+| [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core | UniFFI (`core/`, moving onto `crates/astrid-uniffi`), pinned by revision |
 
 astrid-web is also where the rules are **defined**: its TypeScript is canonical and generates the
 fixtures this crate is tested against. The one exception is a case where web disagrees with iOS
@@ -22,8 +22,8 @@ fixtures this crate is tested against. The one exception is a case where web dis
 
 ```
 astrid-windows   app/Astrid.App (WinUI, C#)  ──  crates/astrid-ffi (C ABI)  ──────┐
-astrid-ios       Astrid App / Astrid Mac (Swift)  ──  UniFFI (astrid-ios/core) ────┤
-astrid-android   app/ (Kotlin, Compose)  ──  UniFFI (astrid-android/core)  ────────┤──  astrid-core
+astrid-ios       Astrid App / Astrid Mac (Swift)  ──  crates/astrid-uniffi (UniFFI) ┤
+astrid-android   app/ (Kotlin, Compose)  ──  crates/astrid-uniffi (UniFFI)  ────────┤──  astrid-core
                                                                                    │
                                                         HTTPS /api/v1/*  ◄─────────┘
                                                         astrid-web (astrid.cc)
@@ -115,11 +115,13 @@ nothing.
 
 ## Layout
 
-Two crates. `astrid-rules` is the pure half — no clock, disk, network or entropy, so it also
+Three crates, and the build tool. `astrid-rules` is the pure half — no clock, disk, network or entropy, so it also
 builds for `wasm32-unknown-unknown` and the web can run the same rules (CI checks that build).
 `astrid-core` is everything that waits on something, and re-exports every `astrid-rules` module at
 its old path (`astrid_core::repeating`, `astrid_core::rules`, `astrid_core::model`, …), so a client
-names the same items either way.
+names the same items either way. `astrid-uniffi` is the binding layer every UniFFI shell builds —
+Swift for the Apple apps, Kotlin for Android — one crate since 2026-11-12 rather than a copy in each
+client (astrid-windows keeps its C ABI, `astrid-ffi`, beside its shell: UniFFI has no C# generator).
 
 ```
 crates/astrid-rules/src/
@@ -131,6 +133,7 @@ crates/astrid-rules/src/
 crates/astrid-rules/tests/   the fixture-locked contract tests
 crates/astrid-rules-wasm/    `rules::run_json` for the web, via wasm-bindgen; `scripts/build-wasm.sh
                              <out>` writes the Node and browser packages astrid-web vendors
+crates/astrid-uniffi/        the UniFFI doors (rules + client) and callbacks, for Swift and Kotlin
 crates/astrid-core/src/
   api/          the only place that speaks HTTP
   store/        the SQLite cache; the read path never waits on the network
