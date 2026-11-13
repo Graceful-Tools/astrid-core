@@ -316,6 +316,33 @@ pub enum Rule {
         #[serde(default)]
         assignee_id: Option<String>,
     },
+    /// Which of these tasks a reminder puts in front of somebody, in what order —
+    /// [`crate::rows::triage::deck`]. iOS's `Tasks/ReminderTriage.swift` (task `75a27f7f`), asked
+    /// as a notification is tapped.
+    ///
+    /// Answers **ids**, not rows: a row is assembled from the lists, the users and the subtask
+    /// counts, none of which this door has — the App door's `reminderTriageDeck` is where a
+    /// drawn row comes from. The caller already holds the tasks it sent, so ids are enough to
+    /// order them.
+    ///
+    /// The App door also answers `assistant`. That is `users.find(…)` over the cache, a lookup
+    /// rather than a rule, so it does not belong here.
+    ReminderTriage {
+        #[serde(default)]
+        tasks: Vec<Task>,
+        /// The signed-in user's id. The deck is **what is due for me**, so without one there is
+        /// nobody to triage for and the answer is empty rather than everybody's.
+        #[serde(default)]
+        user_id: Option<String>,
+        /// The task the notification fired for, if it fired for one.
+        #[serde(default)]
+        reminded_task_id: Option<String>,
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes: which calendar day "today" is.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+    },
 }
 
 /// Where a drop happened, as the wire spells it: `{"on": "<id>"}`, `"line"`, `"outdent"` or
@@ -364,6 +391,14 @@ struct QuickAddDefaultsAnswer {
     is_all_day: bool,
     repeating: Option<crate::model::Repeating>,
     is_private: bool,
+}
+
+/// [`Rule::ReminderTriage`]'s answer: the deck, in the order it is dealt, as ids into the tasks
+/// the caller sent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReminderTriageAnswer {
+    task_ids: Vec<String>,
 }
 
 /// [`Rule::Nesting`]'s answer: what the drop means, and the parent it nests under when it makes
@@ -705,6 +740,33 @@ pub fn run(rule: Rule) -> Response {
                 is_all_day: draft.is_all_day,
                 repeating: draft.repeating,
                 is_private: draft.is_private,
+            })
+        }
+        Rule::ReminderTriage {
+            tasks,
+            user_id,
+            reminded_task_id,
+            now,
+            utc_offset_minutes,
+        } => {
+            let Some(zone) = utc_offset_minutes
+                .checked_mul(60)
+                .and_then(chrono::FixedOffset::east_opt)
+            else {
+                return Response::failed(Failure::bad_request(format!(
+                    "{utc_offset_minutes} minutes is not an offset from UTC"
+                )));
+            };
+            // Nobody signed in is an empty deck, not everybody's: the question is what is due for
+            // ME, and there is no me.
+            let deck = match user_id.as_deref() {
+                Some(me) => {
+                    crate::rows::triage::deck(&tasks, me, reminded_task_id.as_deref(), now, zone)
+                }
+                None => Vec::new(),
+            };
+            Response::ok(ReminderTriageAnswer {
+                task_ids: deck.into_iter().map(|task| task.id.clone()).collect(),
             })
         }
         Rule::CopyOnly {
@@ -1233,6 +1295,46 @@ mod tests {
             "list": { "id": "l1", "name": "Work" },
             "now": "2026-09-07T12:00:00.000Z",
             "utcOffsetMinutes": 2147483647
+        }));
+        assert_eq!(absurd["ok"], false, "{absurd}");
+    }
+
+    /// Task 75a27f7f: `Tasks/ReminderTriage.swift` decides what a tapped notification puts in
+    /// front of somebody. Mine, open and due; the reminded one first; ids, not rows.
+    #[test]
+    fn task_75a27f7f_the_door_deals_the_triage_deck() {
+        let tasks = json!([
+            { "id": "late", "assigneeId": "me", "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "theirs", "assigneeId": "bo", "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
+            { "id": "pinged", "assigneeId": "me", "dueDateTime": "2099-06-01T00:00:00Z", "isAllDay": true }
+        ]);
+
+        assert_eq!(
+            answer(json!({
+                "kind": "reminderTriage", "tasks": tasks, "userId": "me",
+                "remindedTaskId": "pinged", "now": "2026-06-15T12:00:00Z"
+            }))["value"],
+            json!({ "taskIds": ["pinged", "late"] })
+        );
+        // Not due yet, and nobody pinged it.
+        assert_eq!(
+            answer(json!({
+                "kind": "reminderTriage", "tasks": tasks, "userId": "me",
+                "now": "2026-06-15T12:00:00Z"
+            }))["value"],
+            json!({ "taskIds": ["late"] })
+        );
+        // Nobody signed in: nobody to triage for, so an empty deck rather than everybody's.
+        assert_eq!(
+            answer(json!({
+                "kind": "reminderTriage", "tasks": tasks, "now": "2026-06-15T12:00:00Z"
+            }))["value"],
+            json!({ "taskIds": [] })
+        );
+        // An offset no clock has is refused rather than quietly read as UTC.
+        let absurd = answer(json!({
+            "kind": "reminderTriage", "tasks": tasks, "userId": "me",
+            "now": "2026-06-15T12:00:00Z", "utcOffsetMinutes": 999_999
         }));
         assert_eq!(absurd["ok"], false, "{absurd}");
     }

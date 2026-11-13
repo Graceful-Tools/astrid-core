@@ -31,6 +31,7 @@ pub mod nesting;
 pub mod reminder_picks;
 pub mod repeat;
 pub mod sidebar;
+pub mod triage;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
