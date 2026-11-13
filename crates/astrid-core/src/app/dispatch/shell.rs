@@ -144,6 +144,38 @@ pub(super) fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
+        // DS19. Read exactly as the theme above is: the cache holds it, an unreadable or unknown
+        // value is the default rather than an error, and the shell is handed `maxLines` so that it
+        // never matches on the names to draw a row.
+        Command::TitleDisplay => {
+            let chosen = app
+                .store
+                .metadata(crate::title_display::KEY)
+                .ok()
+                .flatten()
+                .map(|value| crate::title_display::TitleDisplay::parse(&value))
+                .unwrap_or_default();
+            Response::ok(serde_json::json!({
+                "titleDisplay": chosen,
+                "maxLines": chosen.max_lines(),
+                "choices": crate::title_display::TitleDisplay::all()
+                    .iter()
+                    .map(|display| display.wire())
+                    .collect::<Vec<_>>(),
+            }))
+        }
+        Command::SetTitleDisplay { display } => {
+            match app
+                .store
+                .set_metadata(crate::title_display::KEY, display.wire())
+            {
+                Ok(()) => Response::ok(serde_json::json!({
+                    "titleDisplay": display,
+                    "maxLines": display.max_lines(),
+                })),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
         Command::HasSeenTour => Response::ok(serde_json::json!({
             "seen": app
                 .store

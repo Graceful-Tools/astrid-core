@@ -131,6 +131,60 @@ async fn auto_leaves_the_appearance_to_the_system() {
     assert!(held["value"]["isDark"].is_null());
 }
 
+/// DS19, and the behaviour change: every client truncated a long title before this. Somebody who
+/// has never opened settings now sees the whole thing, and `maxLines` says so without the shell
+/// having to know what "wrap" means. Task 3d5cca89.
+#[tokio::test]
+async fn a_row_title_wraps_until_somebody_asks_for_less() {
+    let app = app_with(StubTransport::new());
+
+    let answer = call(&app, json!({ "kind": "titleDisplay" })).await;
+
+    assert_eq!(answer["value"]["titleDisplay"], "wrap");
+    assert!(
+        answer["value"]["maxLines"].is_null(),
+        "wrap is not a line count"
+    );
+    assert_eq!(
+        answer["value"]["choices"],
+        json!(["wrap", "twoLines", "oneLine"])
+    );
+}
+
+/// It belongs to the machine, like the theme, so it has to survive being asked for again — and
+/// the shell is handed the count rather than the name. Task 3d5cca89.
+#[tokio::test]
+async fn a_chosen_title_display_is_remembered_with_its_line_count() {
+    let app = app_with(StubTransport::new());
+
+    let set = call(
+        &app,
+        json!({ "kind": "setTitleDisplay", "display": "twoLines" }),
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["value"]["maxLines"], 2);
+
+    let held = call(&app, json!({ "kind": "titleDisplay" })).await;
+    assert_eq!(held["value"]["titleDisplay"], "twoLines");
+    assert_eq!(held["value"]["maxLines"], 2);
+}
+
+/// The tightest option is one line, not none — a row that drew zero lines of title would be a
+/// blank list, and a shell that took `maxLines` literally would draw exactly that. Task 3d5cca89.
+#[tokio::test]
+async fn one_line_is_one_line() {
+    let app = app_with(StubTransport::new());
+
+    let set = call(
+        &app,
+        json!({ "kind": "setTitleDisplay", "display": "oneLine" }),
+    )
+    .await;
+
+    assert_eq!(set["value"]["maxLines"], 1);
+}
+
 /// Once. A tour that came back every launch would be the first thing anybody turned off.
 #[tokio::test]
 async fn the_tour_is_shown_once() {

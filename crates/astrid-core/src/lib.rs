@@ -33,6 +33,7 @@ pub mod sync;
 pub use astrid_rules::{
     board, board_cards, decisions, editing, filters, identifier, keyboard, manual_order, markdown,
     model, palette, parse, permissions, reminders, repeating, rows, rules, smart_tasks, theme,
+    title_display,
 };
 
 /// The revision of this core that a client was built against.

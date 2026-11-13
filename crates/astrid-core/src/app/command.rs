@@ -1401,6 +1401,12 @@ pub enum Command {
     SetTheme {
         theme: crate::theme::Theme,
     },
+    /// How much of a title a row shows: wrap, two lines or one line (DS19).
+    TitleDisplay,
+    /// Choose how much of a title a row shows. This machine's, like the theme.
+    SetTitleDisplay {
+        display: crate::title_display::TitleDisplay,
+    },
     /// The My Tasks entry for the sidebar: the view the app opens on.
     MyTasksList,
     /// What My Tasks is filtered and sorted by.

@@ -35,4 +35,5 @@ pub mod rows;
 pub mod rules;
 pub mod smart_tasks;
 pub mod theme;
+pub mod title_display;
 pub mod waiting;

@@ -248,6 +248,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::CommitAllEditing
         | Command::Theme
         | Command::SetTheme { .. }
+        | Command::TitleDisplay
+        | Command::SetTitleDisplay { .. }
         | Command::HasSeenTour
         | Command::TourSeen
         | Command::Palette { .. }) => shell::run(app, command),

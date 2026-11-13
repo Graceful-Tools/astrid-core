@@ -177,6 +177,7 @@ setTaskProjectField
 setTaskStatus
 setTaskStatusRole
 setTheme
+setTitleDisplay
 settings
 shareList
 shareTask
@@ -199,6 +200,7 @@ tasks
 testAgentCredential
 testWebhook
 theme
+titleDisplay
 toggleAssignee
 tourSeen
 transferListOwnership
