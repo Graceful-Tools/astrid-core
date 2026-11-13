@@ -7,6 +7,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Which SQLite a client links. `bundled` compiles it in, which Windows and Android require —
+# neither has a `libsqlite3` an MSVC or NDK link can find — so it is ON by default and every
+# consumer that says nothing keeps today's behaviour. Apple turns it off
+# (`default-features = false`) to link the system SQLite it already carries. Asserted by
+# `tests/build_features.rs`, which is the only layer of the gate that can see build configuration
+# (task `f1210dd8`).
+[features]
+default = ["bundled-sqlite"]
+bundled-sqlite = ["rusqlite/bundled"]
+
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
 chrono = { workspace = true }

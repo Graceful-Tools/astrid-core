@@ -57,9 +57,13 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "nat
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "fs"] }
 async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-# The offline cache. `bundled` compiles SQLite itself: the version is then the same on every
-# machine and every architecture, rather than whatever the OS happens to ship.
-rusqlite = { version = "0.41", features = ["bundled", "chrono", "serde_json", "backup"] }
+# The offline cache. Whether SQLite is COMPILED IN is deliberately not decided here: rusqlite's
+# `bundled` requested at this level is a feature no consumer can remove — `default-features =
+# false` does not take back an explicitly named feature — and Apple links the system SQLite
+# already, so a second copy cost the iOS binary and `libastrid_apple.a` megabytes for a library
+# the OS had. It is `astrid-core`'s `bundled-sqlite` feature instead, on by default (task
+# `f1210dd8`). What stays here is what every client wants either way.
+rusqlite = { version = "0.41", features = ["chrono", "serde_json", "backup"] }
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 # Markdown, for task descriptions, comments and chat: the same GFM the web renders through
