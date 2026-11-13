@@ -354,6 +354,154 @@ pub async fn realtime_loop(app: Arc<App>, should_continue: impl Fn() -> bool + S
     }
 }
 
+/// Which of the background loops a shell starts.
+///
+/// **The policy is [`LoopSet::ALL`], and it lives here because it is not a shell's to decide.**
+/// Apple started three of the five and Windows and Android started all five, so "is this account
+/// current?" had a different answer on each platform and adding a loop meant editing three
+/// repositories. A named subset exists for the one honest reason to want one — a harness that
+/// wants an app with nothing running behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoopSet {
+    /// The sixty-second sync pass.
+    pub sync: bool,
+    /// The Outbox drain, woken by a write.
+    pub outbox: bool,
+    /// The half-minute look for a reminder that has come due.
+    pub reminders: bool,
+    /// The five-minute mirror of the externally-linked lists.
+    pub external: bool,
+    /// The live-update stream, kept connected.
+    pub realtime: bool,
+}
+
+impl LoopSet {
+    /// Every loop. What a shell starts, on every platform.
+    pub const ALL: Self = Self {
+        sync: true,
+        outbox: true,
+        reminders: true,
+        external: true,
+        realtime: true,
+    };
+
+    /// None of them, for a harness that wants an app that does nothing until it is asked.
+    pub const NONE: Self = Self {
+        sync: false,
+        outbox: false,
+        reminders: false,
+        external: false,
+        realtime: false,
+    };
+
+    /// How many loops this set starts.
+    pub fn count(&self) -> usize {
+        [
+            self.sync,
+            self.outbox,
+            self.reminders,
+            self.external,
+            self.realtime,
+        ]
+        .into_iter()
+        .filter(|started| *started)
+        .count()
+    }
+}
+
+impl Default for LoopSet {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+/// The loops a shell started, and the one thing it has to hold: the flag that stops them.
+///
+/// Dropping the runtime would stop them anyway, but only at each loop's next await point — which
+/// for a stream sitting on a socket is whenever the server next says something. Asking them to
+/// stop first means closing the app takes a moment rather than however long a quiet connection
+/// stays quiet.
+pub struct BackgroundLoops {
+    running: Arc<std::sync::atomic::AtomicBool>,
+    started: usize,
+}
+
+impl BackgroundLoops {
+    /// Ask every loop to finish at its next await point. Idempotent.
+    pub fn stop(&self) {
+        self.running
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the loops have been asked to stop.
+    pub fn is_running(&self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How many loops were spawned — [`LoopSet::count`] of the set that started them.
+    pub fn started(&self) -> usize {
+        self.started
+    }
+}
+
+/// Dropping the handle stops the loops.
+///
+/// Without this, a shell that closes its window and drops everything leaves five tasks polling a
+/// server until the runtime itself goes. Stopping is the only correct meaning of "nobody holds
+/// these any more".
+impl Drop for BackgroundLoops {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Start the background loops for `app` on `handle`, and hand back the flag that stops them.
+///
+/// Prefer [`App::start_background`], which is this with the app already in hand.
+pub fn start(app: &Arc<App>, handle: &tokio::runtime::Handle, loops: LoopSet) -> BackgroundLoops {
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+    // One flag, read by every loop. `keep_going` is rebuilt per loop because each takes it by
+    // value, and `realtime_loop` needs one that is `Copy` so its inner reconnect can check it too.
+    macro_rules! keep_going {
+        () => {{
+            let running = running.clone();
+            move || running.load(std::sync::atomic::Ordering::Relaxed)
+        }};
+    }
+
+    if loops.sync {
+        handle.spawn(sync_loop(
+            app.clone(),
+            keep_going!(),
+            default_sync_interval(),
+        ));
+    }
+    if loops.outbox {
+        let nudge = app.outbox_nudge().clone();
+        handle.spawn(outbox_loop(app.clone(), keep_going!(), nudge));
+    }
+    if loops.reminders {
+        handle.spawn(reminder_loop(app.clone(), keep_going!(), REMINDER_INTERVAL));
+    }
+    if loops.external {
+        handle.spawn(external_loop(app.clone(), keep_going!(), EXTERNAL_INTERVAL));
+    }
+    if loops.realtime {
+        let app = app.clone();
+        let keep_going = keep_going!();
+        handle.spawn(async move {
+            let keep_going = keep_going;
+            realtime_loop(app, &keep_going).await;
+        });
+    }
+
+    BackgroundLoops {
+        running,
+        started: loops.count(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -898,5 +1046,49 @@ mod tests {
         realtime_loop(app, &keep_going).await;
 
         assert!(transport.requests().is_empty());
+    }
+
+    /// The policy is "every shell runs every loop", and it is written down once.
+    ///
+    /// Apple started three of the five and Windows and Android started all five, so an account
+    /// that was current on one platform was stale on another and adding a loop meant editing
+    /// three repositories (astrid-windows task `ab249b76`). [`LoopSet::ALL`] is now the answer,
+    /// and a loop added below without being named here fails this.
+    #[test]
+    fn every_loop_is_in_the_shared_policy() {
+        let all = LoopSet::ALL;
+        assert!(all.sync && all.outbox && all.reminders && all.external && all.realtime);
+        assert_eq!(all.count(), 5);
+        assert_eq!(LoopSet::default().count(), 5);
+        assert_eq!(LoopSet::NONE.count(), 0);
+    }
+
+    /// A shell starts the loops with one line and gets back the one thing it has to hold: the
+    /// flag that stops them. Starting fewer is possible — a test harness wants none — but it is a
+    /// deliberate, named subset, not five copies of a spawn.
+    #[tokio::test(start_paused = true)]
+    async fn start_background_spawns_the_set_and_stop_ends_them() {
+        let app = app_with(StubTransport::new(), Arc::new(MemorySecureStore::new()));
+
+        let loops = app.start_background(&tokio::runtime::Handle::current(), LoopSet::ALL);
+        assert_eq!(loops.started(), 5);
+        assert!(loops.is_running());
+
+        loops.stop();
+        assert!(!loops.is_running());
+    }
+
+    /// Dropping the handle stops them too. The alternative is a shell that closes its window,
+    /// drops everything, and leaves five tasks polling a server until the runtime notices.
+    #[tokio::test(start_paused = true)]
+    async fn dropping_the_handle_stops_the_loops() {
+        let app = app_with(StubTransport::new(), Arc::new(MemorySecureStore::new()));
+
+        let still_running = {
+            let loops = app.start_background(&tokio::runtime::Handle::current(), LoopSet::NONE);
+            loops.running.clone()
+        };
+
+        assert!(!still_running.load(Ordering::SeqCst));
     }
 }

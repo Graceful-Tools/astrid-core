@@ -193,6 +193,28 @@ impl App {
         &self.outbox_nudge
     }
 
+    /// Start the loops that keep the app up to date without being asked.
+    ///
+    /// One line per shell, and the same loops everywhere: which of them run is
+    /// [`background::LoopSet`]'s to say, not a window's (astrid-windows task `ab249b76`). Hold
+    /// the returned [`background::BackgroundLoops`] for as long as the app is open — dropping it
+    /// stops them.
+    ///
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use astrid_core::app::{background::LoopSet, App};
+    /// # fn example(app: Arc<App>, runtime: &tokio::runtime::Runtime) {
+    /// let loops = app.start_background(runtime.handle(), LoopSet::ALL);
+    /// # }
+    /// ```
+    pub fn start_background(
+        self: &Arc<Self>,
+        handle: &tokio::runtime::Handle,
+        loops: background::LoopSet,
+    ) -> background::BackgroundLoops {
+        background::start(self, handle, loops)
+    }
+
     /// The cache, for tests that need to seed one.
     ///
     /// Public because the performance tests build an account of ten thousand tasks and going
