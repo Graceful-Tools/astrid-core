@@ -105,6 +105,10 @@
         "type": "path",
         "env": "NEXT_PUBLIC_BRAND_ICON"
       },
+      "icon-source": {
+        "type": "path",
+        "alias": "iconSource"
+      },
       "icon-small": {
         "type": "path",
         "env": "NEXT_PUBLIC_BRAND_ICON_SMALL"
