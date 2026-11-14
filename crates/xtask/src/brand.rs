@@ -85,6 +85,10 @@ struct Field {
     required: bool,
     /// The `NEXT_PUBLIC_*`/`BRAND_*` key this field is also readable as.
     env: Option<String>,
+    /// The names this field is also readable as **inside its own block** — the keys the clients
+    /// actually spell. `env` aliases a field to a flat environment key; this aliases it to another
+    /// key in the same section, which is what a platform block needs (task b8f019d8).
+    aliases: Vec<String>,
     /// Astrid's own value, used when a profile states none. This is what lets
     /// `astrid.brand.json` set nothing at all and still describe Astrid.
     default: Option<String>,
@@ -146,6 +150,15 @@ fn fields(raw: &Value, what: &str) -> Result<BTreeMap<String, Field>, Vec<String
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
                         env: spec.get("env").and_then(Value::as_str).map(str::to_string),
+                        aliases: match spec.get("alias") {
+                            Some(Value::String(one)) => vec![one.clone()],
+                            Some(Value::Array(many)) => many
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect(),
+                            _ => Vec::new(),
+                        },
                         default: spec
                             .get("default")
                             .and_then(Value::as_str)
@@ -257,10 +270,16 @@ impl Schema {
 
         for (key, field) in self.all() {
             let (section, name) = key.split_once('.').expect("built with a dot");
-            let from_section = object
-                .get(section)
-                .and_then(Value::as_object)
-                .and_then(|s| s.get(name))
+            let block = object.get(section).and_then(Value::as_object);
+            // The schema's own name first, then the names the clients spell. Same rule as `env`
+            // below, one level in: a profile that has migrated says so by having the canonical
+            // key, and the one it moved away from must not win.
+            let from_section = block
+                .and_then(|s| {
+                    std::iter::once(name)
+                        .chain(field.aliases.iter().map(String::as_str))
+                        .find_map(|candidate| s.get(candidate))
+                })
                 .map(scalar);
             let from_env = field
                 .env
@@ -499,6 +518,7 @@ fn android_properties(profile: &Profile) -> String {
     for (property, key) in [
         ("brand.name", "identity.name"),
         ("brand.title", "identity.title"),
+        ("brand.appName", "android.app-name"),
         ("brand.package", "android.package"),
         ("brand.domain", "identity.domain"),
         ("brand.urlScheme", "identity.url-scheme"),
@@ -570,6 +590,11 @@ fn windows_manifest(profile: &Profile) -> String {
         ("identity", "windows.package-identity"),
         ("publisher", "windows.publisher"),
         ("displayName", "windows.display-name"),
+        // The Partner Center account's publisher display name, which is a different value from
+        // the app's own and must match the account or certification refuses the submission.
+        ("publisherDisplayName", "windows.publisher-display-name"),
+        // A tile directory, relative to the profile, replacing packaging/Assets.
+        ("assets", "windows.assets"),
         ("protocol", "identity.url-scheme"),
     ] {
         if let Some(value) = profile.get(key) {
@@ -590,7 +615,12 @@ fn vscode_json(profile: &Profile) -> String {
             Value::String(publisher.to_string()),
         );
     }
-    if let Some(title) = profile.get("identity.title") {
+    // The block's own name if it states one, otherwise the brand's title: an extension can be
+    // listed under something other than the product's own name.
+    if let Some(title) = profile
+        .get("vscode.display-name")
+        .or_else(|| profile.get("identity.title"))
+    {
         package.insert("displayName".to_string(), Value::String(title.to_string()));
     }
     if let Some(tagline) = profile.get("identity.tagline") {
@@ -611,8 +641,17 @@ fn code_product(profile: &Profile) -> String {
             Value::String(name.to_string()),
         );
     }
-    if let Some(title) = profile.get("identity.title") {
-        product.insert("nameLong".to_string(), Value::String(title.to_string()));
+    // Astrid Code names itself twice: a short name for the window and the dock, a long one for
+    // the about box. A block that states either wins; the title is the fallback for the long one,
+    // and the short name has no fallback because a guessed abbreviation reads worse than none.
+    if let Some(long) = profile
+        .get("code.name-long")
+        .or_else(|| profile.get("identity.title"))
+    {
+        product.insert("nameLong".to_string(), Value::String(long.to_string()));
+    }
+    if let Some(short) = profile.get("code.name-short") {
+        product.insert("nameShort".to_string(), Value::String(short.to_string()));
     }
     if !bundle.is_empty() {
         product.insert(
@@ -807,6 +846,19 @@ mod tests {
 
     fn schema() -> Schema {
         Schema::parse(SCHEMA_SOURCE).expect("the test schema is valid")
+    }
+
+    /// The schema as it is shipped. The alias tests use this rather than a sample, because the
+    /// bug they pin was in the shipped names themselves, not in the mechanism.
+    fn shipped() -> Schema {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(SCHEMA),
+        )
+        .expect("brand/schema.json is in the repository");
+
+        Schema::parse(&source).expect("the shipped schema is valid")
     }
 
     /// The shape every profile in astrid-web's `brands/` has today: an `env` bag and nothing else.
@@ -1046,14 +1098,7 @@ mod tests {
     /// The schema in the repository is the one the generator is written against, not a sample.
     #[test]
     fn the_shipped_schema_parses_77367032() {
-        let source = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join(SCHEMA),
-        )
-        .expect("brand/schema.json is in the repository");
-
-        let schema = Schema::parse(&source).expect("the shipped schema is valid");
+        let schema = shipped();
 
         assert_eq!(schema.version(), 1);
         for platform in ["web", "ios", "mac", "android", "windows", "vscode", "code"] {
@@ -1062,5 +1107,193 @@ mod tests {
                 "the schema must describe {platform}"
             );
         }
+    }
+
+    /// A profile whose platform blocks are spelled the way the CLIENTS spell them — which is the
+    /// only way any of them is spelled in the wild. `ios` is astrid-web's declared block
+    /// (`lib/brand/profile.ts`) and astrid-ios's `make-brand-variant.sh`; `windows` is
+    /// astrid-windows's `scripts/lib/brand-profile.ps1`.
+    const CLIENT_BLOCKS: &str = r##"{
+      "name": "Acme",
+      "env": {
+        "NEXT_PUBLIC_BRAND_NAME": "Acme",
+        "NEXT_PUBLIC_BRAND_TITLE": "Acme Tasks",
+        "NEXT_PUBLIC_BRAND_DOMAIN": "tasks.acme.example",
+        "NEXT_PUBLIC_BRAND_APP_URL_SCHEME": "acmetasks",
+        "NEXT_PUBLIC_BRAND_ACCENT_COLOR": "#7e22ce"
+      },
+      "ios": {
+        "bundleId": "example.acme.Tasks",
+        "appGroup": "group.example.acme",
+        "keychainGroup": "ACME000001.example.acme.shared",
+        "developmentTeam": "ACME000001",
+        "displayName": "Acme Tasks"
+      },
+      "mac": { "bundleId": "example.acme.TasksMac", "displayName": "Acme Tasks" },
+      "android": { "applicationId": "example.acme.tasks", "appName": "Acme Tasks" },
+      "windows": {
+        "identityName": "AcmeCorporation.AcmeTasks",
+        "identityPublisher": "CN=ACME000001-0000-0000-0000-000000000001",
+        "publisherDisplayName": "Acme Corporation",
+        "assets": "acme-tiles"
+      },
+      "vscode": { "publisher": "acme-corp", "displayName": "Acme Tasks" },
+      "code": {
+        "bundleId": "example.acme.code",
+        "applicationName": "acme-code",
+        "nameShort": "Acme Code",
+        "nameLong": "Acme Code - Editor"
+      }
+    }"##;
+
+    /// The bug: the schema named the platform fields in kebab case and with different WORDS from
+    /// the keys each client reads out of the same file, so `gen-brand` read none of a real
+    /// profile's platform blocks and every platform output came out empty of its own identity.
+    #[test]
+    fn a_platform_block_is_read_the_way_its_client_spells_it_b8f019d8() {
+        let profile = shipped().read(CLIENT_BLOCKS).expect("valid");
+
+        for (key, expected) in [
+            ("ios.bundle-id", "example.acme.Tasks"),
+            ("ios.app-group", "group.example.acme"),
+            ("ios.keychain-group", "ACME000001.example.acme.shared"),
+            ("ios.development-team", "ACME000001"),
+            ("ios.display-name", "Acme Tasks"),
+            ("mac.bundle-id", "example.acme.TasksMac"),
+            ("android.package", "example.acme.tasks"),
+            ("windows.package-identity", "AcmeCorporation.AcmeTasks"),
+            (
+                "windows.publisher",
+                "CN=ACME000001-0000-0000-0000-000000000001",
+            ),
+            ("vscode.publisher", "acme-corp"),
+            ("code.bundle-id", "example.acme.code"),
+            ("code.application-name", "acme-code"),
+        ] {
+            assert_eq!(profile.get(key), Some(expected), "{key}");
+        }
+    }
+
+    /// Four keys the clients read had no home in the schema at all, so they are new fields rather
+    /// than renames. `publisherDisplayName` is the *Partner Center publisher's* name, a different
+    /// value from the app's display name (astrid-windows `scripts/lib/brand-profile.ps1`), and
+    /// `assets` is a tile directory.
+    #[test]
+    fn the_fields_with_no_home_in_the_schema_have_one_now_b8f019d8() {
+        let profile = shipped().read(CLIENT_BLOCKS).expect("valid");
+
+        for (key, expected) in [
+            ("windows.publisher-display-name", "Acme Corporation"),
+            ("windows.assets", "acme-tiles"),
+            ("android.app-name", "Acme Tasks"),
+            ("vscode.display-name", "Acme Tasks"),
+            ("code.name-short", "Acme Code"),
+            ("code.name-long", "Acme Code - Editor"),
+        ] {
+            assert_eq!(profile.get(key), Some(expected), "{key}");
+        }
+    }
+
+    /// The same precedence the `env` alias already has, for the same reason: a profile that has
+    /// migrated to the schema's own name says so by having it, and the key it moved away from must
+    /// not silently win.
+    #[test]
+    fn the_schemas_own_name_beats_the_client_alias_b8f019d8() {
+        let source = r##"{
+          "name": "Acme",
+          "identity": { "name": "Acme", "domain": "a.example", "url-scheme": "acme" },
+          "colors": { "accent": "#7e22ce" },
+          "windows": {
+            "package-identity": "AcmeCorporation.Migrated",
+            "identityName": "AcmeCorporation.Old"
+          }
+        }"##;
+
+        let profile = shipped().read(source).expect("valid");
+
+        assert_eq!(
+            profile.get("windows.package-identity"),
+            Some("AcmeCorporation.Migrated")
+        );
+    }
+
+    /// Every platform's output carries the block's own identity. Before this each one was written
+    /// from the shared sections alone — a correct-looking file with the partner's identity missing.
+    #[test]
+    fn every_platform_output_carries_its_blocks_identity_b8f019d8() {
+        let schema = shipped();
+        let profile = schema.read(CLIENT_BLOCKS).expect("valid");
+        let written = outputs(&schema, &profile);
+        let file = |path: &str| {
+            written
+                .iter()
+                .find(|(name, _)| name == path)
+                .map(|(_, contents)| contents.clone())
+                .unwrap_or_else(|| panic!("{path} was not written"))
+        };
+
+        assert!(
+            file("apple/Brand.xcconfig").contains("PRODUCT_BUNDLE_IDENTIFIER = example.acme.Tasks"),
+            "{}",
+            file("apple/Brand.xcconfig")
+        );
+        assert!(
+            file("android/brand.properties").contains("brand.package=example.acme.tasks"),
+            "{}",
+            file("android/brand.properties")
+        );
+
+        let manifest = file("windows/brand.manifest.json");
+        for expected in [
+            "\"identity\": \"AcmeCorporation.AcmeTasks\"",
+            "\"publisherDisplayName\": \"Acme Corporation\"",
+            "\"assets\": \"acme-tiles\"",
+        ] {
+            assert!(manifest.contains(expected), "{expected} in {manifest}");
+        }
+
+        assert!(
+            file("vscode/package.brand.json").contains("\"publisher\": \"acme-corp\""),
+            "{}",
+            file("vscode/package.brand.json")
+        );
+        assert!(
+            file("code/product.patch.json").contains("\"nameShort\": \"Acme Code\""),
+            "{}",
+            file("code/product.patch.json")
+        );
+    }
+
+    /// The smaller gap the same task names. iOS already reads
+    /// `NEXT_PUBLIC_BRAND_ACCENT_HOVER_COLOR` from a profile's env and web honours a stated one, so
+    /// a partner who states it got it on two clients out of four and a derived colour on the rest.
+    #[test]
+    fn a_stated_accent_hover_is_read_from_its_env_key_b8f019d8() {
+        let source = r##"{
+          "name": "Acme",
+          "env": {
+            "NEXT_PUBLIC_BRAND_NAME": "Acme",
+            "NEXT_PUBLIC_BRAND_DOMAIN": "a.example",
+            "NEXT_PUBLIC_BRAND_APP_URL_SCHEME": "acme",
+            "NEXT_PUBLIC_BRAND_ACCENT_COLOR": "#7e22ce",
+            "NEXT_PUBLIC_BRAND_ACCENT_HOVER_COLOR": "#7E22CE"
+          }
+        }"##;
+
+        let schema = shipped();
+        let profile = schema.read(source).expect("valid");
+
+        // The stated hover, not the derived one — derivation is for a partner who gives an accent
+        // and nothing else.
+        assert_eq!(profile.get("colors.accent-hover"), Some("#7E22CE"));
+
+        let (_, env) = outputs(&schema, &profile)
+            .into_iter()
+            .find(|(path, _)| path == "web/.env.brand")
+            .expect("written");
+        assert!(
+            env.contains("NEXT_PUBLIC_BRAND_ACCENT_HOVER_COLOR=#7E22CE\n"),
+            "{env}"
+        );
     }
 }

@@ -36,6 +36,30 @@ profile is not quietly overridden by the key it has moved away from.
 An empty string is how web's profiles spell "unset", so an empty optional is treated as absent
 rather than invalid — otherwise every existing profile fails on its unset keys.
 
+## The `alias`, for a platform block
+
+`env` aliases a field to a flat environment key. A platform block needs the other kind: the key the
+**client** spells inside the block, which is not the key the schema spells. That is `alias`:
+
+```json
+"package-identity": { "type": "string", "alias": "identityName" }
+```
+
+It was not optional. The schema named the platform fields in kebab case and with different *words*
+from what each client reads out of the same file — `ios.bundle-id` against astrid-ios's `bundleId`,
+`windows.package-identity` against astrid-windows's `identityName` — so `gen-brand` read **none** of
+a real profile's platform blocks and wrote every platform file without the partner's identity in it.
+Both halves now read the same file (task b8f019d8). A field may list several (`"alias": ["a", "b"]`).
+
+The precedence is one rule all the way down: **a field's own name, then an alias, then `env`, then
+the default.** A profile that has migrated says so by carrying the schema's name, and the key it
+moved away from never silently wins.
+
+Three keys are deliberately *not* aliased: `android.urlScheme`, `android.accentColor` and
+`code.urlProtocol`. They are not another spelling of a platform field — they would be a per-platform
+**override** of the shared `identity.url-scheme` and `colors.accent`, which is a design decision
+rather than a rename. Every platform output already takes those two from the shared sections.
+
 ## What it writes
 
 | Path | For |
