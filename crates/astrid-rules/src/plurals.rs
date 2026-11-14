@@ -25,14 +25,14 @@
 //! An unknown language gets `other`, the one category every language has. A tag this build has
 //! never met is a client newer than this core, and `other` is a word rather than a crash.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What a number in a message is counting — and so which of CLDR's two sets of rules applies.
 ///
 /// They are genuinely different rules, not two uses of one: English's *cardinal* 3 is `other`
 /// ("3 weeks") while its *ordinal* 3 is `few` ("3rd"). Nothing can pick the right form without
 /// being told which question is being asked, and the arm that chose the key already knows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum CountForm {

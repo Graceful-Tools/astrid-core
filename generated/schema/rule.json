@@ -191,6 +191,21 @@
       ],
       "type": "string"
     },
+    "CountForm": {
+      "description": "What a number in a message is counting — and so which of CLDR's two sets of rules applies.\n\nThey are genuinely different rules, not two uses of one: English's *cardinal* 3 is `other`\n(\"3 weeks\") while its *ordinal* 3 is `few` (\"3rd\"). Nothing can pick the right form without\nbeing told which question is being asked, and the arm that chose the key already knows.",
+      "oneOf": [
+        {
+          "const": "cardinal",
+          "description": "How many: \"every 2 weeks\", \"10 times\".",
+          "type": "string"
+        },
+        {
+          "const": "ordinal",
+          "description": "Which one in order: \"the 3rd Tuesday\", \"on the 21st\".",
+          "type": "string"
+        }
+      ]
+    },
     "CustomRepeatingPattern": {
       "description": "The custom repeat pattern, kept as loose as it is on the wire.\n\nEvery field is optional because the shape depends on `unit` and the server has never validated\nthe combination. Interpretation lives in [`crate::repeating`] and nowhere else.",
       "properties": {
@@ -3168,6 +3183,33 @@
       "required": [
         "kind",
         "text"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Which CLDR category a number selects - [`crate::plurals::category`]. The row a plural key's\ntranslation is read from (task `bcc8a11e`).\n\nThe catalog holds the words and this picks the row, which is the split `strings/README.md`\ndescribes. A client that links Rust calls the function; one that reaches the core through\na JSON door had no way to ask, so the WinUI shell could not adopt the catalog's plural keys\nand kept `count == 1` arms in C# instead. A rule rather than a command, deliberately: it\ndepends on nothing but its arguments, and a command would be unreachable from\n`astrid-rules-wasm`, which exposes `run_json` alone.\n\n`form` is not inferable from the number. English's **cardinal** 3 is `other` (\"3 weeks\")\nwhile its **ordinal** 3 is `few` (\"3rd\") - genuinely different CLDR rules, and the arm that\nchose the key already knows which question it is asking.",
+      "properties": {
+        "count": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "form": {
+          "$ref": "#/$defs/CountForm"
+        },
+        "kind": {
+          "const": "pluralCategory",
+          "type": "string"
+        },
+        "locale": {
+          "description": "A tag from `strings/locales.json` (`en`, `de`, `zh-CN`). The language subtag decides,\nso `de-DE` and `pt-BR` are answered rather than falling through to `other`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "locale",
+        "form",
+        "count"
       ],
       "type": "object"
     },

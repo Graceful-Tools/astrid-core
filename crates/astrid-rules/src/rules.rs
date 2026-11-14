@@ -473,6 +473,26 @@ pub enum Rule {
         #[serde(default)]
         context: crate::identifier::LinkContext,
     },
+    /// Which CLDR category a number selects - [`crate::plurals::category`]. The row a plural key's
+    /// translation is read from (task `bcc8a11e`).
+    ///
+    /// The catalog holds the words and this picks the row, which is the split `strings/README.md`
+    /// describes. A client that links Rust calls the function; one that reaches the core through
+    /// a JSON door had no way to ask, so the WinUI shell could not adopt the catalog's plural keys
+    /// and kept `count == 1` arms in C# instead. A rule rather than a command, deliberately: it
+    /// depends on nothing but its arguments, and a command would be unreachable from
+    /// `astrid-rules-wasm`, which exposes `run_json` alone.
+    ///
+    /// `form` is not inferable from the number. English's **cardinal** 3 is `other` ("3 weeks")
+    /// while its **ordinal** 3 is `few` ("3rd") - genuinely different CLDR rules, and the arm that
+    /// chose the key already knows which question it is asking.
+    PluralCategory {
+        /// A tag from `strings/locales.json` (`en`, `de`, `zh-CN`). The language subtag decides,
+        /// so `de-DE` and `pt-BR` are answered rather than falling through to `other`.
+        locale: String,
+        form: crate::plurals::CountForm,
+        count: i64,
+    },
     /// Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].
     ///
     /// A read normalises: anything a newer build wrote reads as the default rather than as an
@@ -1020,6 +1040,11 @@ pub fn run(rule: Rule) -> Response {
         Rule::IdentifierLinks { text, context } => {
             Response::ok(crate::identifier::find_links(&text, &context))
         }
+        Rule::PluralCategory {
+            locale,
+            form,
+            count,
+        } => Response::ok(crate::plurals::category(&locale, form, count)),
         Rule::Theme { stored } => {
             Response::ok(crate::theme::Theme::parse(stored.as_deref().unwrap_or_default()).wire())
         }
@@ -2010,6 +2035,52 @@ mod tests {
             "kind": "rows",
             "now": "2026-10-17T12:00:00.000Z",
             "utcOffsetMinutes": 2147483647,
+        }));
+        assert_eq!(refused["ok"], false, "{refused}");
+    }
+
+    /// The row a plural key's translation is read from, through the door (task `bcc8a11e`).
+    ///
+    /// `astrid_rules::plurals::category` was reachable only by a client that links Rust, so the
+    /// WinUI shell could not adopt the catalog's plural keys and kept `count == 1` arms in C#.
+    #[test]
+    fn bcc8a11e_a_json_door_client_can_pick_a_plural_row() {
+        let category = |locale: &str, form: &str, count: i64| {
+            answer(json!({
+                "kind": "pluralCategory",
+                "locale": locale,
+                "form": form,
+                "count": count,
+            }))["value"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("{locale}/{form}/{count} was refused"))
+        };
+
+        // The pair that shows why `form` cannot be inferred from the number: the same 3, in the
+        // same language, is a different row depending on what is being counted.
+        assert_eq!(category("en", "cardinal", 3), "other", "3 weeks");
+        assert_eq!(category("en", "ordinal", 3), "few", "the 3rd");
+        assert_eq!(category("en", "cardinal", 1), "one");
+        assert_eq!(category("en", "ordinal", 1), "one", "the 1st");
+
+        // The language subtag decides, so a regional tag is answered rather than falling through.
+        assert_eq!(category("de-DE", "cardinal", 1), "one");
+        assert_eq!(category("de-DE", "cardinal", 2), "other");
+
+        // One form for the whole language.
+        assert_eq!(category("ja", "cardinal", 7), "other");
+
+        // A tag this build has never met is a client newer than this core: a word, not a crash.
+        assert_eq!(category("xx-YY", "cardinal", 2), "other");
+
+        // CLDR's `n` operand is the absolute value. No repeat makes one, but "the -1st" is worse.
+        assert_eq!(category("en", "ordinal", -1), "one");
+
+        // A form this build does not know IS refused, because guessing it would answer the wrong
+        // question rather than the same question in an unknown language.
+        let refused = answer(json!({
+            "kind": "pluralCategory", "locale": "en", "form": "fractional", "count": 1
         }));
         assert_eq!(refused["ok"], false, "{refused}");
     }
