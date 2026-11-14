@@ -314,10 +314,10 @@ mod tests {
         core.subscribe(heard.clone());
         core.app
             .realtime()
-            .publish(astrid_core::realtime::Change::Task("t1".into()));
+            .publish(astrid_core::realtime::Change::task("t1", ["l1"]));
         assert_eq!(
             heard.0.lock().unwrap().as_slice(),
-            [r#"{"change":"task","id":"t1"}"#.to_string()]
+            [r#"{"change":"task","id":"t1","listIds":["l1"]}"#.to_string()]
         );
     }
 

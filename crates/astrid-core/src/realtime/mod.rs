@@ -50,21 +50,38 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
             if deleting.contains(&task.id) {
                 return None;
             }
-            match store.task(&task.id).ok()? {
+            let cached = store.task(&task.id).ok()?;
+            // Where the task was before this event moves it. A row that leaves a list makes that
+            // list stale too, and the cache is the only thing that remembers which one it was.
+            let was_in = cached
+                .as_ref()
+                .map(Task::effective_list_ids)
+                .unwrap_or_default();
+            let stored = match &cached {
                 // Older than what is here — the echo of an edit a newer one has overtaken. Keep
                 // the newer; its own event, or the next pass, brings the server's word on it.
                 Some(cached) if is_older(task.updated_at, cached.updated_at) => return None,
                 // Both may have moved: the same field-by-field rule the sync pass applies.
-                Some(cached) => store
-                    .upsert_task(&crate::sync::conflict::resolve(&cached, task))
-                    .ok()?,
-                None => store.upsert_task(task).ok()?,
-            }
-            Some(Change::Task(task.id.clone()))
+                Some(cached) => crate::sync::conflict::resolve(cached, task),
+                None => task.clone(),
+            };
+            store.upsert_task(&stored).ok()?;
+            Some(Change::task(
+                &stored.id,
+                also(stored.effective_list_ids(), was_in),
+            ))
         }
         EventKind::TaskDeleted(id) => {
+            // Read where it was before it goes: a delete event carries an id and nothing else, so
+            // without this every delete is "could not say" and nothing is ever skipped for one.
+            let was_in = store
+                .task(id)
+                .ok()
+                .flatten()
+                .map(|task| task.effective_list_ids())
+                .unwrap_or_default();
             store.delete_task(id).ok()?;
-            Some(Change::Task(id.clone()))
+            Some(Change::task(id, was_in))
         }
         EventKind::ListCreated(list) | EventKind::ListUpdated(list) => {
             // Deleted here, or changed here and not yet sent — its settings, who is on it: the
@@ -152,10 +169,30 @@ fn is_older(
     matches!((incoming, cached), (Some(incoming), Some(cached)) if incoming < cached)
 }
 
+/// `now`, then whatever in `before` is not already in it — the lists a task is in and the ones it
+/// has just left, in that order, without repeating one that is both.
+fn also(mut now: Vec<String>, before: Vec<String>) -> Vec<String> {
+    for id in before {
+        if !now.contains(&id) {
+            now.push(id);
+        }
+    }
+    now
+}
+
 /// What an applied event changed, for the shell to refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
-    Task(String),
+    /// A task changed, and where it is — so a client drawing some other list can skip the read
+    /// entirely (task 05c95986).
+    ///
+    /// `list_ids` is the lists the task is in *and* any it has just left, because a move makes
+    /// both stale. Empty means **"could not say"**, which every shell reads as "refresh anyway",
+    /// never as "no list is affected" — the same rule an empty [`Change::Synced`] carries.
+    Task {
+        id: String,
+        list_ids: Vec<String>,
+    },
     List(String),
     Comments(String),
     Chat(String),
@@ -201,11 +238,25 @@ pub enum Change {
 }
 
 impl Change {
+    /// A [`Change::Task`] naming the lists it touches. Pass an empty iterator for "could not say".
+    pub fn task<I, S>(id: impl Into<String>, list_ids: I) -> Change
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Change::Task {
+            id: id.into(),
+            list_ids: list_ids.into_iter().map(Into::into).collect(),
+        }
+    }
+
     /// The change as a shell reads it: `{"change":"task","id":…}` and so on — the vocabulary the
     /// Windows FFI has always sent, now answered here so every shell hears the same words.
     pub fn to_json(&self) -> String {
         let value = match self {
-            Change::Task(id) => serde_json::json!({ "change": "task", "id": id }),
+            Change::Task { id, list_ids } => serde_json::json!({
+                "change": "task", "id": id, "listIds": list_ids
+            }),
             Change::List(id) => serde_json::json!({ "change": "list", "id": id }),
             Change::Comments(id) => serde_json::json!({ "change": "comments", "taskId": id }),
             Change::Chat(id) => serde_json::json!({ "change": "chat", "channelId": id }),
@@ -368,7 +419,7 @@ mod tests {
         })))
         .expect("parses");
 
-        assert_eq!(apply(&store, &event), Some(Change::Task("t1".into())));
+        assert_eq!(apply(&store, &event), Some(Change::task("t1", ["l1"])));
         assert_eq!(store.tasks_in_list("l1").expect("reads").len(), 1);
     }
 
@@ -384,7 +435,10 @@ mod tests {
             "data": { "id": "t1" }
         })))
         .expect("parses");
-        assert_eq!(apply(&store, &event), Some(Change::Task("t1".into())));
+        assert_eq!(
+            apply(&store, &event),
+            Some(Change::task("t1", [] as [&str; 0]))
+        );
         assert!(store.task("t1").expect("reads").is_none());
     }
 
@@ -419,7 +473,10 @@ mod tests {
             "task_updated",
             json!({ "id": "t1", "title": "Server's", "updatedAt": "2026-09-07T12:05:00Z" }),
         );
-        assert_eq!(apply(&store, &same), Some(Change::Task("t1".into())));
+        assert_eq!(
+            apply(&store, &same),
+            Some(Change::task("t1", [] as [&str; 0]))
+        );
         assert_eq!(
             store.task("t1").expect("reads").expect("kept").title,
             "Server's"
@@ -486,7 +543,7 @@ mod tests {
 
         assert_eq!(
             heard.lock().expect("lock").as_slice(),
-            &[Change::Task("t1".into())]
+            &[Change::task("t1", [] as [&str; 0])]
         );
     }
 
@@ -652,6 +709,80 @@ mod tests {
         assert!(
             store.list("l2").expect("reads").is_none(),
             "not brought back"
+        );
+    }
+
+    // ── A task change names its lists ───────────────────────────────────────────────────────
+    //
+    // Task 05c95986: without them, a colleague working in a list nobody has open still costs
+    // every client a full read of the list they do have open, once per dispatcher turn.
+
+    /// The ordinary case: the event carries the task, so the change carries its lists.
+    #[test]
+    fn a_task_change_names_the_lists_the_task_is_in_05c95986() {
+        let store = Store::in_memory().expect("opens");
+        let event = task_event(
+            "task_updated",
+            json!({ "id": "t1", "title": "Buy milk", "listIds": ["l1", "l2"] }),
+        );
+
+        let change = apply(&store, &event).expect("something moved");
+        assert_eq!(change, Change::task("t1", ["l1", "l2"]));
+        assert_eq!(
+            change.to_json(),
+            r#"{"change":"task","id":"t1","listIds":["l1","l2"]}"#
+        );
+    }
+
+    /// A task that moved out of one list into another changed *both*. Naming only the lists it is
+    /// in now leaves the row behind on a screen drawing the list it left (task 05c95986).
+    #[test]
+    fn a_task_moved_between_lists_names_the_list_it_left_too_05c95986() {
+        let store = Store::in_memory().expect("opens");
+        let before: Task = serde_json::from_value(json!({
+            "id": "t1", "title": "Buy milk", "listIds": ["l1"],
+            "updatedAt": "2026-11-14T12:00:00Z"
+        }))
+        .expect("a task");
+        store.upsert_task(&before).expect("stores");
+
+        let moved = task_event(
+            "task_updated",
+            json!({ "id": "t1", "title": "Buy milk", "listIds": ["l2"],
+                    "updatedAt": "2026-11-14T12:05:00Z" }),
+        );
+        assert_eq!(
+            apply(&store, &moved),
+            Some(Change::task("t1", ["l2", "l1"]))
+        );
+    }
+
+    /// A delete event carries an id and nothing else, but the cache still knows where the task
+    /// was — read before it goes, or every delete is "could not say" (task 05c95986).
+    #[test]
+    fn a_delete_names_the_lists_the_task_was_in_05c95986() {
+        let store = Store::in_memory().expect("opens");
+        let cached: Task =
+            serde_json::from_value(json!({ "id": "t1", "title": "Gone", "listIds": ["l1"] }))
+                .expect("a task");
+        store.upsert_task(&cached).expect("stores");
+
+        let event = task_event("task_deleted", json!({ "id": "t1" }));
+        assert_eq!(apply(&store, &event), Some(Change::task("t1", ["l1"])));
+    }
+
+    /// Nothing known either way. Absent has to keep meaning "could not say", which every shell
+    /// reads as "refresh anyway" — exactly as an empty [`Change::Synced`] already is.
+    #[test]
+    fn a_task_change_that_cannot_say_which_list_names_none_05c95986() {
+        let store = Store::in_memory().expect("opens");
+        let event = task_event("task_updated", json!({ "id": "t1", "title": "Homeless" }));
+
+        let change = apply(&store, &event).expect("something moved");
+        assert_eq!(change, Change::task("t1", [] as [&str; 0]));
+        assert_eq!(
+            change.to_json(),
+            r#"{"change":"task","id":"t1","listIds":[]}"#
         );
     }
 
