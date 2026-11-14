@@ -154,6 +154,58 @@ fn the_google_commands_stay_in_the_vocabulary_without_the_feature() {
     }
 }
 
+/// `github-project-fields` is declared and on by default — task `86a95710`.
+///
+/// The GitHub code a partner build can actually leave out, and it is not sync: GitHub sync is a
+/// cron on astrid-web, so `services/external/github.rs` is 27 lines of names and there is no pass
+/// to compile out. What there is, is `services/project_fields.rs` — 503 lines of schema cache,
+/// value cache, display rules and editors for a GitHub board's project fields in task detail
+/// (AITD-491). A partner build with no GitHub boards draws none of them and carries all of it. So
+/// the feature is named for what it removes rather than for the provider.
+///
+/// **On by default**, like `bundled-sqlite` and `sync-google`: every consumer that says nothing
+/// keeps today's behaviour, and leaving the surface out is the partner build's explicit
+/// `default-features = false`.
+#[test]
+fn github_project_fields_is_a_default_feature() {
+    let manifest = read(&crate_dir().join("Cargo.toml"));
+
+    let default = entry(&manifest, "features", "default");
+    assert!(
+        default.contains("github-project-fields"),
+        "`default` must carry `github-project-fields`: every client that says nothing shows a \
+         GitHub board's project fields in task detail today, so dropping it from `default` \
+         silently removes a shipped surface. Found: {default}"
+    );
+
+    // Declared at all — the same manifest error `sync_google_is_a_default_feature` guards, for the
+    // same reason: `cargo check` reports it, but nothing records why the feature has to exist.
+    entry(&manifest, "features", "github-project-fields");
+}
+
+/// The command vocabulary does not change shape with this feature either — task `86a95710`.
+///
+/// The same decision as `the_google_commands_stay_in_the_vocabulary_without_the_feature`, and it
+/// has to be re-asserted per feature rather than once: the failure is a `#[cfg]` put on a
+/// `Command` variant, which is a per-variant mistake. `Command::kinds()` is read by astrid-windows'
+/// `bindings_contract.rs` and the Apple and Android equivalents; one shape per feature combination
+/// would make a gated command a gated binding in three repositories.
+///
+/// Compiled under both combinations; it is `--no-default-features --features bundled-sqlite,sync-google`
+/// that makes it bite.
+#[test]
+fn the_project_field_commands_stay_in_the_vocabulary_without_the_feature() {
+    let kinds = astrid_core::app::command_kinds();
+    for kind in ["taskProjectFields", "setTaskProjectField"] {
+        assert!(
+            kinds.contains(kind),
+            "`{kind}` left the vocabulary. A build without `github-project-fields` must still KNOW \
+             the command and refuse it, or every shell's bindings gate reads a different list per \
+             feature combination"
+        );
+    }
+}
+
 /// The feature is not only declared — the SQLite that linked is the one rusqlite bundles.
 ///
 /// A mistyped feature path is the failure this catches: the manifest reads correctly, the build is

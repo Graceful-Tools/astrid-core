@@ -1418,6 +1418,7 @@ async fn resolve_ids_names_only_the_ids_that_moved() {
 
 /// Task detail reads the schema once per project and the values from the task's own route, and
 /// draws the unmapped fields in order with this task's values. A classic task has no rows.
+#[cfg(feature = "github-project-fields")]
 #[tokio::test]
 async fn aitd_491_a_github_task_shows_its_project_fields_and_a_classic_one_none() {
     let transport = StubTransport::new()
@@ -1458,6 +1459,7 @@ async fn aitd_491_a_github_task_shows_its_project_fields_and_a_classic_one_none(
 
 /// Online, an edit is sent at once and the server's value is kept; a refusal reaches the person
 /// who made it, by its code, and nothing is journalled to be refused again unseen.
+#[cfg(feature = "github-project-fields")]
 #[tokio::test]
 async fn aitd_491_a_field_edit_online_is_sent_and_a_refusal_comes_back_by_its_code() {
     let transport = StubTransport::new()
@@ -1510,6 +1512,7 @@ async fn aitd_491_a_field_edit_online_is_sent_and_a_refusal_comes_back_by_its_co
 }
 
 /// Offline, an edit — a clear included — shows at once and waits in the journal.
+#[cfg(feature = "github-project-fields")]
 #[tokio::test]
 async fn aitd_491_a_field_edit_offline_shows_at_once_and_is_journalled() {
     let transport = StubTransport::new()
@@ -1535,6 +1538,70 @@ async fn aitd_491_a_field_edit_offline_shows_at_once_and_is_journalled() {
     assert_eq!(journal[0].kind, "setTaskField");
     assert_eq!(journal[0].payload["fieldId"], "f-team");
     assert!(journal[0].payload["body"]["value"].is_null());
+}
+
+/// Without `github-project-fields` both commands are still known, and say why they cannot — task
+/// `86a95710`.
+///
+/// The half of the decision a manifest assertion cannot make, and the twin of
+/// `a_google_command_is_refused_by_name_in_a_build_without_the_pass`.
+/// `tests/build_features.rs` proves the vocabulary did not change shape; this proves a shell gets
+/// an answer it can act on. A silent `ok` with no rows would be the worst outcome: a partner build
+/// would look exactly like a board whose fields are all mapped.
+#[cfg(not(feature = "github-project-fields"))]
+#[tokio::test]
+async fn a_project_field_command_is_refused_by_name_in_a_build_without_the_surface() {
+    let app = app_with(StubTransport::new());
+
+    for kind in ["taskProjectFields", "setTaskProjectField"] {
+        let answer = call(
+            &app,
+            json!({ "kind": kind, "taskId": "t1", "fieldId": "f-size", "value": 8 }),
+        )
+        .await;
+        assert_eq!(answer["ok"], false, "{kind} should be refused, not served");
+        assert_eq!(
+            answer["error"]["code"], "GITHUB_PROJECT_FIELDS_UNAVAILABLE",
+            "{kind} must be refused by a code the shell can read, not by a bare message"
+        );
+    }
+}
+
+/// A `setTaskField` entry written by a build WITH the feature still decodes in one without it, and
+/// is dropped with a reason that names the feature — task `86a95710`.
+///
+/// The outbox half of the decision, and the reason it is cheap: [`crate::outbox::entry::Entry`]
+/// keys on a `String`, not an enum, so nothing in somebody's journal becomes unreadable when the
+/// feature goes. What is left is the handler's answer, and the failure this guards is the entry
+/// falling through to the `unknown` arm — which says *"the journal was written by a newer build"*
+/// and would send a partner looking for a version to upgrade to. Dead, not retried: the reply's
+/// cache write is compiled out with the module, so a send that worked would update nothing this
+/// build can draw.
+#[cfg(not(feature = "github-project-fields"))]
+#[tokio::test]
+async fn a_journalled_field_edit_from_a_full_build_is_dropped_by_name() {
+    let app = app_with(StubTransport::new());
+    let entry: crate::outbox::entry::Entry = serde_json::from_value(json!({
+        "id": "e1",
+        "kind": "setTaskField",
+        "payload": { "taskId": "t1", "fieldId": "f-size", "body": { "value": 8 } },
+        "clientRequestId": "r1",
+        "status": "pending",
+        "attempts": 0,
+        "nextAttemptAt": "2026-11-14T00:00:00Z",
+        "createdAt": "2026-11-14T00:00:00Z",
+        "updatedAt": "2026-11-14T00:00:00Z",
+    }))
+    .expect("an entry a build with the feature wrote still decodes here");
+
+    let outcome = crate::outbox::handlers::perform(&app.context.client, &app.store, &entry).await;
+    let crate::outbox::handlers::Outcome::Dead(reason) = outcome else {
+        panic!("a field edit this build cannot serve must be dead-lettered, not retried forever");
+    };
+    assert!(
+        reason.contains("github-project-fields"),
+        "the reason must name the feature, not claim a newer build wrote the journal: {reason}"
+    );
 }
 
 /// AATD-25: a picked time lands on the task's own day — for an all-day task, its calendar date.

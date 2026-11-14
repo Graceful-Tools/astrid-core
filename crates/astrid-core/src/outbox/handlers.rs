@@ -101,7 +101,20 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         }
         kind::ADD_TASK_BLOCKER => add_task_blocker(client, store, entry).await,
         kind::REMOVE_TASK_BLOCKER => remove_task_blocker(client, store, entry).await,
+        #[cfg(feature = "github-project-fields")]
         kind::SET_TASK_FIELD => set_task_field(client, store, entry).await,
+        // Task `86a95710`. The entry stays DECODABLE without the feature — `kind` is a `String`,
+        // never an enum — so all that is open is what to do with it, and it is dropped with a
+        // reason of its own rather than left to the `unknown` arm below, which would say "a newer
+        // build" and send a partner looking for a version to upgrade to. Not retried: the reply's
+        // cache write is `project_fields::store_value`, compiled out with the module, so even a
+        // send that worked would update nothing this build can draw.
+        #[cfg(not(feature = "github-project-fields"))]
+        kind::SET_TASK_FIELD => Outcome::Dead(
+            "this build has no GitHub project fields — it was compiled without \
+             `github-project-fields`, so the field edit was dropped"
+                .into(),
+        ),
         unknown => Outcome::Dead(format!(
             "no handler for {unknown} — the journal was written by a newer build"
         )),
@@ -245,6 +258,7 @@ async fn add_task_blocker(client: &ApiClient, store: &Store, entry: &Entry) -> O
 /// A `400` (wrong type, an option that is gone, a field now mapped), `403` or `404` will say the
 /// same in five minutes, so it is dead-lettered rather than retried; the cached value then shows
 /// what was typed until the next refresh corrects it from the server.
+#[cfg(feature = "github-project-fields")]
 async fn set_task_field(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
     let task_id = match id(entry, "taskId") {
         Ok(id) => id,

@@ -14,7 +14,7 @@ repository.workspace = true
 # `tests/build_features.rs`, which is the only layer of the gate that can see build configuration
 # (task `f1210dd8`).
 [features]
-default = ["bundled-sqlite", "sync-google"]
+default = ["bundled-sqlite", "sync-google", "github-project-fields"]
 bundled-sqlite = ["rusqlite/bundled"]
 # Google Tasks mirroring — the only provider with a client-side pass, and so the only one there is
 # anything to compile out of a partner build. GitHub sync is a cron on astrid-web, which is why
@@ -24,6 +24,15 @@ bundled-sqlite = ["rusqlite/bundled"]
 # three repositories' bindings gates would each need a matrix — and refuses them with
 # SYNC_GOOGLE_UNAVAILABLE, the way `require-base-url` refuses a start (task `b92569a8`).
 sync-google = []
+# A GitHub board's project fields in task detail (AITD-491) — `services/project_fields.rs`, 503
+# lines of schema cache, value cache, display rules and editors, plus the `setTaskField` outbox
+# handler. Named for the surface it removes, not for the provider: GitHub *sync* is a cron on
+# astrid-web, so there is no client pass to compile out and a `sync-github` feature would be a name
+# that does nothing. Fields are DEFINED in GitHub, so a partner build with no GitHub boards draws
+# none of them and carries all of it regardless.
+# ON by default, and the commands stay in the vocabulary and are refused with
+# GITHUB_PROJECT_FIELDS_UNAVAILABLE, for the reasons `sync-google` gives above (task `86a95710`).
+github-project-fields = []
 # White-label builds: compiles out the last Astrid address, the origin a relative Markdown link
 # resolves against when its caller names none (astrid-rules, AWTD-1630). `baseUrl` itself is
 # required in every build since AWTD-1627 (CONFIG_BASE_URL_REQUIRED), so the feature no longer

@@ -29,6 +29,9 @@ pub mod list;
 pub mod list_defaults;
 pub mod members;
 pub mod notifications;
+/// Task detail's GitHub project fields, and so the whole of what `github-project-fields` removes
+/// from a partner build (task `86a95710`).
+#[cfg(feature = "github-project-fields")]
 pub mod project_fields;
 pub mod search;
 pub mod share;
@@ -102,6 +105,7 @@ impl Context {
     }
 
     /// A GitHub board's project fields on one task (AITD-491).
+    #[cfg(feature = "github-project-fields")]
     pub fn project_fields(&self) -> project_fields::ProjectFieldService {
         project_fields::ProjectFieldService::new(self.clone())
     }

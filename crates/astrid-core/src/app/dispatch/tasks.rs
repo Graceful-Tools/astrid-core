@@ -69,6 +69,7 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         } => due_date_at_time(app, &task_id, hour, minute),
         Command::DueDateAllDay { task_id } => due_date_all_day(app, &task_id),
         Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
+        #[cfg(feature = "github-project-fields")]
         Command::TaskProjectFields { task_id } => {
             let fields = app.context.project_fields();
             match fields.refresh(&task_id).await {
@@ -76,6 +77,9 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 Err(error) => Response::failed(error.into()),
             }
         }
+        #[cfg(not(feature = "github-project-fields"))]
+        Command::TaskProjectFields { .. } => project_fields_unavailable(),
+        #[cfg(feature = "github-project-fields")]
         Command::SetTaskProjectField {
             task_id,
             field_id,
@@ -86,6 +90,8 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 .set_now(&task_id, &field_id, value)
                 .await,
         ),
+        #[cfg(not(feature = "github-project-fields"))]
+        Command::SetTaskProjectField { .. } => project_fields_unavailable(),
         Command::AddTaskBlocker {
             task_id,
             blocking_task_id,
@@ -334,6 +340,22 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("tasks"),
     }
+}
+
+/// The refusal a project-field command gets in a build without `github-project-fields` — task
+/// `86a95710`.
+///
+/// The twin of `account::sync_google_unavailable`. The command is in the vocabulary, so it has to
+/// answer; a shell reads
+/// [`GITHUB_PROJECT_FIELDS_UNAVAILABLE`](crate::app::GITHUB_PROJECT_FIELDS_UNAVAILABLE) to tell
+/// this from the server refusing, and draws no field section rather than an empty one.
+#[cfg(not(feature = "github-project-fields"))]
+fn project_fields_unavailable() -> Response {
+    Response::failed(crate::app::Failure::unavailable_in_this_build(
+        crate::app::GITHUB_PROJECT_FIELDS_UNAVAILABLE,
+        "this build does not show GitHub project fields; it was compiled without \
+         `github-project-fields`",
+    ))
 }
 
 /// An edit through the Waiting rules (`astrid_rules::waiting`, R1–R3): into Waiting it needs a

@@ -123,6 +123,16 @@ pub const CONFIG_BASE_URL_REQUIRED: &str = "CONFIG_BASE_URL_REQUIRED";
 /// by the code.
 pub const SYNC_GOOGLE_UNAVAILABLE: &str = "SYNC_GOOGLE_UNAVAILABLE";
 
+/// The code a project-field command is refused with in a build without `github-project-fields` —
+/// task `86a95710`.
+///
+/// Beside [`SYNC_GOOGLE_UNAVAILABLE`] and for the same reason: the commands stay in
+/// [`command_kinds`], because a vocabulary that changes shape with a feature is a vocabulary three
+/// repositories' bindings gates each have to read a matrix of. A shell that asks a partner build
+/// for a task's project fields gets this back and can draw nothing, rather than guessing from a
+/// bare `BadRequest` whether the server or the binary said no.
+pub const GITHUB_PROJECT_FIELDS_UNAVAILABLE: &str = "GITHUB_PROJECT_FIELDS_UNAVAILABLE";
+
 /// Astrid's sign-in callback scheme — what [`Config::url_scheme`] is when a shell leaves it out.
 pub const DEFAULT_URL_SCHEME: &str = crate::services::auth::URL_SCHEME;
 

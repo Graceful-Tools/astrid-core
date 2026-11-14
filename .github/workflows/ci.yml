@@ -101,6 +101,14 @@ jobs:
       - name: Test without the Google pass
         run: cargo test -p astrid-core --no-default-features --features bundled-sqlite
 
+      # And each feature off on its own (task `86a95710`). The line above turns BOTH optional
+      # features off at once, which hides a `cfg` that only goes stale in the other combination —
+      # a call from the Google pass into `project_fields`, say, compiles under `--all-features` and
+      # under neither, and breaks only for a partner who wanted one and not the other. This is the
+      # GitHub project-field surface left out with Google kept.
+      - name: Test without the GitHub project fields
+        run: cargo test -p astrid-core --no-default-features --features bundled-sqlite,sync-google
+
   # astrid-rules is the half of the core the web loads as WebAssembly. It builds for
   # wasm32-unknown-unknown only while it stays pure — no clock, disk, socket or OS entropy — so a
   # dependency that reaches for one fails here, the day it lands, rather than in the web's build.

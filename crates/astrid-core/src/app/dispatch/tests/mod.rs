@@ -78,6 +78,7 @@ async fn board_app(list: serde_json::Value) -> super::App {
 }
 
 /// A task on a GitHub board, and a classic one, in a fresh app (AITD-491).
+#[cfg(feature = "github-project-fields")]
 fn on_a_github_board(app: &super::App) {
     app.store
         .upsert_list(
@@ -102,6 +103,7 @@ fn on_a_github_board(app: &super::App) {
     }
 }
 
+#[cfg(feature = "github-project-fields")]
 fn project_schema() -> serde_json::Value {
     json!({ "fields": [
         { "id": "f-size", "remoteId": "R1", "name": "Size", "dataType": "number", "options": null,
