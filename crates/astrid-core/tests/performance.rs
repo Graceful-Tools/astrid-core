@@ -28,6 +28,14 @@ const TASKS: usize = 10_000;
 /// an implementation that went quadratic does not.
 const BUDGET: Duration = Duration::from_millis(500);
 
+/// Held for the whole of each test, so they run one at a time.
+///
+/// The test harness runs a binary's tests in parallel, and each of these builds ten thousand tasks
+/// and times a wall clock. Six of them at once on a two-core CI runner timed each other rather than
+/// the code: one of the six went over the budget, a different one in each run (core (linux) on
+/// main, 2026-11-14).
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn app_with_tasks(count: usize) -> App {
     let app = App::with_parts(
         &Config {
@@ -83,6 +91,7 @@ async fn time(app: &App, command: serde_json::Value) -> (Duration, serde_json::V
 /// The first paint: one window of rows out of ten thousand tasks.
 #[tokio::test]
 async fn a_window_of_rows_is_fast_on_a_huge_list() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
 
     let (elapsed, answer) = time(
@@ -104,6 +113,7 @@ async fn a_window_of_rows_is_fast_on_a_huge_list() {
 /// worth its own guard: the scope, the filters and the sort all run over the whole set.
 #[tokio::test]
 async fn my_tasks_is_fast_on_a_huge_account() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
 
     let (elapsed, answer) = time(
@@ -124,6 +134,7 @@ async fn my_tasks_is_fast_on_a_huge_account() {
 /// This is the one that would catch a window implemented by building every row and slicing.
 #[tokio::test]
 async fn scrolling_does_not_get_slower_further_down() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
 
     let (first, _) = time(
@@ -150,6 +161,7 @@ async fn scrolling_does_not_get_slower_further_down() {
 /// Search reads every task by definition. It still has to feel instant.
 #[tokio::test]
 async fn search_over_the_whole_account_is_fast() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
 
     let (elapsed, answer) = time(
@@ -165,6 +177,7 @@ async fn search_over_the_whole_account_is_fast() {
 /// The board groups every card on the project into columns.
 #[tokio::test]
 async fn a_board_of_ten_thousand_cards_is_fast() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
     let list: astrid_core::model::TaskList =
         serde_json::from_value(json!({ "id": "l1", "name": "Everything", "projectId": "p1" }))
@@ -206,6 +219,7 @@ async fn a_board_of_ten_thousand_cards_is_fast() {
 /// Completing one task out of ten thousand must not cost the account.
 #[tokio::test]
 async fn one_write_does_not_cost_the_whole_account() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let app = app_with_tasks(TASKS);
 
     let (elapsed, answer) = time(
