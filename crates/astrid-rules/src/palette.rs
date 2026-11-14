@@ -66,6 +66,25 @@ pub fn score(query: &str, text: &str) -> Option<i32> {
     (index == query.len()).then_some(score)
 }
 
+/// The indices of the `titles` that match `query`, best first (AITD-667).
+///
+/// What the Mac's own palette sorts with (`MacPaletteSearch`, `CommandRegistry`): a higher
+/// [`score`] first, a tie to the shorter title — the closer fit for the same letters — and then
+/// to the order given. Characters are counted, not bytes, as the Mac counts them. The caller
+/// trims the query and decides what an empty one shows.
+pub fn rank<T: AsRef<str>>(query: &str, titles: &[T]) -> Vec<usize> {
+    let mut matched: Vec<(i32, usize, usize)> = titles
+        .iter()
+        .enumerate()
+        .filter_map(|(index, title)| {
+            let title = title.as_ref();
+            score(query, title).map(|score| (score, title.chars().count(), index))
+        })
+        .collect();
+    matched.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    matched.into_iter().map(|(_, _, index)| index).collect()
+}
+
 /// What kind of thing a row is, so the shell knows what pressing it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

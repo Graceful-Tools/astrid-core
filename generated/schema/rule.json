@@ -2652,7 +2652,7 @@
       "type": "object"
     },
     {
-      "description": "What of a comment is drawn at all — [`crate::rows::comment`]'s `shows_text`, `is_empty` and\n`renders_inline`. iOS's `CommentVisibility.swift` (task `75a27f7f`), asked as a bubble\ndraws.",
+      "description": "What of a comment is drawn at all — [`crate::rows::comment`]'s `shows_text`, `is_empty` and\n`renders_inline`. iOS's `CommentVisibility.swift` (task `75a27f7f`), asked as a bubble\ndraws.\n\n`isSystem` too (AITD-667): [`crate::model::Comment::is_system`], but never while\n`offline`. A cached comment can come back without its `authorId`, so offline \"no author\"\nproves nothing, and hiding a person's own words from their own thread is the worse mistake.",
       "properties": {
         "comment": {
           "$ref": "#/$defs/Comment"
@@ -2660,11 +2660,66 @@
         "kind": {
           "const": "commentVisibility",
           "type": "string"
+        },
+        "offline": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
         "kind",
         "comment"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The controls a task's lists let an editor offer, and what deleting it is called —\n[`crate::capabilities::for_lists`]. iOS's `TaskCapabilities.swift` (AITD-667), asked as an\neditor draws. `list_ids` is the task's lists; `lists` is every list the shell has loaded,\nand only those the task is on are read.",
+      "properties": {
+        "kind": {
+          "const": "capabilities",
+          "type": "string"
+        },
+        "listIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Which of `titles` match `query`, best first, as indices — [`crate::palette::rank`]. The\nMac's `FuzzyMatch` (AITD-667), asked on every keystroke in the ⌘K palette, which keeps its\nown commands; the App door's `palette` is the cache-backed whole search.",
+      "properties": {
+        "kind": {
+          "const": "paletteRank",
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "titles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "query"
       ],
       "type": "object"
     },

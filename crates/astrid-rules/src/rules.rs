@@ -281,7 +281,33 @@ pub enum Rule {
     /// What of a comment is drawn at all — [`crate::rows::comment`]'s `shows_text`, `is_empty` and
     /// `renders_inline`. iOS's `CommentVisibility.swift` (task `75a27f7f`), asked as a bubble
     /// draws.
-    CommentVisibility { comment: Box<crate::model::Comment> },
+    ///
+    /// `isSystem` too (AITD-667): [`crate::model::Comment::is_system`], but never while
+    /// `offline`. A cached comment can come back without its `authorId`, so offline "no author"
+    /// proves nothing, and hiding a person's own words from their own thread is the worse mistake.
+    CommentVisibility {
+        comment: Box<crate::model::Comment>,
+        #[serde(default)]
+        offline: bool,
+    },
+    /// The controls a task's lists let an editor offer, and what deleting it is called —
+    /// [`crate::capabilities::for_lists`]. iOS's `TaskCapabilities.swift` (AITD-667), asked as an
+    /// editor draws. `list_ids` is the task's lists; `lists` is every list the shell has loaded,
+    /// and only those the task is on are read.
+    Capabilities {
+        #[serde(default)]
+        list_ids: Vec<String>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+    },
+    /// Which of `titles` match `query`, best first, as indices — [`crate::palette::rank`]. The
+    /// Mac's `FuzzyMatch` (AITD-667), asked on every keystroke in the ⌘K palette, which keeps its
+    /// own commands; the App door's `palette` is the cache-backed whole search.
+    PaletteRank {
+        query: String,
+        #[serde(default)]
+        titles: Vec<String>,
+    },
     /// What a bare key press does right now, or `null` — [`crate::keyboard::action_for`]. The
     /// Mac's `Keyboard/*` (task `75a27f7f`).
     ///
@@ -811,7 +837,8 @@ pub fn run(rule: Rule) -> Response {
             lists,
             user_id,
         } => Response::ok(crate::rows::copy_only(&task, &lists, user_id.as_deref())),
-        Rule::CommentVisibility { comment } => Response::ok(CommentVisibilityAnswer {
+        Rule::CommentVisibility { comment, offline } => Response::ok(CommentVisibilityAnswer {
+            is_system: !offline && comment.is_system(),
             shows_text: crate::rows::comment::shows_text(&comment.content),
             is_empty: crate::rows::comment::is_empty(&comment),
             files: crate::rows::comment::files_of(&comment)
@@ -824,6 +851,10 @@ pub fn run(rule: Rule) -> Response {
                 })
                 .collect(),
         }),
+        Rule::Capabilities { list_ids, lists } => {
+            Response::ok(crate::capabilities::for_lists(&list_ids, &lists))
+        }
+        Rule::PaletteRank { query, titles } => Response::ok(crate::palette::rank(&query, &titles)),
         Rule::Shortcut {
             key,
             has_selection,
@@ -863,6 +894,7 @@ struct MentionInsertAnswer {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CommentVisibilityAnswer {
+    is_system: bool,
     shows_text: bool,
     is_empty: bool,
     files: Vec<VisibleFile>,
@@ -1583,6 +1615,8 @@ mod tests {
         assert_eq!(
             reply["value"],
             json!({
+                // No author and no GitHub login: the server's (AITD-667).
+                "isSystem": true,
                 "showsText": false,
                 "isEmpty": false,
                 "files": [
@@ -1634,5 +1668,93 @@ mod tests {
             assert_eq!(reply["ok"], true, "{request}: {reply}");
             assert_eq!(reply["value"], Value::Null, "{request}");
         }
+    }
+
+    /// The controls a task's lists let an editor offer (AITD-667, iOS `TaskCapabilities`). A
+    /// list the task is on refuses; a list not loaded, or one the task is not on, refuses nothing.
+    #[test]
+    fn capabilities_are_refused_only_by_a_loaded_list_the_task_is_on_aitd667() {
+        let board = json!({ "id": "board", "name": "Board",
+            "supports": { "priority": false, "dueDate": false, "privateTasks": false,
+                          "deleteTask": "remove_from_list" } });
+        let classic = json!({ "id": "home", "name": "Home" });
+
+        let on_board = answer(json!({
+            "kind": "capabilities", "listIds": ["board"], "lists": [board, classic]
+        }));
+        assert_eq!(on_board["ok"], true, "{on_board}");
+        assert_eq!(
+            on_board["value"],
+            json!({
+                "priority": false, "dueDate": false, "privateTasks": false, "deletion": "removeFromList"
+            })
+        );
+
+        // Also on a classic list: the delete really deletes, while the board still refuses its
+        // controls.
+        let both = answer(json!({
+            "kind": "capabilities", "listIds": ["board", "home"], "lists": [board, classic]
+        }));
+        assert_eq!(
+            both["value"],
+            json!({
+                "priority": false, "dueDate": false, "privateTasks": false, "deletion": "delete"
+            })
+        );
+
+        // The board is not one of the task's lists, and a list that has not loaded refuses nothing.
+        for list_ids in [json!(["home"]), json!(["not-loaded"]), json!([])] {
+            let free = answer(json!({
+                "kind": "capabilities", "listIds": list_ids, "lists": [board, classic]
+            }));
+            assert_eq!(
+                free["value"],
+                json!({
+                    "priority": true, "dueDate": true, "privateTasks": true, "deletion": "delete"
+                }),
+                "{list_ids}"
+            );
+        }
+    }
+
+    /// A comment with no author and no GitHub login is the server's — except offline, where a
+    /// cached comment can lose its `authorId` and "no author" proves nothing (AITD-667, iOS
+    /// `CommentVisibility.isSystem`).
+    #[test]
+    fn comment_visibility_names_a_system_comment_but_never_offline_aitd667() {
+        let system = json!({ "id": "c1", "content": "marked this as complete" });
+        let person = json!({ "id": "c2", "content": "hi", "authorId": "u1" });
+        let github = json!({ "id": "c3", "content": "hi", "remoteAuthorLogin": "octocat" });
+
+        let ask = |comment: &Value, offline: Option<bool>| {
+            let mut request = json!({ "kind": "commentVisibility", "comment": comment });
+            if let Some(offline) = offline {
+                request["offline"] = json!(offline);
+            }
+            answer(request)["value"]["isSystem"].clone()
+        };
+        assert_eq!(ask(&system, None), json!(true));
+        assert_eq!(ask(&system, Some(false)), json!(true));
+        assert_eq!(ask(&system, Some(true)), json!(false));
+        assert_eq!(ask(&person, None), json!(false));
+        assert_eq!(ask(&github, None), json!(false));
+    }
+
+    /// The Mac palette's ranking (AITD-667, `FuzzyMatch`, `MacPaletteSearch`, `CommandRegistry`):
+    /// matches only, best score first, a tie to the shorter title, then to the order given.
+    #[test]
+    fn palette_rank_orders_matches_best_first_and_ties_to_the_shorter_title_aitd667() {
+        let reply = answer(json!({
+            "kind": "paletteRank", "query": "tdy",
+            "titles": ["Yesterday", "Today's plan", "Nothing", "Today", "today"]
+        }));
+        assert_eq!(reply["ok"], true, "{reply}");
+        // "Today" and "today" score alike and are as long: given order. "Today's plan" scores
+        // the same as both and is longer. "Yesterday" matches t-d-y further apart. "Nothing"
+        // has no y.
+        assert_eq!(reply["value"], json!([3, 4, 1, 0]));
+
+        let none = answer(json!({ "kind": "paletteRank", "query": "zzz", "titles": ["Today"] }));
+        assert_eq!(none["value"], json!([]));
     }
 }
