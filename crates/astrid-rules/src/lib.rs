@@ -13,6 +13,7 @@
 //! its old path (`astrid_core::repeating`, `astrid_core::rules`, …).
 
 pub mod agent_name;
+pub mod agent_protocol;
 pub mod board;
 pub mod board_cards;
 pub mod brand_colors;
