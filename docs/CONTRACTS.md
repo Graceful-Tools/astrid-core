@@ -1466,3 +1466,55 @@ so a future join cannot adopt the arm quietly.
 
 Widening it remains available as its own decision, with its own fixture cases, if a surface ever
 wants it.
+
+### D62 — someone else's task opens the picker on every surface, and a list row completes only a real checkbox
+
+**The clients follow iOS** (task `aa72f990`, 2026-11-14; AITD-375 and AITD-382). Two divergences
+between `rows::LeadingControl::action` and iOS's
+`TaskLeadingControl.action(surface:kind:displayMode:currentUserId:)`, both resolved iOS's way under
+Jon's rule of 2026-10-03.
+
+**AITD-375 — whose task it is comes before which surface it is on.** The core answered `Complete`
+for a list row in list mode whatever the control depicted, on the argument that a row's leading
+control is the checkbox affordance even when it is drawn as somebody's face. iOS calls that a
+trapdoor: one stray tap finishes another person's work and nothing on the row says it did. The
+guard now runs before the surface match, and a reader who is not signed in counts as someone
+else's — the safe direction, since it refuses rather than completing the wrong task.
+
+**AITD-382 — a list row completes only when the control IS a checkbox.** Detail already applied
+that condition (task `729a190e`); the list row did not, so an `Unassigned` row — the ordinary row
+on a fresh board — completed on click instead of first asking whose it is. `ListRow` and `Detail`
+are one arm now.
+
+**What this changes for a shipped client.** astrid-windows draws from `TaskRow`, so both answers
+change there the moment its pin moves: a list row for someone else's task, and an unassigned list
+row, open the picker where they used to complete. That is the point of the change rather than a
+side effect of it, but it is a behaviour change to a client in use and not only an unblocking of
+the Apple apps.
+
+`action` takes `current_user_id` as a result. Two questions iOS asked alongside it are doors now,
+so the Apple apps stop keeping a Swift copy: `LeadingControl::picker_shows_project_state` and
+`LeadingControl::is_someone_elses_task` — in which **unassigned is nobody's, not somebody else's**
+(task `f1a8ff9f`: they are different states with different marks).
+
+Pinned by `rows::tests::aitd_375_someone_elses_task_opens_the_picker_on_every_surface`,
+`rows::tests::aitd_382_a_list_row_completes_only_a_real_checkbox` and
+`rows::tests::aa72f990_the_picker_and_whose_task_it_is_are_the_cores_answers`.
+
+### D63 — task detail shows the board state in both display modes
+
+**The clients follow iOS** (task `aa72f990`, 2026-11-14; AITD-555, *"board status is not in task
+details — should be"*).
+
+`rows::detail::shows_board_state` was `List && is_in_project && !is_read_only`, and its own doc
+comment argued the mode condition: *in project mode the state already lives behind the leading
+control*. It does not. That control depicts **who** and **priority**, never the column — so the
+detail of a task on a board simply never said where the task was, in the display mode whose whole
+subject is boards.
+
+The condition is gone. `display_mode` stays as a parameter, exactly as iOS keeps it, so that no
+call site can re-add the rule by passing something else; the body ignores it.
+
+Pinned by the two existing cases in `rows::detail`, one of which asserted the opposite, and by
+`app::dispatch::tests::tasks::the_detail_shows_the_board_state_of_a_board_task_in_both_modes_task_5221e43f`
+— renamed from `..._in_list_mode_...`, which had become a claim the code no longer made.

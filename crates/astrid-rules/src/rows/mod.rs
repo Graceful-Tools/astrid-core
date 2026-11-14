@@ -196,38 +196,74 @@ impl LeadingControl {
 
     /// Complete the task, or open the picker?
     ///
+    /// iOS's `TaskLeadingControl.action(surface:kind:displayMode:currentUserId:)`, which this
+    /// follows exactly (task `aa72f990`; Jon, 2026-10-03: on disagreement follow iOS).
+    ///
+    /// **Someone else's task opens the picker on every surface** (AITD-375), checked before the
+    /// surface is looked at. This used to be a list-row-only exception and iOS calls it a
+    /// trapdoor: one stray tap finishes another person's work, with nothing on the row to say it
+    /// did. A reader who is not signed in counts as someone else's, which is the safe direction.
+    ///
     /// A **board card** always opens the picker, in both modes: a board is where a task has a
     /// status, so the control is how you set it, and completing outright from a card is the
     /// trapdoor described on [`Surface`].
     ///
-    /// A **list row** completes, because that is what a checkbox means when the task is not on a
-    /// board — unless project mode has turned the control into the quick changer everywhere.
-    ///
-    /// **Detail** adds one condition: only when the control actually *is* a checkbox. Someone
-    /// else's photo is not a checkbox, and finishing their task by clicking their face is not what
-    /// that click means (task 729a190e).
-    pub fn action(&self, surface: Surface, display_mode: DisplayMode) -> LeadingAction {
+    /// A **list row and detail are one case**: complete only when project mode has not taken the
+    /// control over *and* the control actually **is** a checkbox (AITD-382). Detail always applied
+    /// the second condition (task 729a190e); the list row did not, so a row nobody owned completed
+    /// on click instead of first asking whose it is.
+    pub fn action(
+        &self,
+        surface: Surface,
+        display_mode: DisplayMode,
+        current_user_id: Option<&str>,
+    ) -> LeadingAction {
         // Copy is copy on every surface: a row, a card and the detail all say the same thing
         // about a task that can only be copied.
         if *self == LeadingControl::Copy {
             return LeadingAction::Copy;
         }
+        // Before the surface, deliberately (AITD-375).
+        if let LeadingControl::Avatar(assignee) = self {
+            if current_user_id != Some(assignee.as_str()) {
+                return LeadingAction::OpenPicker;
+            }
+        }
         match surface {
             Surface::BoardCard => LeadingAction::OpenPicker,
-            Surface::ListRow => {
-                if display_mode.checkbox_completes_task() {
-                    LeadingAction::Complete
-                } else {
-                    LeadingAction::OpenPicker
-                }
-            }
-            Surface::Detail => {
+            Surface::ListRow | Surface::Detail => {
                 if display_mode.checkbox_completes_task() && *self == LeadingControl::Checkbox {
                     LeadingAction::Complete
                 } else {
                     LeadingAction::OpenPicker
                 }
             }
+        }
+    }
+
+    /// Whether the picker this control opens offers the BOARD STATE as well as who and priority.
+    ///
+    /// iOS's `pickerShowsProjectState`. A door rather than a Swift copy, for the reason the field
+    /// order is written down once: compact detail has no room for a state row, a board card is
+    /// where a column means something, and someone else's task is being *triaged* rather than
+    /// worked, which is when its column matters most.
+    pub fn picker_shows_project_state(
+        display_mode: DisplayMode,
+        surface: Surface,
+        is_someone_elses: bool,
+    ) -> bool {
+        display_mode.uses_compact_detail() || surface == Surface::BoardCard || is_someone_elses
+    }
+
+    /// Whether a task belongs to somebody other than the reader.
+    ///
+    /// iOS's `isSomeoneElsesTask`. **Unassigned is not someone else's** — it is nobody's, and the
+    /// two are different states with different marks (task f1a8ff9f). Nobody signed in, however,
+    /// *is* someone else's: there is no reader to own it.
+    pub fn is_someone_elses_task(assignee_id: Option<&str>, current_user_id: Option<&str>) -> bool {
+        match assignee_id.filter(|id| !id.is_empty()) {
+            None => false,
+            Some(assignee) => current_user_id != Some(assignee),
         }
     }
 }
@@ -452,7 +488,11 @@ impl TaskRow {
         if copy_only(task, context.lists, context.current_user_id) {
             leading = LeadingControl::Copy;
         }
-        let action = leading.action(context.surface, context.display_mode);
+        let action = leading.action(
+            context.surface,
+            context.display_mode,
+            context.current_user_id,
+        );
 
         let list_ids = task.effective_list_ids();
         let list_chips = list_ids
@@ -708,11 +748,11 @@ mod tests {
             "a private list is not copied"
         );
         assert_eq!(
-            LeadingControl::Copy.action(Surface::ListRow, DisplayMode::List),
+            LeadingControl::Copy.action(Surface::ListRow, DisplayMode::List, Some("me")),
             LeadingAction::Copy
         );
         assert_eq!(
-            LeadingControl::Copy.action(Surface::Detail, DisplayMode::Project),
+            LeadingControl::Copy.action(Surface::Detail, DisplayMode::Project, Some("me")),
             LeadingAction::Copy
         );
     }
@@ -723,7 +763,7 @@ mod tests {
     fn a_board_card_never_completes_from_its_leading_control() {
         for mode in [DisplayMode::List, DisplayMode::Project] {
             assert_eq!(
-                LeadingControl::Checkbox.action(Surface::BoardCard, mode),
+                LeadingControl::Checkbox.action(Surface::BoardCard, mode, Some("me")),
                 LeadingAction::OpenPicker
             );
         }
@@ -732,29 +772,110 @@ mod tests {
     #[test]
     fn a_list_row_completes_unless_project_mode_has_taken_that_over() {
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::List),
+            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::List, Some("me")),
             LeadingAction::Complete
         );
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::Project),
+            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::Project, Some("me")),
             LeadingAction::OpenPicker
         );
     }
 
-    /// The asymmetry between a list row and detail, stated so it cannot be "tidied up": a list row
-    /// completes whoever the task belongs to, and detail refuses unless the control really is a
-    /// checkbox. Making them agree in either direction breaks one of the two behaviours the Apple
-    /// tasks (729a190e, 132d7b3f) settled.
+    /// Someone else's task opens the picker on EVERY surface (AITD-375).
+    ///
+    /// This used to be the asymmetry "a list row completes whoever the task belongs to, and detail
+    /// refuses unless the control really is a checkbox", written down so it could not be tidied
+    /// up. iOS calls the list-row half a trapdoor: one stray tap finishes another person's task,
+    /// and there is nothing on the row to say it did. Per Jon's rule of 2026-10-03 the clients
+    /// follow iOS on disagreement, so the asymmetry is gone and the guard runs before the surface
+    /// is even looked at.
     #[test]
-    fn a_list_row_completes_someone_elses_task_where_detail_would_not() {
+    fn aitd_375_someone_elses_task_opens_the_picker_on_every_surface() {
         let theirs = LeadingControl::Avatar("them".into());
+        for surface in [Surface::ListRow, Surface::Detail, Surface::BoardCard] {
+            for mode in [DisplayMode::List, DisplayMode::Project] {
+                assert_eq!(
+                    theirs.action(surface, mode, Some("me")),
+                    LeadingAction::OpenPicker,
+                    "{surface:?} in {mode:?} completed someone else's task"
+                );
+            }
+        }
+
+        // My own avatar is not someone else's — project mode draws me as one, and the ordinary
+        // surface rules then apply.
+        let mine = LeadingControl::Avatar("me".into());
         assert_eq!(
-            theirs.action(Surface::ListRow, DisplayMode::List),
-            LeadingAction::Complete
+            mine.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingAction::OpenPicker,
+            "an avatar is not a checkbox, so AITD-382 still refuses"
+        );
+
+        // Nobody signed in counts as someone else's, which is the safe direction: refuse to
+        // complete rather than complete the wrong person's task.
+        assert_eq!(
+            theirs.action(Surface::ListRow, DisplayMode::List, None),
+            LeadingAction::OpenPicker
+        );
+    }
+
+    /// The two questions iOS asks alongside `action`, exposed so the Apple apps stop answering
+    /// them in Swift (task `aa72f990`).
+    #[test]
+    fn aa72f990_the_picker_and_whose_task_it_is_are_the_cores_answers() {
+        // Compact detail has no room for a state row; a board card is where a column means
+        // something; someone else's task is being triaged rather than worked.
+        assert!(LeadingControl::picker_shows_project_state(
+            DisplayMode::Project,
+            Surface::Detail,
+            false
+        ));
+        assert!(LeadingControl::picker_shows_project_state(
+            DisplayMode::List,
+            Surface::BoardCard,
+            false
+        ));
+        assert!(LeadingControl::picker_shows_project_state(
+            DisplayMode::List,
+            Surface::ListRow,
+            true
+        ));
+        assert!(!LeadingControl::picker_shows_project_state(
+            DisplayMode::List,
+            Surface::ListRow,
+            false
+        ));
+
+        // Unassigned is NOBODY's, not somebody else's — they are different states with different
+        // marks (task f1a8ff9f).
+        assert!(!LeadingControl::is_someone_elses_task(None, Some("me")));
+        assert!(!LeadingControl::is_someone_elses_task(Some(""), Some("me")));
+        assert!(!LeadingControl::is_someone_elses_task(
+            Some("me"),
+            Some("me")
+        ));
+        assert!(LeadingControl::is_someone_elses_task(
+            Some("them"),
+            Some("me")
+        ));
+        // Nobody signed in: there is no reader to own it.
+        assert!(LeadingControl::is_someone_elses_task(Some("them"), None));
+    }
+
+    /// A list row completes only when the control IS a checkbox (AITD-382) — the same condition
+    /// detail already applied, so the two surfaces are now one case.
+    ///
+    /// The regression is `Unassigned`: a row nobody owns used to complete on click, and iOS opens
+    /// the picker so the click first says whose it is.
+    #[test]
+    fn aitd_382_a_list_row_completes_only_a_real_checkbox() {
+        assert_eq!(
+            LeadingControl::Unassigned.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingAction::OpenPicker
         );
         assert_eq!(
-            theirs.action(Surface::Detail, DisplayMode::List),
-            LeadingAction::OpenPicker
+            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingAction::Complete
         );
     }
 
@@ -763,15 +884,19 @@ mod tests {
     #[test]
     fn detail_completes_only_when_the_control_really_is_a_checkbox() {
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::Detail, DisplayMode::List),
+            LeadingControl::Checkbox.action(Surface::Detail, DisplayMode::List, Some("me")),
             LeadingAction::Complete
         );
         assert_eq!(
-            LeadingControl::Avatar("them".into()).action(Surface::Detail, DisplayMode::List),
+            LeadingControl::Avatar("them".into()).action(
+                Surface::Detail,
+                DisplayMode::List,
+                Some("me")
+            ),
             LeadingAction::OpenPicker
         );
         assert_eq!(
-            LeadingControl::Unassigned.action(Surface::Detail, DisplayMode::List),
+            LeadingControl::Unassigned.action(Surface::Detail, DisplayMode::List, Some("me")),
             LeadingAction::OpenPicker
         );
     }
@@ -875,10 +1000,10 @@ mod tests {
         assert_eq!(row.subtask_count, 3);
         assert!(row.has_description);
         assert_eq!(row.leading, LeadingControl::Avatar("them".into()));
-        // A list row completes in list mode whoever the task belongs to — the row control is the
-        // checkbox affordance even when it is drawn as a face. Only DETAIL adds the condition
-        // that the control must really be a checkbox.
-        assert_eq!(row.action, LeadingAction::Complete);
+        // Drawn as a face, so it is somebody else's and the click opens the picker rather than
+        // finishing their task (AITD-375, task `aa72f990`). This asserted `Complete` until then,
+        // on the argument that a row control is the checkbox affordance however it is drawn.
+        assert_eq!(row.action, LeadingAction::OpenPicker);
         assert_eq!(
             row.assignee
                 .expect("resolved from the known users")

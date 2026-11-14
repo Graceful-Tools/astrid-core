@@ -65,8 +65,11 @@ pub fn field_order(display_mode: super::DisplayMode) -> &'static [DetailField] {
 /// (AITD-327, AITD-332), and the web copied it as `showsTaskDetailProjectState` (task 5221e43f).
 /// Copied rather than redesigned, for the reason the field order above is written down once.
 ///
-/// - **List mode only.** In project mode the state already lives behind the leading control, and
-///   a row would say it twice in the layout that is compact on purpose.
+/// - **In BOTH display modes** since AITD-555 (task `aa72f990`). This was list-mode-only, on the
+///   argument that project mode already shows the state behind the leading control — and it does
+///   not: that control depicts *who* and *priority*, never the column, so the detail of a task on
+///   a board simply never said where the task was. `display_mode` is kept as a parameter, as iOS
+///   keeps it, so that no call site can re-add the condition by passing something else.
 /// - **On a board only.** A board column is a project idea, and a row for one on a task that has
 ///   no column would rebuild exactly the hybrid the display-mode setting exists to end. For a
 ///   task that IS on a board, the column is real information the list layout was merely hiding.
@@ -77,7 +80,8 @@ pub fn shows_board_state(
     is_in_project: bool,
     is_read_only: bool,
 ) -> bool {
-    display_mode == super::DisplayMode::List && is_in_project && !is_read_only
+    let _ = display_mode;
+    is_in_project && !is_read_only
 }
 
 /// Whether the detail shows the WAITING ON row.
@@ -237,7 +241,11 @@ mod tests {
     /// In project mode the quick changer already offers the state; a row would say it twice.
     #[test]
     fn project_mode_hides_the_row() {
-        assert!(!shows_board_state(DisplayMode::Project, true, false));
+        assert!(
+            shows_board_state(DisplayMode::Project, true, false),
+            "AITD-555: project mode's leading control depicts who and priority, never the column, \
+             so the detail never said where the task was"
+        );
     }
 
     /// A row for a state the task cannot have is the list/project hybrid the display-mode setting

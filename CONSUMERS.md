@@ -33,6 +33,12 @@ by `<checkout>/<copy>`, not by its repository.
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
 that reads like a bad pin.
 
+**`astrid-ios/core` is waiting on a bump, deliberately** (task `aa72f990`, 2026-11-14). The core
+now answers the leading action and the board-state row as iOS does (CONTRACTS D62, D63), which is
+what AITD-656 / AITD-622 / AITD-672 need in order to draw rows from `TaskRow` and delete
+`TaskLeadingControl` and `TaskDetailProjectStateRow`. The bump itself is a client release decision
+(AITD-673) and is not this repo's to make — the row above still reads `c80b399`.
+
 **The table is the source.** `check-pins` reads the rows — the key, the manifest paths out of the
 *Pinned in* cell, and the revision out of the last one. It holds no list of paths of its own, so
 recording a tenth copy is a row here and nothing in `crates/xtask`. What the code still holds is

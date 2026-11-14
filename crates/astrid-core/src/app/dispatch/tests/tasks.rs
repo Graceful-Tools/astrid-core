@@ -990,7 +990,7 @@ async fn create_task_can_carry_a_status_role_task_95c7a68f() {
 /// columns as chips with Done left out and the current one lit, in list mode only, and never
 /// for a task with no board column. The rule is the one the Mac, iOS and the web share.
 #[tokio::test]
-async fn the_detail_shows_the_board_state_of_a_board_task_in_list_mode_task_5221e43f() {
+async fn the_detail_shows_the_board_state_of_a_board_task_in_both_modes_task_5221e43f() {
     let app = app_with(StubTransport::new());
     app.store
         .upsert_list(
@@ -1033,9 +1033,13 @@ async fn the_detail_shows_the_board_state_of_a_board_task_in_list_mode_task_5221
         json!({ "kind": "taskDetail", "taskId": "t1", "displayMode": "project" }),
     )
     .await;
+    // Both modes since AITD-555 (task `aa72f990`). This asserted null, on the argument that
+    // project mode already offers the state behind the leading control — which it does not: that
+    // control depicts who and priority, never the column, so the detail never said where the task
+    // was.
     assert!(
-        compact["value"]["boardState"].is_null(),
-        "project mode already offers the state behind the leading control"
+        !compact["value"]["boardState"].is_null(),
+        "AITD-555: compact detail shows the board state too"
     );
 
     let plain = call(&app, json!({ "kind": "taskDetail", "taskId": "t2" })).await;

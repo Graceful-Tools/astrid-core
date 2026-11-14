@@ -407,7 +407,9 @@ async fn aatd46_a_featured_list_shows_its_tasks_without_caching_them() {
             .map(|row| row["action"].clone())
     };
     assert_eq!(action("theirs"), Some(json!("copy")), "{rows}");
-    assert_eq!(action("mine"), Some(json!("complete")), "{rows}");
+    // Nobody is assigned, so the click asks whose it is rather than finishing it (AITD-382,
+    // task `aa72f990`). This was `complete` until then.
+    assert_eq!(action("mine"), Some(json!("openPicker")), "{rows}");
     let cached = call(&app, json!({ "kind": "task", "taskId": "theirs" })).await;
     assert_eq!(cached["ok"], false, "not cached: {cached}");
 }
