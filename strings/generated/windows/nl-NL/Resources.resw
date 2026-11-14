@@ -10,8 +10,224 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value></resheader>
+  <data name="about" xml:space="preserve">
+    <value>Over</value>
+  </data>
+  <data name="account" xml:space="preserve">
+    <value>Account</value>
+  </data>
+  <data name="account_access" xml:space="preserve">
+    <value>Account &amp; Toegang</value>
+  </data>
+  <data name="actions_add" xml:space="preserve">
+    <value>Toevoegen</value>
+  </data>
+  <data name="actions_apply" xml:space="preserve">
+    <value>Toepassen</value>
+  </data>
+  <data name="actions_archive" xml:space="preserve">
+    <value>Archiveren</value>
+  </data>
+  <data name="actions_back" xml:space="preserve">
+    <value>Terug</value>
+  </data>
+  <data name="actions_cancel" xml:space="preserve">
+    <value>Annuleren</value>
+  </data>
+  <data name="actions_clear" xml:space="preserve">
+    <value>Wissen</value>
+  </data>
+  <data name="actions_close" xml:space="preserve">
+    <value>Sluiten</value>
+  </data>
+  <data name="actions_confirm" xml:space="preserve">
+    <value>Bevestigen</value>
+  </data>
+  <data name="actions_copy" xml:space="preserve">
+    <value>Kopiëren</value>
+  </data>
+  <data name="actions_create" xml:space="preserve">
+    <value>Aanmaken</value>
+  </data>
+  <data name="actions_delete" xml:space="preserve">
+    <value>Verwijderen</value>
+  </data>
+  <data name="actions_done" xml:space="preserve">
+    <value>Klaar</value>
+  </data>
+  <data name="actions_edit" xml:space="preserve">
+    <value>Bewerken</value>
+  </data>
+  <data name="actions_filter" xml:space="preserve">
+    <value>Filteren</value>
+  </data>
+  <data name="actions_move" xml:space="preserve">
+    <value>Verplaatsen</value>
+  </data>
+  <data name="actions_next" xml:space="preserve">
+    <value>Volgende</value>
+  </data>
+  <data name="actions_ok" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="actions_remove" xml:space="preserve">
+    <value>Verwijderen</value>
+  </data>
+  <data name="actions_restore" xml:space="preserve">
+    <value>Herstellen</value>
+  </data>
+  <data name="actions_retry" xml:space="preserve">
+    <value>Opnieuw proberen</value>
+  </data>
+  <data name="actions_save" xml:space="preserve">
+    <value>Opslaan</value>
+  </data>
+  <data name="actions_search" xml:space="preserve">
+    <value>Zoeken</value>
+  </data>
+  <data name="actions_share" xml:space="preserve">
+    <value>Delen</value>
+  </data>
+  <data name="actions_sort" xml:space="preserve">
+    <value>Sorteren</value>
+  </data>
+  <data name="actions_submit" xml:space="preserve">
+    <value>Verzenden</value>
+  </data>
+  <data name="actions_update" xml:space="preserve">
+    <value>Bijwerken</value>
+  </data>
+  <data name="add" xml:space="preserve">
+    <value>Toevoegen</value>
+  </data>
+  <data name="appearance" xml:space="preserve">
+    <value>Uiterlijk</value>
+  </data>
+  <data name="assignee" xml:space="preserve">
+    <value>Toegewezen aan</value>
+  </data>
+  <data name="assignee_clear" xml:space="preserve">
+    <value>Toewijzing opheffen</value>
+  </data>
+  <data name="assignee_unassigned" xml:space="preserve">
+    <value>Niet toegewezen</value>
+  </data>
+  <data name="assignee_you" xml:space="preserve">
+    <value>Jij</value>
+  </data>
+  <data name="attachments" xml:space="preserve">
+    <value>Bijlagen</value>
+  </data>
+  <data name="attachments_saving" xml:space="preserve">
+    <value>Opslaan...</value>
+  </data>
+  <data name="auth_email" xml:space="preserve">
+    <value>E-mail</value>
+  </data>
+  <data name="auth_new_user" xml:space="preserve">
+    <value>Nieuw?</value>
+  </data>
+  <data name="auth_or" xml:space="preserve">
+    <value>of</value>
+  </data>
+  <data name="auth_returning_user" xml:space="preserve">
+    <value>Terug?</value>
+  </data>
+  <data name="auth_sign_in_header" xml:space="preserve">
+    <value>Meld je aan om te beginnen!</value>
+  </data>
+  <data name="auth_sign_in_prompt_title" xml:space="preserve">
+    <value>Inloggen</value>
+  </data>
+  <data name="auth_sign_in_short" xml:space="preserve">
+    <value>Inloggen</value>
+  </data>
+  <data name="board_status_doing" xml:space="preserve">
+    <value>Bezig</value>
+  </data>
+  <data name="board_status_done" xml:space="preserve">
+    <value>Gedaan</value>
+  </data>
+  <data name="board_status_inbox" xml:space="preserve">
+    <value>Inbox</value>
+  </data>
+  <data name="board_status_ready" xml:space="preserve">
+    <value>Klaar</value>
+  </data>
+  <data name="board_status_waiting" xml:space="preserve">
+    <value>Wachten</value>
+  </data>
+  <data name="cancel" xml:space="preserve">
+    <value>Annuleren</value>
+  </data>
+  <data name="chat_hide_messages" xml:space="preserve">
+    <value>Berichten verbergen</value>
+  </data>
+  <data name="chat_send" xml:space="preserve">
+    <value>Verzenden</value>
+  </data>
+  <data name="chat_show_messages" xml:space="preserve">
+    <value>Berichten tonen</value>
+  </data>
+  <data name="chat_toggle_tasks" xml:space="preserve">
+    <value>Taken</value>
+  </data>
+  <data name="comments" xml:space="preserve">
+    <value>Reacties</value>
+  </data>
+  <data name="comments_add_placeholder" xml:space="preserve">
+    <value>Opmerking toevoegen...</value>
+  </data>
+  <data name="comments_count" xml:space="preserve">
+    <value>Opmerkingen ({0})</value>
+  </data>
+  <data name="complete" xml:space="preserve">
+    <value>Voltooien</value>
+  </data>
+  <data name="contacts" xml:space="preserve">
+    <value>Contacten</value>
+  </data>
+  <data name="contacts_synced_contacts" xml:space="preserve">
+    <value>Gesynchroniseerde contacten</value>
+  </data>
+  <data name="debug_reminder_debug_mode" xml:space="preserve">
+    <value>Herinnering Debug Modus</value>
+  </data>
+  <data name="debug_toast_debug_desc" xml:space="preserve">
+    <value>Toon gedetailleerde toast-meldingen voor debugging</value>
+  </data>
+  <data name="debug_toast_debug_mode" xml:space="preserve">
+    <value>Toast Debug Modus</value>
+  </data>
+  <data name="decision_recommended" xml:space="preserve">
+    <value>Aanbevolen</value>
+  </data>
   <data name="defaults_all_day" xml:space="preserve">
     <value>Hele dag</value>
+  </data>
+  <data name="delete" xml:space="preserve">
+    <value>Verwijderen</value>
+  </data>
+  <data name="done" xml:space="preserve">
+    <value>Klaar</value>
+  </data>
+  <data name="empty_state_list_with_name" xml:space="preserve">
+    <value>Laten we "{0}" vullen! Voeg je eerste taak toe om te beginnen.</value>
+  </data>
+  <data name="empty_state_my_tasks_caught_up" xml:space="preserve">
+    <value>Je bent helemaal bij! Geen taken aan jou toegewezen op dit moment.</value>
+  </data>
+  <data name="empty_state_no_lists" xml:space="preserve">
+    <value>Nog geen lijsten. Maak je eerste lijst aan!</value>
+  </data>
+  <data name="empty_state_public_list" xml:space="preserve">
+    <value>Deel je ideeën! Voeg taken toe - iedereen kan deze openbare lijst zien.</value>
+  </data>
+  <data name="empty_state_shared_list" xml:space="preserve">
+    <value>Begin met samenwerken! Voeg een taak toe aan deze gedeelde lijst.</value>
+  </data>
+  <data name="empty_state_today" xml:space="preserve">
+    <value>Niets gepland voor vandaag! Geniet van je vrije tijd.</value>
   </data>
   <data name="filter_any" xml:space="preserve">
     <value>Alle</value>
@@ -91,8 +307,215 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Herhaalt niet</value>
   </data>
+  <data name="filters_all" xml:space="preserve">
+    <value>Alles</value>
+  </data>
+  <data name="filters_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="filters_clear_all" xml:space="preserve">
+    <value>Alle filters wissen</value>
+  </data>
+  <data name="filters_high_priority" xml:space="preserve">
+    <value>!! Hoog</value>
+  </data>
+  <data name="filters_highest_priority" xml:space="preserve">
+    <value>!!! Hoogste</value>
+  </data>
+  <data name="filters_low_priority" xml:space="preserve">
+    <value>○ Laag</value>
+  </data>
+  <data name="filters_manual" xml:space="preserve">
+    <value>Handmatig</value>
+  </data>
+  <data name="filters_medium_priority" xml:space="preserve">
+    <value>! Gemiddeld</value>
+  </data>
+  <data name="filters_saving" xml:space="preserve">
+    <value>Opslaan...</value>
+  </data>
+  <data name="filters_show" xml:space="preserve">
+    <value>Tonen</value>
+  </data>
+  <data name="filters_sort" xml:space="preserve">
+    <value>Sorteren</value>
+  </data>
+  <data name="filters_sort_and_filters" xml:space="preserve">
+    <value>Sorteren en filters</value>
+  </data>
+  <data name="filters_tasks_count" xml:space="preserve">
+    <value>{0} taken</value>
+  </data>
+  <data name="filters_unassigned" xml:space="preserve">
+    <value>Niet toegewezen</value>
+  </data>
+  <data name="filters_who" xml:space="preserve">
+    <value>Wie</value>
+  </data>
   <data name="format_ordinal_other" xml:space="preserve">
     <value>{0}e</value>
+  </data>
+  <data name="high" xml:space="preserve">
+    <value>Hoog</value>
+  </data>
+  <data name="image_picker_uploading" xml:space="preserve">
+    <value>Uploaden...</value>
+  </data>
+  <data name="language" xml:space="preserve">
+    <value>Taal</value>
+  </data>
+  <data name="language_settings" xml:space="preserve">
+    <value>Taal</value>
+  </data>
+  <data name="list_danger_zone" xml:space="preserve">
+    <value>Gevarenzone</value>
+  </data>
+  <data name="list_delete_list" xml:space="preserve">
+    <value>Lijst verwijderen</value>
+  </data>
+  <data name="list_details" xml:space="preserve">
+    <value>Lijstdetails</value>
+  </data>
+  <data name="list_list_settings" xml:space="preserve">
+    <value>Lijstinstellingen</value>
+  </data>
+  <data name="list_oauth_hint" xml:space="preserve">
+    <value>Gebruik deze ID voor OAuth API-integraties en programmeringsagenten</value>
+  </data>
+  <data name="list_task_creator" xml:space="preserve">
+    <value>Taakmaker</value>
+  </data>
+  <data name="list_insights_activity" xml:space="preserve">
+    <value>Activiteit</value>
+  </data>
+  <data name="list_insights_activity_counts" xml:space="preserve">
+    <value>{0} gemaakt · {1} bewerkingen · {2} reacties</value>
+  </data>
+  <data name="list_insights_completed" xml:space="preserve">
+    <value>Voltooid</value>
+  </data>
+  <data name="list_insights_completed_total" xml:space="preserve">
+    <value>{0} voltooid</value>
+  </data>
+  <data name="list_insights_contributors" xml:space="preserve">
+    <value>Topbijdragers</value>
+  </data>
+  <data name="list_insights_created" xml:space="preserve">
+    <value>Nieuw</value>
+  </data>
+  <data name="list_insights_created_total" xml:space="preserve">
+    <value>{0} nieuw</value>
+  </data>
+  <data name="list_insights_days30" xml:space="preserve">
+    <value>30 dagen</value>
+  </data>
+  <data name="list_insights_days7" xml:space="preserve">
+    <value>7 dagen</value>
+  </data>
+  <data name="list_insights_days90" xml:space="preserve">
+    <value>90 dagen</value>
+  </data>
+  <data name="list_insights_duration_days" xml:space="preserve">
+    <value>{0} d</value>
+  </data>
+  <data name="list_insights_duration_hours" xml:space="preserve">
+    <value>{0} u</value>
+  </data>
+  <data name="list_insights_duration_minutes" xml:space="preserve">
+    <value>{0} min</value>
+  </data>
+  <data name="list_insights_lane_history_note" xml:space="preserve">
+    <value>Kolomverplaatsingen worden vanaf nu vastgelegd; dit vult zich naarmate kaarten verschuiven.</value>
+  </data>
+  <data name="list_insights_load_failed" xml:space="preserve">
+    <value>Inzichten konden niet worden geladen</value>
+  </data>
+  <data name="list_insights_loading" xml:space="preserve">
+    <value>Inzichten laden…</value>
+  </data>
+  <data name="list_insights_no_activity" xml:space="preserve">
+    <value>Geen activiteit in deze periode</value>
+  </data>
+  <data name="list_insights_not_enough_history" xml:space="preserve">
+    <value>Nog niet genoeg geschiedenis</value>
+  </data>
+  <data name="list_insights_profile_counts" xml:space="preserve">
+    <value>{0} voltooid · {1} geïnspireerd · {2} ondersteund</value>
+  </data>
+  <data name="list_insights_sample_size" xml:space="preserve">
+    <value>uit {0}</value>
+  </data>
+  <data name="list_insights_tab" xml:space="preserve">
+    <value>Inzichten</value>
+  </data>
+  <data name="list_insights_time_in_lane" xml:space="preserve">
+    <value>Mediane tijd per kolom</value>
+  </data>
+  <data name="list_insights_time_to_complete" xml:space="preserve">
+    <value>Mediane tijd tot voltooiing</value>
+  </data>
+  <data name="lists" xml:space="preserve">
+    <value>Lijsten</value>
+  </data>
+  <data name="lists_add_list" xml:space="preserve">
+    <value>Lijst toevoegen</value>
+  </data>
+  <data name="lists_admin" xml:space="preserve">
+    <value>Beheerder</value>
+  </data>
+  <data name="lists_admin_role" xml:space="preserve">
+    <value>Beheerder</value>
+  </data>
+  <data name="lists_ai_agent_account_default" xml:space="preserve">
+    <value>Accountstandaard gebruiken</value>
+  </data>
+  <data name="lists_ai_agent_footer" xml:space="preserve">
+    <value>Voedt {0} in de chat en reacties van deze lijst. Programmeeragenten die aan taken zijn toegewezen, behouden hun eigen runtime.</value>
+  </data>
+  <data name="lists_ai_agent_model" xml:space="preserve">
+    <value>{0}-model voor deze lijst</value>
+  </data>
+  <data name="lists_ai_agent_section" xml:space="preserve">
+    <value>AI-agent</value>
+  </data>
+  <data name="lists_ai_agents" xml:space="preserve">
+    <value>AI-agenten</value>
+  </data>
+  <data name="lists_ai_coding_agents" xml:space="preserve">
+    <value>AI-programmeeragenten</value>
+  </data>
+  <data name="lists_all" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="lists_all_lists" xml:space="preserve">
+    <value>Alle lijsten</value>
+  </data>
+  <data name="lists_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="lists_available_agents" xml:space="preserve">
+    <value>Beschikbare agenten</value>
+  </data>
+  <data name="lists_clear_all_filters" xml:space="preserve">
+    <value>Alle filters wissen</value>
+  </data>
+  <data name="lists_custom" xml:space="preserve">
+    <value>Aangepast</value>
+  </data>
+  <data name="lists_custom_color" xml:space="preserve">
+    <value>Aangepaste kleur</value>
+  </data>
+  <data name="lists_daily" xml:space="preserve">
+    <value>Dagelijks</value>
+  </data>
+  <data name="lists_delete_list" xml:space="preserve">
+    <value>Lijst verwijderen</value>
+  </data>
+  <data name="lists_edit_list" xml:space="preserve">
+    <value>Lijst bewerken</value>
+  </data>
+  <data name="lists_favorite" xml:space="preserve">
+    <value>Favoriet</value>
   </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>Hoog</value>
@@ -100,14 +523,419 @@
   <data name="lists_highest_priority" xml:space="preserve">
     <value>Hoogste</value>
   </data>
+  <data name="lists_leave_list" xml:space="preserve">
+    <value>Lijst verlaten</value>
+  </data>
+  <data name="lists_list" xml:space="preserve">
+    <value>Lijst</value>
+  </data>
+  <data name="lists_list_color" xml:space="preserve">
+    <value>Lijstkleur</value>
+  </data>
+  <data name="lists_list_description" xml:space="preserve">
+    <value>Beschrijving</value>
+  </data>
+  <data name="lists_list_image" xml:space="preserve">
+    <value>Lijstafbeelding</value>
+  </data>
+  <data name="lists_list_name" xml:space="preserve">
+    <value>Lijstnaam</value>
+  </data>
+  <data name="lists_list_privacy" xml:space="preserve">
+    <value>Lijstprivacy</value>
+  </data>
+  <data name="lists_list_settings" xml:space="preserve">
+    <value>Lijstinstellingen</value>
+  </data>
   <data name="lists_low_priority" xml:space="preserve">
     <value>Laag</value>
+  </data>
+  <data name="lists_make_admin" xml:space="preserve">
+    <value>Beheerder maken</value>
+  </data>
+  <data name="lists_make_member" xml:space="preserve">
+    <value>Lid maken</value>
+  </data>
+  <data name="lists_make_private" xml:space="preserve">
+    <value>Privé maken</value>
+  </data>
+  <data name="lists_make_public" xml:space="preserve">
+    <value>Openbaar maken</value>
+  </data>
+  <data name="lists_manual" xml:space="preserve">
+    <value>Handmatig</value>
   </data>
   <data name="lists_medium_priority" xml:space="preserve">
     <value>Gemiddeld</value>
   </data>
+  <data name="lists_member_role" xml:space="preserve">
+    <value>Lid</value>
+  </data>
+  <data name="lists_members" xml:space="preserve">
+    <value>Leden</value>
+  </data>
+  <data name="lists_monthly" xml:space="preserve">
+    <value>Maandelijks</value>
+  </data>
+  <data name="lists_my_tasks_only" xml:space="preserve">
+    <value>Alleen mijn taken</value>
+  </data>
+  <data name="lists_never" xml:space="preserve">
+    <value>Nooit</value>
+  </data>
+  <data name="lists_new_list" xml:space="preserve">
+    <value>Nieuwe lijst</value>
+  </data>
+  <data name="lists_next_week" xml:space="preserve">
+    <value>Volgende week</value>
+  </data>
+  <data name="lists_no_members_yet" xml:space="preserve">
+    <value>Nog geen leden</value>
+  </data>
+  <data name="lists_none" xml:space="preserve">
+    <value>Geen</value>
+  </data>
+  <data name="lists_overdue" xml:space="preserve">
+    <value>Verlopen</value>
+  </data>
+  <data name="lists_owner" xml:space="preserve">
+    <value>Eigenaar</value>
+  </data>
+  <data name="lists_pending" xml:space="preserve">
+    <value>In afwachting</value>
+  </data>
+  <data name="lists_privacy_private" xml:space="preserve">
+    <value>Privé</value>
+  </data>
+  <data name="lists_privacy_public" xml:space="preserve">
+    <value>Openbaar</value>
+  </data>
+  <data name="lists_privacy_shared" xml:space="preserve">
+    <value>Gedeeld</value>
+  </data>
+  <data name="lists_public_collaborative_description" xml:space="preserve">
+    <value>Iedereen kan taken bekijken en toevoegen. Lijstbeheerders en makers van taken kunnen ze bewerken. Iedereen kan reageren.</value>
+  </data>
+  <data name="lists_public_type" xml:space="preserve">
+    <value>Type openbare lijst</value>
+  </data>
+  <data name="lists_recently_completed" xml:space="preserve">
+    <value>Onlangs voltooid</value>
+  </data>
+  <data name="lists_remove" xml:space="preserve">
+    <value>Verwijderen</value>
+  </data>
+  <data name="lists_remove_ai_agent" xml:space="preserve">
+    <value>Agent verwijderen</value>
+  </data>
+  <data name="lists_saved_filter" xml:space="preserve">
+    <value>Opgeslagen filter</value>
+  </data>
+  <data name="lists_show_subtasks" xml:space="preserve">
+    <value>Subtaken tonen</value>
+  </data>
+  <data name="lists_sort_and_filters" xml:space="preserve">
+    <value>Sorteren &amp; filteren</value>
+  </data>
+  <data name="lists_task_creator" xml:space="preserve">
+    <value>Taakmaker</value>
+  </data>
+  <data name="lists_tomorrow" xml:space="preserve">
+    <value>Morgen</value>
+  </data>
+  <data name="lists_transfer_and_leave" xml:space="preserve">
+    <value>Overdragen en verlaten</value>
+  </data>
+  <data name="lists_transfer_ownership" xml:space="preserve">
+    <value>Eigendom overdragen</value>
+  </data>
+  <data name="lists_transfer_ownership_select" xml:space="preserve">
+    <value>Nieuwe eigenaar kiezen</value>
+  </data>
+  <data name="lists_weekly" xml:space="preserve">
+    <value>Wekelijks</value>
+  </data>
+  <data name="lists_yearly" xml:space="preserve">
+    <value>Jaarlijks</value>
+  </data>
+  <data name="low" xml:space="preserve">
+    <value>Laag</value>
+  </data>
+  <data name="mac_add_subtask" xml:space="preserve">
+    <value>Subtaak toevoegen</value>
+  </data>
+  <data name="mac_ai" xml:space="preserve">
+    <value>AI</value>
+  </data>
+  <data name="mac_ai_keys_not_set" xml:space="preserve">
+    <value>Niet ingesteld</value>
+  </data>
+  <data name="mac_assigned_to" xml:space="preserve">
+    <value>Toegewezen aan {0}</value>
+  </data>
+  <data name="mac_attachments" xml:space="preserve">
+    <value>Bijlagen</value>
+  </data>
+  <data name="mac_browse_public_lists" xml:space="preserve">
+    <value>Openbare lijsten bekijken</value>
+  </data>
+  <data name="mac_comments_count" xml:space="preserve">
+    <value>Reacties ({0})</value>
+  </data>
+  <data name="mac_connect" xml:space="preserve">
+    <value>Verbinden</value>
+  </data>
+  <data name="mac_disable_board" xml:space="preserve">
+    <value>Bord uitschakelen</value>
+  </data>
+  <data name="mac_enabled" xml:space="preserve">
+    <value>Ingeschakeld</value>
+  </data>
+  <data name="mac_export_csv" xml:space="preserve">
+    <value>Exporteren als CSV</value>
+  </data>
+  <data name="mac_export_json" xml:space="preserve">
+    <value>Exporteren als JSON</value>
+  </data>
+  <data name="mac_get_started" xml:space="preserve">
+    <value>Aan de slag</value>
+  </data>
+  <data name="mac_keyboard_shortcuts" xml:space="preserve">
+    <value>Sneltoetsen</value>
+  </data>
+  <data name="mac_mark_complete" xml:space="preserve">
+    <value>Markeer als voltooid</value>
+  </data>
+  <data name="mac_no_members" xml:space="preserve">
+    <value>Nog geen leden</value>
+  </data>
+  <data name="mac_open_astrid" xml:space="preserve">
+    <value>{0} openen</value>
+  </data>
+  <data name="mac_privacy" xml:space="preserve">
+    <value>Privacy</value>
+  </data>
+  <data name="mac_refresh" xml:space="preserve">
+    <value>Vernieuwen</value>
+  </data>
+  <data name="mac_rename" xml:space="preserve">
+    <value>Naam wijzigen</value>
+  </data>
+  <data name="mac_repeat_every_n_days" xml:space="preserve">
+    <value>Elke {0} dagen</value>
+  </data>
+  <data name="mac_repeat_every_n_months" xml:space="preserve">
+    <value>Elke {0} maanden</value>
+  </data>
+  <data name="mac_repeat_every_n_weeks" xml:space="preserve">
+    <value>Elke {0} weken</value>
+  </data>
+  <data name="mac_repeat_every_n_years" xml:space="preserve">
+    <value>Elke {0} jaar</value>
+  </data>
+  <data name="mac_repeat_every_one_days" xml:space="preserve">
+    <value>Elke dag</value>
+  </data>
+  <data name="mac_repeat_every_one_months" xml:space="preserve">
+    <value>Elke maand</value>
+  </data>
+  <data name="mac_repeat_every_one_weeks" xml:space="preserve">
+    <value>Elke week</value>
+  </data>
+  <data name="mac_repeat_every_one_years" xml:space="preserve">
+    <value>Elk jaar</value>
+  </data>
+  <data name="mac_reply" xml:space="preserve">
+    <value>Beantwoorden</value>
+  </data>
+  <data name="mac_shortcut_add_comment" xml:space="preserve">
+    <value>Reactie toevoegen</value>
+  </data>
+  <data name="mac_shortcut_complete_task" xml:space="preserve">
+    <value>Geselecteerde taak voltooien</value>
+  </data>
+  <data name="mac_shortcut_cycle_filters" xml:space="preserve">
+    <value>Door lijstfilters/tags bladeren</value>
+  </data>
+  <data name="mac_shortcut_delete_task" xml:space="preserve">
+    <value>Geselecteerde taak verwijderen</value>
+  </data>
+  <data name="mac_shortcut_due_date_earlier" xml:space="preserve">
+    <value>Vervaldatum een dag eerder</value>
+  </data>
+  <data name="mac_shortcut_due_date_later" xml:space="preserve">
+    <value>Vervaldatum een dag later</value>
+  </data>
+  <data name="mac_shortcut_edit_description" xml:space="preserve">
+    <value>Taakomschrijving bewerken</value>
+  </data>
+  <data name="mac_shortcut_edit_lists" xml:space="preserve">
+    <value>Takenlijsten bewerken</value>
+  </data>
+  <data name="mac_shortcut_edit_title" xml:space="preserve">
+    <value>Taaktitel bewerken</value>
+  </data>
+  <data name="mac_shortcut_indent_task" xml:space="preserve">
+    <value>Taak onder de bovenstaande taak plaatsen</value>
+  </data>
+  <data name="mac_shortcut_new_task" xml:space="preserve">
+    <value>Nieuwe taak</value>
+  </data>
+  <data name="mac_shortcut_outdent_task" xml:space="preserve">
+    <value>Taak uit de bovenliggende taak halen</value>
+  </data>
+  <data name="mac_shortcut_postpone" xml:space="preserve">
+    <value>Taak een week uitstellen</value>
+  </data>
+  <data name="mac_shortcut_remove_due_date" xml:space="preserve">
+    <value>Vervaldatum verwijderen</value>
+  </data>
+  <data name="mac_shortcut_select_next" xml:space="preserve">
+    <value>Volgende taak selecteren</value>
+  </data>
+  <data name="mac_shortcut_select_previous" xml:space="preserve">
+    <value>Vorige taak selecteren</value>
+  </data>
+  <data name="mac_shortcut_show_shortcuts" xml:space="preserve">
+    <value>Sneltoetsen tonen</value>
+  </data>
+  <data name="mac_shortcut_toggle_panel" xml:space="preserve">
+    <value>Bewerkpaneel openen/sluiten</value>
+  </data>
+  <data name="mac_system_comments_hide" xml:space="preserve">
+    <value>Systeem verbergen</value>
+  </data>
+  <data name="mac_system_comments_show" xml:space="preserve">
+    <value>Systeem tonen</value>
+  </data>
+  <data name="mac_task_actions" xml:space="preserve">
+    <value>Taakacties</value>
+  </data>
+  <data name="mac_time" xml:space="preserve">
+    <value>Tijd</value>
+  </data>
+  <data name="mac_timer_start" xml:space="preserve">
+    <value>Begin</value>
+  </data>
+  <data name="mac_undo_delete" xml:space="preserve">
+    <value>taak verwijderen</value>
+  </data>
+  <data name="mac_unknown_author" xml:space="preserve">
+    <value>Onbekend</value>
+  </data>
+  <data name="mac_until" xml:space="preserve">
+    <value>Tot</value>
+  </data>
+  <data name="mac_view" xml:space="preserve">
+    <value>Weergave</value>
+  </data>
+  <data name="mac_view_board" xml:space="preserve">
+    <value>Bordweergave</value>
+  </data>
+  <data name="medium" xml:space="preserve">
+    <value>Gemiddeld</value>
+  </data>
+  <data name="messages_copied" xml:space="preserve">
+    <value>Gekopieerd</value>
+  </data>
+  <data name="messages_copying" xml:space="preserve">
+    <value>Kopiëren...</value>
+  </data>
+  <data name="messages_danger_zone" xml:space="preserve">
+    <value>Gevarenzone</value>
+  </data>
+  <data name="messages_deleted" xml:space="preserve">
+    <value>Verwijderd</value>
+  </data>
+  <data name="messages_deleting" xml:space="preserve">
+    <value>Verwijderen...</value>
+  </data>
+  <data name="messages_error" xml:space="preserve">
+    <value>Fout</value>
+  </data>
+  <data name="messages_loading" xml:space="preserve">
+    <value>Laden...</value>
+  </data>
+  <data name="messages_no_results" xml:space="preserve">
+    <value>Geen resultaten gevonden</value>
+  </data>
+  <data name="messages_saved" xml:space="preserve">
+    <value>Opgeslagen</value>
+  </data>
+  <data name="messages_saving" xml:space="preserve">
+    <value>Opslaan...</value>
+  </data>
+  <data name="messages_something_went_wrong" xml:space="preserve">
+    <value>Er is iets misgegaan</value>
+  </data>
+  <data name="messages_success" xml:space="preserve">
+    <value>Succes!</value>
+  </data>
+  <data name="messages_updated" xml:space="preserve">
+    <value>Bijgewerkt</value>
+  </data>
+  <data name="misc_cancel" xml:space="preserve">
+    <value>Annuleren</value>
+  </data>
+  <data name="misc_close" xml:space="preserve">
+    <value>Sluiten</value>
+  </data>
+  <data name="misc_save" xml:space="preserve">
+    <value>Opslaan</value>
+  </data>
+  <data name="navigation_add_list" xml:space="preserve">
+    <value>Lijst toevoegen</value>
+  </data>
+  <data name="navigation_lists" xml:space="preserve">
+    <value>Lijsten</value>
+  </data>
+  <data name="navigation_my_tasks" xml:space="preserve">
+    <value>Mijn taken</value>
+  </data>
+  <data name="navigation_public_lists" xml:space="preserve">
+    <value>Openbare lijsten</value>
+  </data>
+  <data name="navigation_public_shared_lists" xml:space="preserve">
+    <value>Openbare gedeelde lijsten</value>
+  </data>
+  <data name="navigation_search" xml:space="preserve">
+    <value>Zoeken</value>
+  </data>
+  <data name="navigation_see_all_collaborative" xml:space="preserve">
+    <value>Bekijk alle samenwerkingslijsten →</value>
+  </data>
+  <data name="navigation_see_all_suggested" xml:space="preserve">
+    <value>Bekijk alle gesuggereerde lijsten →</value>
+  </data>
+  <data name="navigation_today" xml:space="preserve">
+    <value>Vandaag</value>
+  </data>
+  <data name="never" xml:space="preserve">
+    <value>Nooit</value>
+  </data>
+  <data name="none" xml:space="preserve">
+    <value>Geen</value>
+  </data>
+  <data name="notifications" xml:space="preserve">
+    <value>Meldingen</value>
+  </data>
+  <data name="notifications_due_soon_title" xml:space="preserve">
+    <value>Taak verloopt binnenkort</value>
+  </data>
+  <data name="notifications_enable_push" xml:space="preserve">
+    <value>Push-meldingen inschakelen</value>
+  </data>
+  <data name="passkey_error_not_supported" xml:space="preserve">
+    <value>Passkeys worden niet ondersteund op dit apparaat</value>
+  </data>
   <data name="picker_afternoon" xml:space="preserve">
     <value>Middag</value>
+  </data>
+  <data name="picker_ai_agent" xml:space="preserve">
+    <value>AI-agent</value>
+  </data>
+  <data name="picker_all_day" xml:space="preserve">
+    <value>Hele dag</value>
   </data>
   <data name="picker_evening" xml:space="preserve">
     <value>Avond</value>
@@ -127,11 +955,20 @@
   <data name="picker_no_due_date" xml:space="preserve">
     <value>Geen deadline</value>
   </data>
+  <data name="picker_no_lists" xml:space="preserve">
+    <value>Geen lijsten gevonden</value>
+  </data>
   <data name="picker_today" xml:space="preserve">
     <value>Vandaag</value>
   </data>
   <data name="picker_tomorrow" xml:space="preserve">
     <value>Morgen</value>
+  </data>
+  <data name="preferences" xml:space="preserve">
+    <value>Voorkeuren</value>
+  </data>
+  <data name="priority" xml:space="preserve">
+    <value>Prioriteit</value>
   </data>
   <data name="priority_high" xml:space="preserve">
     <value>Hoog</value>
@@ -144,6 +981,51 @@
   </data>
   <data name="priority_none" xml:space="preserve">
     <value>Geen</value>
+  </data>
+  <data name="priority_urgent" xml:space="preserve">
+    <value>Urgent</value>
+  </data>
+  <data name="profile_ai_agent" xml:space="preserve">
+    <value>AI-agent</value>
+  </data>
+  <data name="profile_display_name" xml:space="preserve">
+    <value>Weergavenaam</value>
+  </data>
+  <data name="profile_email_address" xml:space="preserve">
+    <value>E-mailadres</value>
+  </data>
+  <data name="profile_error_load_failed" xml:space="preserve">
+    <value>Kan profiel niet laden</value>
+  </data>
+  <data name="profile_error_not_found" xml:space="preserve">
+    <value>Gebruiker niet gevonden</value>
+  </data>
+  <data name="profile_go_back" xml:space="preserve">
+    <value>Ga terug</value>
+  </data>
+  <data name="profile_joined" xml:space="preserve">
+    <value>Lid sinds {0}</value>
+  </data>
+  <data name="profile_loading" xml:space="preserve">
+    <value>Profiel laden...</value>
+  </data>
+  <data name="profile_save_changes" xml:space="preserve">
+    <value>Wijzigingen opslaan</value>
+  </data>
+  <data name="profile_saving" xml:space="preserve">
+    <value>Opslaan...</value>
+  </data>
+  <data name="profile_shared_tasks_with" xml:space="preserve">
+    <value>Gedeelde taken met {0}</value>
+  </data>
+  <data name="profile_title" xml:space="preserve">
+    <value>Profiel</value>
+  </data>
+  <data name="profile_you" xml:space="preserve">
+    <value>Jij</value>
+  </data>
+  <data name="profile_your_tasks" xml:space="preserve">
+    <value>Jouw taken</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
     <value>15 minuten van tevoren</value>
@@ -171,6 +1053,30 @@
   </data>
   <data name="reminder_week_before" xml:space="preserve">
     <value>1 week van tevoren</value>
+  </data>
+  <data name="reminders" xml:space="preserve">
+    <value>Herinneringen</value>
+  </data>
+  <data name="reminders_complete" xml:space="preserve">
+    <value>Voltooien</value>
+  </data>
+  <data name="reminders_counting_on_you" xml:space="preserve">
+    <value>Deze mensen rekenen op je!</value>
+  </data>
+  <data name="reminders_import" xml:space="preserve">
+    <value>Importeren</value>
+  </data>
+  <data name="reminders_snooze_1_day" xml:space="preserve">
+    <value>1 dag</value>
+  </data>
+  <data name="reminders_triage_close" xml:space="preserve">
+    <value>Sluiten</value>
+  </data>
+  <data name="reminders_triage_done" xml:space="preserve">
+    <value>Klaar</value>
+  </data>
+  <data name="reminders_unlink" xml:space="preserve">
+    <value>Ontkoppelen</value>
   </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
@@ -220,23 +1126,497 @@
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>op {0}</value>
   </data>
+  <data name="repeating_1st" xml:space="preserve">
+    <value>1e</value>
+  </data>
+  <data name="repeating_2nd" xml:space="preserve">
+    <value>2e</value>
+  </data>
+  <data name="repeating_3rd" xml:space="preserve">
+    <value>3e</value>
+  </data>
+  <data name="repeating_4th" xml:space="preserve">
+    <value>4e</value>
+  </data>
+  <data name="repeating_5th" xml:space="preserve">
+    <value>5e</value>
+  </data>
+  <data name="repeating_after_occurrences" xml:space="preserve">
+    <value>Na X keer</value>
+  </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>Aangepast</value>
   </data>
   <data name="repeating_daily" xml:space="preserve">
     <value>Dagelijks</value>
   </data>
+  <data name="repeating_day" xml:space="preserve">
+    <value>Dag</value>
+  </data>
+  <data name="repeating_day_of_month" xml:space="preserve">
+    <value>Dag van de maand</value>
+  </data>
+  <data name="repeating_days" xml:space="preserve">
+    <value>Dagen</value>
+  </data>
+  <data name="repeating_end_condition" xml:space="preserve">
+    <value>Eindconditie</value>
+  </data>
+  <data name="repeating_end_date" xml:space="preserve">
+    <value>Einddatum</value>
+  </data>
+  <data name="repeating_last" xml:space="preserve">
+    <value>Laatste</value>
+  </data>
+  <data name="repeating_month" xml:space="preserve">
+    <value>Maand</value>
+  </data>
   <data name="repeating_monthly" xml:space="preserve">
     <value>Maandelijks</value>
+  </data>
+  <data name="repeating_months" xml:space="preserve">
+    <value>Maanden</value>
+  </data>
+  <data name="repeating_never" xml:space="preserve">
+    <value>Nooit</value>
+  </data>
+  <data name="repeating_num_occurrences" xml:space="preserve">
+    <value>Aantal herhalingen</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
     <value>Nooit</value>
   </data>
+  <data name="repeating_preview" xml:space="preserve">
+    <value>Voorbeeld</value>
+  </data>
+  <data name="repeating_repeat_every" xml:space="preserve">
+    <value>Herhaal elke</value>
+  </data>
+  <data name="repeating_repeat_mode" xml:space="preserve">
+    <value>Herhalingsmodus</value>
+  </data>
+  <data name="repeating_repeat_on_days" xml:space="preserve">
+    <value>Herhaal op deze dagen</value>
+  </data>
+  <data name="repeating_repeat_type" xml:space="preserve">
+    <value>Herhalingstype</value>
+  </data>
+  <data name="repeating_same_date_monthly" xml:space="preserve">
+    <value>Dezelfde datum elke maand</value>
+  </data>
+  <data name="repeating_same_weekday_monthly" xml:space="preserve">
+    <value>Dezelfde weekdag en week van de maand</value>
+  </data>
+  <data name="repeating_until_date" xml:space="preserve">
+    <value>Tot specifieke datum</value>
+  </data>
+  <data name="repeating_week_of_month" xml:space="preserve">
+    <value>Week van de maand</value>
+  </data>
+  <data name="repeating_weekday" xml:space="preserve">
+    <value>Weekdag</value>
+  </data>
   <data name="repeating_weekly" xml:space="preserve">
     <value>Wekelijks</value>
   </data>
+  <data name="repeating_weeks" xml:space="preserve">
+    <value>Weken</value>
+  </data>
   <data name="repeating_yearly" xml:space="preserve">
     <value>Jaarlijks</value>
+  </data>
+  <data name="repeating_years" xml:space="preserve">
+    <value>Jaren</value>
+  </data>
+  <data name="retry" xml:space="preserve">
+    <value>Opnieuw</value>
+  </data>
+  <data name="save" xml:space="preserve">
+    <value>Opslaan</value>
+  </data>
+  <data name="search_placeholder" xml:space="preserve">
+    <value>Zoeken naar taken en gebruikers</value>
+  </data>
+  <data name="send" xml:space="preserve">
+    <value>Verzenden</value>
+  </data>
+  <data name="settings" xml:space="preserve">
+    <value>Instellingen</value>
+  </data>
+  <data name="settings_account_add_passkey_button" xml:space="preserve">
+    <value>Passkey Toevoegen</value>
+  </data>
+  <data name="settings_account_add_passkey_description" xml:space="preserve">
+    <value>Voeg een passkey toe voor sneller inloggen zonder wachtwoord</value>
+  </data>
+  <data name="settings_account_added_on" xml:space="preserve">
+    <value>Toegevoegd op {0}</value>
+  </data>
+  <data name="settings_account_adding_passkey" xml:space="preserve">
+    <value>Passkey toevoegen...</value>
+  </data>
+  <data name="settings_account_created" xml:space="preserve">
+    <value>Aangemaakt</value>
+  </data>
+  <data name="settings_account_danger_zone" xml:space="preserve">
+    <value>Gevarenzone</value>
+  </data>
+  <data name="settings_account_delete_account" xml:space="preserve">
+    <value>Account Verwijderen</value>
+  </data>
+  <data name="settings_account_delete_my_account_button" xml:space="preserve">
+    <value>Mijn Account Verwijderen</value>
+  </data>
+  <data name="settings_account_delete_remove_list_header" xml:space="preserve">
+    <value>Het verwijderen van je account verwijdert permanent:</value>
+  </data>
+  <data name="settings_account_display_name" xml:space="preserve">
+    <value>Weergavenaam</value>
+  </data>
+  <data name="settings_account_email_placeholder" xml:space="preserve">
+    <value>E-mail</value>
+  </data>
+  <data name="settings_account_email_verification" xml:space="preserve">
+    <value>E-mailverificatie</value>
+  </data>
+  <data name="settings_account_id" xml:space="preserve">
+    <value>Account ID</value>
+  </data>
+  <data name="settings_account_info" xml:space="preserve">
+    <value>Accountinformatie</value>
+  </data>
+  <data name="settings_account_invalid_email" xml:space="preserve">
+    <value>Voer een geldig e-mailadres in</value>
+  </data>
+  <data name="settings_account_loading_passkeys" xml:space="preserve">
+    <value>Passkeys laden...</value>
+  </data>
+  <data name="settings_account_passkey" xml:space="preserve">
+    <value>Passkey</value>
+  </data>
+  <data name="settings_account_passkeys" xml:space="preserve">
+    <value>Passkeys</value>
+  </data>
+  <data name="settings_account_save_changes" xml:space="preserve">
+    <value>Wijzigingen Opslaan</value>
+  </data>
+  <data name="settings_account_synced" xml:space="preserve">
+    <value>Gesynchroniseerd</value>
+  </data>
+  <data name="settings_account_unknown" xml:space="preserve">
+    <value>Onbekend</value>
+  </data>
+  <data name="settings_agents_copied" xml:space="preserve">
+    <value>Gekopieerd</value>
+  </data>
+  <data name="settings_agents_copilot_cloud_config" xml:space="preserve">
+    <value>MCP-configuratie</value>
+  </data>
+  <data name="settings_agents_custom_subtitle" xml:space="preserve">
+    <value>Agents die je zelf beheert via OAuth + REST + SSE</value>
+  </data>
+  <data name="settings_agents_custom_title" xml:space="preserve">
+    <value>Aangepaste agents</value>
+  </data>
+  <data name="settings_agents_get_key" xml:space="preserve">
+    <value>Sleutel ophalen</value>
+  </data>
+  <data name="settings_agents_github_repositories" xml:space="preserve">
+    <value>{0} repositories</value>
+  </data>
+  <data name="settings_agents_github_title" xml:space="preserve">
+    <value>GitHub-verbinding</value>
+  </data>
+  <data name="settings_agents_guide_link" xml:space="preserve">
+    <value>Handleiding: mijn code-agent verbinden</value>
+  </data>
+  <data name="settings_agents_key_footer" xml:space="preserve">
+    <value>Versleuteld opgeslagen, alleen aan de serverkant gebruikt.</value>
+  </data>
+  <data name="settings_agents_key_replace_placeholder" xml:space="preserve">
+    <value>Sleutel opgeslagen — plak om te vervangen</value>
+  </data>
+  <data name="settings_agents_mode_api" xml:space="preserve">
+    <value>{0} voert hem uit</value>
+  </data>
+  <data name="settings_agents_mode_webhook" xml:space="preserve">
+    <value>Webhook-server</value>
+  </data>
+  <data name="settings_agents_needs_setup" xml:space="preserve">
+    <value>Instellen vereist</value>
+  </data>
+  <data name="settings_agents_ownership_astrid" xml:space="preserve">
+    <value>{0} voert hem uit</value>
+  </data>
+  <data name="settings_agents_ownership_off" xml:space="preserve">
+    <value>Uit</value>
+  </data>
+  <data name="settings_agents_ownership_user" xml:space="preserve">
+    <value>Ik voer hem uit</value>
+  </data>
+  <data name="settings_agents_test_key" xml:space="preserve">
+    <value>Testen</value>
+  </data>
+  <data name="settings_agents_title" xml:space="preserve">
+    <value>AI-agents</value>
+  </data>
+  <data name="settings_agents_transport_polling" xml:space="preserve">
+    <value>Native codeerharness</value>
+  </data>
+  <data name="settings_agents_transport_sse" xml:space="preserve">
+    <value>Custom Agent (SSE)</value>
+  </data>
+  <data name="settings_agents_transport_webhook" xml:space="preserve">
+    <value>Webhook-server</value>
+  </data>
+  <data name="settings_agents_webhook_active" xml:space="preserve">
+    <value>Actief</value>
+  </data>
+  <data name="settings_agents_webhook_disabled" xml:space="preserve">
+    <value>Uitgeschakeld</value>
+  </data>
+  <data name="settings_agents_webhook_enabled" xml:space="preserve">
+    <value>Ingeschakeld</value>
+  </data>
+  <data name="settings_agents_webhook_failures" xml:space="preserve">
+    <value>Mislukkingen: {0}</value>
+  </data>
+  <data name="settings_agents_webhook_no_failures" xml:space="preserve">
+    <value>Geen mislukkingen</value>
+  </data>
+  <data name="settings_agents_webhook_status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="settings_agents_webhook_url" xml:space="preserve">
+    <value>Webhook-URL</value>
+  </data>
+  <data name="settings_agents_your_agents" xml:space="preserve">
+    <value>Je agents</value>
+  </data>
+  <data name="settings_appearance_email_to_task" xml:space="preserve">
+    <value>E-mail naar Taak</value>
+  </data>
+  <data name="settings_appearance_email_to_task_footer" xml:space="preserve">
+    <value>Maak taken door e-mails te sturen naar {0}</value>
+  </data>
+  <data name="settings_appearance_theme" xml:space="preserve">
+    <value>Thema</value>
+  </data>
+  <data name="settings_connections_category_app" xml:space="preserve">
+    <value>Apps</value>
+  </data>
+  <data name="settings_connections_category_token" xml:space="preserve">
+    <value>Toegangstokens</value>
+  </data>
+  <data name="settings_connections_category_webhook" xml:space="preserve">
+    <value>Webhook-server</value>
+  </data>
+  <data name="settings_connections_create" xml:space="preserve">
+    <value>Aanmaken</value>
+  </data>
+  <data name="settings_connections_created" xml:space="preserve">
+    <value>Gemaakt op {0}</value>
+  </data>
+  <data name="settings_connections_edit" xml:space="preserve">
+    <value>Bewerken</value>
+  </data>
+  <data name="settings_connections_empty" xml:space="preserve">
+    <value>Er is nog niets met je account verbonden.</value>
+  </data>
+  <data name="settings_connections_expires" xml:space="preserve">
+    <value>Verloopt op {0}</value>
+  </data>
+  <data name="settings_connections_field_description" xml:space="preserve">
+    <value>Beschrijving</value>
+  </data>
+  <data name="settings_connections_field_description_none" xml:space="preserve">
+    <value>Geen beschrijving</value>
+  </data>
+  <data name="settings_connections_field_redirect_uris" xml:space="preserve">
+    <value>Redirect-URI's</value>
+  </data>
+  <data name="settings_connections_field_scopes" xml:space="preserve">
+    <value>Scopes</value>
+  </data>
+  <data name="settings_connections_kind_access_token" xml:space="preserve">
+    <value>Toegangstokens</value>
+  </data>
+  <data name="settings_connections_kind_custom_agent" xml:space="preserve">
+    <value>Aangepaste agents</value>
+  </data>
+  <data name="settings_connections_kind_webhook" xml:space="preserve">
+    <value>Webhook-server</value>
+  </data>
+  <data name="settings_connections_owner_agent" xml:space="preserve">
+    <value>Agent</value>
+  </data>
+  <data name="settings_connections_owner_third_party" xml:space="preserve">
+    <value>Van derden</value>
+  </data>
+  <data name="settings_connections_owner_you" xml:space="preserve">
+    <value>Van jou</value>
+  </data>
+  <data name="settings_connections_remove_agent_confirm" xml:space="preserve">
+    <value>{0} verwijderen? De agent en zijn inloggegevens worden verwijderd.</value>
+  </data>
+  <data name="settings_connections_revoke" xml:space="preserve">
+    <value>Intrekken</value>
+  </data>
+  <data name="settings_connections_revoke_confirm" xml:space="preserve">
+    <value>{0} intrekken? Alles wat het gebruikt stopt onmiddellijk.</value>
+  </data>
+  <data name="settings_connections_status_active" xml:space="preserve">
+    <value>Actief</value>
+  </data>
+  <data name="settings_connections_status_disabled" xml:space="preserve">
+    <value>Uitgeschakeld</value>
+  </data>
+  <data name="settings_connections_status_expired" xml:space="preserve">
+    <value>Verlopen</value>
+  </data>
+  <data name="settings_connections_status_unknown" xml:space="preserve">
+    <value>Onbekend</value>
+  </data>
+  <data name="settings_connections_subtitle" xml:space="preserve">
+    <value>Alles wat namens je account kan handelen</value>
+  </data>
+  <data name="settings_connections_title" xml:space="preserve">
+    <value>Verbindingen</value>
+  </data>
+  <data name="settings_default_agent_available" xml:space="preserve">
+    <value>Beschikbare agents</value>
+  </data>
+  <data name="settings_default_agent_none" xml:space="preserve">
+    <value>Geen</value>
+  </data>
+  <data name="settings_openclaw_agent_deleted" xml:space="preserve">
+    <value>Agent verwijderd</value>
+  </data>
+  <data name="settings_openclaw_agent_name" xml:space="preserve">
+    <value>Agentnaam</value>
+  </data>
+  <data name="settings_openclaw_agent_name_hint" xml:space="preserve">
+    <value>Kies een naam voor je agent (bijv. buddy, helper, dev-bot)</value>
+  </data>
+  <data name="settings_openclaw_agent_name_placeholder" xml:space="preserve">
+    <value>buddy</value>
+  </data>
+  <data name="settings_openclaw_connect_agent" xml:space="preserve">
+    <value>Agent Verbinden</value>
+  </data>
+  <data name="settings_openclaw_copied" xml:space="preserve">
+    <value>Gekopieerd!</value>
+  </data>
+  <data name="settings_openclaw_create_agent" xml:space="preserve">
+    <value>Agent Aanmaken</value>
+  </data>
+  <data name="settings_openclaw_credential_api_base" xml:space="preserve">
+    <value>API-basis</value>
+  </data>
+  <data name="settings_openclaw_credential_client_id" xml:space="preserve">
+    <value>Client-ID</value>
+  </data>
+  <data name="settings_openclaw_credential_client_secret" xml:space="preserve">
+    <value>Clientgeheim</value>
+  </data>
+  <data name="settings_openclaw_credential_email" xml:space="preserve">
+    <value>Agent E-mail</value>
+  </data>
+  <data name="settings_openclaw_credential_sse_endpoint" xml:space="preserve">
+    <value>SSE-endpoint</value>
+  </data>
+  <data name="settings_openclaw_credential_token_endpoint" xml:space="preserve">
+    <value>Token-endpoint</value>
+  </data>
+  <data name="settings_openclaw_credentials_title" xml:space="preserve">
+    <value>Agent Aangemaakt</value>
+  </data>
+  <data name="settings_openclaw_credentials_warning" xml:space="preserve">
+    <value>Sla deze inloggegevens nu op. Het client secret wordt niet meer getoond.</value>
+  </data>
+  <data name="settings_openclaw_delete_agent" xml:space="preserve">
+    <value>Agent Verwijderen</value>
+  </data>
+  <data name="settings_openclaw_last_active" xml:space="preserve">
+    <value>Laatst actief {0}</value>
+  </data>
+  <data name="settings_openclaw_registered" xml:space="preserve">
+    <value>Geregistreerd {0}</value>
+  </data>
+  <data name="settings_openclaw_registering" xml:space="preserve">
+    <value>Registreren...</value>
+  </data>
+  <data name="settings_openclaw_section" xml:space="preserve">
+    <value>Aangepaste agents</value>
+  </data>
+  <data name="settings_openclaw_status_active" xml:space="preserve">
+    <value>Actief</value>
+  </data>
+  <data name="settings_openclaw_status_idle" xml:space="preserve">
+    <value>Inactief</value>
+  </data>
+  <data name="settings_openclaw_subtitle" xml:space="preserve">
+    <value>Verbind je eigen AI-agents</value>
+  </data>
+  <data name="settings_openclaw_title" xml:space="preserve">
+    <value>Aangepaste agents</value>
+  </data>
+  <data name="settings_reminders_daily_digest" xml:space="preserve">
+    <value>Dagelijks overzicht</value>
+  </data>
+  <data name="settings_reminders_default_time" xml:space="preserve">
+    <value>Standaard herinneringstijd</value>
+  </data>
+  <data name="settings_reminders_enable_push" xml:space="preserve">
+    <value>Push-meldingen inschakelen</value>
+  </data>
+  <data name="settings_reminders_end" xml:space="preserve">
+    <value>Einde</value>
+  </data>
+  <data name="settings_reminders_push_notifications" xml:space="preserve">
+    <value>Push-meldingen</value>
+  </data>
+  <data name="settings_reminders_start" xml:space="preserve">
+    <value>Begin</value>
+  </data>
+  <data name="settings_reminders_test" xml:space="preserve">
+    <value>Testen</value>
+  </data>
+  <data name="settings_reminders_test_reminder" xml:space="preserve">
+    <value>Testherinnering</value>
+  </data>
+  <data name="settings_reminders_timezone" xml:space="preserve">
+    <value>Tijdzone</value>
+  </data>
+  <data name="settings_subtasks_display" xml:space="preserve">
+    <value>Subtaken tonen</value>
+  </data>
+  <data name="settings_subtasks_indented" xml:space="preserve">
+    <value>In lijsten, ingesprongen</value>
+  </data>
+  <data name="settings_subtasks_title" xml:space="preserve">
+    <value>Subtaken</value>
+  </data>
+  <data name="settings_subtasks_under_parent" xml:space="preserve">
+    <value>Alleen in de hoofdtaak</value>
+  </data>
+  <data name="settings_task_display_list" xml:space="preserve">
+    <value>Lijst</value>
+  </data>
+  <data name="settings_task_display_project" xml:space="preserve">
+    <value>Project</value>
+  </data>
+  <data name="share_generating_link" xml:space="preserve">
+    <value>Link genereren...</value>
+  </data>
+  <data name="share_link_failed" xml:space="preserve">
+    <value>Kan geen deellink maken. Probeer het opnieuw.</value>
+  </data>
+  <data name="share_private_task_message" xml:space="preserve">
+    <value>Dit is een privétaak. Alleen gebruikers met toegang tot deze lijst kunnen deze zien.</value>
+  </data>
+  <data name="share_share_task" xml:space="preserve">
+    <value>Taak delen</value>
   </data>
   <data name="smart_layout_list" xml:space="preserve">
     <value>Lijst</value>
@@ -280,6 +1660,9 @@
   <data name="smart_time_20_00" xml:space="preserve">
     <value>20:00</value>
   </data>
+  <data name="smart_task_creations" xml:space="preserve">
+    <value>Slimme taakcreatie</value>
+  </data>
   <data name="sort" xml:space="preserve">
     <value>Sorteren op</value>
   </data>
@@ -298,6 +1681,54 @@
   <data name="sort_when" xml:space="preserve">
     <value>Vervaldatum</value>
   </data>
+  <data name="stats_completed" xml:space="preserve">
+    <value>Voltooid</value>
+  </data>
+  <data name="stats_inspired" xml:space="preserve">
+    <value>Geïnspireerd</value>
+  </data>
+  <data name="stats_supported" xml:space="preserve">
+    <value>Ondersteund</value>
+  </data>
+  <data name="status_retry_now" xml:space="preserve">
+    <value>Opnieuw proberen</value>
+  </data>
+  <data name="subtasks" xml:space="preserve">
+    <value>Subtaken</value>
+  </data>
+  <data name="subtasks_promote_drop_target" xml:space="preserve">
+    <value>Zet hier neer om uit de bovenliggende taak te halen</value>
+  </data>
+  <data name="sync_account" xml:space="preserve">
+    <value>Account</value>
+  </data>
+  <data name="sync_connect_github" xml:space="preserve">
+    <value>GitHub koppelen</value>
+  </data>
+  <data name="sync_disconnect" xml:space="preserve">
+    <value>Ontkoppelen</value>
+  </data>
+  <data name="sync_external_sync" xml:space="preserve">
+    <value>Externe synchronisatie</value>
+  </data>
+  <data name="sync_list" xml:space="preserve">
+    <value>Lijst</value>
+  </data>
+  <data name="sync_unlink" xml:space="preserve">
+    <value>Ontkoppelen</value>
+  </data>
+  <data name="task_detail_description_preview" xml:space="preserve">
+    <value>Voorbeeld</value>
+  </data>
+  <data name="task_detail_subtasks" xml:space="preserve">
+    <value>Subtaken</value>
+  </data>
+  <data name="task_edit_add_description" xml:space="preserve">
+    <value>Beschrijving toevoegen...</value>
+  </data>
+  <data name="task_edit_copy_to_lists" xml:space="preserve">
+    <value>Kopiëren naar Mijn lijsten</value>
+  </data>
   <data name="tasks_addNewTask" xml:space="preserve">
     <value>Nieuwe taak toevoegen</value>
   </data>
@@ -313,6 +1744,105 @@
   <data name="tasks_addTaskToList" xml:space="preserve">
     <value>Taak toevoegen aan {0}</value>
   </data>
+  <data name="tasks_add_task" xml:space="preserve">
+    <value>Taak toevoegen</value>
+  </data>
+  <data name="tasks_assignee" xml:space="preserve">
+    <value>Wie</value>
+  </data>
+  <data name="tasks_completed" xml:space="preserve">
+    <value>Voltooid</value>
+  </data>
+  <data name="tasks_copy_task" xml:space="preserve">
+    <value>Taak kopiëren</value>
+  </data>
+  <data name="tasks_delete_task" xml:space="preserve">
+    <value>Taak verwijderen</value>
+  </data>
+  <data name="tasks_description" xml:space="preserve">
+    <value>Beschrijving</value>
+  </data>
+  <data name="tasks_due_date" xml:space="preserve">
+    <value>Datum</value>
+  </data>
+  <data name="tasks_edit_task" xml:space="preserve">
+    <value>Taak bewerken</value>
+  </data>
+  <data name="tasks_incomplete" xml:space="preserve">
+    <value>Onvoltooid</value>
+  </data>
+  <data name="tasks_new_task" xml:space="preserve">
+    <value>Nieuwe taak</value>
+  </data>
+  <data name="tasks_no_description" xml:space="preserve">
+    <value>Geen beschrijving</value>
+  </data>
+  <data name="tasks_no_due_date" xml:space="preserve">
+    <value>Geen vervaldatum</value>
+  </data>
+  <data name="tasks_no_reminder" xml:space="preserve">
+    <value>Geen herinnering</value>
+  </data>
+  <data name="tasks_occurrences_next" xml:space="preserve">
+    <value>Volgende</value>
+  </data>
+  <data name="tasks_overdue" xml:space="preserve">
+    <value>Verlopen</value>
+  </data>
+  <data name="tasks_placeholder_description" xml:space="preserve">
+    <value>Voeg een beschrijving toe...</value>
+  </data>
+  <data name="tasks_placeholder_task_name" xml:space="preserve">
+    <value>Wat moet er gebeuren?</value>
+  </data>
+  <data name="tasks_priority" xml:space="preserve">
+    <value>Prioriteit</value>
+  </data>
+  <data name="tasks_project_fields_clear" xml:space="preserve">
+    <value>Geen</value>
+  </data>
+  <data name="tasks_project_fields_empty" xml:space="preserve">
+    <value>Niet ingesteld</value>
+  </data>
+  <data name="tasks_project_fields_error_auth_required" xml:space="preserve">
+    <value>Koppel je GitHub-account om dit veld te wijzigen.</value>
+  </data>
+  <data name="tasks_project_fields_error_save_failed" xml:space="preserve">
+    <value>Die wijziging kon niet in GitHub worden opgeslagen. Probeer het opnieuw.</value>
+  </data>
+  <data name="tasks_project_fields_error_sso_required" xml:space="preserve">
+    <value>Je organisatie vereist eenmalige aanmelding voor dit project. Meld je aan bij GitHub en probeer het opnieuw.</value>
+  </data>
+  <data name="tasks_reminder" xml:space="preserve">
+    <value>Herinnering</value>
+  </data>
+  <data name="tasks_reminders" xml:space="preserve">
+    <value>Herinneringen</value>
+  </data>
+  <data name="tasks_reopen" xml:space="preserve">
+    <value>Heropenen</value>
+  </data>
+  <data name="tasks_share_task" xml:space="preserve">
+    <value>Taak delen</value>
+  </data>
+  <data name="tasks_task" xml:space="preserve">
+    <value>Taak</value>
+  </data>
+  <data name="tasks_task_id_copy" xml:space="preserve">
+    <value>Taak-ID kopiëren</value>
+  </data>
+  <data name="tasks_task_id_label" xml:space="preserve">
+    <value>Taak-ID</value>
+  </data>
+  <data name="tasks_task_name" xml:space="preserve">
+    <value>Taaknaam</value>
+  </data>
+  <data name="tasks_tasks" xml:space="preserve">
+    <value>Taken</value>
+  </data>
+  <data name="tasks_timer" xml:space="preserve">
+    <value>Timer</value>
+  </data>
   <data name="tasks_tradeoffRatings_good" xml:space="preserve">
     <value>Goed</value>
   </data>
@@ -327,5 +1857,167 @@
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
     <value>Zeer slecht</value>
+  </data>
+  <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
+    <value>Volledig scherm</value>
+  </data>
+  <data name="tasks_waiting_on_add" xml:space="preserve">
+    <value>Op een taak wachten…</value>
+  </data>
+  <data name="tasks_waiting_on_add_error" xml:space="preserve">
+    <value>Kon niet op die taak wachten</value>
+  </data>
+  <data name="tasks_waiting_on_cycle_error" xml:space="preserve">
+    <value>Die taken zouden op elkaar gaan wachten</value>
+  </data>
+  <data name="tasks_waiting_on_hidden" xml:space="preserve">
+    <value>Een taak die je niet kunt zien</value>
+  </data>
+  <data name="tasks_waiting_on_label" xml:space="preserve">
+    <value>Wacht op</value>
+  </data>
+  <data name="tasks_waiting_on_no_results" xml:space="preserve">
+    <value>Geen overeenkomende taken</value>
+  </data>
+  <data name="tasks_waiting_on_remove" xml:space="preserve">
+    <value>Niet meer op deze taak wachten</value>
+  </data>
+  <data name="tasks_waiting_on_search_placeholder" xml:space="preserve">
+    <value>Taken zoeken…</value>
+  </data>
+  <data name="tasks_when" xml:space="preserve">
+    <value>Wanneer</value>
+  </data>
+  <data name="tasks_who" xml:space="preserve">
+    <value>Wie</value>
+  </data>
+  <data name="tasks_wont_do" xml:space="preserve">
+    <value>Doen we niet</value>
+  </data>
+  <data name="tasks_wont_do_chip" xml:space="preserve">
+    <value>Doen we niet</value>
+  </data>
+  <data name="theme_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="theme_dark" xml:space="preserve">
+    <value>Donker</value>
+  </data>
+  <data name="theme_light" xml:space="preserve">
+    <value>Licht</value>
+  </data>
+  <data name="theme_ocean" xml:space="preserve">
+    <value>Oceaan</value>
+  </data>
+  <data name="time_at_due_time" xml:space="preserve">
+    <value>Op vervaltijd</value>
+  </data>
+  <data name="time_day_before" xml:space="preserve">
+    <value>1 dag van tevoren</value>
+  </data>
+  <data name="time_hour_before" xml:space="preserve">
+    <value>1 uur van tevoren</value>
+  </data>
+  <data name="time_hours_before" xml:space="preserve">
+    <value>{0} uur van tevoren</value>
+  </data>
+  <data name="time_minutes_before" xml:space="preserve">
+    <value>{0} minuten van tevoren</value>
+  </data>
+  <data name="time_next_month" xml:space="preserve">
+    <value>Volgende maand</value>
+  </data>
+  <data name="time_next_week" xml:space="preserve">
+    <value>Volgende week</value>
+  </data>
+  <data name="time_this_month" xml:space="preserve">
+    <value>Deze maand</value>
+  </data>
+  <data name="time_this_week" xml:space="preserve">
+    <value>Deze week</value>
+  </data>
+  <data name="time_today" xml:space="preserve">
+    <value>Vandaag</value>
+  </data>
+  <data name="time_tomorrow" xml:space="preserve">
+    <value>Morgen</value>
+  </data>
+  <data name="time_week_before" xml:space="preserve">
+    <value>1 week van tevoren</value>
+  </data>
+  <data name="time_yesterday" xml:space="preserve">
+    <value>Gisteren</value>
+  </data>
+  <data name="timer" xml:space="preserve">
+    <value>Timer</value>
+  </data>
+  <data name="timer_tap_to_change" xml:space="preserve">
+    <value>Tik op de tijd om duur te wijzigen</value>
+  </data>
+  <data name="tradeoff_good" xml:space="preserve">
+    <value>Goed</value>
+  </data>
+  <data name="tradeoff_mixed" xml:space="preserve">
+    <value>Gemengd</value>
+  </data>
+  <data name="tradeoff_poor" xml:space="preserve">
+    <value>Slecht</value>
+  </data>
+  <data name="tradeoff_very_good" xml:space="preserve">
+    <value>Zeer goed</value>
+  </data>
+  <data name="tradeoff_very_poor" xml:space="preserve">
+    <value>Zeer slecht</value>
+  </data>
+  <data name="update_action" xml:space="preserve">
+    <value>Bijwerken</value>
+  </data>
+  <data name="update_later" xml:space="preserve">
+    <value>Niet nu</value>
+  </data>
+  <data name="user_menu_refresh_data" xml:space="preserve">
+    <value>Gegevens vernieuwen</value>
+  </data>
+  <data name="waiting_prompt_confirm" xml:space="preserve">
+    <value>Naar Wachten verplaatsen</value>
+  </data>
+  <data name="waiting_prompt_date_in_past" xml:space="preserve">
+    <value>Kies een dag na vandaag.</value>
+  </data>
+  <data name="waiting_prompt_date_label" xml:space="preserve">
+    <value>Tot</value>
+  </data>
+  <data name="waiting_prompt_description" xml:space="preserve">
+    <value>Een wachtende taak wacht op een datum of op een andere taak.</value>
+  </data>
+  <data name="waiting_prompt_description_for" xml:space="preserve">
+    <value>‘{0}’ wacht op een datum of op een andere taak.</value>
+  </data>
+  <data name="waiting_prompt_keep_assigned_to" xml:space="preserve">
+    <value>Aan {0} toegewezen laten</value>
+  </data>
+  <data name="waiting_prompt_keep_assigned_to_me" xml:space="preserve">
+    <value>Aan mij toegewezen laten</value>
+  </data>
+  <data name="waiting_prompt_on" xml:space="preserve">
+    <value>Wachten op…</value>
+  </data>
+  <data name="waiting_prompt_picked" xml:space="preserve">
+    <value>Wacht op {0}</value>
+  </data>
+  <data name="waiting_prompt_task_label" xml:space="preserve">
+    <value>De taak waarop ze wacht</value>
+  </data>
+  <data name="waiting_prompt_the_assignee" xml:space="preserve">
+    <value>de toegewezen persoon</value>
+  </data>
+  <data name="waiting_prompt_title" xml:space="preserve">
+    <value>Waarop wacht deze taak?</value>
+  </data>
+  <data name="waiting_prompt_until" xml:space="preserve">
+    <value>Wachten tot…</value>
+  </data>
+  <data name="welcome_sign_in" xml:space="preserve">
+    <value>Inloggen</value>
   </data>
 </root>

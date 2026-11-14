@@ -20,40 +20,21 @@
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const web = join(root, '..', 'astrid-web')
-const windows = join(root, '..', 'astrid-windows')
-const ios = join(root, '..', 'astrid-ios')
+import {
+  LOCALES,
+  PRINTF,
+  fromPrintf,
+  iosCatalog,
+  root,
+  sameWords,
+  webCatalog,
+  windows,
+} from './catalogs.mjs'
+
 const out = join(root, 'strings')
 const check = process.argv.includes('--check')
-
-// ── The twelve languages, and what each platform calls them ─────────────────────────────────────
-//
-// One table, because the four platforms disagree about every one of the interesting ones and a
-// mapping written twice is a mapping that disagrees with itself. `zh-CN` is `zh-Hans` to Apple,
-// `values-zh-rCN` to Android and `zh-Hans-CN` to Windows; Android's English is the unqualified
-// `values` directory, not `values-en`.
-const LOCALES = [
-  { tag: 'en', name: 'English', web: 'en', apple: 'en', android: 'values', windows: 'en-US' },
-  { tag: 'es', name: 'Español', web: 'es', apple: 'es', android: 'values-es', windows: 'es-ES' },
-  { tag: 'fr', name: 'Français', web: 'fr', apple: 'fr', android: 'values-fr', windows: 'fr-FR' },
-  { tag: 'de', name: 'Deutsch', web: 'de', apple: 'de', android: 'values-de', windows: 'de-DE' },
-  { tag: 'it', name: 'Italiano', web: 'it', apple: 'it', android: 'values-it', windows: 'it-IT' },
-  { tag: 'pt', name: 'Português', web: 'pt', apple: 'pt-PT', android: 'values-pt', windows: 'pt-PT' },
-  { tag: 'nl', name: 'Nederlands', web: 'nl', apple: 'nl', android: 'values-nl', windows: 'nl-NL' },
-  { tag: 'ru', name: 'Русский', web: 'ru', apple: 'ru', android: 'values-ru', windows: 'ru-RU' },
-  { tag: 'ja', name: '日本語', web: 'ja', apple: 'ja', android: 'values-ja', windows: 'ja-JP' },
-  { tag: 'ko', name: '한국어', web: 'ko', apple: 'ko', android: 'values-ko', windows: 'ko-KR' },
-  { tag: 'zh-CN', name: '简体中文', web: 'zh-CN', apple: 'zh-Hans', android: 'values-zh-rCN', windows: 'zh-Hans-CN' },
-  { tag: 'zh-TW', name: '繁體中文', web: 'zh-TW', apple: 'zh-Hant', android: 'values-zh-rTW', windows: 'zh-Hant-TW' },
-]
-
-// iOS's `.lproj` directories, which are not quite Apple's tags as `LOCALES` spells them for the
-// generated output: astrid-ios ships European Portuguese as plain `pt.lproj`.
-const IOS_LPROJ = { pt: 'pt' }
 
 // Core keys whose meaning iOS already carries in other English (AITD-660). A words-match cannot
 // find these: iOS says "1 hour before" where the core says "An hour before", and "Recently
@@ -206,103 +187,6 @@ function windowsResw(language, keys) {
     if (byName[name] !== undefined) table[key] = byName[name]
   }
   return table
-}
-
-/**
- * One of astrid-ios's `Localizable.strings`, flat, as the app looks its strings up (AITD-660).
- *
- * The largest body of translation the product has (~1,400 keys in the same twelve languages),
- * and a source this seeder could not reach in tranche 1. Values keep their printf placeholders
- * (`%@`, `%d`, `%1$@`); `fromPrintf` turns them into a key's named arguments once it is known
- * which key they are being asked for. A missing file is an empty table, so a checkout without
- * astrid-ios beside it seeds exactly as tranche 1 did.
- */
-function iosCatalog(locale) {
-  const lproj = IOS_LPROJ[locale.tag] ?? locale.apple
-  const path = join(ios, 'Astrid App/Resources/Localizations', `${lproj}.lproj`, 'Localizable.strings')
-  let source
-  try {
-    source = readFileSync(path, 'utf8')
-  } catch {
-    return {}
-  }
-  // Comments first: a quote inside one would otherwise start a phantom entry.
-  source = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-  const unescape = (text) =>
-    text.replace(/\\(U[0-9a-fA-F]{4}|.)/g, (_, escape) => {
-      if (escape.length === 5) return String.fromCharCode(parseInt(escape.slice(1), 16))
-      return { n: '\n', t: '\t', r: '\r' }[escape] ?? escape
-    })
-  const table = {}
-  for (const match of source.matchAll(/"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/g)) {
-    table[unescape(match[1])] = unescape(match[2])
-  }
-  return table
-}
-
-// A printf conversion as `.strings` files write them: `%@`, `%d`, `%lld`, `%1$@`, `%.1f`, `%%`.
-const PRINTF = /%(?:(\d+)\$)?[-+ 0#]*\d*(?:\.\d+)?(?:hh|h|ll|l|q|z|t|j|L)?([@dDiuUxXoOfeEgGcCsSp%])/g
-
-/**
- * An iOS value with its printf placeholders rewritten into the catalog's named arguments, or
- * `undefined` when it cannot be said safely.
- *
- * BY INDEX, not by order of appearance: a translation that reorders writes `%2$@ … %1$@`, and the
- * number is the only thing that says which argument is which (the same trap `renameByPosition`
- * documents for `{0}`). An unnumbered `%@` takes the next argument, as Foundation does. A value
- * with a placeholder the key does not declare, or one that leaves out an argument the key does
- * declare, is refused rather than guessed at: a translation that drops `{count}` says the wrong
- * number.
- */
-function fromPrintf(value, names) {
-  let next = 0
-  let refused = false
-  const used = new Set()
-  const rewritten = value.replace(PRINTF, (_, index, conversion) => {
-    if (conversion === '%') return '%'
-    const position = index === undefined ? next++ : Number(index) - 1
-    const name = names[position]
-    if (name === undefined) {
-      refused = true
-      return ''
-    }
-    used.add(name)
-    return `{${name}}`
-  })
-  if (refused || used.size !== names.length) return undefined
-  return rewritten
-}
-
-/** One of web's next-intl catalogs, flattened to the dotted keys next-intl looks them up by. */
-function webCatalog(locale) {
-  const nested = JSON.parse(readFileSync(join(web, 'lib/i18n/locales', `${locale}.json`), 'utf8'))
-  const flat = {}
-  const walk = (node, prefix) => {
-    for (const [key, value] of Object.entries(node)) {
-      const path = prefix ? `${prefix}.${key}` : key
-      if (value && typeof value === 'object') walk(value, path)
-      else if (typeof value === 'string') flat[path] = value
-    }
-  }
-  walk(nested, '')
-  return flat
-}
-
-/**
- * The form two strings are compared in when asking "is this the same words".
- *
- * Case, surrounding space, a trailing ellipsis and the placeholder syntax all differ between the
- * catalogs for reasons that are not about meaning: Windows writes `Custom…` and `{0}`, web writes
- * `Custom...` and `{count}`. Comparing those raw would match almost nothing.
- */
-function sameWords(text) {
-  return text
-    .replace(PRINTF, ' ')
-    .replace(/\{[^}]*\}/g, ' ')
-    .replace(/[.…]+$/u, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
 }
 
 // ── The join ────────────────────────────────────────────────────────────────────────────────────

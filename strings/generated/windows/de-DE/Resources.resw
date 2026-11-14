@@ -10,8 +10,224 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value></resheader>
+  <data name="about" xml:space="preserve">
+    <value>Über</value>
+  </data>
+  <data name="account" xml:space="preserve">
+    <value>Konto</value>
+  </data>
+  <data name="account_access" xml:space="preserve">
+    <value>Konto &amp; Zugang</value>
+  </data>
+  <data name="actions_add" xml:space="preserve">
+    <value>Hinzufügen</value>
+  </data>
+  <data name="actions_apply" xml:space="preserve">
+    <value>Anwenden</value>
+  </data>
+  <data name="actions_archive" xml:space="preserve">
+    <value>Archivieren</value>
+  </data>
+  <data name="actions_back" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="actions_cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="actions_clear" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="actions_close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="actions_confirm" xml:space="preserve">
+    <value>Bestätigen</value>
+  </data>
+  <data name="actions_copy" xml:space="preserve">
+    <value>Kopieren</value>
+  </data>
+  <data name="actions_create" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="actions_delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="actions_done" xml:space="preserve">
+    <value>Fertig</value>
+  </data>
+  <data name="actions_edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="actions_filter" xml:space="preserve">
+    <value>Filtern</value>
+  </data>
+  <data name="actions_move" xml:space="preserve">
+    <value>Verschieben</value>
+  </data>
+  <data name="actions_next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
+  <data name="actions_ok" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="actions_remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="actions_restore" xml:space="preserve">
+    <value>Wiederherstellen</value>
+  </data>
+  <data name="actions_retry" xml:space="preserve">
+    <value>Erneut versuchen</value>
+  </data>
+  <data name="actions_save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="actions_search" xml:space="preserve">
+    <value>Suchen</value>
+  </data>
+  <data name="actions_share" xml:space="preserve">
+    <value>Teilen</value>
+  </data>
+  <data name="actions_sort" xml:space="preserve">
+    <value>Sortieren</value>
+  </data>
+  <data name="actions_submit" xml:space="preserve">
+    <value>Absenden</value>
+  </data>
+  <data name="actions_update" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="add" xml:space="preserve">
+    <value>Hinzufügen</value>
+  </data>
+  <data name="appearance" xml:space="preserve">
+    <value>Erscheinungsbild</value>
+  </data>
+  <data name="assignee" xml:space="preserve">
+    <value>Zugewiesen an</value>
+  </data>
+  <data name="assignee_clear" xml:space="preserve">
+    <value>Zuweisung aufheben</value>
+  </data>
+  <data name="assignee_unassigned" xml:space="preserve">
+    <value>Nicht zugewiesen</value>
+  </data>
+  <data name="assignee_you" xml:space="preserve">
+    <value>Du</value>
+  </data>
+  <data name="attachments" xml:space="preserve">
+    <value>Anhänge</value>
+  </data>
+  <data name="attachments_saving" xml:space="preserve">
+    <value>Speichern...</value>
+  </data>
+  <data name="auth_email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="auth_new_user" xml:space="preserve">
+    <value>Neu hier?</value>
+  </data>
+  <data name="auth_or" xml:space="preserve">
+    <value>oder</value>
+  </data>
+  <data name="auth_returning_user" xml:space="preserve">
+    <value>Zurück?</value>
+  </data>
+  <data name="auth_sign_in_header" xml:space="preserve">
+    <value>Anmelden, um zu beginnen!</value>
+  </data>
+  <data name="auth_sign_in_prompt_title" xml:space="preserve">
+    <value>Anmelden</value>
+  </data>
+  <data name="auth_sign_in_short" xml:space="preserve">
+    <value>Anmelden</value>
+  </data>
+  <data name="board_status_doing" xml:space="preserve">
+    <value>In Arbeit</value>
+  </data>
+  <data name="board_status_done" xml:space="preserve">
+    <value>Erledigt</value>
+  </data>
+  <data name="board_status_inbox" xml:space="preserve">
+    <value>Eingang</value>
+  </data>
+  <data name="board_status_ready" xml:space="preserve">
+    <value>Bereit</value>
+  </data>
+  <data name="board_status_waiting" xml:space="preserve">
+    <value>Wartet</value>
+  </data>
+  <data name="cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="chat_hide_messages" xml:space="preserve">
+    <value>Nachrichten ausblenden</value>
+  </data>
+  <data name="chat_send" xml:space="preserve">
+    <value>Senden</value>
+  </data>
+  <data name="chat_show_messages" xml:space="preserve">
+    <value>Nachrichten einblenden</value>
+  </data>
+  <data name="chat_toggle_tasks" xml:space="preserve">
+    <value>Aufgaben</value>
+  </data>
+  <data name="comments" xml:space="preserve">
+    <value>Kommentare</value>
+  </data>
+  <data name="comments_add_placeholder" xml:space="preserve">
+    <value>Kommentar hinzufügen...</value>
+  </data>
+  <data name="comments_count" xml:space="preserve">
+    <value>Kommentare ({0})</value>
+  </data>
+  <data name="complete" xml:space="preserve">
+    <value>Abschließen</value>
+  </data>
+  <data name="contacts" xml:space="preserve">
+    <value>Kontakte</value>
+  </data>
+  <data name="contacts_synced_contacts" xml:space="preserve">
+    <value>Synchronisierte Kontakte</value>
+  </data>
+  <data name="debug_reminder_debug_mode" xml:space="preserve">
+    <value>Erinnerungs-Debug-Modus</value>
+  </data>
+  <data name="debug_toast_debug_desc" xml:space="preserve">
+    <value>Detaillierte Toast-Benachrichtigungen für Debugging anzeigen</value>
+  </data>
+  <data name="debug_toast_debug_mode" xml:space="preserve">
+    <value>Toast-Debug-Modus</value>
+  </data>
+  <data name="decision_recommended" xml:space="preserve">
+    <value>Empfohlen</value>
+  </data>
   <data name="defaults_all_day" xml:space="preserve">
     <value>Ganztägig</value>
+  </data>
+  <data name="delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="done" xml:space="preserve">
+    <value>Fertig</value>
+  </data>
+  <data name="empty_state_list_with_name" xml:space="preserve">
+    <value>Füllen wir "{0}"! Füge deine erste Aufgabe hinzu.</value>
+  </data>
+  <data name="empty_state_my_tasks_caught_up" xml:space="preserve">
+    <value>Du bist auf dem Laufenden! Keine Aufgaben zugewiesen.</value>
+  </data>
+  <data name="empty_state_no_lists" xml:space="preserve">
+    <value>Noch keine Listen. Erstelle deine erste Liste!</value>
+  </data>
+  <data name="empty_state_public_list" xml:space="preserve">
+    <value>Teile deine Ideen! Füge Aufgaben hinzu – jeder kann diese Liste sehen.</value>
+  </data>
+  <data name="empty_state_shared_list" xml:space="preserve">
+    <value>Leg los mit der Zusammenarbeit! Füge eine Aufgabe hinzu.</value>
+  </data>
+  <data name="empty_state_today" xml:space="preserve">
+    <value>Nichts für heute geplant! Genieß die freie Zeit.</value>
   </data>
   <data name="filter_any" xml:space="preserve">
     <value>Alle</value>
@@ -91,8 +307,215 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Wiederholt sich nicht</value>
   </data>
+  <data name="filters_all" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="filters_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="filters_clear_all" xml:space="preserve">
+    <value>Alle Filter löschen</value>
+  </data>
+  <data name="filters_high_priority" xml:space="preserve">
+    <value>!! Hoch</value>
+  </data>
+  <data name="filters_highest_priority" xml:space="preserve">
+    <value>!!! Höchste</value>
+  </data>
+  <data name="filters_low_priority" xml:space="preserve">
+    <value>○ Niedrig</value>
+  </data>
+  <data name="filters_manual" xml:space="preserve">
+    <value>Manuell</value>
+  </data>
+  <data name="filters_medium_priority" xml:space="preserve">
+    <value>! Mittel</value>
+  </data>
+  <data name="filters_saving" xml:space="preserve">
+    <value>Speichern...</value>
+  </data>
+  <data name="filters_show" xml:space="preserve">
+    <value>Anzeigen</value>
+  </data>
+  <data name="filters_sort" xml:space="preserve">
+    <value>Sortieren</value>
+  </data>
+  <data name="filters_sort_and_filters" xml:space="preserve">
+    <value>Sortierung &amp; Filter</value>
+  </data>
+  <data name="filters_tasks_count" xml:space="preserve">
+    <value>{0} Aufgaben</value>
+  </data>
+  <data name="filters_unassigned" xml:space="preserve">
+    <value>Nicht zugewiesen</value>
+  </data>
+  <data name="filters_who" xml:space="preserve">
+    <value>Wer</value>
+  </data>
   <data name="format_ordinal_other" xml:space="preserve">
     <value>{0}.</value>
+  </data>
+  <data name="high" xml:space="preserve">
+    <value>Hoch</value>
+  </data>
+  <data name="image_picker_uploading" xml:space="preserve">
+    <value>Hochladen...</value>
+  </data>
+  <data name="language" xml:space="preserve">
+    <value>Sprache</value>
+  </data>
+  <data name="language_settings" xml:space="preserve">
+    <value>Sprache</value>
+  </data>
+  <data name="list_danger_zone" xml:space="preserve">
+    <value>Gefahrenzone</value>
+  </data>
+  <data name="list_delete_list" xml:space="preserve">
+    <value>Liste löschen</value>
+  </data>
+  <data name="list_details" xml:space="preserve">
+    <value>Listendetails</value>
+  </data>
+  <data name="list_list_settings" xml:space="preserve">
+    <value>Listeneinstellungen</value>
+  </data>
+  <data name="list_oauth_hint" xml:space="preserve">
+    <value>Verwende diese ID für OAuth-API-Integrationen und Programmier-Agenten</value>
+  </data>
+  <data name="list_task_creator" xml:space="preserve">
+    <value>Aufgabenersteller</value>
+  </data>
+  <data name="list_insights_activity" xml:space="preserve">
+    <value>Aktivität</value>
+  </data>
+  <data name="list_insights_activity_counts" xml:space="preserve">
+    <value>{0} erstellt · {1} Änderungen · {2} Kommentare</value>
+  </data>
+  <data name="list_insights_completed" xml:space="preserve">
+    <value>Erledigt</value>
+  </data>
+  <data name="list_insights_completed_total" xml:space="preserve">
+    <value>{0} erledigt</value>
+  </data>
+  <data name="list_insights_contributors" xml:space="preserve">
+    <value>Top-Beitragende</value>
+  </data>
+  <data name="list_insights_created" xml:space="preserve">
+    <value>Neu</value>
+  </data>
+  <data name="list_insights_created_total" xml:space="preserve">
+    <value>{0} neu</value>
+  </data>
+  <data name="list_insights_days30" xml:space="preserve">
+    <value>30 Tage</value>
+  </data>
+  <data name="list_insights_days7" xml:space="preserve">
+    <value>7 Tage</value>
+  </data>
+  <data name="list_insights_days90" xml:space="preserve">
+    <value>90 Tage</value>
+  </data>
+  <data name="list_insights_duration_days" xml:space="preserve">
+    <value>{0} T.</value>
+  </data>
+  <data name="list_insights_duration_hours" xml:space="preserve">
+    <value>{0} Std.</value>
+  </data>
+  <data name="list_insights_duration_minutes" xml:space="preserve">
+    <value>{0} Min.</value>
+  </data>
+  <data name="list_insights_lane_history_note" xml:space="preserve">
+    <value>Spaltenwechsel werden ab jetzt erfasst; die Werte füllen sich, sobald Karten verschoben werden.</value>
+  </data>
+  <data name="list_insights_load_failed" xml:space="preserve">
+    <value>Statistiken konnten nicht geladen werden</value>
+  </data>
+  <data name="list_insights_loading" xml:space="preserve">
+    <value>Statistiken werden geladen…</value>
+  </data>
+  <data name="list_insights_no_activity" xml:space="preserve">
+    <value>Keine Aktivität in diesem Zeitraum</value>
+  </data>
+  <data name="list_insights_not_enough_history" xml:space="preserve">
+    <value>Noch nicht genug Verlauf</value>
+  </data>
+  <data name="list_insights_profile_counts" xml:space="preserve">
+    <value>{0} erledigt · {1} inspiriert · {2} unterstützt</value>
+  </data>
+  <data name="list_insights_sample_size" xml:space="preserve">
+    <value>aus {0}</value>
+  </data>
+  <data name="list_insights_tab" xml:space="preserve">
+    <value>Statistiken</value>
+  </data>
+  <data name="list_insights_time_in_lane" xml:space="preserve">
+    <value>Mittlere Zeit pro Spalte</value>
+  </data>
+  <data name="list_insights_time_to_complete" xml:space="preserve">
+    <value>Mittlere Zeit bis zur Erledigung</value>
+  </data>
+  <data name="lists" xml:space="preserve">
+    <value>Listen</value>
+  </data>
+  <data name="lists_add_list" xml:space="preserve">
+    <value>Liste hinzufügen</value>
+  </data>
+  <data name="lists_admin" xml:space="preserve">
+    <value>Administrator</value>
+  </data>
+  <data name="lists_admin_role" xml:space="preserve">
+    <value>Administrator</value>
+  </data>
+  <data name="lists_ai_agent_account_default" xml:space="preserve">
+    <value>Kontostandard verwenden</value>
+  </data>
+  <data name="lists_ai_agent_footer" xml:space="preserve">
+    <value>Betreibt {0} im Chat und in den Kommentaren dieser Liste. Programmieragenten, die Aufgaben zugewiesen sind, behalten ihre eigene Laufzeitumgebung.</value>
+  </data>
+  <data name="lists_ai_agent_model" xml:space="preserve">
+    <value>{0}-Modell für diese Liste</value>
+  </data>
+  <data name="lists_ai_agent_section" xml:space="preserve">
+    <value>KI-Agent</value>
+  </data>
+  <data name="lists_ai_agents" xml:space="preserve">
+    <value>KI-Agenten</value>
+  </data>
+  <data name="lists_ai_coding_agents" xml:space="preserve">
+    <value>KI-Programmieragenten</value>
+  </data>
+  <data name="lists_all" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="lists_all_lists" xml:space="preserve">
+    <value>Alle Listen</value>
+  </data>
+  <data name="lists_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="lists_available_agents" xml:space="preserve">
+    <value>Verfügbare Agenten</value>
+  </data>
+  <data name="lists_clear_all_filters" xml:space="preserve">
+    <value>Alle Filter löschen</value>
+  </data>
+  <data name="lists_custom" xml:space="preserve">
+    <value>Benutzerdefiniert</value>
+  </data>
+  <data name="lists_custom_color" xml:space="preserve">
+    <value>Eigene Farbe</value>
+  </data>
+  <data name="lists_daily" xml:space="preserve">
+    <value>Täglich</value>
+  </data>
+  <data name="lists_delete_list" xml:space="preserve">
+    <value>Liste löschen</value>
+  </data>
+  <data name="lists_edit_list" xml:space="preserve">
+    <value>Liste bearbeiten</value>
+  </data>
+  <data name="lists_favorite" xml:space="preserve">
+    <value>Favorit</value>
   </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>Hoch</value>
@@ -100,14 +523,419 @@
   <data name="lists_highest_priority" xml:space="preserve">
     <value>Höchste</value>
   </data>
+  <data name="lists_leave_list" xml:space="preserve">
+    <value>Liste verlassen</value>
+  </data>
+  <data name="lists_list" xml:space="preserve">
+    <value>Liste</value>
+  </data>
+  <data name="lists_list_color" xml:space="preserve">
+    <value>Listenfarbe</value>
+  </data>
+  <data name="lists_list_description" xml:space="preserve">
+    <value>Beschreibung</value>
+  </data>
+  <data name="lists_list_image" xml:space="preserve">
+    <value>Listenbild</value>
+  </data>
+  <data name="lists_list_name" xml:space="preserve">
+    <value>Listenname</value>
+  </data>
+  <data name="lists_list_privacy" xml:space="preserve">
+    <value>Listenschutz</value>
+  </data>
+  <data name="lists_list_settings" xml:space="preserve">
+    <value>Listeneinstellungen</value>
+  </data>
   <data name="lists_low_priority" xml:space="preserve">
     <value>Niedrig</value>
+  </data>
+  <data name="lists_make_admin" xml:space="preserve">
+    <value>Zum Administrator machen</value>
+  </data>
+  <data name="lists_make_member" xml:space="preserve">
+    <value>Zum Mitglied machen</value>
+  </data>
+  <data name="lists_make_private" xml:space="preserve">
+    <value>Privat machen</value>
+  </data>
+  <data name="lists_make_public" xml:space="preserve">
+    <value>Öffentlich machen</value>
+  </data>
+  <data name="lists_manual" xml:space="preserve">
+    <value>Manuell</value>
   </data>
   <data name="lists_medium_priority" xml:space="preserve">
     <value>Mittel</value>
   </data>
+  <data name="lists_member_role" xml:space="preserve">
+    <value>Mitglied</value>
+  </data>
+  <data name="lists_members" xml:space="preserve">
+    <value>Mitglieder</value>
+  </data>
+  <data name="lists_monthly" xml:space="preserve">
+    <value>Monatlich</value>
+  </data>
+  <data name="lists_my_tasks_only" xml:space="preserve">
+    <value>Nur meine Aufgaben</value>
+  </data>
+  <data name="lists_never" xml:space="preserve">
+    <value>Nie</value>
+  </data>
+  <data name="lists_new_list" xml:space="preserve">
+    <value>Neue Liste</value>
+  </data>
+  <data name="lists_next_week" xml:space="preserve">
+    <value>Nächste Woche</value>
+  </data>
+  <data name="lists_no_members_yet" xml:space="preserve">
+    <value>Noch keine Mitglieder</value>
+  </data>
+  <data name="lists_none" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="lists_overdue" xml:space="preserve">
+    <value>Überfällig</value>
+  </data>
+  <data name="lists_owner" xml:space="preserve">
+    <value>Besitzer</value>
+  </data>
+  <data name="lists_pending" xml:space="preserve">
+    <value>Ausstehend</value>
+  </data>
+  <data name="lists_privacy_private" xml:space="preserve">
+    <value>Privat</value>
+  </data>
+  <data name="lists_privacy_public" xml:space="preserve">
+    <value>Öffentlich</value>
+  </data>
+  <data name="lists_privacy_shared" xml:space="preserve">
+    <value>Geteilt</value>
+  </data>
+  <data name="lists_public_collaborative_description" xml:space="preserve">
+    <value>Alle können Aufgaben sehen und hinzufügen. Listen-Admins und Ersteller können Aufgaben bearbeiten. Alle können kommentieren.</value>
+  </data>
+  <data name="lists_public_type" xml:space="preserve">
+    <value>Typ der öffentlichen Liste</value>
+  </data>
+  <data name="lists_recently_completed" xml:space="preserve">
+    <value>Kürzlich erledigt</value>
+  </data>
+  <data name="lists_remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="lists_remove_ai_agent" xml:space="preserve">
+    <value>Agent entfernen</value>
+  </data>
+  <data name="lists_saved_filter" xml:space="preserve">
+    <value>Gespeicherter Filter</value>
+  </data>
+  <data name="lists_show_subtasks" xml:space="preserve">
+    <value>Unteraufgaben anzeigen</value>
+  </data>
+  <data name="lists_sort_and_filters" xml:space="preserve">
+    <value>Sortieren &amp; Filtern</value>
+  </data>
+  <data name="lists_task_creator" xml:space="preserve">
+    <value>Aufgabenersteller</value>
+  </data>
+  <data name="lists_tomorrow" xml:space="preserve">
+    <value>Morgen</value>
+  </data>
+  <data name="lists_transfer_and_leave" xml:space="preserve">
+    <value>Übertragen &amp; verlassen</value>
+  </data>
+  <data name="lists_transfer_ownership" xml:space="preserve">
+    <value>Eigentum übertragen</value>
+  </data>
+  <data name="lists_transfer_ownership_select" xml:space="preserve">
+    <value>Neue Eigentümerin oder neuen Eigentümer wählen</value>
+  </data>
+  <data name="lists_weekly" xml:space="preserve">
+    <value>Wöchentlich</value>
+  </data>
+  <data name="lists_yearly" xml:space="preserve">
+    <value>Jährlich</value>
+  </data>
+  <data name="low" xml:space="preserve">
+    <value>Niedrig</value>
+  </data>
+  <data name="mac_add_subtask" xml:space="preserve">
+    <value>Teilaufgabe hinzufügen</value>
+  </data>
+  <data name="mac_ai" xml:space="preserve">
+    <value>KI</value>
+  </data>
+  <data name="mac_ai_keys_not_set" xml:space="preserve">
+    <value>Nicht festgelegt</value>
+  </data>
+  <data name="mac_assigned_to" xml:space="preserve">
+    <value>Zugewiesen an {0}</value>
+  </data>
+  <data name="mac_attachments" xml:space="preserve">
+    <value>Anhänge</value>
+  </data>
+  <data name="mac_browse_public_lists" xml:space="preserve">
+    <value>Öffentliche Listen durchsuchen</value>
+  </data>
+  <data name="mac_comments_count" xml:space="preserve">
+    <value>Kommentare ({0})</value>
+  </data>
+  <data name="mac_connect" xml:space="preserve">
+    <value>Verbinden</value>
+  </data>
+  <data name="mac_disable_board" xml:space="preserve">
+    <value>Board deaktivieren</value>
+  </data>
+  <data name="mac_enabled" xml:space="preserve">
+    <value>Aktiviert</value>
+  </data>
+  <data name="mac_export_csv" xml:space="preserve">
+    <value>Als CSV exportieren</value>
+  </data>
+  <data name="mac_export_json" xml:space="preserve">
+    <value>Als JSON exportieren</value>
+  </data>
+  <data name="mac_get_started" xml:space="preserve">
+    <value>Loslegen</value>
+  </data>
+  <data name="mac_keyboard_shortcuts" xml:space="preserve">
+    <value>Tastaturkurzbefehle</value>
+  </data>
+  <data name="mac_mark_complete" xml:space="preserve">
+    <value>Als erledigt markieren</value>
+  </data>
+  <data name="mac_no_members" xml:space="preserve">
+    <value>Noch keine Mitglieder</value>
+  </data>
+  <data name="mac_open_astrid" xml:space="preserve">
+    <value>{0} öffnen</value>
+  </data>
+  <data name="mac_privacy" xml:space="preserve">
+    <value>Datenschutz</value>
+  </data>
+  <data name="mac_refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="mac_rename" xml:space="preserve">
+    <value>Umbenennen</value>
+  </data>
+  <data name="mac_repeat_every_n_days" xml:space="preserve">
+    <value>Alle {0} Tage</value>
+  </data>
+  <data name="mac_repeat_every_n_months" xml:space="preserve">
+    <value>Alle {0} Monate</value>
+  </data>
+  <data name="mac_repeat_every_n_weeks" xml:space="preserve">
+    <value>Alle {0} Wochen</value>
+  </data>
+  <data name="mac_repeat_every_n_years" xml:space="preserve">
+    <value>Alle {0} Jahre</value>
+  </data>
+  <data name="mac_repeat_every_one_days" xml:space="preserve">
+    <value>Jeden Tag</value>
+  </data>
+  <data name="mac_repeat_every_one_months" xml:space="preserve">
+    <value>Jeden Monat</value>
+  </data>
+  <data name="mac_repeat_every_one_weeks" xml:space="preserve">
+    <value>Jede Woche</value>
+  </data>
+  <data name="mac_repeat_every_one_years" xml:space="preserve">
+    <value>Jedes Jahr</value>
+  </data>
+  <data name="mac_reply" xml:space="preserve">
+    <value>Antworten</value>
+  </data>
+  <data name="mac_shortcut_add_comment" xml:space="preserve">
+    <value>Kommentar hinzufügen</value>
+  </data>
+  <data name="mac_shortcut_complete_task" xml:space="preserve">
+    <value>Ausgewählte Aufgabe abschließen</value>
+  </data>
+  <data name="mac_shortcut_cycle_filters" xml:space="preserve">
+    <value>Durch Listenfilter/Tags blättern</value>
+  </data>
+  <data name="mac_shortcut_delete_task" xml:space="preserve">
+    <value>Ausgewählte Aufgabe löschen</value>
+  </data>
+  <data name="mac_shortcut_due_date_earlier" xml:space="preserve">
+    <value>Fälligkeit einen Tag früher</value>
+  </data>
+  <data name="mac_shortcut_due_date_later" xml:space="preserve">
+    <value>Fälligkeit einen Tag später</value>
+  </data>
+  <data name="mac_shortcut_edit_description" xml:space="preserve">
+    <value>Aufgabenbeschreibung bearbeiten</value>
+  </data>
+  <data name="mac_shortcut_edit_lists" xml:space="preserve">
+    <value>Aufgabenlisten bearbeiten</value>
+  </data>
+  <data name="mac_shortcut_edit_title" xml:space="preserve">
+    <value>Aufgabentitel bearbeiten</value>
+  </data>
+  <data name="mac_shortcut_indent_task" xml:space="preserve">
+    <value>Aufgabe unter der darüberliegenden Aufgabe einordnen</value>
+  </data>
+  <data name="mac_shortcut_new_task" xml:space="preserve">
+    <value>Neue Aufgabe</value>
+  </data>
+  <data name="mac_shortcut_outdent_task" xml:space="preserve">
+    <value>Aufgabe aus der übergeordneten Aufgabe herauslösen</value>
+  </data>
+  <data name="mac_shortcut_postpone" xml:space="preserve">
+    <value>Aufgabe um eine Woche verschieben</value>
+  </data>
+  <data name="mac_shortcut_remove_due_date" xml:space="preserve">
+    <value>Fälligkeitsdatum entfernen</value>
+  </data>
+  <data name="mac_shortcut_select_next" xml:space="preserve">
+    <value>Nächste Aufgabe auswählen</value>
+  </data>
+  <data name="mac_shortcut_select_previous" xml:space="preserve">
+    <value>Vorherige Aufgabe auswählen</value>
+  </data>
+  <data name="mac_shortcut_show_shortcuts" xml:space="preserve">
+    <value>Kurzbefehle anzeigen</value>
+  </data>
+  <data name="mac_shortcut_toggle_panel" xml:space="preserve">
+    <value>Bearbeitungsbereich ein-/ausblenden</value>
+  </data>
+  <data name="mac_system_comments_hide" xml:space="preserve">
+    <value>System ausblenden</value>
+  </data>
+  <data name="mac_system_comments_show" xml:space="preserve">
+    <value>System einblenden</value>
+  </data>
+  <data name="mac_task_actions" xml:space="preserve">
+    <value>Aufgabenaktionen</value>
+  </data>
+  <data name="mac_time" xml:space="preserve">
+    <value>Uhrzeit</value>
+  </data>
+  <data name="mac_timer_start" xml:space="preserve">
+    <value>Starten</value>
+  </data>
+  <data name="mac_undo_delete" xml:space="preserve">
+    <value>Aufgabe löschen</value>
+  </data>
+  <data name="mac_unknown_author" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="mac_until" xml:space="preserve">
+    <value>Bis</value>
+  </data>
+  <data name="mac_view" xml:space="preserve">
+    <value>Ansicht</value>
+  </data>
+  <data name="mac_view_board" xml:space="preserve">
+    <value>Boardansicht</value>
+  </data>
+  <data name="medium" xml:space="preserve">
+    <value>Mittel</value>
+  </data>
+  <data name="messages_copied" xml:space="preserve">
+    <value>Kopiert</value>
+  </data>
+  <data name="messages_copying" xml:space="preserve">
+    <value>Kopieren...</value>
+  </data>
+  <data name="messages_danger_zone" xml:space="preserve">
+    <value>Gefahrenzone</value>
+  </data>
+  <data name="messages_deleted" xml:space="preserve">
+    <value>Gelöscht</value>
+  </data>
+  <data name="messages_deleting" xml:space="preserve">
+    <value>Löschen...</value>
+  </data>
+  <data name="messages_error" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="messages_loading" xml:space="preserve">
+    <value>Laden...</value>
+  </data>
+  <data name="messages_no_results" xml:space="preserve">
+    <value>Keine Ergebnisse gefunden</value>
+  </data>
+  <data name="messages_saved" xml:space="preserve">
+    <value>Gespeichert</value>
+  </data>
+  <data name="messages_saving" xml:space="preserve">
+    <value>Speichern...</value>
+  </data>
+  <data name="messages_something_went_wrong" xml:space="preserve">
+    <value>Etwas ist schief gelaufen</value>
+  </data>
+  <data name="messages_success" xml:space="preserve">
+    <value>Erfolg!</value>
+  </data>
+  <data name="messages_updated" xml:space="preserve">
+    <value>Aktualisiert</value>
+  </data>
+  <data name="misc_cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="misc_close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="misc_save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="navigation_add_list" xml:space="preserve">
+    <value>Liste hinzufügen</value>
+  </data>
+  <data name="navigation_lists" xml:space="preserve">
+    <value>Listen</value>
+  </data>
+  <data name="navigation_my_tasks" xml:space="preserve">
+    <value>Meine Aufgaben</value>
+  </data>
+  <data name="navigation_public_lists" xml:space="preserve">
+    <value>Öffentliche Listen</value>
+  </data>
+  <data name="navigation_public_shared_lists" xml:space="preserve">
+    <value>Öffentliche geteilte Listen</value>
+  </data>
+  <data name="navigation_search" xml:space="preserve">
+    <value>Suchen</value>
+  </data>
+  <data name="navigation_see_all_collaborative" xml:space="preserve">
+    <value>Alle kollaborativen Listen anzeigen →</value>
+  </data>
+  <data name="navigation_see_all_suggested" xml:space="preserve">
+    <value>Alle vorgeschlagenen Listen anzeigen →</value>
+  </data>
+  <data name="navigation_today" xml:space="preserve">
+    <value>Heute</value>
+  </data>
+  <data name="never" xml:space="preserve">
+    <value>Nie</value>
+  </data>
+  <data name="none" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="notifications" xml:space="preserve">
+    <value>Benachrichtigungen</value>
+  </data>
+  <data name="notifications_due_soon_title" xml:space="preserve">
+    <value>Aufgabe bald fällig</value>
+  </data>
+  <data name="notifications_enable_push" xml:space="preserve">
+    <value>Push-Benachrichtigungen aktivieren</value>
+  </data>
+  <data name="passkey_error_not_supported" xml:space="preserve">
+    <value>Passkeys werden auf diesem Gerät nicht unterstützt</value>
+  </data>
   <data name="picker_afternoon" xml:space="preserve">
     <value>Nachmittags</value>
+  </data>
+  <data name="picker_ai_agent" xml:space="preserve">
+    <value>KI-Agent</value>
+  </data>
+  <data name="picker_all_day" xml:space="preserve">
+    <value>Ganztägig</value>
   </data>
   <data name="picker_evening" xml:space="preserve">
     <value>Abends</value>
@@ -127,11 +955,20 @@
   <data name="picker_no_due_date" xml:space="preserve">
     <value>Kein Fälligkeitsdatum</value>
   </data>
+  <data name="picker_no_lists" xml:space="preserve">
+    <value>Keine Listen gefunden</value>
+  </data>
   <data name="picker_today" xml:space="preserve">
     <value>Heute</value>
   </data>
   <data name="picker_tomorrow" xml:space="preserve">
     <value>Morgen</value>
+  </data>
+  <data name="preferences" xml:space="preserve">
+    <value>Einstellungen</value>
+  </data>
+  <data name="priority" xml:space="preserve">
+    <value>Priorität</value>
   </data>
   <data name="priority_high" xml:space="preserve">
     <value>Hoch</value>
@@ -144,6 +981,51 @@
   </data>
   <data name="priority_none" xml:space="preserve">
     <value>Keine Priorität</value>
+  </data>
+  <data name="priority_urgent" xml:space="preserve">
+    <value>Dringend</value>
+  </data>
+  <data name="profile_ai_agent" xml:space="preserve">
+    <value>KI-Agent</value>
+  </data>
+  <data name="profile_display_name" xml:space="preserve">
+    <value>Anzeigename</value>
+  </data>
+  <data name="profile_email_address" xml:space="preserve">
+    <value>E-Mail-Adresse</value>
+  </data>
+  <data name="profile_error_load_failed" xml:space="preserve">
+    <value>Profil konnte nicht geladen werden</value>
+  </data>
+  <data name="profile_error_not_found" xml:space="preserve">
+    <value>Benutzer nicht gefunden</value>
+  </data>
+  <data name="profile_go_back" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="profile_joined" xml:space="preserve">
+    <value>Beigetreten am {0}</value>
+  </data>
+  <data name="profile_loading" xml:space="preserve">
+    <value>Profil wird geladen...</value>
+  </data>
+  <data name="profile_save_changes" xml:space="preserve">
+    <value>Änderungen speichern</value>
+  </data>
+  <data name="profile_saving" xml:space="preserve">
+    <value>Speichern...</value>
+  </data>
+  <data name="profile_shared_tasks_with" xml:space="preserve">
+    <value>Geteilte Aufgaben mit {0}</value>
+  </data>
+  <data name="profile_title" xml:space="preserve">
+    <value>Profil</value>
+  </data>
+  <data name="profile_you" xml:space="preserve">
+    <value>Du</value>
+  </data>
+  <data name="profile_your_tasks" xml:space="preserve">
+    <value>Deine Aufgaben</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
     <value>15 Minuten vorher</value>
@@ -171,6 +1053,30 @@
   </data>
   <data name="reminder_week_before" xml:space="preserve">
     <value>1 Woche vorher</value>
+  </data>
+  <data name="reminders" xml:space="preserve">
+    <value>Erinnerungen</value>
+  </data>
+  <data name="reminders_complete" xml:space="preserve">
+    <value>Abschließen</value>
+  </data>
+  <data name="reminders_counting_on_you" xml:space="preserve">
+    <value>Diese Leute zählen auf dich!</value>
+  </data>
+  <data name="reminders_import" xml:space="preserve">
+    <value>Importieren</value>
+  </data>
+  <data name="reminders_snooze_1_day" xml:space="preserve">
+    <value>1 Tag</value>
+  </data>
+  <data name="reminders_triage_close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="reminders_triage_done" xml:space="preserve">
+    <value>Fertig</value>
+  </data>
+  <data name="reminders_unlink" xml:space="preserve">
+    <value>Verknüpfung aufheben</value>
   </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
@@ -220,23 +1126,497 @@
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>am {0}</value>
   </data>
+  <data name="repeating_1st" xml:space="preserve">
+    <value>1.</value>
+  </data>
+  <data name="repeating_2nd" xml:space="preserve">
+    <value>2.</value>
+  </data>
+  <data name="repeating_3rd" xml:space="preserve">
+    <value>3.</value>
+  </data>
+  <data name="repeating_4th" xml:space="preserve">
+    <value>4.</value>
+  </data>
+  <data name="repeating_5th" xml:space="preserve">
+    <value>5.</value>
+  </data>
+  <data name="repeating_after_occurrences" xml:space="preserve">
+    <value>Nach X Wiederholungen</value>
+  </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>Benutzerdefiniert…</value>
   </data>
   <data name="repeating_daily" xml:space="preserve">
     <value>Täglich</value>
   </data>
+  <data name="repeating_day" xml:space="preserve">
+    <value>Tag</value>
+  </data>
+  <data name="repeating_day_of_month" xml:space="preserve">
+    <value>Tag des Monats</value>
+  </data>
+  <data name="repeating_days" xml:space="preserve">
+    <value>Tage</value>
+  </data>
+  <data name="repeating_end_condition" xml:space="preserve">
+    <value>Endebedingung</value>
+  </data>
+  <data name="repeating_end_date" xml:space="preserve">
+    <value>Enddatum</value>
+  </data>
+  <data name="repeating_last" xml:space="preserve">
+    <value>Letzte</value>
+  </data>
+  <data name="repeating_month" xml:space="preserve">
+    <value>Monat</value>
+  </data>
   <data name="repeating_monthly" xml:space="preserve">
     <value>Monatlich</value>
+  </data>
+  <data name="repeating_months" xml:space="preserve">
+    <value>Monate</value>
+  </data>
+  <data name="repeating_never" xml:space="preserve">
+    <value>Nie</value>
+  </data>
+  <data name="repeating_num_occurrences" xml:space="preserve">
+    <value>Anzahl der Wiederholungen</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
     <value>Nie</value>
   </data>
+  <data name="repeating_preview" xml:space="preserve">
+    <value>Vorschau</value>
+  </data>
+  <data name="repeating_repeat_every" xml:space="preserve">
+    <value>Wiederholen alle</value>
+  </data>
+  <data name="repeating_repeat_mode" xml:space="preserve">
+    <value>Wiederholungsmodus</value>
+  </data>
+  <data name="repeating_repeat_on_days" xml:space="preserve">
+    <value>An diesen Tagen wiederholen</value>
+  </data>
+  <data name="repeating_repeat_type" xml:space="preserve">
+    <value>Wiederholungsart</value>
+  </data>
+  <data name="repeating_same_date_monthly" xml:space="preserve">
+    <value>Gleiches Datum jeden Monat</value>
+  </data>
+  <data name="repeating_same_weekday_monthly" xml:space="preserve">
+    <value>Gleicher Wochentag und Woche im Monat</value>
+  </data>
+  <data name="repeating_until_date" xml:space="preserve">
+    <value>Bis zu einem bestimmten Datum</value>
+  </data>
+  <data name="repeating_week_of_month" xml:space="preserve">
+    <value>Woche des Monats</value>
+  </data>
+  <data name="repeating_weekday" xml:space="preserve">
+    <value>Wochentag</value>
+  </data>
   <data name="repeating_weekly" xml:space="preserve">
     <value>Wöchentlich</value>
   </data>
+  <data name="repeating_weeks" xml:space="preserve">
+    <value>Wochen</value>
+  </data>
   <data name="repeating_yearly" xml:space="preserve">
     <value>Jährlich</value>
+  </data>
+  <data name="repeating_years" xml:space="preserve">
+    <value>Jahre</value>
+  </data>
+  <data name="retry" xml:space="preserve">
+    <value>Erneut versuchen</value>
+  </data>
+  <data name="save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="search_placeholder" xml:space="preserve">
+    <value>Nach Aufgaben und Benutzern suchen</value>
+  </data>
+  <data name="send" xml:space="preserve">
+    <value>Senden</value>
+  </data>
+  <data name="settings" xml:space="preserve">
+    <value>Einstellungen</value>
+  </data>
+  <data name="settings_account_add_passkey_button" xml:space="preserve">
+    <value>Passkey hinzufügen</value>
+  </data>
+  <data name="settings_account_add_passkey_description" xml:space="preserve">
+    <value>Füge einen Passkey für eine schnellere Anmeldung hinzu</value>
+  </data>
+  <data name="settings_account_added_on" xml:space="preserve">
+    <value>Hinzugefügt am {0}</value>
+  </data>
+  <data name="settings_account_adding_passkey" xml:space="preserve">
+    <value>Passkey wird hinzugefügt...</value>
+  </data>
+  <data name="settings_account_created" xml:space="preserve">
+    <value>Erstellt am</value>
+  </data>
+  <data name="settings_account_danger_zone" xml:space="preserve">
+    <value>Gefahrenzone</value>
+  </data>
+  <data name="settings_account_delete_account" xml:space="preserve">
+    <value>Konto löschen</value>
+  </data>
+  <data name="settings_account_delete_my_account_button" xml:space="preserve">
+    <value>Mein Konto löschen</value>
+  </data>
+  <data name="settings_account_delete_remove_list_header" xml:space="preserve">
+    <value>Das Löschen deines Kontos entfernt dauerhaft:</value>
+  </data>
+  <data name="settings_account_display_name" xml:space="preserve">
+    <value>Anzeigename</value>
+  </data>
+  <data name="settings_account_email_placeholder" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="settings_account_email_verification" xml:space="preserve">
+    <value>E-Mail-Verifizierung</value>
+  </data>
+  <data name="settings_account_id" xml:space="preserve">
+    <value>Konto-ID</value>
+  </data>
+  <data name="settings_account_info" xml:space="preserve">
+    <value>Kontoinformationen</value>
+  </data>
+  <data name="settings_account_invalid_email" xml:space="preserve">
+    <value>Bitte gib eine gültige E-Mail-Adresse ein</value>
+  </data>
+  <data name="settings_account_loading_passkeys" xml:space="preserve">
+    <value>Passkeys werden geladen...</value>
+  </data>
+  <data name="settings_account_passkey" xml:space="preserve">
+    <value>Passkey</value>
+  </data>
+  <data name="settings_account_passkeys" xml:space="preserve">
+    <value>Passkeys</value>
+  </data>
+  <data name="settings_account_save_changes" xml:space="preserve">
+    <value>Änderungen speichern</value>
+  </data>
+  <data name="settings_account_synced" xml:space="preserve">
+    <value>Synchronisiert</value>
+  </data>
+  <data name="settings_account_unknown" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="settings_agents_copied" xml:space="preserve">
+    <value>Kopiert</value>
+  </data>
+  <data name="settings_agents_copilot_cloud_config" xml:space="preserve">
+    <value>MCP-Konfiguration</value>
+  </data>
+  <data name="settings_agents_custom_subtitle" xml:space="preserve">
+    <value>Agenten, die du über OAuth + REST + SSE betreibst</value>
+  </data>
+  <data name="settings_agents_custom_title" xml:space="preserve">
+    <value>Eigene Agenten</value>
+  </data>
+  <data name="settings_agents_get_key" xml:space="preserve">
+    <value>Schlüssel holen</value>
+  </data>
+  <data name="settings_agents_github_repositories" xml:space="preserve">
+    <value>{0} Repositories</value>
+  </data>
+  <data name="settings_agents_github_title" xml:space="preserve">
+    <value>GitHub-Verbindung</value>
+  </data>
+  <data name="settings_agents_guide_link" xml:space="preserve">
+    <value>Anleitung: Meinen Coding-Agenten verbinden</value>
+  </data>
+  <data name="settings_agents_key_footer" xml:space="preserve">
+    <value>Verschlüsselt gespeichert, nur serverseitig verwendet.</value>
+  </data>
+  <data name="settings_agents_key_replace_placeholder" xml:space="preserve">
+    <value>Schlüssel gespeichert – zum Ersetzen einfügen</value>
+  </data>
+  <data name="settings_agents_mode_api" xml:space="preserve">
+    <value>{0} führt ihn aus</value>
+  </data>
+  <data name="settings_agents_mode_webhook" xml:space="preserve">
+    <value>Webhook-Server</value>
+  </data>
+  <data name="settings_agents_needs_setup" xml:space="preserve">
+    <value>Einrichtung nötig</value>
+  </data>
+  <data name="settings_agents_ownership_astrid" xml:space="preserve">
+    <value>{0} führt ihn aus</value>
+  </data>
+  <data name="settings_agents_ownership_off" xml:space="preserve">
+    <value>Aus</value>
+  </data>
+  <data name="settings_agents_ownership_user" xml:space="preserve">
+    <value>Ich führe ihn aus</value>
+  </data>
+  <data name="settings_agents_test_key" xml:space="preserve">
+    <value>Testen</value>
+  </data>
+  <data name="settings_agents_title" xml:space="preserve">
+    <value>KI-Agenten</value>
+  </data>
+  <data name="settings_agents_transport_polling" xml:space="preserve">
+    <value>Natives Coding-Harness</value>
+  </data>
+  <data name="settings_agents_transport_sse" xml:space="preserve">
+    <value>Custom Agent (SSE)</value>
+  </data>
+  <data name="settings_agents_transport_webhook" xml:space="preserve">
+    <value>Webhook-Server</value>
+  </data>
+  <data name="settings_agents_webhook_active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="settings_agents_webhook_disabled" xml:space="preserve">
+    <value>Deaktiviert</value>
+  </data>
+  <data name="settings_agents_webhook_enabled" xml:space="preserve">
+    <value>Aktiviert</value>
+  </data>
+  <data name="settings_agents_webhook_failures" xml:space="preserve">
+    <value>Fehler: {0}</value>
+  </data>
+  <data name="settings_agents_webhook_no_failures" xml:space="preserve">
+    <value>Keine Fehler</value>
+  </data>
+  <data name="settings_agents_webhook_status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="settings_agents_webhook_url" xml:space="preserve">
+    <value>Webhook-URL</value>
+  </data>
+  <data name="settings_agents_your_agents" xml:space="preserve">
+    <value>Deine Agenten</value>
+  </data>
+  <data name="settings_appearance_email_to_task" xml:space="preserve">
+    <value>E-Mail-zu-Aufgabe</value>
+  </data>
+  <data name="settings_appearance_email_to_task_footer" xml:space="preserve">
+    <value>Erstelle Aufgaben, indem du E-Mails an {0} sendest</value>
+  </data>
+  <data name="settings_appearance_theme" xml:space="preserve">
+    <value>Design</value>
+  </data>
+  <data name="settings_connections_category_app" xml:space="preserve">
+    <value>Apps</value>
+  </data>
+  <data name="settings_connections_category_token" xml:space="preserve">
+    <value>Zugriffstoken</value>
+  </data>
+  <data name="settings_connections_category_webhook" xml:space="preserve">
+    <value>Webhook-Server</value>
+  </data>
+  <data name="settings_connections_create" xml:space="preserve">
+    <value>Erstellen</value>
+  </data>
+  <data name="settings_connections_created" xml:space="preserve">
+    <value>Erstellt am {0}</value>
+  </data>
+  <data name="settings_connections_edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="settings_connections_empty" xml:space="preserve">
+    <value>Mit deinem Konto ist noch nichts verbunden.</value>
+  </data>
+  <data name="settings_connections_expires" xml:space="preserve">
+    <value>Läuft ab am {0}</value>
+  </data>
+  <data name="settings_connections_field_description" xml:space="preserve">
+    <value>Beschreibung</value>
+  </data>
+  <data name="settings_connections_field_description_none" xml:space="preserve">
+    <value>Keine Beschreibung</value>
+  </data>
+  <data name="settings_connections_field_redirect_uris" xml:space="preserve">
+    <value>Weiterleitungs-URIs</value>
+  </data>
+  <data name="settings_connections_field_scopes" xml:space="preserve">
+    <value>Berechtigungen</value>
+  </data>
+  <data name="settings_connections_kind_access_token" xml:space="preserve">
+    <value>Zugriffstoken</value>
+  </data>
+  <data name="settings_connections_kind_custom_agent" xml:space="preserve">
+    <value>Eigene Agenten</value>
+  </data>
+  <data name="settings_connections_kind_webhook" xml:space="preserve">
+    <value>Webhook-Server</value>
+  </data>
+  <data name="settings_connections_owner_agent" xml:space="preserve">
+    <value>Agent</value>
+  </data>
+  <data name="settings_connections_owner_third_party" xml:space="preserve">
+    <value>Drittanbieter</value>
+  </data>
+  <data name="settings_connections_owner_you" xml:space="preserve">
+    <value>Deine</value>
+  </data>
+  <data name="settings_connections_remove_agent_confirm" xml:space="preserve">
+    <value>{0} entfernen? Der Agent und seine Zugangsdaten werden gelöscht.</value>
+  </data>
+  <data name="settings_connections_revoke" xml:space="preserve">
+    <value>Widerrufen</value>
+  </data>
+  <data name="settings_connections_revoke_confirm" xml:space="preserve">
+    <value>{0} widerrufen? Alles, was es verwendet, funktioniert sofort nicht mehr.</value>
+  </data>
+  <data name="settings_connections_status_active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="settings_connections_status_disabled" xml:space="preserve">
+    <value>Deaktiviert</value>
+  </data>
+  <data name="settings_connections_status_expired" xml:space="preserve">
+    <value>Abgelaufen</value>
+  </data>
+  <data name="settings_connections_status_unknown" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="settings_connections_subtitle" xml:space="preserve">
+    <value>Alles, was in deinem Namen handeln kann</value>
+  </data>
+  <data name="settings_connections_title" xml:space="preserve">
+    <value>Verbindungen</value>
+  </data>
+  <data name="settings_default_agent_available" xml:space="preserve">
+    <value>Verfügbare Agenten</value>
+  </data>
+  <data name="settings_default_agent_none" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="settings_openclaw_agent_deleted" xml:space="preserve">
+    <value>Agent entfernt</value>
+  </data>
+  <data name="settings_openclaw_agent_name" xml:space="preserve">
+    <value>Agentenname</value>
+  </data>
+  <data name="settings_openclaw_agent_name_hint" xml:space="preserve">
+    <value>Wähle einen Namen für deinen Agenten (z.B. buddy, helper, dev-bot)</value>
+  </data>
+  <data name="settings_openclaw_agent_name_placeholder" xml:space="preserve">
+    <value>buddy</value>
+  </data>
+  <data name="settings_openclaw_connect_agent" xml:space="preserve">
+    <value>Agent verbinden</value>
+  </data>
+  <data name="settings_openclaw_copied" xml:space="preserve">
+    <value>Kopiert!</value>
+  </data>
+  <data name="settings_openclaw_create_agent" xml:space="preserve">
+    <value>Agent erstellen</value>
+  </data>
+  <data name="settings_openclaw_credential_api_base" xml:space="preserve">
+    <value>API-Basis</value>
+  </data>
+  <data name="settings_openclaw_credential_client_id" xml:space="preserve">
+    <value>Client-ID</value>
+  </data>
+  <data name="settings_openclaw_credential_client_secret" xml:space="preserve">
+    <value>Client-Secret</value>
+  </data>
+  <data name="settings_openclaw_credential_email" xml:space="preserve">
+    <value>Agent-E-Mail</value>
+  </data>
+  <data name="settings_openclaw_credential_sse_endpoint" xml:space="preserve">
+    <value>SSE-Endpoint</value>
+  </data>
+  <data name="settings_openclaw_credential_token_endpoint" xml:space="preserve">
+    <value>Token-Endpoint</value>
+  </data>
+  <data name="settings_openclaw_credentials_title" xml:space="preserve">
+    <value>Agent erstellt</value>
+  </data>
+  <data name="settings_openclaw_credentials_warning" xml:space="preserve">
+    <value>Speichere diese Zugangsdaten jetzt. Das Client-Secret wird nicht erneut angezeigt.</value>
+  </data>
+  <data name="settings_openclaw_delete_agent" xml:space="preserve">
+    <value>Agent entfernen</value>
+  </data>
+  <data name="settings_openclaw_last_active" xml:space="preserve">
+    <value>Zuletzt aktiv {0}</value>
+  </data>
+  <data name="settings_openclaw_registered" xml:space="preserve">
+    <value>Registriert {0}</value>
+  </data>
+  <data name="settings_openclaw_registering" xml:space="preserve">
+    <value>Wird registriert...</value>
+  </data>
+  <data name="settings_openclaw_section" xml:space="preserve">
+    <value>Eigene Agenten</value>
+  </data>
+  <data name="settings_openclaw_status_active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="settings_openclaw_status_idle" xml:space="preserve">
+    <value>Inaktiv</value>
+  </data>
+  <data name="settings_openclaw_subtitle" xml:space="preserve">
+    <value>Eigene KI-Agenten verbinden</value>
+  </data>
+  <data name="settings_openclaw_title" xml:space="preserve">
+    <value>Eigene Agenten</value>
+  </data>
+  <data name="settings_reminders_daily_digest" xml:space="preserve">
+    <value>Täglicher Rückblick</value>
+  </data>
+  <data name="settings_reminders_default_time" xml:space="preserve">
+    <value>Standard-Erinnerungszeit</value>
+  </data>
+  <data name="settings_reminders_enable_push" xml:space="preserve">
+    <value>Push-Benachrichtigungen aktivieren</value>
+  </data>
+  <data name="settings_reminders_end" xml:space="preserve">
+    <value>Ende</value>
+  </data>
+  <data name="settings_reminders_push_notifications" xml:space="preserve">
+    <value>Push-Benachrichtigungen</value>
+  </data>
+  <data name="settings_reminders_start" xml:space="preserve">
+    <value>Beginn</value>
+  </data>
+  <data name="settings_reminders_test" xml:space="preserve">
+    <value>Testen</value>
+  </data>
+  <data name="settings_reminders_test_reminder" xml:space="preserve">
+    <value>Testerinnerung</value>
+  </data>
+  <data name="settings_reminders_timezone" xml:space="preserve">
+    <value>Zeitzone</value>
+  </data>
+  <data name="settings_subtasks_display" xml:space="preserve">
+    <value>Unteraufgaben anzeigen</value>
+  </data>
+  <data name="settings_subtasks_indented" xml:space="preserve">
+    <value>In Listen, eingerückt</value>
+  </data>
+  <data name="settings_subtasks_title" xml:space="preserve">
+    <value>Unteraufgaben</value>
+  </data>
+  <data name="settings_subtasks_under_parent" xml:space="preserve">
+    <value>Nur in der übergeordneten Aufgabe</value>
+  </data>
+  <data name="settings_task_display_list" xml:space="preserve">
+    <value>Liste</value>
+  </data>
+  <data name="settings_task_display_project" xml:space="preserve">
+    <value>Projekt</value>
+  </data>
+  <data name="share_generating_link" xml:space="preserve">
+    <value>Link wird generiert...</value>
+  </data>
+  <data name="share_link_failed" xml:space="preserve">
+    <value>Freigabelink konnte nicht erstellt werden. Bitte erneut versuchen.</value>
+  </data>
+  <data name="share_private_task_message" xml:space="preserve">
+    <value>Dies ist eine private Aufgabe. Nur Benutzer mit Zugriff auf diese Liste können sie sehen.</value>
+  </data>
+  <data name="share_share_task" xml:space="preserve">
+    <value>Aufgabe teilen</value>
   </data>
   <data name="smart_layout_list" xml:space="preserve">
     <value>Liste</value>
@@ -280,6 +1660,9 @@
   <data name="smart_time_20_00" xml:space="preserve">
     <value>20:00 Uhr</value>
   </data>
+  <data name="smart_task_creations" xml:space="preserve">
+    <value>Intelligente Aufgabenerstellung</value>
+  </data>
   <data name="sort" xml:space="preserve">
     <value>Sortieren nach</value>
   </data>
@@ -298,6 +1681,54 @@
   <data name="sort_when" xml:space="preserve">
     <value>Fälligkeit</value>
   </data>
+  <data name="stats_completed" xml:space="preserve">
+    <value>Abgeschlossen</value>
+  </data>
+  <data name="stats_inspired" xml:space="preserve">
+    <value>Inspiriert</value>
+  </data>
+  <data name="stats_supported" xml:space="preserve">
+    <value>Unterstützt</value>
+  </data>
+  <data name="status_retry_now" xml:space="preserve">
+    <value>Erneut versuchen</value>
+  </data>
+  <data name="subtasks" xml:space="preserve">
+    <value>Teilaufgaben</value>
+  </data>
+  <data name="subtasks_promote_drop_target" xml:space="preserve">
+    <value>Hier ablegen, um sie aus der übergeordneten Aufgabe herauszulösen</value>
+  </data>
+  <data name="sync_account" xml:space="preserve">
+    <value>Konto</value>
+  </data>
+  <data name="sync_connect_github" xml:space="preserve">
+    <value>GitHub verbinden</value>
+  </data>
+  <data name="sync_disconnect" xml:space="preserve">
+    <value>Trennen</value>
+  </data>
+  <data name="sync_external_sync" xml:space="preserve">
+    <value>Externe Synchronisierung</value>
+  </data>
+  <data name="sync_list" xml:space="preserve">
+    <value>Liste</value>
+  </data>
+  <data name="sync_unlink" xml:space="preserve">
+    <value>Trennen</value>
+  </data>
+  <data name="task_detail_description_preview" xml:space="preserve">
+    <value>Vorschau</value>
+  </data>
+  <data name="task_detail_subtasks" xml:space="preserve">
+    <value>Unteraufgaben</value>
+  </data>
+  <data name="task_edit_add_description" xml:space="preserve">
+    <value>Beschreibung hinzufügen...</value>
+  </data>
+  <data name="task_edit_copy_to_lists" xml:space="preserve">
+    <value>In Meine Listen kopieren</value>
+  </data>
   <data name="tasks_addNewTask" xml:space="preserve">
     <value>Neue Aufgabe hinzufügen</value>
   </data>
@@ -313,6 +1744,105 @@
   <data name="tasks_addTaskToList" xml:space="preserve">
     <value>Aufgabe zu {0} hinzufügen</value>
   </data>
+  <data name="tasks_add_task" xml:space="preserve">
+    <value>Aufgabe hinzufügen</value>
+  </data>
+  <data name="tasks_assignee" xml:space="preserve">
+    <value>Wer</value>
+  </data>
+  <data name="tasks_completed" xml:space="preserve">
+    <value>Abgeschlossen</value>
+  </data>
+  <data name="tasks_copy_task" xml:space="preserve">
+    <value>Aufgabe kopieren</value>
+  </data>
+  <data name="tasks_delete_task" xml:space="preserve">
+    <value>Aufgabe löschen</value>
+  </data>
+  <data name="tasks_description" xml:space="preserve">
+    <value>Beschreibung</value>
+  </data>
+  <data name="tasks_due_date" xml:space="preserve">
+    <value>Datum</value>
+  </data>
+  <data name="tasks_edit_task" xml:space="preserve">
+    <value>Aufgabe bearbeiten</value>
+  </data>
+  <data name="tasks_incomplete" xml:space="preserve">
+    <value>Unvollständig</value>
+  </data>
+  <data name="tasks_new_task" xml:space="preserve">
+    <value>Neue Aufgabe</value>
+  </data>
+  <data name="tasks_no_description" xml:space="preserve">
+    <value>Keine Beschreibung</value>
+  </data>
+  <data name="tasks_no_due_date" xml:space="preserve">
+    <value>Kein Fälligkeitsdatum</value>
+  </data>
+  <data name="tasks_no_reminder" xml:space="preserve">
+    <value>Keine Erinnerung</value>
+  </data>
+  <data name="tasks_occurrences_next" xml:space="preserve">
+    <value>Nächste</value>
+  </data>
+  <data name="tasks_overdue" xml:space="preserve">
+    <value>Überfällig</value>
+  </data>
+  <data name="tasks_placeholder_description" xml:space="preserve">
+    <value>Beschreibung hinzufügen...</value>
+  </data>
+  <data name="tasks_placeholder_task_name" xml:space="preserve">
+    <value>Was muss erledigt werden?</value>
+  </data>
+  <data name="tasks_priority" xml:space="preserve">
+    <value>Priorität</value>
+  </data>
+  <data name="tasks_project_fields_clear" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="tasks_project_fields_empty" xml:space="preserve">
+    <value>Nicht gesetzt</value>
+  </data>
+  <data name="tasks_project_fields_error_auth_required" xml:space="preserve">
+    <value>Verbinde dein GitHub-Konto, um dieses Feld zu ändern.</value>
+  </data>
+  <data name="tasks_project_fields_error_save_failed" xml:space="preserve">
+    <value>Diese Änderung konnte nicht in GitHub gespeichert werden. Versuche es erneut.</value>
+  </data>
+  <data name="tasks_project_fields_error_sso_required" xml:space="preserve">
+    <value>Deine Organisation verlangt Single Sign-on für dieses Projekt. Melde dich bei GitHub an und versuche es erneut.</value>
+  </data>
+  <data name="tasks_reminder" xml:space="preserve">
+    <value>Erinnerung</value>
+  </data>
+  <data name="tasks_reminders" xml:space="preserve">
+    <value>Erinnerungen</value>
+  </data>
+  <data name="tasks_reopen" xml:space="preserve">
+    <value>Wieder öffnen</value>
+  </data>
+  <data name="tasks_share_task" xml:space="preserve">
+    <value>Aufgabe teilen</value>
+  </data>
+  <data name="tasks_task" xml:space="preserve">
+    <value>Aufgabe</value>
+  </data>
+  <data name="tasks_task_id_copy" xml:space="preserve">
+    <value>Aufgaben-ID kopieren</value>
+  </data>
+  <data name="tasks_task_id_label" xml:space="preserve">
+    <value>Aufgaben-ID</value>
+  </data>
+  <data name="tasks_task_name" xml:space="preserve">
+    <value>Aufgabenname</value>
+  </data>
+  <data name="tasks_tasks" xml:space="preserve">
+    <value>Aufgaben</value>
+  </data>
+  <data name="tasks_timer" xml:space="preserve">
+    <value>Timer</value>
+  </data>
   <data name="tasks_tradeoffRatings_good" xml:space="preserve">
     <value>Gut</value>
   </data>
@@ -327,5 +1857,167 @@
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
     <value>Sehr schlecht</value>
+  </data>
+  <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
+    <value>Vollbild</value>
+  </data>
+  <data name="tasks_waiting_on_add" xml:space="preserve">
+    <value>Auf Aufgabe warten…</value>
+  </data>
+  <data name="tasks_waiting_on_add_error" xml:space="preserve">
+    <value>Konnte nicht auf diese Aufgabe warten</value>
+  </data>
+  <data name="tasks_waiting_on_cycle_error" xml:space="preserve">
+    <value>Diese Aufgaben würden aufeinander warten</value>
+  </data>
+  <data name="tasks_waiting_on_hidden" xml:space="preserve">
+    <value>Eine Aufgabe, die du nicht sehen kannst</value>
+  </data>
+  <data name="tasks_waiting_on_label" xml:space="preserve">
+    <value>Wartet auf</value>
+  </data>
+  <data name="tasks_waiting_on_no_results" xml:space="preserve">
+    <value>Keine passenden Aufgaben</value>
+  </data>
+  <data name="tasks_waiting_on_remove" xml:space="preserve">
+    <value>Nicht mehr auf diese Aufgabe warten</value>
+  </data>
+  <data name="tasks_waiting_on_search_placeholder" xml:space="preserve">
+    <value>Aufgaben suchen…</value>
+  </data>
+  <data name="tasks_when" xml:space="preserve">
+    <value>Wann</value>
+  </data>
+  <data name="tasks_who" xml:space="preserve">
+    <value>Wer</value>
+  </data>
+  <data name="tasks_wont_do" xml:space="preserve">
+    <value>Wird nicht erledigt</value>
+  </data>
+  <data name="tasks_wont_do_chip" xml:space="preserve">
+    <value>Wird nicht erledigt</value>
+  </data>
+  <data name="theme_auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="theme_dark" xml:space="preserve">
+    <value>Dunkel</value>
+  </data>
+  <data name="theme_light" xml:space="preserve">
+    <value>Hell</value>
+  </data>
+  <data name="theme_ocean" xml:space="preserve">
+    <value>Ozean</value>
+  </data>
+  <data name="time_at_due_time" xml:space="preserve">
+    <value>Zur Fälligkeit</value>
+  </data>
+  <data name="time_day_before" xml:space="preserve">
+    <value>1 Tag vorher</value>
+  </data>
+  <data name="time_hour_before" xml:space="preserve">
+    <value>1 Stunde vorher</value>
+  </data>
+  <data name="time_hours_before" xml:space="preserve">
+    <value>{0} Stunden vorher</value>
+  </data>
+  <data name="time_minutes_before" xml:space="preserve">
+    <value>{0} Minuten vorher</value>
+  </data>
+  <data name="time_next_month" xml:space="preserve">
+    <value>Nächster Monat</value>
+  </data>
+  <data name="time_next_week" xml:space="preserve">
+    <value>Nächste Woche</value>
+  </data>
+  <data name="time_this_month" xml:space="preserve">
+    <value>Dieser Monat</value>
+  </data>
+  <data name="time_this_week" xml:space="preserve">
+    <value>Diese Woche</value>
+  </data>
+  <data name="time_today" xml:space="preserve">
+    <value>Heute</value>
+  </data>
+  <data name="time_tomorrow" xml:space="preserve">
+    <value>Morgen</value>
+  </data>
+  <data name="time_week_before" xml:space="preserve">
+    <value>1 Woche vorher</value>
+  </data>
+  <data name="time_yesterday" xml:space="preserve">
+    <value>Gestern</value>
+  </data>
+  <data name="timer" xml:space="preserve">
+    <value>Timer</value>
+  </data>
+  <data name="timer_tap_to_change" xml:space="preserve">
+    <value>Tippe auf die Zeit, um die Dauer zu ändern</value>
+  </data>
+  <data name="tradeoff_good" xml:space="preserve">
+    <value>Gut</value>
+  </data>
+  <data name="tradeoff_mixed" xml:space="preserve">
+    <value>Gemischt</value>
+  </data>
+  <data name="tradeoff_poor" xml:space="preserve">
+    <value>Schlecht</value>
+  </data>
+  <data name="tradeoff_very_good" xml:space="preserve">
+    <value>Sehr gut</value>
+  </data>
+  <data name="tradeoff_very_poor" xml:space="preserve">
+    <value>Sehr schlecht</value>
+  </data>
+  <data name="update_action" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="update_later" xml:space="preserve">
+    <value>Jetzt nicht</value>
+  </data>
+  <data name="user_menu_refresh_data" xml:space="preserve">
+    <value>Daten aktualisieren</value>
+  </data>
+  <data name="waiting_prompt_confirm" xml:space="preserve">
+    <value>Nach „Warten“ verschieben</value>
+  </data>
+  <data name="waiting_prompt_date_in_past" xml:space="preserve">
+    <value>Wähle einen Tag nach heute.</value>
+  </data>
+  <data name="waiting_prompt_date_label" xml:space="preserve">
+    <value>Bis</value>
+  </data>
+  <data name="waiting_prompt_description" xml:space="preserve">
+    <value>Eine wartende Aufgabe wartet auf ein Datum oder auf eine andere Aufgabe.</value>
+  </data>
+  <data name="waiting_prompt_description_for" xml:space="preserve">
+    <value>„{0}“ wartet auf ein Datum oder auf eine andere Aufgabe.</value>
+  </data>
+  <data name="waiting_prompt_keep_assigned_to" xml:space="preserve">
+    <value>{0} zugewiesen lassen</value>
+  </data>
+  <data name="waiting_prompt_keep_assigned_to_me" xml:space="preserve">
+    <value>Mir zugewiesen lassen</value>
+  </data>
+  <data name="waiting_prompt_on" xml:space="preserve">
+    <value>Warten auf…</value>
+  </data>
+  <data name="waiting_prompt_picked" xml:space="preserve">
+    <value>Wartet auf {0}</value>
+  </data>
+  <data name="waiting_prompt_task_label" xml:space="preserve">
+    <value>Die Aufgabe, auf die sie wartet</value>
+  </data>
+  <data name="waiting_prompt_the_assignee" xml:space="preserve">
+    <value>der zugewiesenen Person</value>
+  </data>
+  <data name="waiting_prompt_title" xml:space="preserve">
+    <value>Worauf wartet die Aufgabe?</value>
+  </data>
+  <data name="waiting_prompt_until" xml:space="preserve">
+    <value>Warten bis…</value>
+  </data>
+  <data name="welcome_sign_in" xml:space="preserve">
+    <value>Anmelden</value>
   </data>
 </root>

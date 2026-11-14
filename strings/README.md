@@ -1,7 +1,9 @@
 # `strings/` — one catalog, four platforms
 
 **The words for every key this core asks a client to say**, in the twelve languages the product
-ships, generated into web's, Apple's, Android's and Windows' own formats.
+ships, generated into web's, Apple's, Android's and Windows' own formats. Beside them, in
+`shared/`, are **the strings the clients already carry in common** and no core function returns
+(AITD-662), so that a word shared by every client is written and translated once.
 
 Task `1bdf84d7`, from the cross-client review of 2026-11-11 (`docs/CROSS_CLIENT_REVIEW_2026-11.md`).
 
@@ -36,12 +38,15 @@ catalog on any platform has ever carried it.
 | `<locale>.json` | the words, one file per language, keyed by the core's own dotted keys |
 | `locales.json` | the twelve languages and what each platform calls each of them |
 | `provenance.json` | which evidence each key's translations rest on — see *Translations*, below |
-| `generated/` | `cargo xtask gen-strings` output. **Do not edit**; `check-strings` regenerates and compares |
+| `shared/` | the second section, the same files over again (`catalog.json`, `<locale>.json`, `provenance.json`) plus `sources.json` — see *The shared section*, below |
+| `generated/` | `cargo xtask gen-strings` output, both sections in one file per platform and language. **Do not edit**; `check-strings` regenerates and compares |
 
 `cargo xtask check-strings` is the gate, and it is in CI. It fails when a key this core emits is
 not in the catalog, when a key in the catalog is no longer emitted, when a language is missing
 words, when a translation interpolates an argument the schema does not declare — and when
-`generated/` is not what the source says.
+`generated/` is not what the source says. Since AITD-662 it also fails when a key is in both
+sections, when a key the core emits sits in the shared section, and when two keys flatten to the
+same resource name (`a.b_c` and `a_b.c` are one name on web, Android and Windows).
 
 `crates/astrid-rules/tests/strings_catalog.rs` asks the same question inside `cargo test`, plus one
 more that only a source scan can: that no key-shaped literal anywhere in `astrid-rules` has escaped
@@ -73,6 +78,44 @@ is to make every key the core emits sayable whatever is decided about it.
 Resolved in task `b0b5f3cc`: the filter took the picker's keys (`docs/CONTRACTS.md` D60) and the
 five `repeat.*` spellings left this catalog. The check that made the pruning compulsory is the one
 below — a key in the catalog the core no longer emits is a failure, not dead weight.
+
+## The shared section
+
+`shared/` holds the strings iOS and web both say, word for word, that no core function returns:
+"Close", "Copy task id", "Comments ({count})". Jon chose this shape on AITD-662: one catalog, so
+nothing is translated twice, while "every key here is one the core emits" stays true of the core
+section.
+
+The two sections are held to the same checks (twelve languages, declared arguments, plural shape,
+provenance) with **one exemption**: a shared key need not be emitted by this core, because it is a
+client's word. That exemption is also why a key the core *does* emit is refused in `shared/`: left
+there, it would escape the check that the core's own keys are catalogued.
+
+They are in files of their own, not inside `catalog.json`, because `scripts/seed-strings.mjs`
+rewrites the core section's files from scratch.
+
+`scripts/hoist-shared-strings.mjs` writes it:
+
+- **What it takes.** Every astrid-ios key whose English is exactly a web key's English, with iOS's
+  printf placeholders put by index into web's named arguments. Only exact matches, so hoisting
+  changes no screen. Strings the clients word differently need a product decision first.
+- **How it names them.** iOS's key in dotted snake_case (`time.atDueTime` → `time.at_due_time`),
+  since divergences follow iOS. `sources.json` records each key's iOS key and the web keys with the
+  same English: the list a client works through when it switches over.
+- **Where the words come from.** iOS's translation, then web's; an iOS value still in English loses
+  to a real translation from web. So `provenance.json` here is all **harvested** (one key, an
+  example name, is the same in every language on purpose).
+- **What it leaves out, and says so.** ICU plurals and selects, a literal `%`, a brace that is not
+  an argument, an apostrophe before a brace, a language neither client can supply, and names that
+  collide with a core key or with each other once flattened.
+
+First run (2026-11-14, astrid-ios `main` and astrid-web `main`): **564 keys**, 39 of them with
+arguments. Left out: 18 already core keys, 6 iOS keys that are English sentences rather than
+dotted names ("New Task"), and 2 that flatten onto a key already hoisted. Run it again as the
+clients converge; it rewrites `shared/` whole.
+
+A shared argument reaches Apple as `%n$@` like every other, so an iOS lookup that passed an `Int`
+for a `%d` passes a string once it switches over.
 
 ## Key spelling per platform
 
@@ -169,10 +212,8 @@ values actually came** rather than from which files mention it:
   value a shipped catalog now supplies, so that file holds only words that ship;
 - **englishOnly**: no translation at all. Nothing is in this state today.
 
-Tranche 2 (AITD-660) added iOS as a source, which took the authored keys from 62 to 32. The 420
-strings iOS and web both carry under different names, none of which the core emits, are not in
-this catalog: putting them here changes what the catalog is (see *The keys*), and that is a
-separate decision.
+Tranche 2 (AITD-660) added iOS as a source, which took the authored keys from 62 to 32. Tranche 3
+(AITD-662) hoisted the strings iOS and web share into the shared section; see *The shared section*.
 
 ## Adoption
 

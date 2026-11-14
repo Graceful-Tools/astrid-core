@@ -76,8 +76,24 @@ struct Locale {
     windows: String,
 }
 
+/// Which half of the catalog a key is in (AITD-662).
+///
+/// `strings/` holds the keys this core emits; `strings/shared/` holds the strings the clients
+/// carry in common that no core function returns ("Close", "Delete list"). Both are generated into
+/// the same files and held to the same checks, with one exception: only a CORE key has to be
+/// emitted, since that is what makes it a key of this core rather than a client's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Section {
+    #[default]
+    Core,
+    Shared,
+}
+
+/// Where the shared section lives, inside `SOURCE`.
+const SHARED: &str = "shared";
+
 /// What `catalog.json` says about one key.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct KeySpec {
     /// The arguments it interpolates, in the order every positional format numbers them.
     args: Vec<String>,
@@ -93,6 +109,8 @@ struct KeySpec {
     /// `astrid_rules::plurals::category(locale, Ordinal, n)` which to use. That is not a
     /// shortcoming of this generator: those platforms have no ordinal plural at all.
     ordinal: bool,
+    /// Which half of the catalog declared it.
+    section: Section,
 }
 
 /// One key's words in one language.
@@ -166,11 +184,49 @@ fn read_catalog(root: &Path) -> Result<Catalog, String> {
         return Err("strings/locales.json names no locales".to_string());
     }
 
-    let catalog_json = read_json(&dir.join("catalog.json"))?;
+    let core = read_keys(&dir.join("catalog.json"), Section::Core)?;
+    let shared_dir = dir.join(SHARED);
+    let shared = if shared_dir.join("catalog.json").is_file() {
+        read_keys(&shared_dir.join("catalog.json"), Section::Shared)?
+    } else {
+        BTreeMap::new()
+    };
+    let keys = merge_sections(core, shared).map_err(|found| found.join("\n"))?;
+
+    let mut messages = BTreeMap::new();
+    for locale in &locales {
+        let mut table = read_messages(&dir.join(format!("{}.json", locale.tag)), &locale.tag)?;
+        if shared_dir.join("catalog.json").is_file() {
+            let path = shared_dir.join(format!("{}.json", locale.tag));
+            for (key, message) in read_messages(&path, &locale.tag)? {
+                // Words for a key the shared catalog does not declare would be generated under
+                // nobody's contract — or, for a core key, silently replace the core's own words.
+                if keys.get(&key).map(|spec| spec.section) != Some(Section::Shared) {
+                    return Err(format!(
+                        "{} has words for {key}, which strings/{SHARED}/catalog.json does not declare",
+                        path.display()
+                    ));
+                }
+                table.insert(key, message);
+            }
+        }
+        messages.insert(locale.tag.clone(), table);
+    }
+
+    Ok(Catalog {
+        locales,
+        keys,
+        messages,
+    })
+}
+
+/// One section's `catalog.json`: each key and what it interpolates.
+fn read_keys(path: &Path, section: Section) -> Result<BTreeMap<String, KeySpec>, String> {
+    let catalog_json = read_json(path)?;
     let entries = catalog_json
         .get("keys")
         .and_then(Value::as_object)
-        .ok_or("strings/catalog.json has no `keys` object")?;
+        .ok_or_else(|| format!("{} has no `keys` object", path.display()))?;
     let mut keys: BTreeMap<String, KeySpec> = BTreeMap::new();
     for (key, spec) in entries {
         let args = match spec.get("args") {
@@ -194,50 +250,63 @@ fn read_catalog(root: &Path) -> Result<Catalog, String> {
                     .get("ordinal")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                section,
             },
         );
     }
+    Ok(keys)
+}
 
-    let mut messages = BTreeMap::new();
-    for locale in &locales {
-        let path = dir.join(format!("{}.json", locale.tag));
-        let words = read_json(&path)?;
-        let words = words
-            .as_object()
-            .ok_or_else(|| format!("{} is not an object of keys", path.display()))?;
-        let mut table = BTreeMap::new();
-        for (key, value) in words {
-            let message = match value {
-                Value::String(text) => Message::Simple(text.clone()),
-                Value::Object(forms) => Message::Plural(
-                    forms
-                        .iter()
-                        .map(|(category, text)| {
-                            text.as_str()
-                                .map(|text| (category.clone(), text.to_string()))
-                                .ok_or_else(|| {
-                                    format!("{key} in {} has a non-string form", locale.tag)
-                                })
-                        })
-                        .collect::<Result<_, _>>()?,
-                ),
-                _ => {
-                    return Err(format!(
-                        "{key} in {} is neither words nor forms",
-                        locale.tag
-                    ))
-                }
-            };
-            table.insert(key.clone(), message);
-        }
-        messages.insert(locale.tag.clone(), table);
+/// One section's words in one language.
+fn read_messages(path: &Path, tag: &str) -> Result<BTreeMap<String, Message>, String> {
+    let words = read_json(path)?;
+    let words = words
+        .as_object()
+        .ok_or_else(|| format!("{} is not an object of keys", path.display()))?;
+    let mut table = BTreeMap::new();
+    for (key, value) in words {
+        let message = match value {
+            Value::String(text) => Message::Simple(text.clone()),
+            Value::Object(forms) => Message::Plural(
+                forms
+                    .iter()
+                    .map(|(category, text)| {
+                        text.as_str()
+                            .map(|text| (category.clone(), text.to_string()))
+                            .ok_or_else(|| format!("{key} in {tag} has a non-string form"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+            _ => return Err(format!("{key} in {tag} is neither words nor forms")),
+        };
+        table.insert(key.clone(), message);
     }
+    Ok(table)
+}
 
-    Ok(Catalog {
-        locales,
-        keys,
-        messages,
-    })
+/// The two sections as one table of keys, or every key both of them declare (AITD-662).
+///
+/// One key, one section: read into one map, the second would silently replace the first, and which
+/// words a client got would depend on reading order.
+fn merge_sections(
+    mut core: BTreeMap<String, KeySpec>,
+    shared: BTreeMap<String, KeySpec>,
+) -> Result<BTreeMap<String, KeySpec>, Vec<String>> {
+    let both: Vec<String> = shared
+        .keys()
+        .filter(|key| core.contains_key(*key))
+        .map(|key| {
+            format!(
+                "{key} is in both strings/catalog.json and strings/{SHARED}/catalog.json; a key \
+                 belongs to one section"
+            )
+        })
+        .collect();
+    if !both.is_empty() {
+        return Err(both);
+    }
+    core.extend(shared);
+    Ok(core)
 }
 
 // ── What the catalog has to say about itself ────────────────────────────────────────────────────
@@ -254,18 +323,43 @@ fn problems(catalog: &Catalog) -> Vec<String> {
     //    a word no client can say, and it reaches the screen as the key itself.
     let emitted = astrid_rules::copy::keys();
     for key in &emitted {
-        if !catalog.keys.contains_key(key) {
-            problems.push(format!(
+        match catalog.keys.get(key).map(|spec| spec.section) {
+            Some(Section::Core) => {}
+            None => problems.push(format!(
                 "{key} is emitted by this core and is not in strings/catalog.json"
-            ));
+            )),
+            // Left in the shared section, a key the core emits would escape the very check above
+            // the day it left the shared catalog too (AITD-662).
+            Some(Section::Shared) => problems.push(format!(
+                "{key} is emitted by this core, so it belongs in strings/catalog.json, not in \
+                 strings/{SHARED}/catalog.json"
+            )),
         }
     }
     // And nothing more: a key nobody emits is twelve translations that will never be read, and it
-    // would sit there for ever because nothing would ever ask for it.
-    for key in catalog.keys.keys() {
-        if !emitted.contains(key) {
+    // would sit there for ever because nothing would ever ask for it. The SHARED section is the
+    // one exemption (AITD-662): its keys are the clients' own words, which no core function
+    // returns, and the clients asking for them is what keeps them read.
+    for (key, spec) in &catalog.keys {
+        if spec.section == Section::Core && !emitted.contains(key) {
             problems.push(format!(
                 "{key} is in strings/catalog.json but no longer emitted by this core"
+            ));
+        }
+    }
+
+    // Three of the four formats spell a key with underscores for its dots, so `a.b_c` and `a_b.c`
+    // are ONE resource on web, Android and Windows, and whichever was written last would win
+    // (AITD-662). Only Apple would tell them apart.
+    let mut flat: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for key in catalog.keys.keys() {
+        flat.entry(underscored(key)).or_default().push(key);
+    }
+    for (name, keys) in flat {
+        if keys.len() > 1 {
+            problems.push(format!(
+                "{} are all `{name}` on web, Android and Windows; rename all but one",
+                keys.join(" and ")
             ));
         }
     }
@@ -356,31 +450,56 @@ fn problems(catalog: &Catalog) -> Vec<String> {
 /// translation whose evidence nobody can tell apart from a harvested one — which is the difference
 /// between "a shipped translation" and "written by whoever added the key, wanting review".
 fn provenance_problems(root: &Path, catalog: &Catalog) -> Vec<String> {
-    let path = root.join(SOURCE).join("provenance.json");
-    let Ok(value) = read_json(&path) else {
-        return vec![format!("{} is missing or is not JSON", path.display())];
-    };
+    let mut problems = Vec::new();
+    for (section, relative) in [
+        (Section::Core, format!("{SOURCE}/provenance.json")),
+        (
+            Section::Shared,
+            format!("{SOURCE}/{SHARED}/provenance.json"),
+        ),
+    ] {
+        let keys: Vec<String> = catalog
+            .keys
+            .iter()
+            .filter(|(_, spec)| spec.section == section)
+            .map(|(key, _)| key.clone())
+            .collect();
+        // No shared section at all is a legal catalog; an empty core section is not, but that is
+        // the emitted-keys check's business.
+        if section == Section::Shared && keys.is_empty() {
+            continue;
+        }
+        match read_json(&root.join(&relative)) {
+            Ok(value) => problems.extend(partition_problems(&relative, &value, &keys)),
+            Err(_) => problems.push(format!("{relative} is missing or is not JSON")),
+        }
+    }
+    problems
+}
+
+/// Whether one section's provenance file partitions exactly that section's keys.
+fn partition_problems(relative: &str, value: &Value, keys: &[String]) -> Vec<String> {
     let mut recorded: Vec<String> = Vec::new();
     for list in ["harvested", "authored", "englishOnly"] {
         let Some(entries) = value.get(list).and_then(Value::as_array) else {
-            return vec![format!("strings/provenance.json has no `{list}` array")];
+            return vec![format!("{relative} has no `{list}` array")];
         };
         recorded.extend(entries.iter().filter_map(Value::as_str).map(str::to_string));
     }
 
     let mut problems = Vec::new();
-    for key in catalog.keys.keys() {
+    for key in keys {
         if !recorded.contains(key) {
             problems.push(format!(
-                "{key} is in the catalog but strings/provenance.json does not say where its \
-                 translations came from"
+                "{key} is in the catalog but {relative} does not say where its translations came \
+                 from"
             ));
         }
     }
     for key in &recorded {
-        if !catalog.keys.contains_key(key) {
+        if !keys.contains(key) {
             problems.push(format!(
-                "strings/provenance.json records {key}, which is not in the catalog"
+                "{relative} records {key}, which is not in that section of the catalog"
             ));
         }
     }
@@ -813,8 +932,16 @@ pub fn check(root: &Path) -> ExitCode {
         eprintln!("\n{stale} generated file(s) are not what {SOURCE}/ says. Run `cargo xtask gen-strings`.");
         return ExitCode::FAILURE;
     }
+    let shared = match read_catalog(root) {
+        Ok(catalog) => catalog
+            .keys
+            .values()
+            .filter(|spec| spec.section == Section::Shared)
+            .count(),
+        Err(_) => 0,
+    };
     println!(
-        "\n{} key(s) in {languages} language(s), generated into 4 formats.",
+        "\n{} core key(s) and {shared} shared key(s) in {languages} language(s), generated into 4 formats.",
         astrid_rules::copy::keys().len(),
     );
     ExitCode::SUCCESS
@@ -874,6 +1001,7 @@ mod tests {
             args: args.iter().map(|arg| arg.to_string()).collect(),
             plural: false,
             ordinal: false,
+            section: Section::Core,
         }
     }
 
@@ -991,6 +1119,7 @@ mod tests {
                 args: vec!["count".to_string()],
                 plural: true,
                 ordinal: true,
+                section: Section::Core,
             },
             Message::Plural(forms),
         );
@@ -1032,6 +1161,7 @@ mod tests {
                 args: vec!["count".to_string()],
                 plural: true,
                 ordinal: false,
+                section: Section::Core,
             },
             message,
         );
@@ -1062,5 +1192,157 @@ mod tests {
             "a plural whose singular arm omits the count is correct English, not a problem: \
              {about_the_key:?}"
         );
+    }
+
+    // ── The shared section (AITD-662) ─────────────────────────────────────────────────────────
+
+    fn shared(args: &[&str]) -> KeySpec {
+        KeySpec {
+            section: Section::Shared,
+            ..spec(args)
+        }
+    }
+
+    fn english(key: &str, text: &str) -> (String, Message) {
+        (key.to_string(), Message::Simple(text.to_string()))
+    }
+
+    /// A catalog of several keys in English only, each with its section.
+    fn catalog_of(keys: &[(&str, KeySpec, &str)]) -> Catalog {
+        let mut catalog = one_key("unused", spec(&[]), Message::Simple(String::new()));
+        catalog.keys.clear();
+        catalog.messages.get_mut("en").unwrap().clear();
+        for (key, key_spec, text) in keys {
+            let spec = KeySpec {
+                args: key_spec.args.clone(),
+                plural: key_spec.plural,
+                ordinal: key_spec.ordinal,
+                section: key_spec.section,
+            };
+            catalog.keys.insert(key.to_string(), spec);
+            let (key, message) = english(key, text);
+            catalog.messages.get_mut("en").unwrap().insert(key, message);
+        }
+        catalog
+    }
+
+    fn about<'a>(problems: &'a [String], key: &str) -> Vec<&'a String> {
+        problems.iter().filter(|p| p.contains(key)).collect()
+    }
+
+    /// Jon chose option 1: the strings iOS and web share go into the catalog in a section of their
+    /// own, which is exempt from "must be emitted by this core" and from nothing else.
+    #[test]
+    fn a_shared_key_need_not_be_emitted_by_the_core_aitd662() {
+        let catalog = catalog_of(&[("actions.close", shared(&[]), "Close")]);
+        let problems = problems(&catalog);
+        assert!(
+            about(&problems, "actions.close").is_empty(),
+            "a shared key is not the core's to emit: {problems:?}"
+        );
+    }
+
+    /// The core section's own rule is unchanged: a key there that nothing emits is still stale.
+    #[test]
+    fn a_core_key_still_has_to_be_emitted_aitd662() {
+        let catalog = catalog_of(&[("actions.close", spec(&[]), "Close")]);
+        assert!(!about(&problems(&catalog), "actions.close").is_empty());
+    }
+
+    /// A key the core emits is the core's, whatever section it was put in. Left in the shared
+    /// section it would escape the check that the core's own keys are catalogued.
+    #[test]
+    fn a_shared_key_the_core_emits_belongs_in_the_core_section_aitd662() {
+        let catalog = catalog_of(&[("filter.any", shared(&[]), "Any")]);
+        let problems = problems(&catalog);
+        let found = about(&problems, "filter.any");
+        assert!(
+            found
+                .iter()
+                .any(|p| p.contains("strings/catalog.json") && p.contains("shared")),
+            "{problems:?}"
+        );
+    }
+
+    /// The shared section is under every check but the one: its arguments still have to agree.
+    #[test]
+    fn a_shared_key_is_still_held_to_its_arguments_aitd662() {
+        let catalog = catalog_of(&[("tasks.due_on", shared(&["date"]), "Due")]);
+        let problems = problems(&catalog);
+        assert!(
+            about(&problems, "tasks.due_on")
+                .iter()
+                .any(|p| p.contains("never uses {date}")),
+            "{problems:?}"
+        );
+    }
+
+    /// One key, one section. Reading both into one table would let the second silently replace
+    /// the first.
+    #[test]
+    fn a_key_cannot_be_in_both_sections_aitd662() {
+        let core = BTreeMap::from([("tasks.title".to_string(), spec(&[]))]);
+        let shared_keys = BTreeMap::from([
+            ("tasks.title".to_string(), shared(&[])),
+            ("actions.close".to_string(), shared(&[])),
+        ]);
+        let err = merge_sections(core, shared_keys).unwrap_err();
+        assert_eq!(err.len(), 1, "{err:?}");
+        assert!(err[0].contains("tasks.title"), "{err:?}");
+
+        let core = BTreeMap::from([("tasks.title".to_string(), spec(&[]))]);
+        let shared_keys = BTreeMap::from([("actions.close".to_string(), shared(&[]))]);
+        let merged = merge_sections(core, shared_keys).unwrap();
+        assert_eq!(merged["actions.close"].section, Section::Shared);
+        assert_eq!(merged["tasks.title"].section, Section::Core);
+    }
+
+    /// Three of the four formats underscore the dots, so `a.b_c` and `a_b.c` are one resource on
+    /// web, Android and Windows. Four hundred hoisted names make that a real possibility.
+    #[test]
+    fn two_keys_that_flatten_alike_are_refused_aitd662() {
+        let catalog = catalog_of(&[
+            ("lists.sort_by", shared(&[]), "Sort by"),
+            ("lists_sort.by", shared(&[]), "Sort by"),
+        ]);
+        let problems = problems(&catalog);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("lists.sort_by") && p.contains("lists_sort.by")),
+            "{problems:?}"
+        );
+    }
+
+    /// Each section's provenance accounts for exactly that section's keys.
+    #[test]
+    fn provenance_partitions_each_section_aitd662() {
+        let value: Value = serde_json::from_str(
+            r#"{"harvested": ["actions.close", "filter.any"], "authored": [], "englishOnly": []}"#,
+        )
+        .unwrap();
+        let keys = vec!["actions.close".to_string(), "actions.open".to_string()];
+        let problems = partition_problems("strings/shared/provenance.json", &value, &keys);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("actions.open")));
+        assert!(problems.iter().any(|p| p.contains("filter.any")));
+    }
+
+    /// Both sections go into the same generated file per platform and language, so a client reads
+    /// one file whichever section a key came from.
+    #[test]
+    fn shared_keys_are_generated_beside_the_core_ones_aitd662() {
+        let catalog = catalog_of(&[
+            ("filter.any", spec(&[]), "Any"),
+            ("tasks.add_to", shared(&["list"]), "Add to {list}"),
+        ]);
+        let locale = &catalog.locales[0];
+        let web = web(&catalog, locale);
+        assert!(web.contains("\"filter_any\": \"Any\""), "{web}");
+        assert!(web.contains("\"tasks_add_to\": \"Add to {list}\""), "{web}");
+        assert!(apple_strings(&catalog, locale).contains("\"tasks.add_to\" = \"Add to %1$@\";"));
+        assert!(android(&catalog, locale)
+            .contains("<string name=\"tasks_add_to\">Add to %1$s</string>"));
+        assert!(windows(&catalog, locale).contains("<value>Add to {0}</value>"));
     }
 }
