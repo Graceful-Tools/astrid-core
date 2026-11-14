@@ -27,6 +27,12 @@ pub struct ReminderPick {
     pub is_selected: bool,
 }
 
+/// The key for turning a reminder off — the one choice every task has, due date or not.
+///
+/// A constant rather than a literal in [`options`] because [`crate::copy`] has to be able to name
+/// every key this module emits, and a key only a `match` arm knows is a key the catalog can miss.
+pub const NONE_KEY: &str = "reminder.none";
+
 /// How long before the due time, in minutes. `0` is "at the time it is due".
 ///
 /// The order is the order Apple offers, and the clearing choice leads — the same decision the date
@@ -50,7 +56,7 @@ pub const OFFSETS: [(&str, i64); 8] = [
 pub fn options(task: &Task, now: DateTime<Utc>) -> Vec<ReminderPick> {
     let current = task.reminder_time;
     let mut picks = vec![ReminderPick {
-        title_key: "reminder.none",
+        title_key: NONE_KEY,
         reminder_time: None,
         is_selected: current.is_none(),
     }];

@@ -66,6 +66,14 @@ pub const RATINGS: &[(&str, RatingStyle)] = &[
 /// The five rating words, worst to best — web's `RATING_LABEL_KEYS`.
 pub const RATING_LABEL_KEYS: [&str; 5] = ["veryPoor", "poor", "mixed", "good", "veryGood"];
 
+/// What a [`RatingStyle::label_key`] is a leaf of, so the catalog can name the whole key.
+///
+/// A rating's key is a leaf and not a whole key — web looks up
+/// `tasks.tradeoffRatings.veryPoor` — so the string catalog cannot be built from
+/// [`RATING_LABEL_KEYS`] alone, and the prefix being written down in three clients' source is how
+/// one of them comes to spell it differently (task 1bdf84d7).
+pub const RATING_KEY_PREFIX: &str = "tasks.tradeoffRatings";
+
 /// What one rating token means, or `None` for anything that is not one.
 pub fn rating_style(token: &str) -> Option<RatingStyle> {
     RATINGS

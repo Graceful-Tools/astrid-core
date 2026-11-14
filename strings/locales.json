@@ -1,0 +1,100 @@
+{
+  "locales": [
+    {
+      "tag": "en",
+      "name": "English",
+      "web": "en",
+      "apple": "en",
+      "android": "values",
+      "windows": "en-US"
+    },
+    {
+      "tag": "es",
+      "name": "Español",
+      "web": "es",
+      "apple": "es",
+      "android": "values-es",
+      "windows": "es-ES"
+    },
+    {
+      "tag": "fr",
+      "name": "Français",
+      "web": "fr",
+      "apple": "fr",
+      "android": "values-fr",
+      "windows": "fr-FR"
+    },
+    {
+      "tag": "de",
+      "name": "Deutsch",
+      "web": "de",
+      "apple": "de",
+      "android": "values-de",
+      "windows": "de-DE"
+    },
+    {
+      "tag": "it",
+      "name": "Italiano",
+      "web": "it",
+      "apple": "it",
+      "android": "values-it",
+      "windows": "it-IT"
+    },
+    {
+      "tag": "pt",
+      "name": "Português",
+      "web": "pt",
+      "apple": "pt-PT",
+      "android": "values-pt",
+      "windows": "pt-PT"
+    },
+    {
+      "tag": "nl",
+      "name": "Nederlands",
+      "web": "nl",
+      "apple": "nl",
+      "android": "values-nl",
+      "windows": "nl-NL"
+    },
+    {
+      "tag": "ru",
+      "name": "Русский",
+      "web": "ru",
+      "apple": "ru",
+      "android": "values-ru",
+      "windows": "ru-RU"
+    },
+    {
+      "tag": "ja",
+      "name": "日本語",
+      "web": "ja",
+      "apple": "ja",
+      "android": "values-ja",
+      "windows": "ja-JP"
+    },
+    {
+      "tag": "ko",
+      "name": "한국어",
+      "web": "ko",
+      "apple": "ko",
+      "android": "values-ko",
+      "windows": "ko-KR"
+    },
+    {
+      "tag": "zh-CN",
+      "name": "简体中文",
+      "web": "zh-CN",
+      "apple": "zh-Hans",
+      "android": "values-zh-rCN",
+      "windows": "zh-Hans-CN"
+    },
+    {
+      "tag": "zh-TW",
+      "name": "繁體中文",
+      "web": "zh-TW",
+      "apple": "zh-Hant",
+      "android": "values-zh-rTW",
+      "windows": "zh-Hant-TW"
+    }
+  ]
+}

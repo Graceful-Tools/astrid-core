@@ -31,10 +31,18 @@ pub mod sync;
 // here at the paths they have always had, so `astrid_core::repeating`, `astrid_core::rules` and
 // the rest still name the same items for every client.
 pub use astrid_rules::{
-    board, board_cards, decisions, editing, filters, identifier, keyboard, manual_order, markdown,
-    model, palette, parse, permissions, reminders, repeating, rows, rules, smart_tasks, theme,
-    title_display,
+    board, board_cards, copy, decisions, editing, filters, identifier, keyboard, manual_order,
+    markdown, model, palette, parse, permissions, reminders, repeating, rows, rules, smart_tasks,
+    theme, title_display,
 };
+
+/// Every string-catalog key this core asks a shell to say (task 1bdf84d7).
+///
+/// Exported here beside [`app::command_kinds`] and for the same reason: the two together are the
+/// whole vocabulary a client has to implement, and a client that cannot ask for the list has to
+/// keep its own copy of it. astrid-windows kept one in `CorePinFollowsIosTests.cs`, and Android
+/// generated its `core_keys.xml` from astrid-windows' `.resw` — a copy of a copy.
+pub use astrid_rules::copy::keys as copy_keys;
 
 /// The revision of this core that a client was built against.
 ///

@@ -1,0 +1,161 @@
+{
+  "note": "GENERATED first by scripts/seed-strings.mjs, then maintained by hand. See strings/README.md.",
+  "keys": {
+    "defaults.all_day": {},
+    "filter.any": {},
+    "filter.assigned_by": {},
+    "filter.assigned_by.me": {},
+    "filter.assigned_by.someone_else": {},
+    "filter.assignee": {},
+    "filter.assignee.me": {},
+    "filter.assignee.nobody": {},
+    "filter.assignee.someone_else": {},
+    "filter.completion": {},
+    "filter.completion.all": {},
+    "filter.completion.completed": {},
+    "filter.completion.incomplete": {},
+    "filter.completion.recent": {},
+    "filter.due": {},
+    "filter.due.none": {},
+    "filter.due.overdue": {},
+    "filter.due.this_month": {},
+    "filter.due.this_week": {},
+    "filter.due.today": {},
+    "filter.lists": {},
+    "filter.lists.in_a_list": {},
+    "filter.lists.not_in_a_list": {},
+    "filter.lists.public": {},
+    "filter.priority": {},
+    "filter.repeat": {},
+    "filter.repeat.never": {},
+    "lists.high_priority": {},
+    "lists.highest_priority": {},
+    "lists.low_priority": {},
+    "lists.medium_priority": {},
+    "picker.afternoon": {},
+    "picker.evening": {},
+    "picker.in_3_days": {},
+    "picker.morning": {},
+    "picker.next_week": {},
+    "picker.night": {},
+    "picker.no_due_date": {},
+    "picker.today": {},
+    "picker.tomorrow": {},
+    "priority.high": {},
+    "priority.low": {},
+    "priority.medium": {},
+    "priority.none": {},
+    "reminder.15_minutes_before": {},
+    "reminder.2_hours_before": {},
+    "reminder.30_minutes_before": {},
+    "reminder.5_minutes_before": {},
+    "reminder.at_due_time": {},
+    "reminder.day_before": {},
+    "reminder.hour_before": {},
+    "reminder.none": {},
+    "reminder.week_before": {},
+    "repeat.custom": {},
+    "repeat.daily": {},
+    "repeat.ends_after": {
+      "args": [
+        "count"
+      ]
+    },
+    "repeat.ends_on": {
+      "args": [
+        "date"
+      ]
+    },
+    "repeat.every_n_days": {
+      "args": [
+        "count"
+      ]
+    },
+    "repeat.every_n_months": {
+      "args": [
+        "count"
+      ]
+    },
+    "repeat.every_n_weeks": {
+      "args": [
+        "count"
+      ]
+    },
+    "repeat.every_n_years": {
+      "args": [
+        "count"
+      ]
+    },
+    "repeat.from_due_date": {},
+    "repeat.monthly": {},
+    "repeat.on_day_of_month": {
+      "args": [
+        "ordinal"
+      ]
+    },
+    "repeat.on_last_weekday": {
+      "args": [
+        "weekday"
+      ]
+    },
+    "repeat.on_month_and_day": {
+      "args": [
+        "month",
+        "ordinal"
+      ]
+    },
+    "repeat.on_nth_weekday": {
+      "args": [
+        "ordinal",
+        "weekday"
+      ]
+    },
+    "repeat.on_weekdays": {
+      "args": [
+        "weekdays"
+      ]
+    },
+    "repeat.weekly": {},
+    "repeat.yearly": {},
+    "repeating.custom": {},
+    "repeating.daily": {},
+    "repeating.monthly": {},
+    "repeating.one_time_only": {},
+    "repeating.weekly": {},
+    "repeating.yearly": {},
+    "smart.layout.list": {},
+    "smart.layout.list_desc": {},
+    "smart.layout.project": {},
+    "smart.layout.project_desc": {},
+    "smart.offset.1_day": {},
+    "smart.offset.1_week": {},
+    "smart.offset.3_days": {},
+    "smart.offset.none": {},
+    "smart.subtasks.indented": {},
+    "smart.subtasks.under_parent": {},
+    "smart.time.09_00": {},
+    "smart.time.12_00": {},
+    "smart.time.17_00": {},
+    "smart.time.20_00": {},
+    "sort": {},
+    "sort.auto": {},
+    "sort.created": {},
+    "sort.manual": {},
+    "sort.priority": {},
+    "sort.when": {},
+    "tasks.addNewTask": {},
+    "tasks.addTaskPlaceholder": {},
+    "tasks.addTaskShort": {},
+    "tasks.addTaskToCurrentList": {},
+    "tasks.addTaskToList": {
+      "args": [
+        "list"
+      ]
+    },
+    "tasks.tradeoffRatings.good": {},
+    "tasks.tradeoffRatings.mixed": {},
+    "tasks.tradeoffRatings.poor": {},
+    "tasks.tradeoffRatings.veryGood": {},
+    "tasks.tradeoffRatings.veryPoor": {}
+  }
+}

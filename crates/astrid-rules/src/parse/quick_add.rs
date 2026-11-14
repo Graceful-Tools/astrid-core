@@ -116,6 +116,20 @@ pub struct Placeholder {
     pub list_name: Option<String>,
 }
 
+/// Every prompt [`placeholder`] can choose.
+///
+/// The arms pick a key from the placement and the layout, so there is no table to read them off.
+/// [`crate::copy`] needs the set, and
+/// [`every_placeholder_is_named_1bdf84d7`](tests::every_placeholder_is_named_1bdf84d7) drives every
+/// combination through [`placeholder`] to keep this honest.
+pub const PLACEHOLDER_KEYS: [&str; 5] = [
+    "tasks.addNewTask",
+    "tasks.addTaskPlaceholder",
+    "tasks.addTaskShort",
+    "tasks.addTaskToCurrentList",
+    "tasks.addTaskToList",
+];
+
 /// Placement and layout pick the prompt.
 ///
 /// Three columns name the list, because several lists are on screen at once and the input alone
@@ -206,6 +220,33 @@ mod tests {
 
     fn list(id: &str, name: &str) -> TaskList {
         TaskList::new(id, name)
+    }
+
+    /// Task 1bdf84d7. [`PLACEHOLDER_KEYS`] is what the string catalog is built from, and the arms
+    /// it describes are in a `match` rather than a table — so every combination of placement,
+    /// layout and list name is driven through [`placeholder`] and compared against it, both ways:
+    /// a key the arms emit and the list lacks is a prompt no client can word, and a key in the
+    /// list no arm emits is a string translated into twelve languages that nothing ever asks for.
+    #[test]
+    fn every_placeholder_is_named_1bdf84d7() {
+        let mut emitted: Vec<&str> = Vec::new();
+        for placement in [Placement::Inline, Placement::FixedBottom] {
+            for layout in [
+                None,
+                Some(Layout::OneColumn),
+                Some(Layout::TwoColumn),
+                Some(Layout::ThreeColumn),
+            ] {
+                for name in [None, Some("My Tasks"), Some("Work")] {
+                    let key = placeholder(placement, layout, name).key;
+                    if !emitted.contains(&key) {
+                        emitted.push(key);
+                    }
+                }
+            }
+        }
+        emitted.sort_unstable();
+        assert_eq!(emitted, PLACEHOLDER_KEYS.to_vec());
     }
 
     /// The web's rule, to the letter: a tag names a list however its spaces were typed, every tag

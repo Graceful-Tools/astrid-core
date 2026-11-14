@@ -9,6 +9,7 @@ mod assets;
 mod brand;
 mod core_contracts;
 mod design;
+mod strings;
 
 const COMMANDS: &[(&str, &str)] = &[
     (
@@ -34,6 +35,18 @@ const COMMANDS: &[(&str, &str)] = &[
     (
         "gen-design",
         "write design/generated from design/tokens.json and design/assets",
+    ),
+    (
+        "strings-keys",
+        "print every string-catalog key this core emits, one per line",
+    ),
+    (
+        "gen-strings",
+        "write strings/generated from strings/<locale>.json for all four platforms",
+    ),
+    (
+        "check-strings",
+        "verify the catalog covers every key this core emits, and that strings/generated is current",
     ),
     (
         "check-design",
@@ -63,6 +76,14 @@ fn main() -> ExitCode {
             brand::generate(&repo_root(), profile, out)
         }
         "gen-design" => design::generate(&repo_root()),
+        "strings-keys" => {
+            for key in astrid_rules::copy::keys() {
+                println!("{key}");
+            }
+            ExitCode::SUCCESS
+        }
+        "gen-strings" => strings::generate(&repo_root()),
+        "check-strings" => strings::check(&repo_root()),
         "check-design" => design::check(
             &repo_root(),
             std::env::args().nth(2).map(std::path::PathBuf::from),

@@ -1399,3 +1399,23 @@ this crate, dropping the word would have silently cost such a list its default, 
 follow iOS — so it is read here: the same day next month, or that month's last day when the next
 month is shorter (Jan 31 → Feb 28). The Swift it replaces let `Calendar` overflow instead
 (Jan 31 → Mar 3). The web should offer and read it too.
+
+### D60 — the repeat filter and the repeat picker ask for different keys for the same word
+
+**Found by building the string catalog** (task `1bdf84d7`), which was the first thing to look at
+every key this core emits at once.
+
+`rows::filter_picks` offers the repeat filter's rows as `repeat.daily`, `repeat.weekly`,
+`repeat.monthly`, `repeat.yearly` and `repeat.custom`. `rows::repeat` offers the repeat *picker*'s
+presets as `repeating.daily` … `repeating.custom`, which is D49's resolution toward iOS. So the
+same five words are asked for under two spellings, depending on which sheet is open.
+
+**Not resolved, deliberately.** astrid-windows' `Strings.cs` carries the `repeating.*` five and not
+the `repeat.*` five, so its filter sheet draws the literal text `repeat.daily` on screen today —
+and the fix that reads best, making `filter_picks` ask for D49's keys, changes what a **pinned**
+core emits. A client that has already mapped `repeat.daily` would then lose its word on the day it
+bumps, which is the same silent regression in the other direction.
+
+`strings/` carries both spellings, because a catalog's job is to make every key the core emits
+sayable; that ends the drawn-on-screen key immediately for any client that adopts it. Collapsing
+the two is a separate change, coordinated with each client's adoption.

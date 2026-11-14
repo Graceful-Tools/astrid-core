@@ -80,6 +80,31 @@ const PRESETS: [(&str, &str); 6] = [
     ("custom", "repeating.custom"),
 ];
 
+/// Every key [`summary`] can put in a [`SummaryPart`].
+///
+/// The summary's keys are chosen in `match` arms rather than read off a table, because each arm
+/// also decides what it interpolates — so they cannot be enumerated by calling the function, the
+/// way the presets can. This is that enumeration, and
+/// [`the_summary_emits_only_the_keys_it_names_1bdf84d7`](tests) drives every shape of pattern
+/// through [`summary`] and fails if an arm names something this list does not.
+///
+/// The preset keys are NOT here: [`presets`] answers for those, and `repeating.daily` appearing in
+/// both a preset and a summary is one key, not two.
+pub const SUMMARY_KEYS: [&str; 12] = [
+    "repeat.ends_after",
+    "repeat.ends_on",
+    "repeat.every_n_days",
+    "repeat.every_n_months",
+    "repeat.every_n_weeks",
+    "repeat.every_n_years",
+    "repeat.from_due_date",
+    "repeat.on_day_of_month",
+    "repeat.on_last_weekday",
+    "repeat.on_month_and_day",
+    "repeat.on_nth_weekday",
+    "repeat.on_weekdays",
+];
+
 pub fn presets(selected: Option<Repeating>) -> Vec<RepeatPreset> {
     let selected = wire_value(selected.unwrap_or(Repeating::Never));
     PRESETS
@@ -406,5 +431,87 @@ mod tests {
     fn no_repeat_selects_never() {
         let offered = presets(None);
         assert!(offered[0].is_selected);
+    }
+
+    /// Task 1bdf84d7. [`SUMMARY_KEYS`] is what the string catalog is built from, and it is the one
+    /// list here that a `match` arm can outgrow without anything noticing — so every shape of
+    /// pattern is driven through [`summary`] and its keys checked against it, both ways.
+    ///
+    /// Both ways matters. A key an arm emits and this list lacks is a word no client can say; a
+    /// key in the list that no arm emits is a string twelve translators were paid to write for
+    /// nothing, and it would sit in the catalog for ever because nothing would ever ask for it.
+    #[test]
+    fn the_summary_emits_only_the_keys_it_names_1bdf84d7() {
+        let weekday = |week_of_month| MonthWeekday {
+            weekday: "tuesday".into(),
+            week_of_month,
+        };
+        let patterns = [
+            CustomRepeatingPattern {
+                unit: Some("days".into()),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("weeks".into()),
+                weekdays: Some(vec!["monday".into()]),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("months".into()),
+                month_repeat_type: Some("same_date".into()),
+                month_day: Some(15),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("months".into()),
+                month_repeat_type: Some("same_weekday".into()),
+                month_weekday: Some(weekday(3)),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("months".into()),
+                month_repeat_type: Some("same_weekday".into()),
+                month_weekday: Some(weekday(-1)),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("years".into()),
+                month: Some(3),
+                day: Some(3),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("years".into()),
+                month: Some(3),
+                day: Some(3),
+                end_condition: Some("after_occurrences".into()),
+                end_after_occurrences: Some(10),
+                ..Default::default()
+            },
+            CustomRepeatingPattern {
+                unit: Some("days".into()),
+                end_condition: Some("until_date".into()),
+                end_until_date: date::parse("2027-03-03T00:00:00Z"),
+                ..Default::default()
+            },
+        ];
+
+        let mut emitted: Vec<&str> = Vec::new();
+        for pattern in &patterns {
+            for repeat_from in [None, Some(RepeatFromMode::DueDate)] {
+                for part in summary(Some(Repeating::Custom), Some(pattern), repeat_from) {
+                    if !emitted.contains(&part.key) {
+                        emitted.push(part.key);
+                    }
+                }
+            }
+        }
+        emitted.sort_unstable();
+
+        assert_eq!(
+            emitted,
+            SUMMARY_KEYS.to_vec(),
+            "SUMMARY_KEYS and what summary() actually emits have drifted apart"
+        );
     }
 }

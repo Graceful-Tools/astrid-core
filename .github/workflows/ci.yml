@@ -342,3 +342,12 @@ jobs:
       - name: Check core-first fixtures are current
         working-directory: astrid-core
         run: cargo xtask check-core-contracts
+
+      # The string catalog is a core-first contract of the same kind (task 1bdf84d7): the keys are
+      # what `copy::keys()` emits, the words are strings/, and strings/generated is every client's
+      # format. In THIS job because it is the same question the fixtures ask — is the thing the
+      # clients read still what this core says — and because a key emitted with no words in the
+      # catalog reaches a screen as the key itself, which no compiler and no client test can see.
+      - name: Check the string catalog covers this core
+        working-directory: astrid-core
+        run: cargo xtask check-strings
