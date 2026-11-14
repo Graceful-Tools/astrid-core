@@ -47,14 +47,20 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts                              # against ../astrid-web
 cargo xtask check-design                                 # design/generated is current (design/README.md)
 cargo xtask check-strings                                # the string catalog covers this core (strings/README.md)
+cargo xtask check-schema                                 # generated/schema is what the wire types produce
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 ```
 
 ## Quality gate
 
-All six commands above, green, before pushing (the wasm build needs `rustup target add
+All seven commands above, green, before pushing (the wasm build needs `rustup target add
 wasm32-unknown-unknown` once). CI runs them on Windows, macOS and Linux and
 checks the fixtures against astrid-web's `main`.
+
+**A wire type changed means `cargo xtask gen-schema`, and reading the diff.** `generated/schema/`
+is derived from `Command`, `Rule` and the models — it is not a second definition, it is those
+types — and every client's bindings gate reads it. The diff is the list of what the clients must
+now follow (task 9ef7edb4).
 
 ## Test locations
 

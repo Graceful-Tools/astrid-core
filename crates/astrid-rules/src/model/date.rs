@@ -36,6 +36,19 @@ use serde::{Deserialize, Serializer};
 /// `astrid-web/lib/date-comparison.ts` and the Google Calendar convention the sync providers use.
 pub const ALL_DAY_ANCHOR_HOUR: u32 = 0;
 
+/// What a field written by [`optional`] or [`required`] looks like **to the schema** — an
+/// ISO-8601 instant.
+///
+/// A `#[serde(with = "date::optional")]` names a MODULE, and `schemars`' derive reads serde's
+/// attributes: handed a module path where it expects a type, it fails to compile. So every such
+/// field says what it is in schema terms, and this alias is what it says. It is the field's real
+/// type, so the schema that comes out is `{"type":"string","format":"date-time"}` — which is what
+/// goes on the wire.
+///
+/// Only under `schema`: nothing else in this crate needs a second name for `DateTime<Utc>`.
+#[cfg(feature = "schema")]
+pub type Timestamp = DateTime<Utc>;
+
 /// Parse an instant the way the Apple client's decoder does: fractional seconds first, then
 /// without.
 ///

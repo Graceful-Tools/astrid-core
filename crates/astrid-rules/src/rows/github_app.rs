@@ -18,6 +18,7 @@ use serde::Serialize;
 
 /// One installation of the GitHub App, as the server summarises it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct InstallationRow {
     /// GitHub's installation id. A number on the wire; kept as text because it is only ever an
@@ -40,6 +41,7 @@ pub struct InstallationRow {
 
 /// What a GitHub App panel needs in one answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GithubApp {
     /// Whether the App is installed anywhere at all.

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// How one agent runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentMode {
     /// Astrid runs it. Nothing to set up.
@@ -47,6 +48,7 @@ impl AgentMode {
 
 /// One agent, and the ways it may be set to run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRow {
     /// The mailbox — the local part of the agent's address, and what a mode write names.

@@ -18,6 +18,7 @@ use crate::model::TaskList;
 
 /// One choice, and whether the list is set to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FilterPick {
     /// The field this choice writes. Carried on the pick as well as the group because a shell
@@ -32,6 +33,7 @@ pub struct FilterPick {
 
 /// One filter: the field it writes, and the choices for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FilterGroup {
     /// The field on the list, as the API spells it — `filterPriority`, `sortBy`, and so on.

@@ -30,6 +30,7 @@ pub const KEY: &str = "rows.titleDisplay";
 
 /// How much of a row's title is shown.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum TitleDisplay {
     /// As many lines as the title needs. The default (DS19).

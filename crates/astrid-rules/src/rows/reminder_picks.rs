@@ -19,6 +19,7 @@ use crate::model::Task;
 
 /// One choice, and the instant it means.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ReminderPick {
     pub title_key: &'static str,

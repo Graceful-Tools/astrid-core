@@ -24,6 +24,7 @@ use crate::model::{date, Task};
 
 /// One question for a pure rule.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -35,6 +36,7 @@ pub enum Rule {
     Completion {
         task: Box<Task>,
         completed: bool,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
         /// The person's zone, by IANA name (`America/Los_Angeles`).
@@ -49,8 +51,10 @@ pub enum Rule {
         /// The custom pattern, or a simple pattern's end condition, as the wire stores it.
         #[serde(default)]
         pattern: Option<serde_json::Value>,
+        #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
         #[serde(default, with = "date::optional")]
         current_due_date: Option<DateTime<Utc>>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         completion: DateTime<Utc>,
         /// `DUE_DATE` or `COMPLETION_DATE`; the wire default is the latter.
@@ -135,6 +139,7 @@ pub enum Rule {
         lists: Vec<crate::model::TaskList>,
         #[serde(default)]
         board_list_id: Option<String>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
         /// The person's offset from UTC now, in minutes: where their day starts for Done's window.
@@ -162,6 +167,7 @@ pub enum Rule {
         blockers: Vec<crate::waiting::Blocker>,
         #[serde(default)]
         change: crate::waiting::StatusChange,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
     },
@@ -171,6 +177,7 @@ pub enum Rule {
         task: Box<Task>,
         #[serde(default)]
         blockers: Vec<crate::waiting::Blocker>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
     },
@@ -180,6 +187,7 @@ pub enum Rule {
         task: Box<Task>,
         #[serde(default)]
         blockers: Vec<crate::waiting::Blocker>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
     },
@@ -309,6 +317,7 @@ pub enum Rule {
         /// The signed-in user's id, the fallback assignee. Absent before anybody is signed in.
         #[serde(default)]
         user_id: Option<String>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
         /// The person's offset from UTC now, in minutes: which calendar day "tomorrow" is.
@@ -341,6 +350,7 @@ pub enum Rule {
         /// The task the notification fired for, if it fired for one.
         #[serde(default)]
         reminded_task_id: Option<String>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
         /// The person's offset from UTC now, in minutes: which calendar day "today" is.
@@ -353,6 +363,7 @@ pub enum Rule {
 /// `{"indent": ["<id>", …]}`. The shell's half of [`crate::rows::nesting::Zone`], which carries
 /// no `Deserialize` of its own because nothing else sends it.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum NestingZone {
     /// On a row: become its subtask.
@@ -442,6 +453,7 @@ pub const UNNAMED_ORIGIN: &str = "";
 /// What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the
 /// web's names (`lib/task-identifier-links.ts`, `IdentifierLinkContext`).
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Identifiers {
     #[serde(default)]

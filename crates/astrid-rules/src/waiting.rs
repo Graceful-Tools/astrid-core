@@ -53,6 +53,7 @@ pub const WAITING_NEEDS_CONDITION: &str = "WAITING_NEEDS_CONDITION";
 
 /// One task this task waits on, and whether it is done.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Blocker {
     pub id: String,
@@ -74,6 +75,7 @@ impl Blocker {
 /// Every `Option<Option<_>>` reads: `None` — absent, unchanged; `Some(None)` — cleared;
 /// `Some(Some(_))` — set. On the wire that is a missing key, `null`, and a value.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StatusChange {
     /// The lane asked for: a role, `null` for Inbox, absent for "not a move".

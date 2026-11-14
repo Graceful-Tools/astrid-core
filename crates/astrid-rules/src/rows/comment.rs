@@ -23,6 +23,7 @@ use crate::model::{Comment, SecureFile};
 
 /// One comment, ready to draw.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CommentRow {
     pub id: String,
@@ -65,6 +66,7 @@ pub struct CommentRow {
 
 /// One file on a comment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FileRow {
     pub id: String,
@@ -89,6 +91,7 @@ pub fn files_of(comment: &Comment) -> Vec<&SecureFile> {
 /// A run of repeated completions folded into one line, as iOS's CompletionStreak (AATD-53):
 /// three or more consecutive server notes that the task was marked complete.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Streak {
     /// The comments it stands for, in order; the first is where it is drawn.

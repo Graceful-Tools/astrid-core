@@ -16,6 +16,7 @@ use crate::model::TaskList;
 
 /// The sidebar's sections, in the order they are drawn down the side.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Sections {
     /// My Tasks: what you are holding, wherever it lives. Above the favourites, because it is the

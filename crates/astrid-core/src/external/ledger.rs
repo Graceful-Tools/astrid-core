@@ -327,6 +327,7 @@ pub fn forget_link(store: &Store, provider: &str, task_id: &str) -> Result<()> {
 
 /// A remote twin still waiting to be removed.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PendingDeletion {
     pub remote_id: String,
@@ -335,6 +336,7 @@ pub struct PendingDeletion {
 
 /// One local task's remote twin.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct KnownLink {
     pub task_id: String,

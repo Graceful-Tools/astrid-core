@@ -24,6 +24,7 @@ use super::task::Task;
 use super::user::User;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Privacy {
     Private,
@@ -35,6 +36,7 @@ pub enum Privacy {
 /// since 2026-08-29, emits as `aiAgentConfig` beside the plain `aiAgentsEnabled` array. It carries
 /// the default agent the array cannot express.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListAgentConfig {
     #[serde(default)]
@@ -53,6 +55,7 @@ pub struct ListAgentConfig {
 
 /// Someone's membership of a list. Presence IS membership; the role only refines what it allows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListMember {
     /// Absent in the embedded member arrays some responses return (creating a task, for one), and
@@ -64,12 +67,14 @@ pub struct ListMember {
     pub user_id: String,
     #[serde(default)]
     pub role: String,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -89,6 +94,7 @@ impl ListMember {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListInvite {
     pub id: String,
@@ -100,6 +106,7 @@ pub struct ListInvite {
     pub role: String,
     #[serde(default)]
     pub token: String,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -116,6 +123,7 @@ pub struct ListInvite {
 /// setting drives the list view's default completion filter and the board's Done column, so the
 /// two views can never disagree. `None` on the list means the legacy 24-hour default.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RecentlyCompletedWindow {
     Duration { amount: i64, unit: DurationUnit },
@@ -125,6 +133,7 @@ pub enum RecentlyCompletedWindow {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum DurationUnit {
     Hour,
@@ -146,6 +155,7 @@ pub const GITHUB_PROJECT_BACKEND: &str = "github_project";
 /// field in this module is: a thinner payload from a server this build does not know must not fail
 /// the whole list.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListRemote {
     /// `https://github.com/orgs/acme/projects/7` — or `/users/…` for a personal project.
@@ -176,6 +186,7 @@ impl ListRemote {
 /// capability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored
 /// rather than refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListSupports {
     /// A task here may hold several assignees (`assigneeIds`). Classic lists keep at most one.
@@ -231,6 +242,7 @@ impl Default for ListSupports {
 /// `list.supports.deleteTask`. A GitHub board takes the item off the project and leaves the issue.
 /// A value this build does not know reads as the classic one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum DeleteTaskMode {
     RemoveFromList,
@@ -244,6 +256,7 @@ pub enum DeleteTaskMode {
 /// not roll the row forward itself. A value this build does not know reads as the classic one:
 /// rolling forward is recoverable, a series silently dropped is not.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RepeatMode {
     Spawn,
@@ -253,6 +266,7 @@ pub enum RepeatMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskList {
     pub id: String,
@@ -344,12 +358,14 @@ pub struct TaskList {
     pub ai_agent_configured_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy_count: Option<i64>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",

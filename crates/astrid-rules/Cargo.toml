@@ -16,6 +16,11 @@ repository.workspace = true
 # relative link relative instead of resolving it on astrid.cc (AWTD-1630). Turned on by
 # astrid-core's feature of the same name (astrid-web AWTD-1627).
 require-base-url = []
+# Derive a JSON Schema for the types that cross the boundary. OFF by default and compiled only by
+# `cargo xtask gen-schema` and the consumers' bindings gates: `astrid-rules-wasm` is built from this
+# crate and its byte count is a product requirement, so a derive nothing at runtime reads must not
+# be in the default build.
+schema = ["dep:schemars"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
@@ -23,6 +28,7 @@ chrono-tz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 pulldown-cmark = { workspace = true }
+schemars = { workspace = true, optional = true }
 
 # `build.rs` narrows `contracts/fixtures/smart.json` to its `keywords` before they are embedded
 # (task 4d05306d). It runs on the host at build time, so this is not a wasm or runtime dependency,

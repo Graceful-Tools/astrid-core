@@ -29,6 +29,7 @@ pub const KEY: &str = "theme.mode";
 
 /// The look the app wears.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     /// The brand look: light, with a cyan surface. The default.

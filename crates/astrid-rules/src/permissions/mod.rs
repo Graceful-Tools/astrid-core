@@ -47,11 +47,13 @@ pub enum ListRole {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UserRef {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListMembership {
     pub user_id: String,
@@ -70,6 +72,7 @@ pub struct ListMembership {
 /// accidentally make a permission decision depend on the list's colour, and it can be built from
 /// any payload that carries these fields.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListAccess {
     /// Defaulted so a list payload missing it decodes rather than failing: an empty owner matches
@@ -107,6 +110,7 @@ pub struct ListAccess {
 /// The part of a list's project that decides access to the list — what astrid-web's
 /// `PROJECT_ACCESS_INCLUDE` loads.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectAccess {
     #[serde(default)]
@@ -120,6 +124,7 @@ pub struct ProjectAccess {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMembership {
     pub user_id: String,
@@ -129,6 +134,7 @@ pub struct ProjectMembership {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectList {
     #[serde(default)]
@@ -136,6 +142,7 @@ pub struct ProjectList {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectListMember {
     pub user_id: String,

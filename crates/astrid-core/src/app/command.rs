@@ -50,6 +50,7 @@ pub(crate) fn yes() -> bool {
 /// nothing: the shell's cue to show the "wait until a date / wait on a task" picker and send the
 /// command again with the answer.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitOptions {
     #[serde(default)]
@@ -70,6 +71,7 @@ impl WaitOptions {
 }
 
 #[derive(Debug, Clone, Deserialize, strum::VariantNames)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 // `rename_all` names the variants, `rename_all_fields` names the fields inside them. Both are
 // needed: without the second, `{"kind":"list","listId":"l1"}` reads as a command with no id and
 // every screen that uses it fails as "bad request" with nothing to say why.
@@ -1671,6 +1673,7 @@ impl Command {
 /// [`crate::services::connections::OAuthClientDraft`], keeping any grant it has never heard of so
 /// an edit sends it back rather than narrowing the client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct OAuthClientDraftFields {
     pub name: String,
@@ -1776,8 +1779,13 @@ fn wire_spelling(variant: &str) -> String {
 
 /// The due date an editor holds, ahead of the cache (AITD-461).
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DueDraft {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "Option<chrono::DateTime<chrono::Utc>>")
+    )]
     #[serde(default, with = "crate::model::date::optional")]
     pub due_date_time: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
@@ -1969,6 +1977,7 @@ mod tests {
 /// is not a member of, whose tasks never enter the cache. Each value given here is used instead of
 /// the cached one, so the rows answer for what the shell is showing rather than what it last wrote.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RowsInputs {
     /// The list itself: one the cache does not hold (a public list the reader is not in), or a

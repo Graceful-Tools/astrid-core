@@ -28,9 +28,15 @@ sync-google = []
 # with CONFIG_BASE_URL_REQUIRED (astrid-web AWTD-1627). For white-label builds whose shell always
 # passes its brand's server; the default once every shell does.
 require-base-url = ["astrid-rules/require-base-url"]
+# The wire schema: `Command`, and the row and detail types a response carries. OFF by default — a
+# shipped client never asks for it. `cargo xtask gen-schema` turns it on to write
+# `generated/schema/`, and a consumer's bindings gate turns it on as a DEV dependency, which under
+# resolver 2 keeps `schemars` out of the library it ships.
+schema = ["dep:schemars", "astrid-rules/schema"]
 
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
+schemars = { workspace = true, optional = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 iana-time-zone = { workspace = true }

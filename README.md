@@ -85,6 +85,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
 cargo xtask check-core-contracts  # the core-first fixtures (waiting.json) are what the rules answer
 cargo xtask check-design        # design/generated is what design/tokens.json and design/assets produce
+cargo xtask check-schema        # generated/schema is what the wire types produce (gen-schema writes it)
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 cargo deny check                # advisories, licences, wildcards, where the crates came from
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy

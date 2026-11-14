@@ -28,6 +28,7 @@ use crate::model::{Task, TaskList, User};
 
 /// Which kind of thing a trigger asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TriggerKind {
     Mention,

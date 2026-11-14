@@ -23,6 +23,7 @@ pub fn is_temp_id(id: &str) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ChatChannel {
     pub id: String,
@@ -33,12 +34,14 @@ pub struct ChatChannel {
     pub virtual_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -48,6 +51,7 @@ pub struct ChatChannel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub id: String,
@@ -77,12 +81,14 @@ pub struct ChatMessage {
     pub client_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secure_files: Option<Vec<SecureFile>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",

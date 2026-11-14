@@ -33,6 +33,7 @@ use serde::Serialize;
 
 /// One block of a rendered text, top to bottom.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Block {
     Paragraph {
@@ -85,6 +86,7 @@ pub enum Block {
 
 /// One option of a trade-off grid.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GridRow {
     /// The option, without the marker its writer put in front (`A. Lisbon` → `Lisbon`).
@@ -95,6 +97,7 @@ pub struct GridRow {
 
 /// One criterion's cell in a trade-off grid.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GridCell {
     /// The rating's label key (`veryPoor`, `poor`, `mixed`, `good`, `veryGood`), or `None` for an
@@ -107,6 +110,7 @@ pub struct GridCell {
 
 /// One item of a list: its own blocks, and a checkbox if it is a task-list item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListItem {
     /// `Some` for a `- [ ]` / `- [x]` item; `None` for an ordinary one.
@@ -116,6 +120,7 @@ pub struct ListItem {
 
 /// One run inside a block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Inline {
     Text {
@@ -139,6 +144,7 @@ pub enum Inline {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum ReferenceKind {
     User,

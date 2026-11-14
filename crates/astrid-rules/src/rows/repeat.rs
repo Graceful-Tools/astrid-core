@@ -21,6 +21,7 @@ use crate::model::{CustomRepeatingPattern, RepeatFromMode, Repeating};
 
 /// One fragment of the sentence: a key, plus whatever it interpolates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryPart {
     /// A resource key. Never a word.
@@ -57,6 +58,7 @@ impl SummaryPart {
 
 /// One choice in the repeat picker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RepeatPreset {
     /// The value to write back, exactly as the wire spells it: `never`, `daily`, …, `custom`.

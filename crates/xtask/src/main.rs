@@ -9,6 +9,7 @@ mod assets;
 mod brand;
 mod core_contracts;
 mod design;
+mod schema;
 mod strings;
 
 const COMMANDS: &[(&str, &str)] = &[
@@ -52,6 +53,14 @@ const COMMANDS: &[(&str, &str)] = &[
         "check-design",
         "verify design/generated is current, and astrid-web's vendored copy [path, default ../astrid-web]",
     ),
+    (
+        "gen-schema",
+        "write generated/schema from the types that are the wire — Command, Rule and the models",
+    ),
+    (
+        "check-schema",
+        "verify generated/schema is what this core's types produce",
+    ),
 ];
 
 fn main() -> ExitCode {
@@ -84,6 +93,8 @@ fn main() -> ExitCode {
         }
         "gen-strings" => strings::generate(&repo_root()),
         "check-strings" => strings::check(&repo_root()),
+        "gen-schema" => schema::generate(&repo_root()),
+        "check-schema" => schema::check(&repo_root()),
         "check-design" => design::check(
             &repo_root(),
             std::env::args().nth(2).map(std::path::PathBuf::from),

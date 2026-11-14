@@ -18,6 +18,7 @@ use serde::Serialize;
 
 /// One service the account can hold a key for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialRow {
     /// What the API calls it, and what a save or a delete has to send back.

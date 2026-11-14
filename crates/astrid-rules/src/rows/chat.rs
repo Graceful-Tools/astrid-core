@@ -23,6 +23,7 @@ use crate::model::{is_temp_id, ChatMessage, User};
 
 /// One message, as the shell draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MessageRow {
     pub id: String,

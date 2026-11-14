@@ -8,6 +8,7 @@ use serde::Serialize;
 
 /// What kind of failure it was. The part the shell branches on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum FailureKind {
     /// The shell sent something this build cannot read.
@@ -31,6 +32,7 @@ pub enum FailureKind {
 /// carry — rather than a tagged union whose payload differs per case. The shell reads this in C#,
 /// where a shape that changes per variant is a `switch` over `JsonElement` at every call site.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Failure {
     pub kind: FailureKind,
@@ -139,7 +141,12 @@ impl Failure {
 }
 
 /// What a command answered.
+///
+/// `value` is deliberately untyped, and that is a fact the wire schema has to state rather than
+/// paper over: the payload differs per command, and what IS describable — the row and detail
+/// projections a shell decodes it into — is named in the schema on its own (task 9ef7edb4).
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Response {
     pub ok: bool,

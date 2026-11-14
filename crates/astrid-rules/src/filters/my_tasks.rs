@@ -34,6 +34,7 @@ pub const VIRTUAL_ID: &str = "virtual:my-tasks";
 /// Held by the account rather than the machine, which is the whole reason this exists as its own
 /// endpoint: filters set on a laptop are the filters on the desktop.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     /// Empty means every priority — see the module note.

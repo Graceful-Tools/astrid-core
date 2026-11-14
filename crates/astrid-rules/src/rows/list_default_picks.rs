@@ -69,6 +69,7 @@ pub const ONE_TIME_KEY: &str = "repeating.one_time_only";
 
 /// One row of one picker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultPick {
     /// What choosing this stores on the list. `None` is a real choice, not an absence: no
@@ -92,6 +93,7 @@ impl DefaultPick {
 
 /// Every picker the defaults editor draws.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListDefaultPicks {
     pub priority: Vec<DefaultPick>,

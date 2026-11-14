@@ -11,5 +11,9 @@ publish = false
 # The design tokens (`design/tokens.json`) are read, checked and written out per platform; the
 # theme list is checked against the core's own, so the two cannot name different themes.
 astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
+# `gen-schema` writes the wire schema out, and only this crate holds `Command`. The `schema`
+# feature is the whole reason it exists: it is off everywhere else, so nothing a client ships
+# carries `schemars`.
+astrid-core = { path = "../astrid-core", version = "0.1.0", features = ["schema"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

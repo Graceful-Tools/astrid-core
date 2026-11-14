@@ -1,0 +1,3309 @@
+{
+  "$defs": {
+    "AgentMode": {
+      "description": "How one agent runs.",
+      "oneOf": [
+        {
+          "const": "api",
+          "description": "Astrid runs it. Nothing to set up.",
+          "type": "string"
+        },
+        {
+          "const": "polling",
+          "description": "The account's own agent asks for work.",
+          "type": "string"
+        },
+        {
+          "const": "webhook",
+          "description": "The account's own agent is told about work.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "It does not run.",
+          "type": "string"
+        }
+      ]
+    },
+    "AgentRow": {
+      "description": "One agent, and the ways it may be set to run.",
+      "properties": {
+        "email": {
+          "description": "The address comments and assignments show for it, when the server said.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The mailbox — the local part of the agent's address, and what a mode write names.",
+          "type": "string"
+        },
+        "locked": {
+          "description": "Whether it has no server-side executor and so can only be polled or switched off.",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/AgentMode",
+          "description": "How it runs now, as the server resolved it."
+        },
+        "modes": {
+          "description": "The modes a control may offer for it. Never a mode the server would refuse.",
+          "items": {
+            "$ref": "#/$defs/AgentMode"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "What to call it on screen.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "mode",
+        "locked",
+        "modes"
+      ],
+      "type": "object"
+    },
+    "AssigneeOption": {
+      "description": "One row of the picker. `user_id: None` is the unassigned choice.",
+      "properties": {
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "initials": {
+          "description": "Avatar fallback. Empty for the unassigned row, which has its own glyph.",
+          "type": "string"
+        },
+        "isAgent": {
+          "type": "boolean"
+        },
+        "isCurrentUser": {
+          "type": "boolean"
+        },
+        "name": {
+          "description": "What to show where a name goes, or `None` for the unassigned row — which the shell names\nfrom its resources rather than being handed a word.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The person's record as the pools hold it, for a shell that draws its own avatar from a\nuser (the Apple apps). `None` for the unassigned row."
+        },
+        "userId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "initials",
+        "isCurrentUser",
+        "isAgent"
+      ],
+      "type": "object"
+    },
+    "Attachment": {
+      "description": "A legacy file attachment. Superseded by [`SecureFile`]; still returned on older tasks.",
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "size": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "Block": {
+      "description": "One block of a rendered text, top to bottom.",
+      "oneOf": [
+        {
+          "properties": {
+            "inlines": {
+              "items": {
+                "$ref": "#/$defs/Inline"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "paragraph",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "inlines"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "inlines": {
+              "items": {
+                "$ref": "#/$defs/Inline"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "heading",
+              "type": "string"
+            },
+            "level": {
+              "description": "1 through 6.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "level",
+            "inlines"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A fenced or indented code block. Drawn monospace, and it scrolls sideways rather than\nwidening whatever it is in (the web's `.prose pre`).",
+          "properties": {
+            "kind": {
+              "const": "code",
+              "type": "string"
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/ListItem"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "list",
+              "type": "string"
+            },
+            "ordered": {
+              "type": "boolean"
+            },
+            "start": {
+              "description": "The first number of an ordered list. `1` for a bulleted one.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "ordered",
+            "start",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blocks": {
+              "items": {
+                "$ref": "#/$defs/Block"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "quote",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "blocks"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "rule",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "alignments": {
+              "description": "One per column: `left`, `center`, `right` or `none`.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "header": {
+              "items": {
+                "items": {
+                  "$ref": "#/$defs/Inline"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "table",
+              "type": "string"
+            },
+            "rows": {
+              "items": {
+                "items": {
+                  "items": {
+                    "$ref": "#/$defs/Inline"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "alignments",
+            "header",
+            "rows"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A table whose body cells all lead with a rating (`++`, `~`, `🔴`): a trade-off grid, drawn\nwith each rated cell on its colour (astrid-web AWTD-1524; this block, AWTD-1626). Which\ntables are grids is [`crate::decisions::is_tradeoff_grid`], on each cell's source text as\nthe web reads it.\n\nThe shell numbers rows from 1 and letters criteria A, B, C by position\n([`crate::decisions::column_letter`]); neither is in the block.",
+          "properties": {
+            "alignments": {
+              "description": "One per column, the option column first: `left`, `center`, `right` or `none`.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "header": {
+              "description": "The option column's heading, then one per criterion.",
+              "items": {
+                "items": {
+                  "$ref": "#/$defs/Inline"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "key": {
+              "description": "The label keys the grid's key shows, worst to best: each rating used, once.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "tradeoffGrid",
+              "type": "string"
+            },
+            "rows": {
+              "items": {
+                "$ref": "#/$defs/GridRow"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "alignments",
+            "header",
+            "rows",
+            "key"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ChatChannel": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "listId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "virtualKey": {
+          "description": "Set for the channels that belong to a virtual list rather than a stored one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ChatMessage": {
+      "properties": {
+        "attachmentName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachmentSize": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "attachmentType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachmentUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorId": {
+          "description": "Absent on the messages the server authors itself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "channelId": {
+          "default": "",
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content": {
+          "default": "",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "replyToId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secureFiles": {
+          "items": {
+            "$ref": "#/$defs/SecureFile"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/CommentType",
+          "default": "TEXT",
+          "description": "The same TEXT/MARKDOWN/ATTACHMENT enum comments use."
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "Comment": {
+      "properties": {
+        "attachmentName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachmentSize": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "attachmentType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachmentUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorId": {
+          "description": "Absent on system comments, which the server authors itself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientRequestId": {
+          "description": "The server echoes the `temp_<uuid>` idempotency key back. Offline dedup depends on it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content": {
+          "default": "",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Mutable because an offline comment is created with a `temp_` id and keeps its identity when\nthe server's id arrives.",
+          "type": "string"
+        },
+        "parentCommentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remoteAuthorLogin": {
+          "description": "The GitHub login of a commenter with no Astrid account (AWTD-1283). Set only when\n`author_id` and `author` are both absent, and it makes the comment a person's, not the\nserver's — see [`Comment::is_system`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remoteNodeId": {
+          "description": "The GitHub comment this one mirrors, on a GitHub Projects deployment (AWTD-1283).\nInformational only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replies": {
+          "items": {
+            "$ref": "#/$defs/Comment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "secureFiles": {
+          "items": {
+            "$ref": "#/$defs/SecureFile"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "taskId": {
+          "default": "",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/CommentType",
+          "default": "TEXT"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "CommentRow": {
+      "description": "One comment, ready to draw.",
+      "properties": {
+        "authorId": {
+          "description": "The author's id, photo and initials, for the face beside the bubble (iOS's comment thread,\nAATD-53).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorImage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorInitials": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorIsAgent": {
+          "description": "Whether an AI agent wrote it — a reply that also ends that agent's \"is thinking...\" (AATD-53).",
+          "type": "boolean"
+        },
+        "authorName": {
+          "description": "Who wrote it, or `None` for one the server authored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "blocks": {
+          "description": "The text as the web draws it — through the same markdown a description gets, so a\nmention is a pill and `**bold**` is bold (task 3271a0c5). Empty when there is no text.",
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": "array"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "description": "The files this comment carries.",
+          "items": {
+            "$ref": "#/$defs/FileRow"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "indentRight": {
+          "description": "Which side a reply is set in from: the parent author's, as the web does it — replies to\nmy comment step in from the right, replies to yours from the left.",
+          "type": "boolean"
+        },
+        "isMine": {
+          "description": "Which side of the thread it sits on.\n\nA chat transcript is unreadable without it: every bubble on the same side is one voice, and\na thread drawn all on one side says the other person never replied.",
+          "type": "boolean"
+        },
+        "isPending": {
+          "description": "Still in the Outbox. Not an error — the same meaning it has in a chat transcript.",
+          "type": "boolean"
+        },
+        "isReply": {
+          "description": "Drawn nested under its parent. False for a reply whose parent is not in the thread, which\nis then an ordinary comment rather than an indent under nothing.",
+          "type": "boolean"
+        },
+        "isSystem": {
+          "description": "Nobody wrote it — the server did. Drawn as a centred note rather than as either voice.",
+          "type": "boolean"
+        },
+        "parentId": {
+          "description": "The comment this one answers, when it answers one (task 97c817dd).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "showsText": {
+          "description": "Whether to draw a text bubble at all.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "content",
+        "authorIsAgent",
+        "isPending",
+        "showsText",
+        "files",
+        "isMine",
+        "isSystem",
+        "isReply",
+        "indentRight",
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "CommentType": {
+      "enum": [
+        "TEXT",
+        "MARKDOWN",
+        "ATTACHMENT"
+      ],
+      "type": "string"
+    },
+    "CredentialRow": {
+      "description": "One service the account can hold a key for.",
+      "properties": {
+        "configured": {
+          "description": "Whether a key is stored. Never the key: the server does not answer with one.",
+          "type": "boolean"
+        },
+        "error": {
+          "description": "What went wrong the last time it was tested, when the server kept a reason.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isValid": {
+          "description": "Whether the stored key worked the last time it was tested.\n\nThree states, not two. `None` is **never tested**, which is not \"broken\": a key saved a\nminute ago and a key the provider has revoked are different rows, and a screen that drew\nboth as a red cross would send somebody to re-paste a key that is fine.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "keyPreview": {
+          "description": "Enough of the stored key to tell which one it is, exactly as the server masked it —\n`first4***last4`, or `***` for a key of eight characters or fewer, or the first twenty\ncharacters of an OpenClaw gateway URL. `None` when no key is stored.\n\nThis is a preview, never the key. The masking is the server's\n(`app/api/v1/users/me/ai-credentials/route.ts`, `getKeyPreview`) and is not recomputed\nhere: a client that re-masked would be a client that could disagree with the screen\nsomebody pasted the key into.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastTested": {
+          "description": "When it was last tested, as the server timestamped it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "What to call it on screen.",
+          "type": "string"
+        },
+        "serviceId": {
+          "description": "What the API calls it, and what a save or a delete has to send back.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceId",
+        "name",
+        "configured"
+      ],
+      "type": "object"
+    },
+    "CustomRepeatingPattern": {
+      "description": "The custom repeat pattern, kept as loose as it is on the wire.\n\nEvery field is optional because the shape depends on `unit` and the server has never validated\nthe combination. Interpretation lives in [`crate::repeating`] and nowhere else.",
+      "properties": {
+        "day": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endAfterOccurrences": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endCondition": {
+          "description": "`never` | `after_occurrences` | `until_date`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endUntilDate": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interval": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "month": {
+          "description": "Yearly patterns.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "monthDay": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "monthRepeatType": {
+          "description": "Monthly patterns: `same_date` | `same_weekday`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "monthWeekday": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MonthWeekday"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "description": "`days` | `weeks` | `months` | `years`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weekdays": {
+          "description": "Weekly patterns: `[\"monday\", \"wednesday\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DefaultPick": {
+      "description": "One row of one picker.",
+      "properties": {
+        "isSelected": {
+          "type": "boolean"
+        },
+        "key": {
+          "description": "The string-catalog key for its label, or `None` when the value is its own label — an\nhour, which only the reader's clock can spell.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "What choosing this stores on the list. `None` is a real choice, not an absence: no\npriority is `\"0\"`, but all-day is the *lack* of a time.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "isSelected"
+      ],
+      "type": "object"
+    },
+    "DeleteTaskMode": {
+      "description": "`list.supports.deleteTask`. A GitHub board takes the item off the project and leaves the issue.\nA value this build does not know reads as the classic one.",
+      "enum": [
+        "remove_from_list",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "DurationUnit": {
+      "enum": [
+        "hour",
+        "day",
+        "week",
+        "month"
+      ],
+      "type": "string"
+    },
+    "Failure": {
+      "description": "Why a command did not work.\n\nOne shape for every failure — a kind, a message, and the two optional details that some kinds\ncarry — rather than a tagged union whose payload differs per case. The shell reads this in C#,\nwhere a shape that changes per variant is a `switch` over `JsonElement` at every call site.",
+      "properties": {
+        "code": {
+          "description": "A machine-readable reason within the kind, when there is one — `WAITING_NEEDS_CONDITION`\n(a move into Waiting with no date and no task to wait on: show the picker). The server's\nown `code`, when a refusal carried one. Absent otherwise; a shell that does not know a code\ntreats the failure by its kind.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "What was not found.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/FailureKind"
+        },
+        "message": {
+          "description": "For a person to read, and for a log. Never the thing to branch on.",
+          "type": "string"
+        },
+        "status": {
+          "description": "The HTTP status, when the server gave one.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "FailureKind": {
+      "description": "What kind of failure it was. The part the shell branches on.",
+      "oneOf": [
+        {
+          "const": "badRequest",
+          "description": "The shell sent something this build cannot read.",
+          "type": "string"
+        },
+        {
+          "const": "unauthorized",
+          "description": "The session is gone. Sign in again — retrying will not help.",
+          "type": "string"
+        },
+        {
+          "const": "refused",
+          "description": "The server considered it and said no.",
+          "type": "string"
+        },
+        {
+          "const": "offline",
+          "description": "It did not reach the server. **Not necessarily a failure**: a write is already journalled\nand will go when the network does. The shell shows this as \"offline\", not as an error.",
+          "type": "string"
+        },
+        {
+          "const": "notFound",
+          "description": "The thing being acted on is not here.",
+          "type": "string"
+        },
+        {
+          "const": "cache",
+          "description": "The cache could not be read or written.",
+          "type": "string"
+        }
+      ]
+    },
+    "FileRow": {
+      "description": "One file on a comment.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "localPath": {
+          "description": "Where its bytes are on this machine, when they are already here.\n\n`None` is not an error — it means \"not fetched yet\", and the chip is what a screen draws\nuntil they are. Filled in by [`with_local_paths`] rather than by [`rows`], which stays a\npure function of the comments.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rendersInline": {
+          "description": "Whether it is drawn in the comment or offered as a chip to open.",
+          "type": "boolean"
+        },
+        "size": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "size",
+        "mimeType",
+        "rendersInline"
+      ],
+      "type": "object"
+    },
+    "FilterGroup": {
+      "description": "One filter: the field it writes, and the choices for it.",
+      "properties": {
+        "field": {
+          "description": "The field on the list, as the API spells it — `filterPriority`, `sortBy`, and so on.",
+          "type": "string"
+        },
+        "picks": {
+          "items": {
+            "$ref": "#/$defs/FilterPick"
+          },
+          "type": "array"
+        },
+        "titleKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "titleKey",
+        "picks"
+      ],
+      "type": "object"
+    },
+    "FilterPick": {
+      "description": "One choice, and whether the list is set to it.",
+      "properties": {
+        "field": {
+          "description": "The field this choice writes. Carried on the pick as well as the group because a shell\ndraws picks one at a time, and a radio button that does not know which group it is in is a\nradio button that clears the wrong one.",
+          "type": "string"
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "titleKey": {
+          "type": "string"
+        },
+        "value": {
+          "description": "The value to write back, exactly as [`crate::filters`] matches it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "value",
+        "titleKey",
+        "isSelected"
+      ],
+      "type": "object"
+    },
+    "GithubApp": {
+      "description": "What a GitHub App panel needs in one answer.",
+      "properties": {
+        "active": {
+          "description": "Whether at least one installation is actually honoured — installed, and not suspended.\nThe question \"will anything work\", which `installed` alone does not answer.",
+          "type": "boolean"
+        },
+        "installations": {
+          "description": "Every installation, oldest access first, as the server ordered them.",
+          "items": {
+            "$ref": "#/$defs/InstallationRow"
+          },
+          "type": "array"
+        },
+        "installed": {
+          "description": "Whether the App is installed anywhere at all.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "installed",
+        "active",
+        "installations"
+      ],
+      "type": "object"
+    },
+    "GridCell": {
+      "description": "One criterion's cell in a trade-off grid.",
+      "properties": {
+        "inlines": {
+          "description": "The reason, without its rating. A cell that is only a rating shows the token, so it still\nreads where colour does not.",
+          "items": {
+            "$ref": "#/$defs/Inline"
+          },
+          "type": "array"
+        },
+        "rating": {
+          "description": "The rating's label key (`veryPoor`, `poor`, `mixed`, `good`, `veryGood`), or `None` for an\nempty cell. The key, not the token: `-` and `🔴` are drawn alike.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inlines"
+      ],
+      "type": "object"
+    },
+    "GridRow": {
+      "description": "One option of a trade-off grid.",
+      "properties": {
+        "cells": {
+          "description": "One per criterion.",
+          "items": {
+            "$ref": "#/$defs/GridCell"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "The option, without the marker its writer put in front (`A. Lisbon` → `Lisbon`).",
+          "items": {
+            "$ref": "#/$defs/Inline"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "Inline": {
+      "description": "One run inside a block.",
+      "oneOf": [
+        {
+          "properties": {
+            "bold": {
+              "type": "boolean"
+            },
+            "code": {
+              "description": "An inline code span.",
+              "type": "boolean"
+            },
+            "italic": {
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "link": {
+              "description": "Where the run goes when clicked, when it goes anywhere: an absolute `http`, `https` or\n`mailto` address.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "strike": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "bold",
+            "italic",
+            "strike",
+            "code"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One of Astrid's pills: a person, a list or a task, by id.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "reference",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "reference": {
+              "$ref": "#/$defs/ReferenceKind"
+            }
+          },
+          "required": [
+            "kind",
+            "reference",
+            "label",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "lineBreak",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InstallationRow": {
+      "description": "One installation of the GitHub App, as the server summarises it.",
+      "properties": {
+        "accountLogin": {
+          "description": "The user or organisation it is installed on.",
+          "type": "string"
+        },
+        "accountType": {
+          "description": "`User` or `Organization`, when the server said. Absent is not an error: an older\ndeployment did not record it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "GitHub's installation id. A number on the wire; kept as text because it is only ever an\nidentifier here, and a client that rounded it would address the wrong installation.",
+          "type": "string"
+        },
+        "repoCount": {
+          "description": "How many repositories it reaches.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repositorySelection": {
+          "description": "`all` or `selected` — whether the App can see every repository or a chosen few.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suspended": {
+          "description": "Suspended on GitHub: the row exists and nothing it grants works.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountLogin",
+        "repoCount",
+        "suspended"
+      ],
+      "type": "object"
+    },
+    "ListAgentConfig": {
+      "description": "`{ enabledTypes, defaultAgentId, allowMemberAssignment }` — the shape the server stores and,\nsince 2026-08-29, emits as `aiAgentConfig` beside the plain `aiAgentsEnabled` array. It carries\nthe default agent the array cannot express.",
+      "properties": {
+        "allowMemberAssignment": {
+          "description": "Whether a member, rather than only an admin, may assign a task to an agent on this list.\n\nCarried so the wire round trip loses nothing; nothing in the core reads it yet, and gating\non it is a dispatch decision rather than a model one. `Option` rather than `bool` because\nabsent and `false` are different answers, and defaulting the key in would invent it on a\nsurface that never sent it.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "defaultAgentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabledTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ListDefaultPicks": {
+      "description": "Every picker the defaults editor draws.",
+      "properties": {
+        "dueDate": {
+          "items": {
+            "$ref": "#/$defs/DefaultPick"
+          },
+          "type": "array"
+        },
+        "dueTime": {
+          "items": {
+            "$ref": "#/$defs/DefaultPick"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "items": {
+            "$ref": "#/$defs/DefaultPick"
+          },
+          "type": "array"
+        },
+        "repeating": {
+          "items": {
+            "$ref": "#/$defs/DefaultPick"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "priority",
+        "repeating",
+        "dueDate",
+        "dueTime"
+      ],
+      "type": "object"
+    },
+    "ListInvite": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "listId": {
+          "default": "",
+          "type": "string"
+        },
+        "role": {
+          "default": "",
+          "type": "string"
+        },
+        "token": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ListItem": {
+      "description": "One item of a list: its own blocks, and a checkbox if it is a task-list item.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": "array"
+        },
+        "checked": {
+          "description": "`Some` for a `- [ ]` / `- [x]` item; `None` for an ordinary one.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "ListMember": {
+      "description": "Someone's membership of a list. Presence IS membership; the role only refines what it allows.",
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Absent in the embedded member arrays some responses return (creating a task, for one), and\nthe user id stands in — see [`ListMember::identity`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "listId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "default": "",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "type": "object"
+    },
+    "ListPick": {
+      "description": "One list as the picker draws it.",
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "color"
+      ],
+      "type": "object"
+    },
+    "ListPicks": {
+      "description": "What the editor shows for one task and one search.",
+      "properties": {
+        "createName": {
+          "description": "The name to offer creating, when what was typed is not a list yet.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "description": "The lists it could be added to that match the search.",
+          "items": {
+            "$ref": "#/$defs/ListPick"
+          },
+          "type": "array"
+        },
+        "selected": {
+          "description": "The lists the task is in, in the task's own order.",
+          "items": {
+            "$ref": "#/$defs/ListPick"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "selected",
+        "options"
+      ],
+      "type": "object"
+    },
+    "ListRemote": {
+      "description": "`list.remote`: which GitHub Project a GitHub-backed list mirrors (web\n`lib/backends/list-wire.ts`).\n\nThe counterpart of [`super::task::TaskRemote`] one level up, and a simpler shape: web fills all\nthree keys or sends `null` for the whole object, never a partial one — `null` for a classic\nlist, for an iteration list, which is a tag rather than a bound board, and for a board whose\nGitHub installation row has gone. They are still `#[serde(default)]`, for the same reason every\nfield in this module is: a thinner payload from a server this build does not know must not fail\nthe whole list.",
+      "properties": {
+        "number": {
+          "default": 0,
+          "description": "The project's number in that account, which is how GitHub itself names it.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "owner": {
+          "default": "",
+          "description": "The GitHub account the project belongs to: an organisation's login, or a person's.",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "description": "`https://github.com/orgs/acme/projects/7` — or `/users/…` for a personal project.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ListSupports": {
+      "description": "`list.supports` on the wire: what a list's backend can do that a client would otherwise have\nto guess. Every key is at its classic value when absent, and the web adds a key as each\ncapability lands (`lib/backends/supports.ts`) — so a key this build does not know is ignored\nrather than refused.",
+      "properties": {
+        "comments": {
+          "default": true,
+          "type": "boolean"
+        },
+        "deleteTask": {
+          "$ref": "#/$defs/DeleteTaskMode",
+          "default": "delete",
+          "description": "What deleting a task does here."
+        },
+        "dueDate": {
+          "default": true,
+          "description": "A due date can be set. False on a GitHub board with no date field mapped.",
+          "type": "boolean"
+        },
+        "fields": {
+          "default": false,
+          "description": "Tasks here can carry the project's own field values (web AWTD-1208).",
+          "type": "boolean"
+        },
+        "membership": {
+          "default": true,
+          "description": "Members and invitations are managed in Astrid. On a GitHub board the roster is GitHub's.",
+          "type": "boolean"
+        },
+        "multipleAssignees": {
+          "default": false,
+          "description": "A task here may hold several assignees (`assigneeIds`). Classic lists keep at most one.",
+          "type": "boolean"
+        },
+        "priority": {
+          "default": true,
+          "description": "Priority can be set. False on a GitHub board with no Priority field mapped.",
+          "type": "boolean"
+        },
+        "privateTasks": {
+          "default": true,
+          "description": "`isPrivate` means something here. A GitHub board's tasks are as visible as its project.",
+          "type": "boolean"
+        },
+        "repeatMode": {
+          "$ref": "#/$defs/RepeatMode",
+          "default": "roll_forward",
+          "description": "How a repeating task here advances when it is completed (web AWTD-1118, spec §10)."
+        }
+      },
+      "type": "object"
+    },
+    "ListToggle": {
+      "description": "One row of the Apple pickers: a list, and whether the task is in it.",
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "color",
+        "isSelected"
+      ],
+      "type": "object"
+    },
+    "ListToggles": {
+      "description": "What the Apple pickers show (AITD-461, `docs/CONTRACTS.md` D50 — iOS's `InlineListsPicker`).",
+      "properties": {
+        "options": {
+          "description": "Every list it can be filed in that matches the search, selected ones included.",
+          "items": {
+            "$ref": "#/$defs/ListToggle"
+          },
+          "type": "array"
+        },
+        "selected": {
+          "description": "The lists the task is in, as chips, in the order below.",
+          "items": {
+            "$ref": "#/$defs/ListToggle"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "selected",
+        "options"
+      ],
+      "type": "object"
+    },
+    "MessageRow": {
+      "description": "One message, as the shell draws it.",
+      "properties": {
+        "authorName": {
+          "description": "Who said it, or `None` when the server did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "blocks": {
+          "description": "What the message says, as blocks a screen can draw — the same projection a comment and a\ndescription get (task 5f3453e2).\n\nWeb has always drawn chat through `renderMarkdownWithLinks`; Windows drew `content` into a\ntext block, so a task id in a conversation could only be retyped, and `**bold**` arrived\nwith its asterisks. `content` stays for whoever wants the text as written — a reply\npreview, an accessibility name, a copy.",
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": "array"
+        },
+        "content": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "initials": {
+          "description": "Avatar fallback. Empty for a message nobody said.",
+          "type": "string"
+        },
+        "isMine": {
+          "description": "Whether the signed-in account wrote it. Which side the bubble sits on.",
+          "type": "boolean"
+        },
+        "isPending": {
+          "description": "Still in the Outbox. Not an error — see the module note.",
+          "type": "boolean"
+        },
+        "isSystem": {
+          "description": "Written by the server rather than by a person.",
+          "type": "boolean"
+        },
+        "replyToId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "content",
+        "blocks",
+        "initials",
+        "isMine",
+        "isPending",
+        "isSystem"
+      ],
+      "type": "object"
+    },
+    "MonthWeekday": {
+      "properties": {
+        "weekOfMonth": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "weekday": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "weekday",
+        "weekOfMonth"
+      ],
+      "type": "object"
+    },
+    "Notification": {
+      "description": "One row of the inbox.",
+      "properties": {
+        "actorId": {
+          "description": "Who caused it. Never the reader — nobody is told what they just did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "description": "`assigned` | `mentioned` | `replied` | `commented` | `status_changed` | `completed`, and\nwhatever a newer server adds — kept as text so an unknown kind still draws.",
+          "type": "string"
+        },
+        "readAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotificationTask"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The task it is about, as the route summarises it. Absent when the task is gone."
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "NotificationTask": {
+      "description": "What the inbox knows about a task without opening it.",
+      "properties": {
+        "completed": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "Priority": {
+      "description": "How urgent, 0-3.\n\n**Decoded leniently.** The server's schema puts no cap on `priority`, and two production tasks\nwere observed carrying `4`. Swift's default enum decode threw on those, which failed the decode\nof the WHOLE tasks array and silently broke sync for that account. An unknown value reads as\n[`Priority::None`] so the task stays usable.",
+      "enum": [
+        "None",
+        "Low",
+        "Medium",
+        "High"
+      ],
+      "type": "string"
+    },
+    "Privacy": {
+      "enum": [
+        "PRIVATE",
+        "SHARED",
+        "PUBLIC"
+      ],
+      "type": "string"
+    },
+    "Project": {
+      "properties": {
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "customStates": {
+          "description": "The board's own columns, and renames of the three defaults.\n\nFree-form JSON on the wire, and read rather than typed: an entry a newer web writes must not\nstop a board drawing. [`crate::board::parse_custom_states`] is the only place that reads it."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The prefix this project's task identifiers carry — `AWTD` in `AWTD-1007`.\n\nUnique across astrid.cc, and `None` for a project made before identifiers existed. The\nserver is the only minter; this is read so a client knows which keys the reader can see,\nwhich is what decides whether `AWTD-1007` in a comment becomes a link\n([`crate::identifier::find_links`], task 5f3453e2).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lists": {
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/ProjectMember"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectMember": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Omitted by the embedded member arrays, like [`super::list::ListMember`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "default": "",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "type": "object"
+    },
+    "RecentlyCompletedWindow": {
+      "description": "How far back \"Recently completed\" reaches for one list.\n\nMirrors `astrid-web/lib/recently-completed-window.ts`, discriminated by `kind`. The same\nsetting drives the list view's default completion filter and the board's Done column, so the\ntwo views can never disagree. `None` on the list means the legacy 24-hour default.",
+      "oneOf": [
+        {
+          "properties": {
+            "amount": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "kind": {
+              "const": "duration",
+              "type": "string"
+            },
+            "unit": {
+              "$ref": "#/$defs/DurationUnit"
+            }
+          },
+          "required": [
+            "kind",
+            "amount",
+            "unit"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "since-weekday",
+              "type": "string"
+            },
+            "weekday": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "weekday"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "day": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "kind": {
+              "const": "since-day-of-month",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "day"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "date": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "since-date",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "date"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ReferenceKind": {
+      "enum": [
+        "user",
+        "list",
+        "task"
+      ],
+      "type": "string"
+    },
+    "ReminderPick": {
+      "description": "One choice, and the instant it means.",
+      "properties": {
+        "isSelected": {
+          "type": "boolean"
+        },
+        "reminderTime": {
+          "description": "The instant to store, or `None` for \"no reminder\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "titleKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "titleKey",
+        "isSelected"
+      ],
+      "type": "object"
+    },
+    "ReminderType": {
+      "enum": [
+        "push",
+        "email",
+        "both"
+      ],
+      "type": "string"
+    },
+    "RepeatFromMode": {
+      "description": "Whether the next occurrence is measured from the due date or from when it was actually done.",
+      "enum": [
+        "DUE_DATE",
+        "COMPLETION_DATE"
+      ],
+      "type": "string"
+    },
+    "RepeatMode": {
+      "description": "`list.supports.repeatMode`. On a GitHub board the completed issue stays closed as history and\nthe next occurrence is a NEW task the server makes, so a client sends the completion and does\nnot roll the row forward itself. A value this build does not know reads as the classic one:\nrolling forward is recoverable, a series silently dropped is not.",
+      "enum": [
+        "spawn",
+        "roll_forward"
+      ],
+      "type": "string"
+    },
+    "RepeatPreset": {
+      "description": "One choice in the repeat picker.",
+      "properties": {
+        "isSelected": {
+          "type": "boolean"
+        },
+        "titleKey": {
+          "type": "string"
+        },
+        "value": {
+          "description": "The value to write back, exactly as the wire spells it: `never`, `daily`, …, `custom`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "titleKey",
+        "isSelected"
+      ],
+      "type": "object"
+    },
+    "Repeating": {
+      "description": "The repeat preset. `Custom` defers to [`CustomRepeatingPattern`].",
+      "enum": [
+        "never",
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+        "custom"
+      ],
+      "type": "string"
+    },
+    "Response": {
+      "description": "What a command answered.\n\n`value` is deliberately untyped, and that is a fact the wire schema has to state rather than\npaper over: the payload differs per command, and what IS describable — the row and detail\nprojections a shell decodes it into — is named in the schema on its own (task 9ef7edb4).",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "value": true
+      },
+      "required": [
+        "ok"
+      ],
+      "type": "object"
+    },
+    "Sections": {
+      "description": "The sidebar's sections, in the order they are drawn down the side.",
+      "properties": {
+        "favorites": {
+          "description": "Favourites, in the order the user arranged them. The web's \"Saved Filters\" section.",
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "lists": {
+          "description": "Everything else that can hold a task, by name.",
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "myTasks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "My Tasks: what you are holding, wherever it lives. Above the favourites, because it is the\nview the app opens on rather than one of the lists. `None` when the caller did not ask for\nit — it is synthesised and has no row on the server, so only the caller can say."
+        }
+      },
+      "required": [
+        "favorites",
+        "lists"
+      ],
+      "type": "object"
+    },
+    "SecureFile": {
+      "description": "A file held by the server's secure-file store. The wire names differ from the field names, and\nthose aliases are the whole reason this type is hand-mapped.",
+      "properties": {
+        "fileSize": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mimeType": {
+          "default": "",
+          "type": "string"
+        },
+        "originalName": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "SummaryPart": {
+      "description": "One fragment of the sentence: a key, plus whatever it interpolates.",
+      "properties": {
+        "count": {
+          "description": "The number the key's plural form and its `{0}` refer to, when it has one.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "date": {
+          "description": "An instant, for \"until 3 March\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "A resource key. Never a word.",
+          "type": "string"
+        },
+        "values": {
+          "description": "Names the key interpolates — weekdays as the wire spells them, so the shell translates\nthem from its own table rather than being handed English.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "properties": {
+        "assignee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assigneeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeIds": {
+          "description": "Everyone assigned, as the server sent it (web AWTD-1190). Only a list whose backend\nsupports several assignees ever holds more than one. Never read this directly:\n[`Task::all_assignee_ids`] is the list a client shows, because `assignee_id` is written on\nits own — by an older client, or by an optimistic reassignment here — and stays the truth\nabout who is first.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "blockedBy": {
+          "description": "The tasks this one is waiting on, by id, and the tasks waiting on it.\n\n`GET /api/v1/tasks/:id` adds both beside `listIds`, and the wire contract\n(`astrid-web/lib/api-contracts/v1-ios-shapes.ts`, `V1TaskBlockerIds`) makes them\n**optional** so the server and each client ship independently: a deployment older than the\nfeature simply does not send them, which reads here as \"nothing known\", never as \"nothing\".\n\nIds only. The titles a chip draws come from `GET /api/v1/tasks/:id/blockers`, because a\nblocker the reader cannot see has an id and nothing else — and the difference between that\nand a blocker that merely has not synced yet is the one thing the row must not get wrong.\nNeeds no cache migration: the store keeps each model's whole JSON and lifts out only the\ncolumns something queries.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "blocks": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "closedReason": {
+          "description": "Why the task was closed, when it was closed as anything but done: `canceled` |\n`duplicate` | `not_planned` (web task 11042ae3). The web keeps `completed` true beside it,\nso every view that reads the flag keeps working; only the rendering and the repeat rollover\ndiffer. Kept as text rather than an enum so a reason this build has never heard of cannot\nmake the whole task unreadable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/Comment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "completed": {
+          "default": false,
+          "type": "boolean"
+        },
+        "completedAt": {
+          "description": "The real completion time, which sync may backdate.",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completedSource": {
+          "description": "`astrid` | `google` | `github` | `apple`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "creator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "creatorId": {
+          "description": "The MCP API returns the creator object without the id field, so both are optional and\n[`Task::effective_creator_id`] is the only correct way to ask.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "description": "`None` is **the response did not say** — `GET /api/v1/tasks?omit=description` leaves the\nkey out and names it in `meta.omitted` — and `Some(\"\")` is a description a person cleared.\nThey were one `\"\"` until task ebe0966b (D55), which meant any write built from a cached row\nerased text somebody had typed. [`Task::keeping_unsent`] fills an omitted one from the\ncache; [`Task::description_text`] is what a reader that only draws or searches it wants.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dueDateTime": {
+          "description": "The single source of truth for when the task is due. See [`super::date`] for what this\nmeans when [`Task::is_all_day`] is set.",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "additionalProperties": true,
+          "description": "This task's GitHub project field VALUES, keyed by `ProjectField.id` (web AWTD-1208, spec\n§9.4.3). No names and no types: those come once per project from\n`GET /api/v1/projects/:id/fields`.\n\n**`None` means \"not asked\", never \"none\".** The list route carries values only on\n`?include=fields`, because a thousand tasks' worth is 42.2 KiB over an already tight\npayload budget, while the task-detail route always carries them — and a task with no\nvalues carries no key at all (web `lib/tasks/v1-task-fields.ts`). Those three cases are\nindistinguishable here, so nothing may read an absent map as \"this task has no field\nvalues\".\n\nWhich is why this is NOT where a pane reads them from:\n`astrid_core::services::project_fields` caches the values under a key of their own, since\n`store::upsert_task` replaces the whole encoded task and one list page fetched without\n`?include=fields` would otherwise wipe what a detail fetch knew. What the key is modelled\nFOR is the round trip — a value is only safe to cache and pass on once it survives a\ndecode and a re-encode, which is what task faa32e20 found it did not.\n\nValues are `string | number` on the wire. They stay [`serde_json::Value`] because that is\nalready how a field value is represented where it is typed and validated\n(`project_fields::accepts`), and two representations of one scalar is one too many.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "description": "The human-readable id — `AST-142` (web task 12f54df4). Minted by the server for tasks on\na project; absent for a task on a project-less list, so a solo user never sees one.\nSearchable as a direct hit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isAllDay": {
+          "default": true,
+          "description": "Defaults to **true**, matching the Swift memberwise init: a task created with a date and no\nstated time is an all-day task.",
+          "type": "boolean"
+        },
+        "isPrivate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "lastTimerValue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "listIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "lists": {
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "nextOccurrenceId": {
+          "description": "The occurrence that followed this one (web AWTD-1219). Only the single-task read and the\nrow beside a live event carry the key — an id, or `null` for \"none\" — and a list page\nleaves it out. So absent (`None`) is \"this response does not say\", which\n[`Task::keeping_unsent`] fills from the cache, and `Some(None)` is the server saying there\nis no successor. Encodes back as it arrived, because the cache keeps the whole JSON.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurrenceCount": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "originalTaskId": {
+          "description": "Copy lineage - the task this one was copied from. NOT the subtask relation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentTaskId": {
+          "description": "Subtasks: the parent's id, `None` for a top-level task. A self-relation on the server,\nnulled when the parent is deleted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previousOccurrenceId": {
+          "description": "The occurrence this one followed, on a list whose series spawns a new task each time\n(web AWTD-1118). The link back; the way forward is the task that names this one here.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": 0
+        },
+        "reminderSent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reminderTime": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reminderType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReminderType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRemote"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The GitHub issue or pull request a task on a GitHub board is (web AWTD-1222, spec §11.2).\nOnly a GitHub-backed task carries it; absent means classic."
+        },
+        "repeatFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepeatFromMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repeating": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Repeating"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repeatingData": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CustomRepeatingPattern"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "secureFiles": {
+          "items": {
+            "$ref": "#/$defs/SecureFile"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "sourceListId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statusRole": {
+          "description": "Board status as a state ON the task: `ready` | `doing` | `waiting` | a project's custom\nrole. `None` means Inbox; Done is derived from `completed`, so neither is ever stored.\n\nTolerated as absent on purpose (task AWTD-562): a deployment older than the field simply\ndoes not send it, and the board falls back to list membership. That fallback is what keeps\nthis build working against an unmigrated server.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "syncState": {
+          "description": "Where the server's write-back to the list's backend stands (web spec §11.2): `pending`\nwhile a task made on a GitHub board is still being written there, `error` if that gave\nup. Absent and `null` are both \"settled\" — it is a column on the task, so every response\ncarries it, and `null` is what a settled task and every classic list send.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timerDuration": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "TaskList": {
+      "properties": {
+        "admins": {
+          "description": "Legacy denormalised arrays. Kept so the public-lists endpoint still decodes; **never**\nconsulted for a role — see [`crate::permissions`].",
+          "items": {
+            "$ref": "#/$defs/User"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "aiAgentConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ListAgentConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aiAgentConfiguredBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "aiAgentsEnabled": {
+          "description": "Accepts both the documented `string[]` and the object form the server once leaked. See the\nmodule note.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "aiAstridEnabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "backend": {
+          "description": "Which backend holds this list (web AWTD-1256, spec §11.2): `\"github_project\"` for a GitHub\nProjects board, `null` for a classic one. Ask through [`TaskList::is_github_backed`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "copyCount": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "coverImageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultAssignee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultAssigneeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultDueDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultDueTime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultIsPrivate": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "defaultPriority": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "defaultRepeating": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fallbackAiProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "favoriteOrder": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filterAssignedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterAssignee": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterCompletion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterDueDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterInLists": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterPriority": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterRepeating": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "githubRepositoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invitations": {
+          "items": {
+            "$ref": "#/$defs/ListInvite"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "isFavorite": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "isVirtual": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "listMembers": {
+          "items": {
+            "$ref": "#/$defs/ListMember"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "listType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manualSortOrder": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "mcpAccessLevel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mcpEnabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/User"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preferredAiProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Privacy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent from the thinner responses, so never assume a missing privacy means private."
+        },
+        "projectId": {
+          "description": "Project status board. A project holds both `listType: \"regular\"` (domain) lists and\n`listType: \"status\"` (board column) lists. Inbox and Done are virtual columns derived from\ntask state and are never stored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicListType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recentlyCompletedWindow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecentlyCompletedWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ListRemote"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The GitHub Project this list mirrors (web AWTD-1222, spec §11.2), for the board's own chip\nand its \"open on GitHub\". **`None` means there is no page**, which a classic list, an\niteration list and a board whose installation has gone all share — see [`ListRemote`]."
+        },
+        "showSubtasks": {
+          "description": "**`None` means SHOW.** See the module note and [`TaskList::shows_subtasks`].",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sortBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statusCompleted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "statusDescription": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statusOrder": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "statusRole": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ListSupports"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What this list's backend can do (web AWTD-1190, spec §11.2). **`None` means classic**: a\nserver older than the field omits it. Ask through the methods, not the field."
+        },
+        "taskCount": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "virtualListType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "TaskRemote": {
+      "description": "`task.remote`: where a task on a GitHub board lives on GitHub (web `lib/backends/task-remote.ts`).",
+      "properties": {
+        "kind": {
+          "default": "",
+          "description": "`issue`, `pull_request` or `draft_issue`.",
+          "type": "string"
+        },
+        "nodeId": {
+          "default": "",
+          "type": "string"
+        },
+        "number": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "repo": {
+          "default": null,
+          "description": "`owner/repo`. `None` for a draft.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "default": null,
+          "description": "The issue or pull request on GitHub. `None` for a draft, which has no page of its own.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "User": {
+      "properties": {
+        "aiAgentType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultDueTime": {
+          "description": "`HH:MM`, the time of day a new all-day task defaults to when the user gives it a time.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "description": "Optional: the public-lists endpoint returns admins without their email addresses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasPendingChange": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hasPendingVerification": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isAIAgent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "isPending": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pendingEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verified": {
+          "description": "The account's own verification state, as `GET /users/me` merges it into the user (task\n19fd9289): verified outright or through a sign-in provider, whether a change of address is\nwaiting, and what it is. Only ever present on the signed-in user; absent on everyone else,\nand absent from a server older than the fields.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "verifiedViaOAuth": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The answer shapes that have a Rust type, gathered so one schema document holds them all.\n\nA field per shape, named as the schema names it. It is never built or serialised — it exists so\n`schemars` walks all of these in one pass and emits one set of `$defs`, with `Task` and `User`\nwritten once rather than once per document.\n\n**Adding a type here is the deliberate act.** A response shape that is not listed is not in the\nschema, and a consumer's gate will say so about every field it carries — which is the right\nfailure, because the alternative is a gate that passes on shapes nobody described.",
+  "properties": {
+    "agentRow": {
+      "$ref": "#/$defs/AgentRow"
+    },
+    "assigneeOption": {
+      "$ref": "#/$defs/AssigneeOption"
+    },
+    "chatChannel": {
+      "$ref": "#/$defs/ChatChannel"
+    },
+    "chatMessage": {
+      "$ref": "#/$defs/ChatMessage"
+    },
+    "comment": {
+      "$ref": "#/$defs/Comment"
+    },
+    "commentRow": {
+      "$ref": "#/$defs/CommentRow"
+    },
+    "credentialRow": {
+      "$ref": "#/$defs/CredentialRow"
+    },
+    "failure": {
+      "$ref": "#/$defs/Failure"
+    },
+    "fileRow": {
+      "$ref": "#/$defs/FileRow"
+    },
+    "filterGroup": {
+      "$ref": "#/$defs/FilterGroup"
+    },
+    "githubApp": {
+      "$ref": "#/$defs/GithubApp"
+    },
+    "listDefaultPicks": {
+      "$ref": "#/$defs/ListDefaultPicks"
+    },
+    "listPicks": {
+      "$ref": "#/$defs/ListPicks"
+    },
+    "listToggles": {
+      "$ref": "#/$defs/ListToggles"
+    },
+    "messageRow": {
+      "$ref": "#/$defs/MessageRow"
+    },
+    "notification": {
+      "$ref": "#/$defs/Notification"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "reminderPick": {
+      "$ref": "#/$defs/ReminderPick"
+    },
+    "repeatPreset": {
+      "$ref": "#/$defs/RepeatPreset"
+    },
+    "repeatSummaryPart": {
+      "$ref": "#/$defs/SummaryPart"
+    },
+    "response": {
+      "$ref": "#/$defs/Response"
+    },
+    "sidebarSections": {
+      "$ref": "#/$defs/Sections"
+    },
+    "task": {
+      "$ref": "#/$defs/Task"
+    },
+    "taskList": {
+      "$ref": "#/$defs/TaskList"
+    },
+    "user": {
+      "$ref": "#/$defs/User"
+    }
+  },
+  "required": [
+    "response",
+    "failure",
+    "task",
+    "taskList",
+    "user",
+    "comment",
+    "project",
+    "chatChannel",
+    "chatMessage",
+    "notification",
+    "commentRow",
+    "fileRow",
+    "messageRow",
+    "agentRow",
+    "credentialRow",
+    "sidebarSections",
+    "repeatSummaryPart",
+    "repeatPreset",
+    "assigneeOption",
+    "filterGroup",
+    "listPicks",
+    "listToggles",
+    "listDefaultPicks",
+    "reminderPick",
+    "githubApp"
+  ],
+  "title": "WireModels",
+  "type": "object"
+}

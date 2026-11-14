@@ -23,6 +23,7 @@ use super::user::User;
 /// of the WHOLE tasks array and silently broke sync for that account. An unknown value reads as
 /// [`Priority::None`] so the task stays usable.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(into = "i64")]
 pub enum Priority {
     #[default]
@@ -67,6 +68,7 @@ impl<'de> Deserialize<'de> for Priority {
 
 /// The repeat preset. `Custom` defers to [`CustomRepeatingPattern`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Repeating {
     Never,
@@ -85,6 +87,7 @@ impl Repeating {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ReminderType {
     Push,
@@ -94,6 +97,7 @@ pub enum ReminderType {
 
 /// Whether the next occurrence is measured from the due date or from when it was actually done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RepeatFromMode {
     DueDate,
@@ -105,6 +109,7 @@ pub enum RepeatFromMode {
 /// Every field is optional because the shape depends on `unit` and the server has never validated
 /// the combination. Interpretation lives in [`crate::repeating`] and nowhere else.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CustomRepeatingPattern {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,6 +124,7 @@ pub struct CustomRepeatingPattern {
     pub end_condition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_after_occurrences: Option<i64>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -143,6 +149,7 @@ pub struct CustomRepeatingPattern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MonthWeekday {
     pub weekday: String,
@@ -151,6 +158,7 @@ pub struct MonthWeekday {
 
 /// A legacy file attachment. Superseded by [`SecureFile`]; still returned on older tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
     pub id: String,
@@ -162,6 +170,7 @@ pub struct Attachment {
     pub r#type: String,
     #[serde(default)]
     pub size: i64,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -175,6 +184,7 @@ pub struct Attachment {
 /// A file held by the server's secure-file store. The wire names differ from the field names, and
 /// those aliases are the whole reason this type is hand-mapped.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecureFile {
     pub id: String,
     #[serde(rename = "originalName", default)]
@@ -186,6 +196,7 @@ pub struct SecureFile {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum CommentType {
     #[default]
@@ -196,6 +207,7 @@ pub enum CommentType {
 
 /// `task.remote`: where a task on a GitHub board lives on GitHub (web `lib/backends/task-remote.ts`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRemote {
     /// `issue`, `pull_request` or `draft_issue`.
@@ -227,6 +239,7 @@ impl TaskRemote {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
     /// Mutable because an offline comment is created with a `temp_` id and keeps its identity when
@@ -243,12 +256,14 @@ pub struct Comment {
     pub author: Option<User>,
     #[serde(default)]
     pub task_id: String,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -340,6 +355,7 @@ impl TaskDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
     pub id: String,
@@ -376,6 +392,7 @@ pub struct Task {
     pub creator: Option<User>,
     /// The single source of truth for when the task is due. See [`super::date`] for what this
     /// means when [`Task::is_all_day`] is set.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -386,6 +403,7 @@ pub struct Task {
     /// stated time is an all-day task.
     #[serde(default = "default_true")]
     pub is_all_day: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -467,6 +485,7 @@ pub struct Task {
     #[serde(default)]
     pub completed: bool,
     /// The real completion time, which sync may backdate.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -513,12 +532,14 @@ pub struct Task {
     pub secure_files: Option<Vec<SecureFile>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments: Option<Vec<Comment>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",

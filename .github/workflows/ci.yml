@@ -351,3 +351,12 @@ jobs:
       - name: Check the string catalog covers this core
         working-directory: astrid-core
         run: cargo xtask check-strings
+
+      # The wire schema (task 9ef7edb4). Same job and same reason: generated/schema is what every
+      # client's bindings gate and Android's model generator read, and a wire type changed without
+      # regenerating leaves them checking a shape this core no longer sends. `cargo test` fails on
+      # a stale one too (the xtask's own test); this step is how a reader of the contracts job
+      # finds out by name.
+      - name: Check the wire schema is current
+        working-directory: astrid-core
+        run: cargo xtask check-schema

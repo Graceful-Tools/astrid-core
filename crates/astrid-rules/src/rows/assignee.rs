@@ -32,6 +32,7 @@ use crate::model::{TaskList, User};
 
 /// One row of the picker. `user_id: None` is the unassigned choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AssigneeOption {
     pub user_id: Option<String>,

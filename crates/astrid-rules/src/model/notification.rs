@@ -11,6 +11,7 @@ use super::date;
 
 /// One row of the inbox.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Notification {
     pub id: String,
@@ -25,12 +26,14 @@ pub struct Notification {
     /// Who caused it. Never the reader — nobody is told what they just did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_id: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub read_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -50,6 +53,7 @@ impl Notification {
 
 /// What the inbox knows about a task without opening it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationTask {
     pub id: String,

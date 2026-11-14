@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 /// Stored on the server in the integration's metadata, so the choice follows the account rather
 /// than the machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SyncMode {
     /// One list at a time, chosen by hand.

@@ -30,6 +30,10 @@
 pub mod background;
 mod command;
 mod dispatch;
+/// The wire as a JSON Schema. Only under `schema`, which no shipped client turns on — see the
+/// module note and `crates/astrid-rules/Cargo.toml`.
+#[cfg(feature = "schema")]
+pub mod schema;
 
 pub use command::{kinds as command_kinds, Command, Failure, FailureKind, Response};
 

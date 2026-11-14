@@ -76,6 +76,10 @@ pulldown-cmark = { version = "0.13", default-features = false }
 # the formatting of the file it lived in. `derive` is the only feature wanted; the name conversions
 # are deliberately NOT used (see `command.rs`), so nothing here needs `std`.
 strum = { version = "0.27", default-features = false, features = ["derive"] }
+# The wire schema, derived from the types that ARE the wire rather than hand-written beside them.
+# Only ever compiled under the `schema` feature, which is off by default: a shipped client has no
+# use for it, and `astrid-rules-wasm` is a crate whose byte count is a product requirement.
+schemars = { version = "1", default-features = false, features = ["derive", "chrono04"] }
 
 [profile.release]
 lto = "thin"

@@ -60,6 +60,7 @@ pub const MAX_OPTIONS: usize = 10;
 
 /// One list as the picker draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListPick {
     pub id: String,
@@ -69,6 +70,7 @@ pub struct ListPick {
 
 /// What the editor shows for one task and one search.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListPicks {
     /// The lists the task is in, in the task's own order.
@@ -133,6 +135,7 @@ pub fn picks(task_list_ids: &[String], lists: &[TaskList], query: &str) -> ListP
 
 /// One row of the Apple pickers: a list, and whether the task is in it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListToggle {
     pub id: String,
@@ -143,6 +146,7 @@ pub struct ListToggle {
 
 /// What the Apple pickers show (AITD-461, `docs/CONTRACTS.md` D50 — iOS's `InlineListsPicker`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListToggles {
     /// The lists the task is in, as chips, in the order below.

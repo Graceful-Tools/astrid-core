@@ -15,6 +15,7 @@ use super::list::TaskList;
 use super::user::User;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
@@ -48,12 +49,14 @@ pub struct Project {
     /// stop a board drawing. [`crate::board::parse_custom_states`] is the only place that reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_states: Option<serde_json::Value>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
@@ -82,6 +85,7 @@ impl Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMember {
     /// Omitted by the embedded member arrays, like [`super::list::ListMember`].
@@ -92,12 +96,14 @@ pub struct ProjectMember {
     pub user_id: String,
     #[serde(default)]
     pub role: String,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
