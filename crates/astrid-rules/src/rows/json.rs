@@ -67,6 +67,8 @@ pub fn rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                     LeadingAction::OpenPicker => "openPicker",
                     LeadingAction::Copy => "copy",
                 },
+                // What that picker has in it, when `action` is `openPicker` (task 3c0dfb73).
+                "pickerShowsProjectState": row.picker_shows_project_state,
                 "depth": row.depth,
                 "isPending": row.is_pending,
                 "isPrivate": row.is_private,

@@ -373,6 +373,14 @@ pub struct TaskRow {
     pub is_overdue: bool,
     pub leading: LeadingControl,
     pub action: LeadingAction,
+    /// Whether the picker [`LeadingAction::OpenPicker`] opens offers the BOARD STATE as well as
+    /// who and priority — [`LeadingControl::picker_shows_project_state`], carried per row.
+    ///
+    /// Carried rather than asked, for the reason `shows_identifier` is: the rule reads the surface,
+    /// the display mode and whose task it is, and a shell that worked out the third of those from
+    /// the row it was handed would be deciding what the core already decided. Meaningless when
+    /// `action` is not `openPicker`, and false there.
+    pub picker_shows_project_state: bool,
     /// How far to indent, from the subtask chain.
     pub depth: usize,
     /// True when this row still exists only on this device.
@@ -493,6 +501,14 @@ impl TaskRow {
             context.display_mode,
             context.current_user_id,
         );
+        // Answered here rather than left to the shell (task 3c0dfb73): the rule needs the surface
+        // and the display mode, which a row on the wire does not carry, so a client holding only
+        // the row could not have worked it out — and the one client that tried would be deciding.
+        let picker_shows_project_state = LeadingControl::picker_shows_project_state(
+            context.display_mode,
+            context.surface,
+            LeadingControl::is_someone_elses_task(assignee_id, context.current_user_id),
+        );
 
         let list_ids = task.effective_list_ids();
         let list_chips = list_ids
@@ -540,6 +556,7 @@ impl TaskRow {
             is_overdue: filters::is_overdue(task, context.now, context.offset),
             leading,
             action,
+            picker_shows_project_state,
             depth: context.depths.get(&task.id).copied().unwrap_or(0),
             is_pending: crate::model::is_temp_id(&task.id),
             is_private: task.is_private,
@@ -596,6 +613,57 @@ pub fn subtask_counts(tasks: &[Task]) -> std::collections::HashMap<String, usize
 
 #[cfg(test)]
 mod tests {
+
+    /// Task 3c0dfb73: a row carries what the picker it opens has in it, so the shell that draws
+    /// that picker does not work the rule out from a surface the row never mentions.
+    #[test]
+    fn task_3c0dfb73_a_row_says_whether_its_picker_shows_the_board_state() {
+        let lists = Vec::new();
+        let users = Vec::new();
+        let depths = HashMap::new();
+        let counts = HashMap::new();
+        let mine: Task = serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": "Water roses", "assigneeId": "me"
+        }))
+        .expect("decodes");
+        let theirs: Task = serde_json::from_value(serde_json::json!({
+            "id": "t2", "title": "Plant tulips", "assigneeId": "them"
+        }))
+        .expect("decodes");
+
+        // My own task on a list row completes outright, so there is no picker and nothing in it.
+        let row = TaskRow::build(&mine, &context(&lists, &users, &depths, &counts));
+        assert_eq!(row.action, LeadingAction::Complete);
+        assert!(!row.picker_shows_project_state);
+
+        // Someone else's is being triaged, which is exactly when its column matters.
+        let row = TaskRow::build(&theirs, &context(&lists, &users, &depths, &counts));
+        assert_eq!(row.action, LeadingAction::OpenPicker);
+        assert!(row.picker_shows_project_state);
+
+        // A board card opens the picker in both modes, and a board is where a column means
+        // something — even for the reader's own task.
+        let mut card = context(&lists, &users, &depths, &counts);
+        card.surface = Surface::BoardCard;
+        let row = TaskRow::build(&mine, &card);
+        assert_eq!(row.action, LeadingAction::OpenPicker);
+        assert!(row.picker_shows_project_state);
+
+        // Unassigned is nobody's, not somebody else's (task f1a8ff9f): the list row still opens
+        // the picker rather than completing, but without a state row to offer.
+        let nobodys: Task =
+            serde_json::from_value(serde_json::json!({ "id": "t3", "title": "Prune" }))
+                .expect("decodes");
+        let row = TaskRow::build(&nobodys, &context(&lists, &users, &depths, &counts));
+        assert_eq!(row.action, LeadingAction::OpenPicker);
+        assert!(!row.picker_shows_project_state);
+
+        // And it reaches the shell: the field is on the wire, not just in the struct.
+        assert_eq!(
+            super::json::rows(std::slice::from_ref(&row))[0]["pickerShowsProjectState"],
+            serde_json::json!(false)
+        );
+    }
 
     /// AATD-36: a row says what iOS's title chips draw — won't do, a GitHub sync mark, `repo#N`.
     #[test]
