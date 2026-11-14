@@ -47,6 +47,12 @@ allow = [
     "Apache-2.0",
     "MIT",
     "BSD-3-Clause",
+    # `arrayref`, reached only through `tiny-skia` from the `resvg` that `cargo xtask gen-brand`
+    # rasterises brand icons with (task b76ce8bf). BSD-2-Clause is BSD-3-Clause without the
+    # no-endorsement clause — strictly the more permissive of the two, and the three-clause form
+    # is allowed above. It reaches no shipped binary either way: xtask is `publish = false`
+    # repo tooling and no client crate depends on it.
+    "BSD-2-Clause",
     "CDLA-Permissive-2.0",
     "ISC",
     # UniFFI (`crates/astrid-uniffi`). File-level copyleft: it binds only changes to UniFFI's own

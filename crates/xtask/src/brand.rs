@@ -12,10 +12,10 @@
 //! astrid-web's `brands/` validates unchanged today, and a client moves to the sections when it
 //! moves, rather than everything moving at once or nothing moving at all.
 //!
-//! The emitters here write TEXT. Icons are deliberately not among them — see `assets.rs`, which
-//! exists because fixed-colour bitmaps cannot take the priority tokens or a partner's brand, and
-//! which has no rasteriser for exactly that reason. Resizing a 1024px icon is a new dependency and
-//! a supply-chain decision, so it is its own task rather than a quiet addition here.
+//! The emitters here write TEXT. The icon sets are `icons.rs`, which was split off precisely
+//! because rasterising is a supply-chain decision rather than another emitter (task b76ce8bf);
+//! that decision — the brand icon source is an SVG, rasterised only where a platform cannot take
+//! a vector — is recorded there, and `generate` writes both halves.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -726,8 +726,32 @@ pub fn generate(root: &Path, profile_path: Option<String>, out: Option<String>) 
         }
     };
 
+    // The icon's path in the profile is relative to the PROFILE, not to the shell's working
+    // directory or to the repository root: a partner keeps their brand file and their artwork
+    // together, and `gen-brand` is run from wherever they happen to be standing.
+    let beside_profile = Path::new(&profile_path)
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    if let Some(note) = crate::icons::note(&crate::icons::source(&profile)) {
+        println!("  {note}");
+    }
+    let icons = match crate::icons::outputs(&profile, &beside_profile) {
+        Ok(icons) => icons,
+        Err(problems) => {
+            eprintln!("{profile_path} does not match brand/schema.json:");
+            for problem in problems {
+                eprintln!("  {problem}");
+            }
+            return ExitCode::FAILURE;
+        }
+    };
+
     let out = Path::new(&out);
-    for (relative, contents) in outputs(&schema, &profile) {
+    let text = outputs(&schema, &profile)
+        .into_iter()
+        .map(|(relative, contents)| (relative, crate::icons::Output::Text(contents)));
+    for (relative, contents) in text.chain(icons) {
         let path = out.join(&relative);
         if let Some(parent) = path.parent() {
             if let Err(error) = std::fs::create_dir_all(parent) {
@@ -735,7 +759,7 @@ pub fn generate(root: &Path, profile_path: Option<String>, out: Option<String>) 
                 return ExitCode::FAILURE;
             }
         }
-        if let Err(error) = std::fs::write(&path, contents) {
+        if let Err(error) = std::fs::write(&path, contents.bytes()) {
             eprintln!("cannot write {}: {error}", path.display());
             return ExitCode::FAILURE;
         }

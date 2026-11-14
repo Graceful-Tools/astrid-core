@@ -17,3 +17,16 @@ astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
 astrid-core = { path = "../astrid-core", version = "0.1.0", features = ["schema"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# `gen-brand` rasterises the brand icon for the platforms that cannot take a vector: the Windows
+# MSIX logo set, Android's mipmaps, Apple's AppIcon and the favicon/PWA sizes (task b76ce8bf).
+# `default-features = false` is the whole point of the choice — it drops `text`, `system-fonts`,
+# `memmap-fonts`, `raster-images`, `gif`, `image-webp` and `svgz`, none of which an app icon uses,
+# leaving `usvg` to parse and `tiny-skia` to render and encode the PNG. MPL-2.0, which `deny.toml`
+# already allows. Nothing a client ships depends on this: xtask is `publish = false` tooling.
+resvg = { version = "0.50", default-features = false }
+
+[dev-dependencies]
+# The icon tests DECODE what the renderer wrote, rather than re-rendering and comparing the
+# result to itself — a test that renders its own expectation passes whatever the emitter does.
+# `png` is already in the graph: `tiny-skia` encodes with it.
+png = "0.18"

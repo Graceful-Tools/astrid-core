@@ -9,6 +9,7 @@ mod assets;
 mod brand;
 mod core_contracts;
 mod design;
+mod icons;
 mod schema;
 mod strings;
 
