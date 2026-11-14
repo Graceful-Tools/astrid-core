@@ -90,7 +90,13 @@ strip = "debuginfo"
 # downloads, so it optimises for it, and a panic aborts rather than carrying the unwinder.
 [profile.wasm]
 inherits = "release"
-opt-level = "s"
+# "z" over "s", measured rather than assumed (task 4d05306d): 353,882 -> 322,923 brotli bytes,
+# 8.7% off the number the browser pays, for one line. The usual objection to "z" is that it costs
+# speed, and these rules answer one request over a handful of tasks -- the web's problem with this
+# module is that it will not load, not that it is slow once it has.
+opt-level = "z"
 lto = "fat"
 panic = "abort"
+# Stripped, so the shipped artifact carries no name section. `scripts/wasm-size.mjs --attribute`
+# wants one: build with `--config 'profile.wasm.strip=false'` to find out which crate grew.
 strip = true

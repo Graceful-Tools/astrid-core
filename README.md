@@ -122,6 +122,49 @@ A shell's bindings are checked against `astrid_core::app::command_kinds()` in th
 every command the shell sends must be one the core has a variant for, or it is a button that does
 nothing.
 
+## The web binding's size is a budget
+
+The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
+CI's `wasm` job holds it to **331,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds.
+
+Measured 2026-11-14 (task `4d05306d`), on that artifact:
+
+| | raw | gzip | brotli |
+|---|---:|---:|---:|
+| the shipped profile | 2,187,892 | 486,869 | **322,923** |
+| with `opt-level = "s"`, as it was | 2,375,925 | 531,752 | 353,882 |
+
+**Where the bytes are**, by `node scripts/wasm-size.mjs <file> --attribute` on a build with
+`--config 'profile.wasm.strip=false'` — the code section, 1,136,835 bytes over 5,175 functions,
+beside a 1,025,331-byte data section that is mostly chrono-tz's zone table:
+
+| crate | | crate | |
+|---|---:|---|---:|
+| serde | 22% | pulldown_cmark | 4% |
+| astrid_rules | 20% | chrono | 3% |
+| core | 18% | hashbrown | 2% |
+| serde_json | 14% | chrono_tz (code) | 2% |
+| alloc | 9% | serde_core | 2% |
+
+(Those shares are the shipped `opt-level = "z"` build. An unstripped build is larger and keeps its
+name section; it is a different artifact from the one the budget measures, which is the point of
+the two commands being different.)
+
+**chrono-tz is the obvious suspect and it is not the obstacle.** Rebuilt with its zone table
+filtered down to UTC, the artifact loses 904,638 raw bytes (38%) but only **53,437 brotli bytes
+(15%)** — a timezone table compresses almost away. Dropping it costs a cross-crate API change
+(the caller would pass offsets from `Intl` instead of an IANA name) and still leaves ~300 KB.
+
+What the compressed size is actually made of is **code**, and the largest part of that is serde's
+monomorphised deserializers: the biggest non-chrono-tz functions are `Task` and `TaskList`
+`Deserialize` instantiations at 8–16 KB each, **each present twice** — once through
+`serde_json::value` and once through `serde::private::de::content`, because `Rule` is an
+internally tagged enum and serde buffers those. That is the door's wire format, not an oversight.
+
+So a materially smaller browser build means compiling **less of the door**, not optimising it
+harder. Raising the budget is allowed; doing it without saying what it bought is not.
+
 ## Layout
 
 Three crates, and the build tool. `astrid-rules` is the pure half — no clock, disk, network or entropy, so it also

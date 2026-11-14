@@ -133,6 +133,19 @@ jobs:
       - name: Build the web binding
         run: cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm
 
+      # The browser has to LOAD this, so its compressed size is a product requirement and not a
+      # statistic (task 4d05306d). The budget is in brotli bytes because that is what a browser
+      # fetches, and it is checked here rather than in a Rust test because the artifact only
+      # exists after a wasm build, which `cargo test` does not do.
+      #
+      # It measures the pre-`wasm-bindgen` artifact -- the one this job already has. Gating the
+      # shipped binding instead would mean pinning and installing the wasm-bindgen CLI in CI for
+      # a number that tracks this one; README.md records the measured ratio between the two.
+      - name: Size budget
+        run: >
+          node scripts/wasm-size.mjs
+          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 331000
+
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
 
