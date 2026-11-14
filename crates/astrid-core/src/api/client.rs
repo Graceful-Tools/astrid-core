@@ -32,14 +32,6 @@ use super::transport::{HttpRequest, HttpResponse, HttpTransport, Method, Transpo
 use crate::model::{self, Lenient};
 use crate::platform::{SecureStore, SESSION_COOKIE_KEY};
 
-/// Where the API lives when the shell does not say. Overridable so a developer can point at a local
-/// astrid-web — which is not a convenience: M0's exit criterion is signing in against one.
-///
-/// Absent from a build with the `require-base-url` feature, so a white-label binary carries no
-/// Astrid server (astrid-web AWTD-1627); see [`crate::app::Config::base_url`].
-#[cfg(not(feature = "require-base-url"))]
-pub const DEFAULT_BASE_URL: &str = "https://astrid.cc";
-
 /// Every path this client may reach starts here. Rule 4 in README.md stated as a
 /// constant, and checked by [`ApiClient::request`], so a stray legacy path fails locally instead
 /// of in production.

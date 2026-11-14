@@ -11,8 +11,6 @@ pub mod path;
 pub mod platform;
 pub mod transport;
 
-#[cfg(not(feature = "require-base-url"))]
-pub use client::DEFAULT_BASE_URL;
 pub use client::{ApiClient, ApiError, Request, API_PREFIX, CLIENT_ID_HEADER};
 pub use pagination::{fetch_all, Page};
 pub use platform::Platform;

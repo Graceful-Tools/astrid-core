@@ -57,11 +57,9 @@ pub struct Config {
     pub cache_path: String,
     /// The server (`baseUrl`): the shell's brand's, or a local astrid-web for a developer.
     ///
-    /// Absent, it is Astrid's ([`crate::api::DEFAULT_BASE_URL`]) — unless the crate is built with
-    /// the `require-base-url` feature, which compiles Astrid's server out of the binary and refuses
-    /// a start that does not name one ([`CONFIG_BASE_URL_REQUIRED`]). A white-label binary must not
-    /// carry Astrid's server, and must fail loudly rather than reach it (astrid-web AWTD-1627).
-    /// Required is where every shell is headed; the default goes once they all pass one.
+    /// Required. A start that names none (absent or `null`) is refused with
+    /// [`CONFIG_BASE_URL_REQUIRED`]: the core carries no server of its own, so a white-label binary
+    /// holds no Astrid address and fails loudly rather than reaching Astrid (astrid-web AWTD-1627).
     pub base_url: String,
     /// Which client this is, stated on every request (`x-platform`). Windows when absent.
     pub platform: crate::api::Platform,
@@ -76,8 +74,9 @@ pub struct Config {
     pub handoff_client_id: Option<String>,
 }
 
-/// The start config as the shell writes it: every key but `cachePath` may be left out (or sent
-/// `null`), and [`Config`] fills it in or refuses it.
+/// The start config as the shell writes it: every key but `cachePath` and `baseUrl` may be left out
+/// (or sent `null`), and [`Config`] fills it in. A missing `baseUrl` is refused with a code rather
+/// than by serde, so every binding hands its shell the same leading `CONFIG_BASE_URL_REQUIRED`.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StartConfig {
@@ -100,7 +99,7 @@ impl TryFrom<StartConfig> for Config {
             cache_path: raw.cache_path,
             base_url: match raw.base_url {
                 Some(base_url) => base_url,
-                None => absent_base_url()?,
+                None => return Err(base_url_required()),
             },
             platform: raw.platform,
             url_scheme: raw
@@ -111,8 +110,8 @@ impl TryFrom<StartConfig> for Config {
     }
 }
 
-/// The code a start fails with when the config names no server and the build has no default
-/// (`require-base-url`). It leads the error's text, which is what every binding hands its shell.
+/// The code a start fails with when the config names no server. It leads the error's text, which is
+/// what every binding hands its shell.
 pub const CONFIG_BASE_URL_REQUIRED: &str = "CONFIG_BASE_URL_REQUIRED";
 
 /// The code a Google command is refused with in a build without `sync-google` — task `b92569a8`.
@@ -127,19 +126,13 @@ pub const SYNC_GOOGLE_UNAVAILABLE: &str = "SYNC_GOOGLE_UNAVAILABLE";
 /// Astrid's sign-in callback scheme — what [`Config::url_scheme`] is when a shell leaves it out.
 pub const DEFAULT_URL_SCHEME: &str = crate::services::auth::URL_SCHEME;
 
-/// What `baseUrl` is when the shell leaves it out: Astrid's server, or — built with
-/// `require-base-url` — a refusal, so the binary holds no server but the one its shell names.
-#[cfg(not(feature = "require-base-url"))]
-fn absent_base_url() -> Result<String, String> {
-    Ok(crate::api::DEFAULT_BASE_URL.to_string())
-}
-
-#[cfg(feature = "require-base-url")]
-fn absent_base_url() -> Result<String, String> {
-    Err(format!(
-        "{CONFIG_BASE_URL_REQUIRED}: the start config names no baseUrl, and this build has no \
+/// The refusal for a start config that names no server: the core has none of its own, so the
+/// binary holds no server but the one its shell names.
+fn base_url_required() -> String {
+    format!(
+        "{CONFIG_BASE_URL_REQUIRED}: the start config names no baseUrl, and the core has no \
          default server; pass the brand's own"
-    ))
+    )
 }
 
 /// The running client.
@@ -367,25 +360,12 @@ mod tests {
         assert_eq!(config.base_url, "https://tasks.partner.example");
     }
 
-    /// astrid-web AWTD-1627. Without `require-base-url`, a shell that leaves the server out — or
-    /// sends it `null` — still gets Astrid's, exactly as before.
-    #[cfg(not(feature = "require-base-url"))]
+    /// astrid-web AWTD-1627. A start that names no server — absent or `null` — fails with the
+    /// code in EVERY build, rather than reaching a server the brand never chose. Until the
+    /// default was deleted this held only under `require-base-url`; Windows (AWTD2-192) and iOS
+    /// (AITD-651) were the last shells to stop relying on it.
     #[test]
-    fn awtd_1627_an_absent_server_is_astrids_by_default() {
-        for json in [
-            r#"{"cachePath":":memory:"}"#,
-            r#"{"cachePath":":memory:","baseUrl":null}"#,
-        ] {
-            let config: Config = serde_json::from_str(json).expect("reads");
-            assert_eq!(config.base_url, crate::api::DEFAULT_BASE_URL, "{json}");
-        }
-    }
-
-    /// astrid-web AWTD-1627. Built with `require-base-url`, a start that names no server fails
-    /// with the code, rather than reaching a server the brand never chose.
-    #[cfg(feature = "require-base-url")]
-    #[test]
-    fn awtd_1627_an_absent_server_is_refused_when_required() {
+    fn awtd_1627_an_absent_server_is_refused_in_every_build() {
         for json in [
             r#"{"cachePath":":memory:"}"#,
             r#"{"cachePath":":memory:","baseUrl":null}"#,

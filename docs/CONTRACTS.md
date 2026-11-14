@@ -272,19 +272,18 @@ values fall back the same way, so a shell that says nothing is Astrid byte for b
 side of the same choice is `BRAND.appUrlScheme` and its `DesktopClient` registry: a partner build
 must register the same scheme with its OS and the same id with its server.
 
-**The server is the shell's to name too, and will be required (AWTD-1627).** `baseUrl` is
-Astrid's (`api::DEFAULT_BASE_URL`) when absent or `null`, today, so that no shell breaks. Built with
-the `require-base-url` feature (`astrid-core`, passed through by `astrid-uniffi`), the binary
-carries no Astrid server and a start without `baseUrl` fails with `CONFIG_BASE_URL_REQUIRED` at the
-head of the error's text. A white-label build must fail loudly rather than reach Astrid. The
-contract every shell is moving to is the feature's: **always pass your brand's server.** Once they
-all do, the feature becomes the only behaviour and the default is deleted.
+**The server is the shell's to name, and it is required (AWTD-1627).** A start config without
+`baseUrl` (absent or `null`) fails with `CONFIG_BASE_URL_REQUIRED` at the head of the error's text,
+in every build. The core carries no server of its own, so a white-label binary holds no Astrid
+address for its API and fails loudly rather than reaching Astrid. **Always pass your brand's
+server.** Every shell's app already did before the default was deleted: Android (`Brand.baseUrl`),
+iOS / Mac (`Constants.API.baseURL`, required since AITD-651) and Windows (`ServerOrigin`, required
+since AWTD2-192). Shell *tests* that start a core without one fail on their next pin bump, by
+design; name a server that is never reached, as Windows' `https://nowhere.invalid`.
 
-| Shell | Passes `baseUrl` | Can turn the feature on |
-|---|---|---|
-| Android | the app always does (`Brand.baseUrl`) | once its tests name a server |
-| iOS / Mac | the app always does (`Constants.API.baseURL`) | once its tests name a server |
-| Windows | **not when the server is the brand's own**: `ServerSelection.Parse` answers null for it, so a partner build without `ASTRID_SERVER_URL` reaches astrid.cc through the core | after it passes `ServerOrigin` |
+The `require-base-url` feature (`astrid-core`, passed through by `astrid-uniffi`) predates this and
+no longer touches `baseUrl`. It now compiles out only the Markdown fallback origin below, the last
+Astrid address in the binary, and is kept so a shell that turned it on goes on building.
 
 **A relative link opens on the reader's server (AWTD-1630).** Markdown's relative links
 (`/lists/…`, `/u/…`, an id's `/t/…`) resolve against an origin the caller passes in, never a
