@@ -179,9 +179,25 @@ pub fn rasters() -> Vec<Raster> {
     [APPLE, ANDROID, WINDOWS, WEB, VSCODE].concat()
 }
 
-/// Why an icon could not be turned into a set.
-fn problem(path: &str, detail: impl std::fmt::Display) -> Vec<String> {
-    vec![format!("assets.icon {path:?}: {detail}")]
+/// Why an icon could not be turned into a set, naming the field the profile set it in.
+fn problem(field: &str, path: &str, detail: impl std::fmt::Display) -> Vec<String> {
+    vec![format!("{field} {path:?}: {detail}")]
+}
+
+/// The build-time vector master (AWTD-1647). Web spells it `assets.iconSource`; the schema's
+/// alias reads that spelling. It has no `env`: web never reads it at runtime.
+const ICON_SOURCE: &str = "assets.icon-source";
+
+/// Which field the rendered vector came from, so a problem names the one the partner wrote.
+fn vector_field(profile: &Profile) -> &'static str {
+    if profile
+        .get(ICON_SOURCE)
+        .is_some_and(|path| !path.is_empty())
+    {
+        ICON_SOURCE
+    } else {
+        "assets.icon"
+    }
 }
 
 /// Render one SVG at one size. The artwork keeps its aspect ratio and is centred, so a source
@@ -281,6 +297,10 @@ fn pretty(value: &Value) -> String {
 ///
 /// So the vector master is recognised by being one: a value naming an `.svg` is artwork beside
 /// the profile and is rendered; anything else stays the runtime reference it has always been.
+///
+/// `assets.icon-source` (AWTD-1647) is the honest form of the same thing: a key that only ever
+/// names the master, so the runtime PNG and the build-time SVG no longer share one. When it is
+/// set it wins, whatever `assets.icon` says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     /// No `assets.icon`, or an empty one.
@@ -292,6 +312,9 @@ pub enum Source {
 }
 
 pub fn source(profile: &Profile) -> Source {
+    if let Some(master) = profile.get(ICON_SOURCE).filter(|path| !path.is_empty()) {
+        return Source::Vector(master.to_string());
+    }
     match profile.get("assets.icon").filter(|path| !path.is_empty()) {
         None => Source::Absent,
         Some(icon) if icon.to_ascii_lowercase().ends_with(".svg") => {
@@ -306,8 +329,8 @@ pub fn note(source: &Source) -> Option<String> {
     match source {
         Source::Reference(icon) => Some(format!(
             "no icon set: assets.icon is {icon:?}, which is the runtime reference web reads, not \
-             artwork to render from. Point it at an .svg beside the profile to generate every \
-             platform's icons."
+             artwork to render from. Set assets.iconSource to an .svg beside the profile to \
+             generate every platform's icons."
         )),
         _ => None,
     }
@@ -327,15 +350,17 @@ pub fn outputs(
         return Ok(Vec::new());
     };
     let icon = icon.as_str();
+    let field = vector_field(profile);
 
     let path = relative_to.join(icon);
-    let source = std::fs::read_to_string(&path).map_err(|error| problem(icon, error))?;
+    let source = std::fs::read_to_string(&path).map_err(|error| problem(field, icon, error))?;
 
     let options = resvg::usvg::Options::default();
     let tree = resvg::usvg::Tree::from_str(&source, &options).map_err(|error| {
         // The decision this task records is that the source is an SVG, so say that rather than
         // letting a PNG hand-over fail as an unreadable file.
         problem(
+            field,
             icon,
             format!(
                 "is not an SVG the renderer can read ({error}) — the brand icon source is an SVG"
@@ -348,7 +373,7 @@ pub fn outputs(
     for raster in rasters() {
         match render(&tree, raster) {
             Ok(bytes) => out.push((raster.path.to_string(), Output::Bytes(bytes))),
-            Err(detail) => failures.push(format!("assets.icon {icon:?}: {detail}")),
+            Err(detail) => failures.push(format!("{field} {icon:?}: {detail}")),
         }
     }
     if !failures.is_empty() {
@@ -614,6 +639,66 @@ mod tests {
         );
         assert_eq!(note(&Source::Absent), None);
         assert_eq!(note(&Source::Vector("a.svg".to_string())), None);
+    }
+
+    /// AWTD-1647: the vector master has a key of its own, `assets.icon-source` (web spells it
+    /// `iconSource`), so `assets.icon` can stay the runtime PNG web serves. With both set, the
+    /// master is what renders and the runtime reference is not mentioned.
+    #[test]
+    fn the_icon_source_is_the_master_awtd_1647() {
+        let dir = scratch("icon-source");
+        std::fs::write(dir.join("acme.icon.svg"), SQUARE).expect("the source writes");
+        let mut profile = profile_with(Some("/icons/acme-1024.png"));
+        profile.values.insert(
+            "assets.icon-source".to_string(),
+            "acme.icon.svg".to_string(),
+        );
+
+        assert_eq!(
+            source(&profile),
+            Source::Vector("acme.icon.svg".to_string())
+        );
+        assert_eq!(note(&source(&profile)), None);
+        let out = outputs(&profile, &dir).expect("the master renders");
+        let paths: Vec<&str> = out.iter().map(|(p, _)| p.as_str()).collect();
+        for raster in rasters() {
+            assert!(paths.contains(&raster.path), "{} is written", raster.path);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The schema carries the key and web's spelling of it, or a web profile's `iconSource`
+    /// reads as absent and the icon set silently generates for nobody again (AWTD-1647).
+    #[test]
+    fn the_schema_declares_the_icon_source_awtd_1647() {
+        let schema = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../brand/schema.json"),
+        )
+        .expect("the shipped schema reads");
+        let schema: Value = serde_json::from_str(&schema).expect("the schema is JSON");
+        let field = &schema["sections"]["assets"]["icon-source"];
+        assert_eq!(field["type"], "path");
+        assert_eq!(field["alias"], "iconSource");
+        assert!(
+            field.get("env").is_none(),
+            "build-time only: web never reads it at runtime"
+        );
+    }
+
+    /// A missing master names its own field, not `assets.icon` (AWTD-1647).
+    #[test]
+    fn a_missing_icon_source_names_its_field_awtd_1647() {
+        let mut profile = profile_with(None);
+        profile
+            .values
+            .insert("assets.icon-source".to_string(), "nowhere.svg".to_string());
+        let problems = outputs(&profile, Path::new(".")).expect_err("a missing file is refused");
+        assert!(
+            problems[0].starts_with("assets.icon-source \"nowhere.svg\""),
+            "{}",
+            problems[0]
+        );
     }
 
     /// A missing file names the field, the way every other profile problem does.

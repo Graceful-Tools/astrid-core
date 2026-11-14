@@ -75,13 +75,16 @@ Astrid Code's ids are a hash of the bundle id and the id's own purpose rather th
 because a regenerated id orphans every installed copy's settings. Same profile, same id, on any
 machine.
 
-## What it does not write
+## Icons come from `assets.iconSource`
 
-**Icons.** The task that asked for this ("one 1024-px icon … the icon in all sizes") would need a
-rasteriser, and that is a dependency and a `cargo deny` decision rather than another emitter. It is
-also against the grain of [`../design/assets`](../design/assets): `crates/xtask/src/assets.rs` exists
-*because* the checkbox used to be sixteen fixed-colour PNGs copied by hand, and fixed-colour bitmaps
-cannot take the priority tokens or a partner's brand (register DS21). Filed separately.
+`gen-brand` renders every platform's icon set (`crates/xtask/src/icons.rs`) from one SVG master,
+named by **`assets.icon-source`**, spelled `assets.iconSource` in astrid-web's profiles. The path
+is relative to the profile, e.g. `"iconSource": "acme.icon.svg"` beside `acme.brand.json`.
+
+It is a key of its own because `assets.icon` is something else: `NEXT_PUBLIC_BRAND_ICON`, the PNG
+URL web serves at runtime. The two used to share that key, told apart by extension (AWTD-1647).
+An `.svg` in `assets.icon` still renders, for profiles written that way; any other value there is
+the runtime reference and writes no icons, and `gen-brand` says so.
 
 ## Colours a profile does not have to state
 
