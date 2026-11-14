@@ -1005,6 +1005,41 @@ mod tests {
         }
     }
 
+    /// `astrid_rules::plurals::PLURAL_KEYS` is what a client reads; `catalog.json` is the source.
+    ///
+    /// The list is published because a shell checking its own coverage has to know that
+    /// `format.ordinal` is held as four entries rather than one (task `b656efce`). A hand list
+    /// against a generated source is exactly the copy this directory exists to remove, so it is
+    /// held to the catalog here: a sixth plural key, or a cardinal one changed to ordinal, fails
+    /// this rather than reaching a client as a key with no word.
+    #[test]
+    fn b656efce_the_published_plural_keys_are_the_catalogs() {
+        let catalog = read_catalog(&super::super::repo_root()).expect("the catalog reads");
+        let mut from_catalog: Vec<(String, bool)> = catalog
+            .keys
+            .iter()
+            .filter(|(_, spec)| spec.plural)
+            .map(|(key, spec)| (key.clone(), spec.ordinal))
+            .collect();
+        from_catalog.sort();
+
+        let mut published: Vec<(String, bool)> = astrid_rules::plurals::PLURAL_KEYS
+            .iter()
+            .map(|(key, form)| {
+                (
+                    (*key).to_string(),
+                    *form == astrid_rules::plurals::CountForm::Ordinal,
+                )
+            })
+            .collect();
+        published.sort();
+
+        assert_eq!(
+            published, from_catalog,
+            "plurals::PLURAL_KEYS and strings/catalog.json disagree about which keys pluralise"
+        );
+    }
+
     /// Task 1bdf84d7. The named arguments the catalog carries are numbered by the order
     /// `catalog.json` declares, NOT by the order this language happens to use them — a language
     /// that puts the weekday before the ordinal still has to mark which is which, and every

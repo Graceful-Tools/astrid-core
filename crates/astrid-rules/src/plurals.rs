@@ -54,6 +54,35 @@ pub const ORDINAL_KEY: &str = "format.ordinal";
 /// forms are categories rather than typos.
 pub const CATEGORIES: [&str; 5] = ["one", "two", "few", "many", "other"];
 
+/// Every catalog key whose translation is one word per CLDR category, and which of the two sets
+/// of rules its categories come from.
+///
+/// Published because a client cannot otherwise tell. [`crate::copy::keys`] answers *which keys
+/// exist*, and for a plural key that is the base name — `format.ordinal` — while what a shell's
+/// resources actually hold is one entry per category, `format.ordinal.one` and its siblings. A
+/// shell checking that it has a word for every key the core sends would look for a `format.ordinal`
+/// that is not supposed to exist, and conclude it was missing a string it had already translated
+/// four times (task `b656efce`).
+///
+/// Mirrors the `"plural": true` entries of `strings/catalog.json`, which is the source;
+/// `xtask`'s `check-strings` asserts the two agree, so a sixth plural key cannot be added there
+/// without appearing here.
+pub const PLURAL_KEYS: [(&str, CountForm); 5] = [
+    (ORDINAL_KEY, CountForm::Ordinal),
+    ("repeat.every_n_days", CountForm::Cardinal),
+    ("repeat.every_n_months", CountForm::Cardinal),
+    ("repeat.every_n_weeks", CountForm::Cardinal),
+    ("repeat.every_n_years", CountForm::Cardinal),
+];
+
+/// Which form a key's categories come from, or `None` when the key does not pluralise.
+pub fn form_of(key: &str) -> Option<CountForm> {
+    PLURAL_KEYS
+        .iter()
+        .find(|(candidate, _)| *candidate == key)
+        .map(|(_, form)| *form)
+}
+
 /// The CLDR category `count` selects for `locale`.
 ///
 /// `locale` is a tag from `strings/locales.json` (`en`, `de`, `zh-CN`, …). The language subtag is
