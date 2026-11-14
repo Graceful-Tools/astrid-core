@@ -77,14 +77,20 @@ const ASSIGNEE: Choices = &[
     ("unassigned", "filter.assignee.nobody"),
 ];
 
+/// The four cadences and "custom" carry the repeat *picker*'s keys (D49), so the same word is
+/// asked for under one spelling whichever sheet is open — this group asked for `repeat.daily`
+/// against the picker's `repeating.daily` until D60 was resolved (task `b0b5f3cc`).
+///
+/// `filter.repeat.never` stays its own key: "Not repeating" is a filter's word for the absence of
+/// a repeat, not the picker's "One time only" preset.
 const REPEATING: Choices = &[
     ("all", "filter.any"),
     ("not_repeating", "filter.repeat.never"),
-    ("daily", "repeat.daily"),
-    ("weekly", "repeat.weekly"),
-    ("monthly", "repeat.monthly"),
-    ("yearly", "repeat.yearly"),
-    ("custom", "repeat.custom"),
+    ("daily", "repeating.daily"),
+    ("weekly", "repeating.weekly"),
+    ("monthly", "repeating.monthly"),
+    ("yearly", "repeating.yearly"),
+    ("custom", "repeating.custom"),
 ];
 
 const ASSIGNED_BY: Choices = &[
@@ -259,6 +265,46 @@ mod tests {
         let mut list = list();
         list.filter_due_date = Some("next_quarter".into());
         assert_eq!(picked(&groups(&list), "filterDueDate"), "");
+    }
+
+    /// The filter's four cadences and its "custom" are the picker's words, so they are the
+    /// picker's keys (D49, D60).
+    ///
+    /// This group asked for `repeat.daily` while the picker asked for `repeating.daily` — the same
+    /// five words under two spellings, depending on which sheet was open. It is asserted against
+    /// [`crate::rows::repeat::presets`] rather than against a second written-out list, because a
+    /// second list is what let the two drift apart in the first place.
+    ///
+    /// `not_repeating` is not in it: "Not repeating" is a filter's own word, not a sixth preset.
+    #[test]
+    fn the_repeat_filter_asks_for_the_pickers_keys_b0b5f3cc() {
+        let presets = crate::rows::repeat::presets(None);
+        let preset_key = |value: &str| {
+            presets
+                .iter()
+                .find(|preset| preset.value == value)
+                .unwrap_or_else(|| panic!("the picker offers {value}"))
+                .title_key
+                .to_string()
+        };
+
+        let repeating = groups(&list())
+            .into_iter()
+            .find(|group| group.field == "filterRepeating")
+            .expect("a repeat group");
+
+        for value in ["daily", "weekly", "monthly", "yearly", "custom"] {
+            let pick = repeating
+                .picks
+                .iter()
+                .find(|pick| pick.value == value)
+                .unwrap_or_else(|| panic!("the filter offers {value}"));
+            assert_eq!(
+                pick.title_key,
+                preset_key(value),
+                "the repeat filter and the repeat picker must ask for one key per word"
+            );
+        }
     }
 
     /// The values are the contract: they are saved on the list and read by every client, so this

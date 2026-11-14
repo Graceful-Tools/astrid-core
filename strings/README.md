@@ -63,13 +63,16 @@ rest. Every other group's title shares its choices' prefix. It is pinned as the 
 `copy.rs` rather than tidied, because astrid-windows' shipped `Strings.cs` looks it up under that
 name and a pinned client cannot be fixed by editing this repository.
 
-### Two keys for one word
+### Two keys for one word, until they were one
 
-The repeat **filter** asks for `repeat.daily`; the repeat **picker** asks for `repeating.daily`.
-Both are in the catalog, because the catalog's job is to make every key the core emits sayable.
-`Strings.cs` carries only the second, so astrid-windows' filter sheet draws the literal text
-`repeat.daily` today — recorded in `docs/CONTRACTS.md`, and making the core emit one spelling is a
-change to a pinned contract rather than a catalog edit.
+The repeat **filter** asked for `repeat.daily` while the repeat **picker** asked for
+`repeating.daily` — five words under two spellings, which this catalog found by being the first
+thing to look at every key the core emits at once. Both were carried here, because a catalog's job
+is to make every key the core emits sayable whatever is decided about it.
+
+Resolved in task `b0b5f3cc`: the filter took the picker's keys (`docs/CONTRACTS.md` D60) and the
+five `repeat.*` spellings left this catalog. The check that made the pruning compulsory is the one
+below — a key in the catalog the core no longer emits is a failure, not dead weight.
 
 ## Key spelling per platform
 

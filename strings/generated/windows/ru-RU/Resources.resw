@@ -172,12 +172,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>За 1 неделю</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>Выбрать</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>Ежедневно</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -199,9 +193,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>от срока выполнения</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>Ежемесячно</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>{0} числа</value>
   </data>
@@ -216,12 +207,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>по {0}</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>Еженедельно</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>Ежегодно</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>Настраиваемый</value>

@@ -58,8 +58,6 @@
     <string name="reminder_hour_before">An hour before</string>
     <string name="reminder_none">No reminder</string>
     <string name="reminder_week_before">A week before</string>
-    <string name="repeat_custom">Custom</string>
-    <string name="repeat_daily">Daily</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">until %1$s</string>
     <plurals name="repeat_every_n_days">
@@ -79,14 +77,11 @@
         <item quantity="other">Every %1$s years</item>
     </plurals>
     <string name="repeat_from_due_date">from due date</string>
-    <string name="repeat_monthly">Monthly</string>
     <string name="repeat_on_day_of_month">on the %1$s</string>
     <string name="repeat_on_last_weekday">on the last %1$s</string>
     <string name="repeat_on_month_and_day">on %1$s %2$s</string>
     <string name="repeat_on_nth_weekday">on the %1$s %2$s</string>
     <string name="repeat_on_weekdays">on %1$s</string>
-    <string name="repeat_weekly">Weekly</string>
-    <string name="repeat_yearly">Yearly</string>
     <string name="repeating_custom">Custom…</string>
     <string name="repeating_daily">Daily</string>
     <string name="repeating_monthly">Monthly</string>

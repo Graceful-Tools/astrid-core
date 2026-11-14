@@ -55,8 +55,6 @@
   "reminder.hour_before": "За 1 час",
   "reminder.none": "Без напоминания",
   "reminder.week_before": "За 1 неделю",
-  "repeat.custom": "Выбрать",
-  "repeat.daily": "Ежедневно",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "до {date}",
   "repeat.every_n_days": {
@@ -72,14 +70,11 @@
     "other": "Каждый {count}-й год"
   },
   "repeat.from_due_date": "от срока выполнения",
-  "repeat.monthly": "Ежемесячно",
   "repeat.on_day_of_month": "{ordinal} числа",
   "repeat.on_last_weekday": "в последний {weekday}",
   "repeat.on_month_and_day": "{ordinal} {month}",
   "repeat.on_nth_weekday": "в {ordinal} {weekday}",
   "repeat.on_weekdays": "по {weekdays}",
-  "repeat.weekly": "Еженедельно",
-  "repeat.yearly": "Ежегодно",
   "repeating.custom": "Настраиваемый",
   "repeating.daily": "Ежедневно",
   "repeating.monthly": "Ежемесячно",

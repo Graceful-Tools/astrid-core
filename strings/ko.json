@@ -55,8 +55,6 @@
   "reminder.hour_before": "1시간 전",
   "reminder.none": "알림 없음",
   "reminder.week_before": "1주일 전",
-  "repeat.custom": "사용자 지정",
-  "repeat.daily": "매일",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "{date}까지",
   "repeat.every_n_days": {
@@ -72,14 +70,11 @@
     "other": "{count}년마다"
   },
   "repeat.from_due_date": "기한일 기준",
-  "repeat.monthly": "매월",
   "repeat.on_day_of_month": "{ordinal}일에",
   "repeat.on_last_weekday": "마지막 {weekday}에",
   "repeat.on_month_and_day": "{month} {ordinal}일에",
   "repeat.on_nth_weekday": "{ordinal} {weekday}에",
   "repeat.on_weekdays": "{weekdays}에",
-  "repeat.weekly": "매주",
-  "repeat.yearly": "매년",
   "repeating.custom": "사용자 지정",
   "repeating.daily": "매일",
   "repeating.monthly": "매월",

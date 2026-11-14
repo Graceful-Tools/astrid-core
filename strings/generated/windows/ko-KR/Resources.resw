@@ -172,12 +172,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>1주일 전</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>사용자 지정</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>매일</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -199,9 +193,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>기한일 기준</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>매월</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>{0}일에</value>
   </data>
@@ -216,12 +207,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>{0}에</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>매주</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>매년</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>사용자 지정</value>

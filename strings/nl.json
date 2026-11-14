@@ -55,8 +55,6 @@
   "reminder.hour_before": "1 uur van tevoren",
   "reminder.none": "Geen herinnering",
   "reminder.week_before": "1 week van tevoren",
-  "repeat.custom": "Aangepast",
-  "repeat.daily": "Dagelijks",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "tot {date}",
   "repeat.every_n_days": {
@@ -76,14 +74,11 @@
     "other": "Elke {count} jaar"
   },
   "repeat.from_due_date": "vanaf de vervaldatum",
-  "repeat.monthly": "Maandelijks",
   "repeat.on_day_of_month": "op de {ordinal}",
   "repeat.on_last_weekday": "op de laatste {weekday}",
   "repeat.on_month_and_day": "op {ordinal} {month}",
   "repeat.on_nth_weekday": "op de {ordinal} {weekday}",
   "repeat.on_weekdays": "op {weekdays}",
-  "repeat.weekly": "Wekelijks",
-  "repeat.yearly": "Jaarlijks",
   "repeating.custom": "Aangepast",
   "repeating.daily": "Dagelijks",
   "repeating.monthly": "Maandelijks",

@@ -55,8 +55,6 @@
   "reminder.hour_before": "1 ora prima",
   "reminder.none": "Nessun promemoria",
   "reminder.week_before": "1 settimana prima",
-  "repeat.custom": "Personalizzato",
-  "repeat.daily": "Giornaliero",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "fino al {date}",
   "repeat.every_n_days": {
@@ -76,14 +74,11 @@
     "other": "Ogni {count} anni"
   },
   "repeat.from_due_date": "dalla data di scadenza",
-  "repeat.monthly": "Mensile",
   "repeat.on_day_of_month": "il {ordinal}",
   "repeat.on_last_weekday": "l'ultimo {weekday}",
   "repeat.on_month_and_day": "il {ordinal} {month}",
   "repeat.on_nth_weekday": "il {ordinal} {weekday}",
   "repeat.on_weekdays": "il {weekdays}",
-  "repeat.weekly": "Settimanale",
-  "repeat.yearly": "Annuale",
   "repeating.custom": "Personalizzato",
   "repeating.daily": "Giornaliero",
   "repeating.monthly": "Mensile",

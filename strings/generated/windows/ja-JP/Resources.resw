@@ -172,12 +172,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>1週間前</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>カスタム</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>毎日</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -199,9 +193,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>期限日から</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>毎月</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>{0}日に</value>
   </data>
@@ -216,12 +207,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>{0}に</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>毎週</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>毎年</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>カスタム</value>

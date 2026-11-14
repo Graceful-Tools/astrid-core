@@ -172,12 +172,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>1 Woche vorher</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>Benutzerdefiniert</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>Täglich</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -211,9 +205,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>ab Fälligkeitsdatum</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>Monatlich</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>am {0}</value>
   </data>
@@ -228,12 +219,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>am {0}</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>Wöchentlich</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>Jährlich</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>Benutzerdefiniert…</value>

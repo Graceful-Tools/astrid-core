@@ -55,8 +55,6 @@
     <string name="reminder_hour_before">1시간 전</string>
     <string name="reminder_none">알림 없음</string>
     <string name="reminder_week_before">1주일 전</string>
-    <string name="repeat_custom">사용자 지정</string>
-    <string name="repeat_daily">매일</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">%1$s까지</string>
     <plurals name="repeat_every_n_days">
@@ -72,14 +70,11 @@
         <item quantity="other">%1$s년마다</item>
     </plurals>
     <string name="repeat_from_due_date">기한일 기준</string>
-    <string name="repeat_monthly">매월</string>
     <string name="repeat_on_day_of_month">%1$s일에</string>
     <string name="repeat_on_last_weekday">마지막 %1$s에</string>
     <string name="repeat_on_month_and_day">%1$s %2$s일에</string>
     <string name="repeat_on_nth_weekday">%1$s %2$s에</string>
     <string name="repeat_on_weekdays">%1$s에</string>
-    <string name="repeat_weekly">매주</string>
-    <string name="repeat_yearly">매년</string>
     <string name="repeating_custom">사용자 지정</string>
     <string name="repeating_daily">매일</string>
     <string name="repeating_monthly">매월</string>

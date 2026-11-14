@@ -56,8 +56,6 @@
   "reminder.hour_before": "1 heure avant",
   "reminder.none": "Pas de rappel",
   "reminder.week_before": "1 semaine avant",
-  "repeat.custom": "Personnalisé",
-  "repeat.daily": "Quotidien",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "jusqu'au {date}",
   "repeat.every_n_days": {
@@ -77,14 +75,11 @@
     "other": "Tous les {count} ans"
   },
   "repeat.from_due_date": "à partir de la date d'échéance",
-  "repeat.monthly": "Mensuel",
   "repeat.on_day_of_month": "le {ordinal}",
   "repeat.on_last_weekday": "le dernier {weekday}",
   "repeat.on_month_and_day": "le {ordinal} {month}",
   "repeat.on_nth_weekday": "le {ordinal} {weekday}",
   "repeat.on_weekdays": "le {weekdays}",
-  "repeat.weekly": "Hebdomadaire",
-  "repeat.yearly": "Annuel",
   "repeating.custom": "Personnalisé",
   "repeating.daily": "Quotidien",
   "repeating.monthly": "Mensuel",

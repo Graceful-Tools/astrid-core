@@ -172,12 +172,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>1 週前</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>自訂</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>每天</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -199,9 +193,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>從到期日起</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>每月</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>在 {0} 日</value>
   </data>
@@ -216,12 +207,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>在{0}</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>每週</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>每年</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>自訂</value>

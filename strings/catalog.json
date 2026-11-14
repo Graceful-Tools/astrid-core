@@ -61,8 +61,6 @@
     "reminder.hour_before": {},
     "reminder.none": {},
     "reminder.week_before": {},
-    "repeat.custom": {},
-    "repeat.daily": {},
     "repeat.ends_after": {
       "args": [
         "count"
@@ -98,7 +96,6 @@
       "plural": true
     },
     "repeat.from_due_date": {},
-    "repeat.monthly": {},
     "repeat.on_day_of_month": {
       "args": [
         "ordinal"
@@ -126,8 +123,6 @@
         "weekdays"
       ]
     },
-    "repeat.weekly": {},
-    "repeat.yearly": {},
     "repeating.custom": {},
     "repeating.daily": {},
     "repeating.monthly": {},

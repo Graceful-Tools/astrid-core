@@ -175,12 +175,6 @@
   <data name="reminder_week_before" xml:space="preserve">
     <value>1 semaine avant</value>
   </data>
-  <data name="repeat_custom" xml:space="preserve">
-    <value>Personnalisé</value>
-  </data>
-  <data name="repeat_daily" xml:space="preserve">
-    <value>Quotidien</value>
-  </data>
   <data name="repeat_ends_after" xml:space="preserve">
     <value>({0}x)</value>
   </data>
@@ -214,9 +208,6 @@
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>à partir de la date d'échéance</value>
   </data>
-  <data name="repeat_monthly" xml:space="preserve">
-    <value>Mensuel</value>
-  </data>
   <data name="repeat_on_day_of_month" xml:space="preserve">
     <value>le {0}</value>
   </data>
@@ -231,12 +222,6 @@
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>le {0}</value>
-  </data>
-  <data name="repeat_weekly" xml:space="preserve">
-    <value>Hebdomadaire</value>
-  </data>
-  <data name="repeat_yearly" xml:space="preserve">
-    <value>Annuel</value>
   </data>
   <data name="repeating_custom" xml:space="preserve">
     <value>Personnalisé</value>

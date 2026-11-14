@@ -1404,17 +1404,24 @@ month is shorter (Jan 31 → Feb 28). The Swift it replaces let `Calendar` overf
 **Found by building the string catalog** (task `1bdf84d7`), which was the first thing to look at
 every key this core emits at once.
 
-`rows::filter_picks` offers the repeat filter's rows as `repeat.daily`, `repeat.weekly`,
+`rows::filter_picks` offered the repeat filter's rows as `repeat.daily`, `repeat.weekly`,
 `repeat.monthly`, `repeat.yearly` and `repeat.custom`. `rows::repeat` offers the repeat *picker*'s
 presets as `repeating.daily` … `repeating.custom`, which is D49's resolution toward iOS. So the
-same five words are asked for under two spellings, depending on which sheet is open.
+same five words were asked for under two spellings, depending on which sheet was open.
 
-**Not resolved, deliberately.** astrid-windows' `Strings.cs` carries the `repeating.*` five and not
-the `repeat.*` five, so its filter sheet draws the literal text `repeat.daily` on screen today —
-and the fix that reads best, making `filter_picks` ask for D49's keys, changes what a **pinned**
-core emits. A client that has already mapped `repeat.daily` would then lose its word on the day it
-bumps, which is the same silent regression in the other direction.
+**Resolved toward D49** (task `b0b5f3cc`): `filter_picks` asks for the picker's keys, and the five
+`repeat.*` spellings are retired. One word, one key. `filter.repeat.never` is untouched — "Not
+repeating" is a filter's word for the absence of a repeat, not the picker's "One time only".
 
-`strings/` carries both spellings, because a catalog's job is to make every key the core emits
-sayable; that ends the drawn-on-screen key immediately for any client that adopts it. Collapsing
-the two is a separate change, coordinated with each client's adoption.
+What held this open was that changing a **pinned** core's keys would cost a client that had
+already mapped `repeat.daily` its word. By the time it was resolved, no client was in that state:
+astrid-windows carried **both** spellings (`Strings.cs` and both `.resw`, since task `b63d8679`),
+so it lost nothing and retired the five in the same change; astrid-web and astrid-ios translate
+`repeating.*` and have never had a `repeat.daily`, so each **gained** a word it was drawing as a
+key. The regression this feared had no one to happen to.
+
+The guard against a third spelling is that
+`filter_picks`'s `the_repeat_filter_asks_for_the_pickers_keys_b0b5f3cc` asserts against
+`rows::repeat::presets` rather than a written-out list — a second list is what let the two drift.
+`strings/` carries one spelling now, and `check-strings` fails on a catalog key the core no longer
+emits, which is how the five were found and pruned.

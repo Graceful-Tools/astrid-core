@@ -58,8 +58,6 @@
   "reminder.hour_before": "An hour before",
   "reminder.none": "No reminder",
   "reminder.week_before": "A week before",
-  "repeat.custom": "Custom",
-  "repeat.daily": "Daily",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "until {date}",
   "repeat.every_n_days": {
@@ -79,14 +77,11 @@
     "other": "Every {count} years"
   },
   "repeat.from_due_date": "from due date",
-  "repeat.monthly": "Monthly",
   "repeat.on_day_of_month": "on the {ordinal}",
   "repeat.on_last_weekday": "on the last {weekday}",
   "repeat.on_month_and_day": "on {month} {ordinal}",
   "repeat.on_nth_weekday": "on the {ordinal} {weekday}",
   "repeat.on_weekdays": "on {weekdays}",
-  "repeat.weekly": "Weekly",
-  "repeat.yearly": "Yearly",
   "repeating.custom": "Custom…",
   "repeating.daily": "Daily",
   "repeating.monthly": "Monthly",

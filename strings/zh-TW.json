@@ -55,8 +55,6 @@
   "reminder.hour_before": "1 小時前",
   "reminder.none": "無提醒",
   "reminder.week_before": "1 週前",
-  "repeat.custom": "自訂",
-  "repeat.daily": "每天",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "直到 {date}",
   "repeat.every_n_days": {
@@ -72,14 +70,11 @@
     "other": "每 {count} 年"
   },
   "repeat.from_due_date": "從到期日起",
-  "repeat.monthly": "每月",
   "repeat.on_day_of_month": "在 {ordinal} 日",
   "repeat.on_last_weekday": "在最後一個{weekday}",
   "repeat.on_month_and_day": "在 {month}{ordinal} 日",
   "repeat.on_nth_weekday": "在第 {ordinal} 個{weekday}",
   "repeat.on_weekdays": "在{weekdays}",
-  "repeat.weekly": "每週",
-  "repeat.yearly": "每年",
   "repeating.custom": "自訂",
   "repeating.daily": "每天",
   "repeating.monthly": "每月",

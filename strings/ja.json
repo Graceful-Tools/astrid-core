@@ -55,8 +55,6 @@
   "reminder.hour_before": "1時間前",
   "reminder.none": "リマインダーなし",
   "reminder.week_before": "1週間前",
-  "repeat.custom": "カスタム",
-  "repeat.daily": "毎日",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "{date}まで",
   "repeat.every_n_days": {
@@ -72,14 +70,11 @@
     "other": "{count}年ごと"
   },
   "repeat.from_due_date": "期限日から",
-  "repeat.monthly": "毎月",
   "repeat.on_day_of_month": "{ordinal}日に",
   "repeat.on_last_weekday": "最後の{weekday}に",
   "repeat.on_month_and_day": "{month}{ordinal}日に",
   "repeat.on_nth_weekday": "第{ordinal}{weekday}に",
   "repeat.on_weekdays": "{weekdays}に",
-  "repeat.weekly": "毎週",
-  "repeat.yearly": "毎年",
   "repeating.custom": "カスタム",
   "repeating.daily": "毎日",
   "repeating.monthly": "毎月",

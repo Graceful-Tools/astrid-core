@@ -56,8 +56,6 @@
     <string name="reminder_hour_before">1 heure avant</string>
     <string name="reminder_none">Pas de rappel</string>
     <string name="reminder_week_before">1 semaine avant</string>
-    <string name="repeat_custom">Personnalisé</string>
-    <string name="repeat_daily">Quotidien</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">jusqu\'au %1$s</string>
     <plurals name="repeat_every_n_days">
@@ -77,14 +75,11 @@
         <item quantity="other">Tous les %1$s ans</item>
     </plurals>
     <string name="repeat_from_due_date">à partir de la date d\'échéance</string>
-    <string name="repeat_monthly">Mensuel</string>
     <string name="repeat_on_day_of_month">le %1$s</string>
     <string name="repeat_on_last_weekday">le dernier %1$s</string>
     <string name="repeat_on_month_and_day">le %2$s %1$s</string>
     <string name="repeat_on_nth_weekday">le %1$s %2$s</string>
     <string name="repeat_on_weekdays">le %1$s</string>
-    <string name="repeat_weekly">Hebdomadaire</string>
-    <string name="repeat_yearly">Annuel</string>
     <string name="repeating_custom">Personnalisé</string>
     <string name="repeating_daily">Quotidien</string>
     <string name="repeating_monthly">Mensuel</string>
