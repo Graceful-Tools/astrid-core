@@ -24,9 +24,10 @@ bundled-sqlite = ["rusqlite/bundled"]
 # three repositories' bindings gates would each need a matrix — and refuses them with
 # SYNC_GOOGLE_UNAVAILABLE, the way `require-base-url` refuses a start (task `b92569a8`).
 sync-google = []
-# Compiles Astrid's server out: a start config must name `baseUrl`, and one that does not fails
-# with CONFIG_BASE_URL_REQUIRED (astrid-web AWTD-1627). For white-label builds whose shell always
-# passes its brand's server; the default once every shell does.
+# White-label builds: compiles out the last Astrid address, the origin a relative Markdown link
+# resolves against when its caller names none (astrid-rules, AWTD-1630). `baseUrl` itself is
+# required in every build since AWTD-1627 (CONFIG_BASE_URL_REQUIRED), so the feature no longer
+# touches it; it is kept so a shell that already turned it on goes on building.
 require-base-url = ["astrid-rules/require-base-url"]
 # The wire schema: `Command`, and the row and detail types a response carries. OFF by default — a
 # shipped client never asks for it. `cargo xtask gen-schema` turns it on to write
