@@ -13,14 +13,8 @@
 			<string>NSStringPluralRuleType</string>
 			<key>NSStringFormatValueTypeKey</key>
 			<string>1$@</string>
-			<key>few</key>
-			<string>Каждые %1$@ дня</string>
-			<key>many</key>
-			<string>Каждые %1$@ дней</string>
-			<key>one</key>
-			<string>Каждый %1$@ день</string>
 			<key>other</key>
-			<string>Каждые %1$@ дня</string>
+			<string>Каждый %1$@-й день</string>
 		</dict>
 	</dict>
 	<key>repeat.every_n_months</key>
@@ -33,14 +27,8 @@
 			<string>NSStringPluralRuleType</string>
 			<key>NSStringFormatValueTypeKey</key>
 			<string>1$@</string>
-			<key>few</key>
-			<string>Каждые %1$@ месяца</string>
-			<key>many</key>
-			<string>Каждые %1$@ месяцев</string>
-			<key>one</key>
-			<string>Каждый %1$@ месяц</string>
 			<key>other</key>
-			<string>Каждые %1$@ месяца</string>
+			<string>Каждый %1$@-й месяц</string>
 		</dict>
 	</dict>
 	<key>repeat.every_n_weeks</key>
@@ -53,14 +41,8 @@
 			<string>NSStringPluralRuleType</string>
 			<key>NSStringFormatValueTypeKey</key>
 			<string>1$@</string>
-			<key>few</key>
-			<string>Каждые %1$@ недели</string>
-			<key>many</key>
-			<string>Каждые %1$@ недель</string>
-			<key>one</key>
-			<string>Каждую %1$@ неделю</string>
 			<key>other</key>
-			<string>Каждые %1$@ недели</string>
+			<string>Каждую %1$@-ю неделю</string>
 		</dict>
 	</dict>
 	<key>repeat.every_n_years</key>
@@ -73,14 +55,8 @@
 			<string>NSStringPluralRuleType</string>
 			<key>NSStringFormatValueTypeKey</key>
 			<string>1$@</string>
-			<key>few</key>
-			<string>Каждые %1$@ года</string>
-			<key>many</key>
-			<string>Каждые %1$@ лет</string>
-			<key>one</key>
-			<string>Каждый %1$@ год</string>
 			<key>other</key>
-			<string>Каждые %1$@ года</string>
+			<string>Каждый %1$@-й год</string>
 		</dict>
 	</dict>
 </dict>

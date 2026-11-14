@@ -26,8 +26,8 @@ name = "astrid_uniffi"
 [features]
 default = ["bundled-sqlite"]
 bundled-sqlite = ["astrid-core/bundled-sqlite"]
-# A white-label build whose shell always passes its brand's `baseUrl`: Astrid's server is compiled
-# out and a start without one fails with CONFIG_BASE_URL_REQUIRED (astrid-web AWTD-1627).
+# A white-label build: compiles out the Markdown fallback origin (astrid-rules, AWTD-1630), the
+# last Astrid address in the binary. `baseUrl` is required in every build (AWTD-1627).
 require-base-url = ["astrid-core/require-base-url"]
 
 [dependencies]

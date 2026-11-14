@@ -23,10 +23,10 @@
     <string name="filter_due_today">Aujourd\'hui</string>
     <string name="filter_lists">Listes</string>
     <string name="filter_lists_in_a_list">Dans une liste</string>
-    <string name="filter_lists_not_in_a_list">Hors liste</string>
+    <string name="filter_lists_not_in_a_list">Dans aucune liste</string>
     <string name="filter_lists_public">Dans une liste publique</string>
     <string name="filter_priority">Priorité</string>
-    <string name="filter_repeat">Répétition</string>
+    <string name="filter_repeat">Répéter</string>
     <string name="filter_repeat_never">Ne se répète pas</string>
     <string name="format_ordinal_one">%1$ser</string>
     <string name="format_ordinal_other">%1$se</string>
@@ -38,9 +38,9 @@
     <string name="picker_evening">Soir</string>
     <string name="picker_in_3_days">Dans 3 jours</string>
     <string name="picker_morning">Matin</string>
-    <string name="picker_next_week">Semaine prochaine</string>
+    <string name="picker_next_week">La semaine prochaine</string>
     <string name="picker_night">Nuit</string>
-    <string name="picker_no_due_date">Pas de date limite</string>
+    <string name="picker_no_due_date">Sans échéance</string>
     <string name="picker_today">Aujourd\'hui</string>
     <string name="picker_tomorrow">Demain</string>
     <string name="priority_high">Haute</string>
@@ -51,7 +51,7 @@
     <string name="reminder_2_hours_before">2 heures avant</string>
     <string name="reminder_30_minutes_before">30 minutes avant</string>
     <string name="reminder_5_minutes_before">5 minutes avant</string>
-    <string name="reminder_at_due_time">À l\'heure d\'échéance</string>
+    <string name="reminder_at_due_time">À l\'heure limite</string>
     <string name="reminder_day_before">1 jour avant</string>
     <string name="reminder_hour_before">1 heure avant</string>
     <string name="reminder_none">Pas de rappel</string>
@@ -101,10 +101,10 @@
     <string name="smart_offset_none">Pas de date limite</string>
     <string name="smart_subtasks_indented">Dans les listes, en retrait</string>
     <string name="smart_subtasks_under_parent">Uniquement dans la tâche parente</string>
-    <string name="smart_time_09_00">09:00</string>
-    <string name="smart_time_12_00">12:00 (midi)</string>
+    <string name="smart_time_09_00">9 h 00</string>
+    <string name="smart_time_12_00">12 h 00 (midi)</string>
     <string name="smart_time_17_00">17:00</string>
-    <string name="smart_time_20_00">20:00</string>
+    <string name="smart_time_20_00">20 h 00</string>
     <string name="sort">Trier par</string>
     <string name="sort_auto">Automatique</string>
     <string name="sort_created">Date d\'ajout</string>

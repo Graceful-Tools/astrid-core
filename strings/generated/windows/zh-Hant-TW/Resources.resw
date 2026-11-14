@@ -17,7 +17,7 @@
     <value>任意</value>
   </data>
   <data name="filter_assigned_by" xml:space="preserve">
-    <value>指派人</value>
+    <value>指派者</value>
   </data>
   <data name="filter_assigned_by_me" xml:space="preserve">
     <value>我</value>
@@ -53,7 +53,7 @@
     <value>最近完成</value>
   </data>
   <data name="filter_due" xml:space="preserve">
-    <value>到期</value>
+    <value>截止</value>
   </data>
   <data name="filter_due_none" xml:space="preserve">
     <value>無截止日期</value>
@@ -77,7 +77,7 @@
     <value>在清單中</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>不在清單中</value>
+    <value>不在任何列表中</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>在公開清單中</value>
@@ -146,31 +146,31 @@
     <value>無</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
-    <value>提前 15 分鐘</value>
+    <value>15 分鐘前</value>
   </data>
   <data name="reminder_2_hours_before" xml:space="preserve">
-    <value>提前 2 小時</value>
+    <value>提前2小時</value>
   </data>
   <data name="reminder_30_minutes_before" xml:space="preserve">
-    <value>提前 30 分鐘</value>
+    <value>30 分鐘前</value>
   </data>
   <data name="reminder_5_minutes_before" xml:space="preserve">
-    <value>提前 5 分鐘</value>
+    <value>5 分鐘前</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>到期時</value>
+    <value>截止時</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
-    <value>提前 1 天</value>
+    <value>1 天前</value>
   </data>
   <data name="reminder_hour_before" xml:space="preserve">
-    <value>提前 1 小時</value>
+    <value>1 小時前</value>
   </data>
   <data name="reminder_none" xml:space="preserve">
     <value>無提醒</value>
   </data>
   <data name="reminder_week_before" xml:space="preserve">
-    <value>提前 1 週</value>
+    <value>1 週前</value>
   </data>
   <data name="repeat_custom" xml:space="preserve">
     <value>自訂</value>
@@ -233,7 +233,7 @@
     <value>每月</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
-    <value>從不</value>
+    <value>永不</value>
   </data>
   <data name="repeating_weekly" xml:space="preserve">
     <value>每週</value>
@@ -266,7 +266,7 @@
     <value>無截止日期</value>
   </data>
   <data name="smart_subtasks_indented" xml:space="preserve">
-    <value>在清單中縮排顯示</value>
+    <value>在列表中縮排顯示</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
     <value>僅在父任務內</value>

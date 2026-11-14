@@ -3,7 +3,7 @@
 <resources>
     <string name="defaults_all_day">Весь день</string>
     <string name="filter_any">Любой</string>
-    <string name="filter_assigned_by">Кем назначено</string>
+    <string name="filter_assigned_by">Назначено</string>
     <string name="filter_assigned_by_me">Я</string>
     <string name="filter_assigned_by_someone_else">Кто-то другой</string>
     <string name="filter_assignee">Кому назначено</string>
@@ -23,7 +23,7 @@
     <string name="filter_due_today">Сегодня</string>
     <string name="filter_lists">Списки</string>
     <string name="filter_lists_in_a_list">В списке</string>
-    <string name="filter_lists_not_in_a_list">Вне списков</string>
+    <string name="filter_lists_not_in_a_list">Не в списке</string>
     <string name="filter_lists_public">В общедоступном списке</string>
     <string name="filter_priority">Приоритет</string>
     <string name="filter_repeat">Повтор</string>
@@ -46,42 +46,30 @@
     <string name="priority_low">Низкий</string>
     <string name="priority_medium">Средний</string>
     <string name="priority_none">Нет</string>
-    <string name="reminder_15_minutes_before">За 15 минут</string>
+    <string name="reminder_15_minutes_before">За 15 мин.</string>
     <string name="reminder_2_hours_before">За 2 часа</string>
-    <string name="reminder_30_minutes_before">За 30 минут</string>
-    <string name="reminder_5_minutes_before">За 5 минут</string>
-    <string name="reminder_at_due_time">В момент срока</string>
-    <string name="reminder_day_before">За день</string>
-    <string name="reminder_hour_before">За час</string>
+    <string name="reminder_30_minutes_before">За 30 мин.</string>
+    <string name="reminder_5_minutes_before">За 5 мин.</string>
+    <string name="reminder_at_due_time">В срок</string>
+    <string name="reminder_day_before">За 1 день</string>
+    <string name="reminder_hour_before">За 1 час</string>
     <string name="reminder_none">Без напоминания</string>
-    <string name="reminder_week_before">За неделю</string>
+    <string name="reminder_week_before">За 1 неделю</string>
     <string name="repeat_custom">Выбрать</string>
     <string name="repeat_daily">Ежедневно</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">до %1$s</string>
     <plurals name="repeat_every_n_days">
-        <item quantity="few">Каждые %1$s дня</item>
-        <item quantity="many">Каждые %1$s дней</item>
-        <item quantity="one">Каждый %1$s день</item>
-        <item quantity="other">Каждые %1$s дня</item>
+        <item quantity="other">Каждый %1$s-й день</item>
     </plurals>
     <plurals name="repeat_every_n_months">
-        <item quantity="few">Каждые %1$s месяца</item>
-        <item quantity="many">Каждые %1$s месяцев</item>
-        <item quantity="one">Каждый %1$s месяц</item>
-        <item quantity="other">Каждые %1$s месяца</item>
+        <item quantity="other">Каждый %1$s-й месяц</item>
     </plurals>
     <plurals name="repeat_every_n_weeks">
-        <item quantity="few">Каждые %1$s недели</item>
-        <item quantity="many">Каждые %1$s недель</item>
-        <item quantity="one">Каждую %1$s неделю</item>
-        <item quantity="other">Каждые %1$s недели</item>
+        <item quantity="other">Каждую %1$s-ю неделю</item>
     </plurals>
     <plurals name="repeat_every_n_years">
-        <item quantity="few">Каждые %1$s года</item>
-        <item quantity="many">Каждые %1$s лет</item>
-        <item quantity="one">Каждый %1$s год</item>
-        <item quantity="other">Каждые %1$s года</item>
+        <item quantity="other">Каждый %1$s-й год</item>
     </plurals>
     <string name="repeat_from_due_date">от срока выполнения</string>
     <string name="repeat_monthly">Ежемесячно</string>

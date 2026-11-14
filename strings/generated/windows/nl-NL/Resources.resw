@@ -50,10 +50,10 @@
     <value>Verberg ze</value>
   </data>
   <data name="filter_completion_recent" xml:space="preserve">
-    <value>Onlangs afgerond</value>
+    <value>Onlangs voltooid</value>
   </data>
   <data name="filter_due" xml:space="preserve">
-    <value>Vervaldatum</value>
+    <value>Vervalt</value>
   </data>
   <data name="filter_due_none" xml:space="preserve">
     <value>Geen vervaldatum</value>
@@ -86,7 +86,7 @@
     <value>Prioriteit</value>
   </data>
   <data name="filter_repeat" xml:space="preserve">
-    <value>Herhaling</value>
+    <value>Herhalen</value>
   </data>
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Herhaalt niet</value>
@@ -125,7 +125,7 @@
     <value>Nacht</value>
   </data>
   <data name="picker_no_due_date" xml:space="preserve">
-    <value>Geen vervaldatum</value>
+    <value>Geen deadline</value>
   </data>
   <data name="picker_today" xml:space="preserve">
     <value>Vandaag</value>
@@ -146,31 +146,31 @@
     <value>Geen</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
-    <value>15 minuten ervoor</value>
+    <value>15 minuten van tevoren</value>
   </data>
   <data name="reminder_2_hours_before" xml:space="preserve">
-    <value>2 uur ervoor</value>
+    <value>2 uur eerder</value>
   </data>
   <data name="reminder_30_minutes_before" xml:space="preserve">
-    <value>30 minuten ervoor</value>
+    <value>30 minuten van tevoren</value>
   </data>
   <data name="reminder_5_minutes_before" xml:space="preserve">
-    <value>5 minuten ervoor</value>
+    <value>5 minuten van tevoren</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>Op het moment zelf</value>
+    <value>Op vervaltijd</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
-    <value>1 dag ervoor</value>
+    <value>1 dag van tevoren</value>
   </data>
   <data name="reminder_hour_before" xml:space="preserve">
-    <value>1 uur ervoor</value>
+    <value>1 uur van tevoren</value>
   </data>
   <data name="reminder_none" xml:space="preserve">
     <value>Geen herinnering</value>
   </data>
   <data name="reminder_week_before" xml:space="preserve">
-    <value>1 week ervoor</value>
+    <value>1 week van tevoren</value>
   </data>
   <data name="repeat_custom" xml:space="preserve">
     <value>Aangepast</value>
@@ -281,10 +281,10 @@
     <value>In lijsten, ingesprongen</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
-    <value>Alleen in de bovenliggende taak</value>
+    <value>Alleen binnen de bovenliggende taak</value>
   </data>
   <data name="smart_time_09_00" xml:space="preserve">
-    <value>09:00</value>
+    <value>9:00</value>
   </data>
   <data name="smart_time_12_00" xml:space="preserve">
     <value>12:00 (middag)</value>

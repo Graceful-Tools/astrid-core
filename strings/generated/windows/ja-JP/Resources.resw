@@ -17,13 +17,13 @@
     <value>すべて</value>
   </data>
   <data name="filter_assigned_by" xml:space="preserve">
-    <value>割り当てた人</value>
+    <value>割り当て者</value>
   </data>
   <data name="filter_assigned_by_me" xml:space="preserve">
     <value>自分</value>
   </data>
   <data name="filter_assigned_by_someone_else" xml:space="preserve">
-    <value>他の人</value>
+    <value>ほかの人</value>
   </data>
   <data name="filter_assignee" xml:space="preserve">
     <value>担当者</value>
@@ -35,7 +35,7 @@
     <value>未割り当て</value>
   </data>
   <data name="filter_assignee_someone_else" xml:space="preserve">
-    <value>他の人</value>
+    <value>ほかの人</value>
   </data>
   <data name="filter_completion" xml:space="preserve">
     <value>完了したタスク</value>
@@ -50,7 +50,7 @@
     <value>非表示</value>
   </data>
   <data name="filter_completion_recent" xml:space="preserve">
-    <value>最近完了したもの</value>
+    <value>最近完了</value>
   </data>
   <data name="filter_due" xml:space="preserve">
     <value>期限</value>
@@ -77,7 +77,7 @@
     <value>リスト内</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>リスト外</value>
+    <value>リストに含まれない</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>公開リスト内</value>
@@ -158,7 +158,7 @@
     <value>5分前</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>期限の時刻に</value>
+    <value>期限時</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
     <value>1日前</value>
@@ -266,16 +266,16 @@
     <value>期限なし</value>
   </data>
   <data name="smart_subtasks_indented" xml:space="preserve">
-    <value>リスト内でインデント表示</value>
+    <value>リスト内にインデント表示</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
-    <value>親タスクの中だけ</value>
+    <value>親タスク内のみ</value>
   </data>
   <data name="smart_time_09_00" xml:space="preserve">
     <value>午前9:00</value>
   </data>
   <data name="smart_time_12_00" xml:space="preserve">
-    <value>午後12:00（正午）</value>
+    <value>午後0:00（正午）</value>
   </data>
   <data name="smart_time_17_00" xml:space="preserve">
     <value>午後5:00</value>

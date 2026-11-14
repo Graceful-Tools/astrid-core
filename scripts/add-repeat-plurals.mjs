@@ -54,38 +54,19 @@ const CADENCES = {
     months: { one: 'Elke maand', other: 'Elke {count} maanden' },
     years: { one: 'Elk jaar', other: 'Elke {count} jaar' },
   },
-  // Russian's `one` covers 21, 31, 101 … so its singular arm cannot drop the number the way
-  // English's does: "Каждый 21 день" is the whole point of the category.
+  // Russian has three integer categories, and this is the one language of the twelve that does
+  // not need them: the wording landed on main while this task was in flight — "Каждый {count}-й
+  // день", an ordinal adjective — is invariant. "Каждый 21-й день" is as correct as "каждый 3-й".
   //
-  // Its integer rule returns only `one`, `few` and `many` — `other` is Russian's FRACTIONAL form,
-  // which no repeat interval reaches. It is written anyway because `other` is the fallback every
-  // renderer uses when it cannot find a category, so a missing one is a blank on screen rather
-  // than an unreachable row. It takes the same genitive singular as `few` ("1,5 дня").
+  // So it gets one form. A plural key still has to BE plural in every language (the catalog's own
+  // rule: whether a key has categories is the key's business, not a language's), and `other` is the
+  // category every renderer falls back to, so one `other` row is the honest shape rather than three
+  // rows spelling the same words.
   ru: {
-    days: {
-      one: 'Каждый {count} день',
-      few: 'Каждые {count} дня',
-      many: 'Каждые {count} дней',
-      other: 'Каждые {count} дня',
-    },
-    weeks: {
-      one: 'Каждую {count} неделю',
-      few: 'Каждые {count} недели',
-      many: 'Каждые {count} недель',
-      other: 'Каждые {count} недели',
-    },
-    months: {
-      one: 'Каждый {count} месяц',
-      few: 'Каждые {count} месяца',
-      many: 'Каждые {count} месяцев',
-      other: 'Каждые {count} месяца',
-    },
-    years: {
-      one: 'Каждый {count} год',
-      few: 'Каждые {count} года',
-      many: 'Каждые {count} лет',
-      other: 'Каждые {count} года',
-    },
+    days: { other: 'Каждый {count}-й день' },
+    weeks: { other: 'Каждую {count}-ю неделю' },
+    months: { other: 'Каждый {count}-й месяц' },
+    years: { other: 'Каждый {count}-й год' },
   },
   // The four with no plural categories at all. One form, carrying the number — which is correct,
   // and is what a `count == 1` shell suppresses.

@@ -3,18 +3,18 @@
 <resources>
     <string name="defaults_all_day">終日</string>
     <string name="filter_any">すべて</string>
-    <string name="filter_assigned_by">割り当てた人</string>
+    <string name="filter_assigned_by">割り当て者</string>
     <string name="filter_assigned_by_me">自分</string>
-    <string name="filter_assigned_by_someone_else">他の人</string>
+    <string name="filter_assigned_by_someone_else">ほかの人</string>
     <string name="filter_assignee">担当者</string>
     <string name="filter_assignee_me">自分</string>
     <string name="filter_assignee_nobody">未割り当て</string>
-    <string name="filter_assignee_someone_else">他の人</string>
+    <string name="filter_assignee_someone_else">ほかの人</string>
     <string name="filter_completion">完了したタスク</string>
     <string name="filter_completion_all">すべて表示</string>
     <string name="filter_completion_completed">完了したものだけ</string>
     <string name="filter_completion_incomplete">非表示</string>
-    <string name="filter_completion_recent">最近完了したもの</string>
+    <string name="filter_completion_recent">最近完了</string>
     <string name="filter_due">期限</string>
     <string name="filter_due_none">期限なし</string>
     <string name="filter_due_overdue">期限超過</string>
@@ -23,7 +23,7 @@
     <string name="filter_due_today">今日</string>
     <string name="filter_lists">リスト</string>
     <string name="filter_lists_in_a_list">リスト内</string>
-    <string name="filter_lists_not_in_a_list">リスト外</string>
+    <string name="filter_lists_not_in_a_list">リストに含まれない</string>
     <string name="filter_lists_public">公開リスト内</string>
     <string name="filter_priority">優先度</string>
     <string name="filter_repeat">繰り返し</string>
@@ -50,7 +50,7 @@
     <string name="reminder_2_hours_before">2時間前</string>
     <string name="reminder_30_minutes_before">30分前</string>
     <string name="reminder_5_minutes_before">5分前</string>
-    <string name="reminder_at_due_time">期限の時刻に</string>
+    <string name="reminder_at_due_time">期限時</string>
     <string name="reminder_day_before">1日前</string>
     <string name="reminder_hour_before">1時間前</string>
     <string name="reminder_none">リマインダーなし</string>
@@ -94,10 +94,10 @@
     <string name="smart_offset_1_week">1週間</string>
     <string name="smart_offset_3_days">3日</string>
     <string name="smart_offset_none">期限なし</string>
-    <string name="smart_subtasks_indented">リスト内でインデント表示</string>
-    <string name="smart_subtasks_under_parent">親タスクの中だけ</string>
+    <string name="smart_subtasks_indented">リスト内にインデント表示</string>
+    <string name="smart_subtasks_under_parent">親タスク内のみ</string>
     <string name="smart_time_09_00">午前9:00</string>
-    <string name="smart_time_12_00">午後12:00（正午）</string>
+    <string name="smart_time_12_00">午後0:00（正午）</string>
     <string name="smart_time_17_00">午後5:00</string>
     <string name="smart_time_20_00">午後8:00</string>
     <string name="sort">並べ替え</string>
