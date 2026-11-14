@@ -25,6 +25,7 @@ pub mod platform;
 pub mod realtime;
 pub mod services;
 pub mod store;
+pub mod supply_chain;
 pub mod sync;
 
 // The pure rules live in `astrid-rules`, which builds for WebAssembly too. They are re-exported

@@ -8,6 +8,7 @@ use std::process::ExitCode;
 mod assets;
 mod brand;
 mod core_contracts;
+mod deny;
 mod design;
 mod icons;
 mod schema;
@@ -29,6 +30,14 @@ const COMMANDS: &[(&str, &str)] = &[
     (
         "check-pins",
         "verify CONSUMERS.md's revisions are real, merged commits [consumer checkout paths]",
+    ),
+    (
+        "gen-deny",
+        "write each consumer's deny.toml into supply-chain/ from this repo's own",
+    ),
+    (
+        "check-deny",
+        "verify supply-chain/deny.<repo>.toml is what deny.toml renders",
     ),
     (
         "gen-brand",
@@ -85,6 +94,8 @@ fn main() -> ExitCode {
             let profile = args.first().filter(|a| *a != "--out").cloned();
             brand::generate(&repo_root(), profile, out)
         }
+        "gen-deny" => deny::generate(&repo_root()),
+        "check-deny" => deny::check(&repo_root()),
         "gen-design" => design::generate(&repo_root()),
         "strings-keys" => {
             for key in astrid_rules::copy::keys() {

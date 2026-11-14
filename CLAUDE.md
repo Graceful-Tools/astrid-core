@@ -48,6 +48,7 @@ cargo xtask check-contracts                              # against ../astrid-web
 cargo xtask check-design                                 # design/generated is current (design/README.md)
 cargo xtask check-strings                                # the string catalog covers this core (strings/README.md)
 cargo xtask check-schema                                 # generated/schema is what the wire types produce
+cargo xtask check-deny                                   # supply-chain/deny.<repo>.toml is what deny.toml renders
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 ```
 

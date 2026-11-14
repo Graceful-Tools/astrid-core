@@ -86,6 +86,7 @@ cargo xtask check-contracts     # our fixtures still say what ../astrid-web's do
 cargo xtask check-core-contracts  # the core-first fixtures (waiting.json) are what the rules answer
 cargo xtask check-design        # design/generated is what design/tokens.json and design/assets produce
 cargo xtask check-schema        # generated/schema is what the wire types produce (gen-schema writes it)
+cargo xtask check-deny          # supply-chain/deny.<repo>.toml is what deny.toml renders (gen-deny writes it)
 cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules stay I/O-free
 cargo deny check                # advisories, licences, wildcards, where the crates came from
 # the fixtures are GENERATED in astrid-web: npm run export:contract-fixtures there, then copy
@@ -97,9 +98,16 @@ Linux; CI runs all three.
 `cargo deny` is the dependency gate — the Rust half of astrid-web's `npm audit`. The rules are in
 [`deny.toml`](./deny.toml); CI runs it on every push and PR and again every Monday, because an
 advisory is published between commits. Install it with `cargo install cargo-deny --locked`;
-`.github/dependabot.yml` proposes the bumps. astrid-windows and astrid-ios carry their own copies of
-`deny.toml` over their own lockfiles — the three resolve the same versions today, so an advisory on
-the sign-in path is one advisory in three places.
+`.github/dependabot.yml` proposes the bumps.
+
+astrid-windows, astrid-ios and astrid-android each gate their own lockfile with their own
+`deny.toml` — the four resolve much the same versions, so an advisory on the sign-in path is one
+advisory in four places. **Those three files are GENERATED from this repository's** by
+`cargo xtask gen-deny`, into `supply-chain/deny.<repo>.toml`, with `[sources] allow-git` the only
+variance (task `32d7c04d`). That is not a shared config read across repositories: a consumer's copy
+changes when it bumps its pin, like every other shared decision, so a licence allowed here does not
+silently change anyone else's gate. `cargo xtask check-deny` and an xtask test assert the copies are
+current; each consumer asserts its own against `astrid_core::supply_chain` at the revision it pins.
 
 ## Consuming it
 

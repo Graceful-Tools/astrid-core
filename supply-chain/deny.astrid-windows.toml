@@ -1,0 +1,114 @@
+# GENERATED for astrid-windows by `cargo xtask gen-deny` in astrid-core. DO NOT EDIT HERE.
+#
+# The source is astrid-core's own `deny.toml`. A change to what the Rust workspaces accept
+# is made there and reaches this repository when its pin on the core is bumped, like every
+# other shared decision — editing this copy instead makes the gate disagree with the core
+# it pins, which is what this repository's own test fails on.
+#
+# What a Rust workspace of Astrid's accepts from crates.io, and what fails its build.
+#
+# **astrid-core's own `deny.toml` is the SOURCE of all four.** `cargo xtask gen-deny` writes each
+# consumer's copy from it into `supply-chain/deny.<repo>.toml`, and a consumer's own gate asserts
+# its committed `deny.toml` against `astrid_core::supply_chain` at the revision it pins. Everything
+# above the `<<per-repo>>` marker near the end is identical in all four copies by construction;
+# `[sources] allow-git` below it is the only variance.
+#
+# That is deliberately NOT one shared config read across repositories, and the distinction is the
+# whole point. A shared config would make a licence decision in one repo silently change the gate
+# in the others, and the repos are pinned to each other by revision precisely so that nothing
+# crosses between them implicitly. A generated copy changes when the pin is bumped, like every
+# other shared decision. Task `32d7c04d`; before it, four copies drifted and a licence decision
+# reached the others only when a person remembered.
+#
+# The Rust half of astrid-web's `npm audit --audit-level=high` gate. Until this file existed the
+# Rust workspaces — this one, astrid-windows, astrid-ios' `core/` and astrid-android's `core/` —
+# had no advisory gate at all, so an advisory against the HTTP stack, TLS, SQLite or the PKCE
+# crates on the sign-in path would have hit every client at once with nothing to say so. Each repo
+# resolves its own lockfile and gates it with its own copy; the lockfiles resolve much the same
+# versions, which is good hygiene and also means one advisory is one failure in four places.
+#
+# Run it the way CI does: `cargo deny check` (all four checks), or one at a time —
+# `cargo deny check advisories`, `cargo deny check licenses bans sources`.
+#
+# **It is a CI gate, not part of any repo's predeploy.** `advisories` needs the RustSec database,
+# which means the network, and cargo-deny is not installed on the dev machines; `cargo install
+# cargo-deny --locked` does not fix that on the Windows machine either, where it dies in `ring`'s
+# build script for want of clang. So astrid-windows asserts the half that needs NO network — the
+# licences, the wildcard ban and the sources — locally in
+# `crates/astrid-ffi/tests/supply_chain_contract.rs`, which reads the lists BELOW rather than
+# restating them (task `e750d9c1`: the wildcard ban had been red in CI since this file landed,
+# because nothing local could ask the question). `advisories` is still CI's alone; it is the one
+# check that needs the world.
+
+# One graph for every target, because the clients do not share one. astrid-windows builds x64 and
+# ARM64 Windows, astrid-ios builds Apple platforms, astrid-android builds the Android ABIs, and
+# astrid-rules builds wasm32: a platform-gated dependency with an advisory against it is still an
+# advisory. `all-features` for the same reason — a feature nobody enables today is enabled by the
+# next caller.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+# A vulnerability, an unmaintained crate or an unsound one fails the build; that is version 2's
+# behaviour and it is not configurable per-kind. To ACCEPT one deliberately, add its id here with
+# the date and the reason — an empty list is a claim that nothing has been waved through.
+ignore = []
+
+# A yank is not a vulnerability. Upstream yanks for a bad release as often as for a security
+# problem, and a lockfile that lags a yank by a day should not stop a release.
+yanked = "warn"
+
+# Computed from the real graph (`cargo metadata --all-features` over THIS workspace, 218 packages
+# on 2026-10-18), not copied from a list of licences that are usually fine. Every term here is
+# REQUIRED by something in the tree: BSD-3-Clause and Unicode-3.0 and ISC each arrive through an
+# `AND` that no `OR` branch can satisfy, and Zlib arrives alone. A new licence in the graph is
+# meant to fail here and be read.
+#
+# A consumer resolves a narrower graph than this one, so a term here may be satisfied by nothing in
+# its tree. That is a WARNING in cargo-deny, never a failure, and the alternative — four allow
+# lists diverging by whichever repo noticed a crate first — is what task `32d7c04d` ended.
+#
+# CDLA-Permissive-2.0 is `webpki-roots`, which carries the Mozilla root certificate set rather than
+# code — it arrived with rustls on Android (AATD-4) and is the one entry here that is a DATA
+# licence. It is also why this list is computed and not assumed: nothing about "a TLS stack"
+# suggests a Community Data License Agreement.
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-3-Clause",
+    # `arrayref`, reached only through `tiny-skia` from the `resvg` that `cargo xtask gen-brand`
+    # rasterises brand icons with (task b76ce8bf). BSD-2-Clause is BSD-3-Clause without the
+    # no-endorsement clause — strictly the more permissive of the two, and the three-clause form
+    # is allowed above. It reaches no shipped binary either way: xtask is `publish = false`
+    # repo tooling and no client crate depends on it.
+    "BSD-2-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    # UniFFI (`crates/astrid-uniffi`). File-level copyleft: it binds only changes to UniFFI's own
+    # files, which nothing here modifies — the same allowance astrid-ios and astrid-android carried
+    # when the binding crate lived in each of them.
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+# Duplicate versions are a fact of a Rust graph this size and failing on them would make the gate
+# noise rather than signal. A wildcard requirement is different: it is a dependency whose version
+# nothing records, so the lockfile is the only thing that knows what shipped.
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# <<per-repo: allow-git>> — astrid-windows
+#
+# The one git dependency this repository has, and the reason it has one: it pins the shared
+# core by revision. Matched by URL and not by revision, so bumping the pin — which is how
+# every shared-behaviour change arrives — does not need this list touched.
+allow-git = ["https://github.com/Graceful-Tools/astrid-core.git"]
