@@ -26,6 +26,9 @@
   "filter.priority": "优先级",
   "filter.repeat": "重复",
   "filter.repeat.never": "不重复",
+  "format.ordinal": {
+    "other": "{count}"
+  },
   "lists.high_priority": "高",
   "lists.highest_priority": "最高",
   "lists.low_priority": "低",
@@ -56,10 +59,18 @@
   "repeat.daily": "每天",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "直到 {date}",
-  "repeat.every_n_days": "每 {count} 天",
-  "repeat.every_n_months": "每 {count} 个月",
-  "repeat.every_n_weeks": "每 {count} 周",
-  "repeat.every_n_years": "每 {count} 年",
+  "repeat.every_n_days": {
+    "other": "每 {count} 天"
+  },
+  "repeat.every_n_months": {
+    "other": "每 {count} 个月"
+  },
+  "repeat.every_n_weeks": {
+    "other": "每 {count} 周"
+  },
+  "repeat.every_n_years": {
+    "other": "每 {count} 年"
+  },
   "repeat.from_due_date": "从到期日起",
   "repeat.monthly": "每月",
   "repeat.on_day_of_month": "在 {ordinal} 日",

@@ -28,6 +28,7 @@
     <string name="filter_priority">우선순위</string>
     <string name="filter_repeat">반복</string>
     <string name="filter_repeat_never">반복 안 함</string>
+    <string name="format_ordinal_other">%1$s</string>
     <string name="lists_high_priority">높음</string>
     <string name="lists_highest_priority">최고</string>
     <string name="lists_low_priority">낮음</string>
@@ -58,10 +59,18 @@
     <string name="repeat_daily">매일</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">%1$s까지</string>
-    <string name="repeat_every_n_days">%1$s일마다</string>
-    <string name="repeat_every_n_months">%1$s개월마다</string>
-    <string name="repeat_every_n_weeks">%1$s주마다</string>
-    <string name="repeat_every_n_years">%1$s년마다</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="other">%1$s일마다</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="other">%1$s개월마다</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="other">%1$s주마다</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="other">%1$s년마다</item>
+    </plurals>
     <string name="repeat_from_due_date">기한일 기준</string>
     <string name="repeat_monthly">매월</string>
     <string name="repeat_on_day_of_month">%1$s일에</string>

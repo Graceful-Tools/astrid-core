@@ -26,6 +26,9 @@
   "filter.priority": "Приоритет",
   "filter.repeat": "Повтор",
   "filter.repeat.never": "Не повторяется",
+  "format.ordinal": {
+    "other": "{count}"
+  },
   "lists.high_priority": "Высокий",
   "lists.highest_priority": "Наивысший",
   "lists.low_priority": "Низкий",
@@ -56,10 +59,30 @@
   "repeat.daily": "Ежедневно",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "до {date}",
-  "repeat.every_n_days": "Каждые {count} дн.",
-  "repeat.every_n_months": "Каждые {count} мес.",
-  "repeat.every_n_weeks": "Каждые {count} нед.",
-  "repeat.every_n_years": "Каждые {count} г.",
+  "repeat.every_n_days": {
+    "one": "Каждый {count} день",
+    "few": "Каждые {count} дня",
+    "many": "Каждые {count} дней",
+    "other": "Каждые {count} дня"
+  },
+  "repeat.every_n_months": {
+    "one": "Каждый {count} месяц",
+    "few": "Каждые {count} месяца",
+    "many": "Каждые {count} месяцев",
+    "other": "Каждые {count} месяца"
+  },
+  "repeat.every_n_weeks": {
+    "one": "Каждую {count} неделю",
+    "few": "Каждые {count} недели",
+    "many": "Каждые {count} недель",
+    "other": "Каждые {count} недели"
+  },
+  "repeat.every_n_years": {
+    "one": "Каждый {count} год",
+    "few": "Каждые {count} года",
+    "many": "Каждые {count} лет",
+    "other": "Каждые {count} года"
+  },
   "repeat.from_due_date": "от срока выполнения",
   "repeat.monthly": "Ежемесячно",
   "repeat.on_day_of_month": "{ordinal} числа",

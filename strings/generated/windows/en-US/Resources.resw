@@ -91,6 +91,18 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Does not repeat</value>
   </data>
+  <data name="format_ordinal_few" xml:space="preserve">
+    <value>{0}rd</value>
+  </data>
+  <data name="format_ordinal_one" xml:space="preserve">
+    <value>{0}st</value>
+  </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}th</value>
+  </data>
+  <data name="format_ordinal_two" xml:space="preserve">
+    <value>{0}nd</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>High</value>
   </data>
@@ -181,16 +193,28 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>until {0}</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_one" xml:space="preserve">
+    <value>Every day</value>
+  </data>
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>Every {0} days</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_one" xml:space="preserve">
+    <value>Every month</value>
+  </data>
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>Every {0} months</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_one" xml:space="preserve">
+    <value>Every week</value>
+  </data>
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>Every {0} weeks</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_one" xml:space="preserve">
+    <value>Every year</value>
+  </data>
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>Every {0} years</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">

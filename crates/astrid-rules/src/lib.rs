@@ -30,6 +30,7 @@ pub mod model;
 pub mod palette;
 pub mod parse;
 pub mod permissions;
+pub mod plurals;
 pub mod reminders;
 pub mod repeating;
 pub mod rows;

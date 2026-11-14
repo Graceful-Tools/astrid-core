@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>不重複</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>高</value>
   </data>
@@ -181,16 +184,16 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>直到 {0}</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>每 {0} 天</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>每 {0} 個月</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>每 {0} 週</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>每 {0} 年</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">

@@ -26,6 +26,9 @@
   "filter.priority": "Prioridad",
   "filter.repeat": "Repetición",
   "filter.repeat.never": "No se repite",
+  "format.ordinal": {
+    "other": "{count}"
+  },
   "lists.high_priority": "Alta",
   "lists.highest_priority": "Máxima",
   "lists.low_priority": "Baja",
@@ -56,10 +59,22 @@
   "repeat.daily": "Diariamente",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "hasta {date}",
-  "repeat.every_n_days": "Cada {count} días",
-  "repeat.every_n_months": "Cada {count} meses",
-  "repeat.every_n_weeks": "Cada {count} semanas",
-  "repeat.every_n_years": "Cada {count} años",
+  "repeat.every_n_days": {
+    "one": "Cada día",
+    "other": "Cada {count} días"
+  },
+  "repeat.every_n_months": {
+    "one": "Cada mes",
+    "other": "Cada {count} meses"
+  },
+  "repeat.every_n_weeks": {
+    "one": "Cada semana",
+    "other": "Cada {count} semanas"
+  },
+  "repeat.every_n_years": {
+    "one": "Cada año",
+    "other": "Cada {count} años"
+  },
   "repeat.from_due_date": "desde la fecha de vencimiento",
   "repeat.monthly": "Mensualmente",
   "repeat.on_day_of_month": "el día {ordinal}",

@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>반복 안 함</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>높음</value>
   </data>
@@ -181,16 +184,16 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>{0}까지</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>{0}일마다</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>{0}개월마다</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>{0}주마다</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>{0}년마다</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">

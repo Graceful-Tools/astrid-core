@@ -28,6 +28,7 @@
     <string name="filter_priority">Priorità</string>
     <string name="filter_repeat">Ripetizione</string>
     <string name="filter_repeat_never">Non si ripete</string>
+    <string name="format_ordinal_other">%1$sº</string>
     <string name="lists_high_priority">Alta</string>
     <string name="lists_highest_priority">Massima</string>
     <string name="lists_low_priority">Bassa</string>
@@ -58,10 +59,22 @@
     <string name="repeat_daily">Giornaliero</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">fino al %1$s</string>
-    <string name="repeat_every_n_days">Ogni %1$s giorni</string>
-    <string name="repeat_every_n_months">Ogni %1$s mesi</string>
-    <string name="repeat_every_n_weeks">Ogni %1$s settimane</string>
-    <string name="repeat_every_n_years">Ogni %1$s anni</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="one">Ogni giorno</item>
+        <item quantity="other">Ogni %1$s giorni</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="one">Ogni mese</item>
+        <item quantity="other">Ogni %1$s mesi</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="one">Ogni settimana</item>
+        <item quantity="other">Ogni %1$s settimane</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="one">Ogni anno</item>
+        <item quantity="other">Ogni %1$s anni</item>
+    </plurals>
     <string name="repeat_from_due_date">dalla data di scadenza</string>
     <string name="repeat_monthly">Mensile</string>
     <string name="repeat_on_day_of_month">il %1$s</string>

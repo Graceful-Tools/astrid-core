@@ -105,12 +105,32 @@ A locale's value may be an object of CLDR categories instead of a string, with t
 `.stringsdict` for Apple, and one flat resource per category for Windows, which has no plural
 resource at all.
 
-**No key declares one yet.** The four `repeat.every_n_*` keys are the candidates — today both iOS
-and Windows special-case a count of one in the shell, with a separate `repeat.every_day` string.
-Their per-language categories cannot be harvested from catalogs that do not have them, and a
-Russian `few` form is a translator's to write. The support is here so that filling them in is a
-change to the data rather than to the format; `crates/xtask/src/strings.rs` exercises all four code
-paths against a fixture.
+**Five keys declare one** (task `3564db06`): the four `repeat.every_n_*` cadences and
+`format.ordinal`. They were the candidates this support was built for — both iOS and Windows
+special-cased a count of one in the shell, with a separate `repeat.every_day` string, which is
+English's and German's rule applied to Russian's three forms and to Japanese's none.
+
+Which category a number selects is **not** in this directory. It is a rule, so it is
+`astrid_rules::plurals::category(locale, form, count)`, transcribed from CLDR for these twelve
+languages and asserted in `crates/astrid-rules/src/plurals.rs`. The catalog holds the words; the
+rule picks the row.
+
+### Ordinals are a second rule set
+
+`"ordinal": true` beside `"plural": true` says a key's categories are CLDR's **ordinal** ones.
+English is the only one of the twelve with more than two (`1st`, `2nd`, `3rd`, `4th` — and `11th`,
+which is why this is a rule and not a lookup of the last digit).
+
+Only web can select one natively, with ICU's `selectordinal`; `plural` there would answer `other`
+for English's 3 and write "3th". The other three formats have no ordinal resource at all —
+`<plurals>`' `quantity` is cardinal, `NSStringPluralRuleType` is Apple's only rule type, and a
+`.resw` has nothing — so an ordinal key reaches them as **one flat resource per category**
+(`format_ordinal_few`, `"format.ordinal.few"`) and the client picks with `plurals::category`.
+
+`repeat.on_day_of_month`, `repeat.on_nth_weekday` and `repeat.on_month_and_day` interpolate the
+result as their `{ordinal}` argument, which is why those three keys did not change: what moved is
+where "3rd" comes from. The summary part itself now says which kind of number it carries — see
+`SummaryPart::form`.
 
 ## Translations
 

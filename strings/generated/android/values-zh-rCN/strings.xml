@@ -28,6 +28,7 @@
     <string name="filter_priority">优先级</string>
     <string name="filter_repeat">重复</string>
     <string name="filter_repeat_never">不重复</string>
+    <string name="format_ordinal_other">%1$s</string>
     <string name="lists_high_priority">高</string>
     <string name="lists_highest_priority">最高</string>
     <string name="lists_low_priority">低</string>
@@ -58,10 +59,18 @@
     <string name="repeat_daily">每天</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">直到 %1$s</string>
-    <string name="repeat_every_n_days">每 %1$s 天</string>
-    <string name="repeat_every_n_months">每 %1$s 个月</string>
-    <string name="repeat_every_n_weeks">每 %1$s 周</string>
-    <string name="repeat_every_n_years">每 %1$s 年</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="other">每 %1$s 天</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="other">每 %1$s 个月</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="other">每 %1$s 周</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="other">每 %1$s 年</item>
+    </plurals>
     <string name="repeat_from_due_date">从到期日起</string>
     <string name="repeat_monthly">每月</string>
     <string name="repeat_on_day_of_month">在 %1$s 日</string>

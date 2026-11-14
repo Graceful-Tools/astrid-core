@@ -28,6 +28,7 @@
     <string name="filter_priority">Prioridad</string>
     <string name="filter_repeat">Repetición</string>
     <string name="filter_repeat_never">No se repite</string>
+    <string name="format_ordinal_other">%1$s</string>
     <string name="lists_high_priority">Alta</string>
     <string name="lists_highest_priority">Máxima</string>
     <string name="lists_low_priority">Baja</string>
@@ -58,10 +59,22 @@
     <string name="repeat_daily">Diariamente</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">hasta %1$s</string>
-    <string name="repeat_every_n_days">Cada %1$s días</string>
-    <string name="repeat_every_n_months">Cada %1$s meses</string>
-    <string name="repeat_every_n_weeks">Cada %1$s semanas</string>
-    <string name="repeat_every_n_years">Cada %1$s años</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="one">Cada día</item>
+        <item quantity="other">Cada %1$s días</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="one">Cada mes</item>
+        <item quantity="other">Cada %1$s meses</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="one">Cada semana</item>
+        <item quantity="other">Cada %1$s semanas</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="one">Cada año</item>
+        <item quantity="other">Cada %1$s años</item>
+    </plurals>
     <string name="repeat_from_due_date">desde la fecha de vencimiento</string>
     <string name="repeat_monthly">Mensualmente</string>
     <string name="repeat_on_day_of_month">el día %1$s</string>

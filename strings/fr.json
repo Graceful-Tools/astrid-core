@@ -26,6 +26,10 @@
   "filter.priority": "Priorité",
   "filter.repeat": "Répétition",
   "filter.repeat.never": "Ne se répète pas",
+  "format.ordinal": {
+    "one": "{count}er",
+    "other": "{count}e"
+  },
   "lists.high_priority": "Haute",
   "lists.highest_priority": "Maximale",
   "lists.low_priority": "Basse",
@@ -56,10 +60,22 @@
   "repeat.daily": "Quotidien",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "jusqu'au {date}",
-  "repeat.every_n_days": "Tous les {count} jours",
-  "repeat.every_n_months": "Tous les {count} mois",
-  "repeat.every_n_weeks": "Toutes les {count} semaines",
-  "repeat.every_n_years": "Tous les {count} ans",
+  "repeat.every_n_days": {
+    "one": "Tous les jours",
+    "other": "Tous les {count} jours"
+  },
+  "repeat.every_n_months": {
+    "one": "Tous les mois",
+    "other": "Tous les {count} mois"
+  },
+  "repeat.every_n_weeks": {
+    "one": "Toutes les semaines",
+    "other": "Toutes les {count} semaines"
+  },
+  "repeat.every_n_years": {
+    "one": "Tous les ans",
+    "other": "Tous les {count} ans"
+  },
   "repeat.from_due_date": "à partir de la date d'échéance",
   "repeat.monthly": "Mensuel",
   "repeat.on_day_of_month": "le {ordinal}",

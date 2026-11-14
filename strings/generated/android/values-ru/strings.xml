@@ -28,6 +28,7 @@
     <string name="filter_priority">Приоритет</string>
     <string name="filter_repeat">Повтор</string>
     <string name="filter_repeat_never">Не повторяется</string>
+    <string name="format_ordinal_other">%1$s</string>
     <string name="lists_high_priority">Высокий</string>
     <string name="lists_highest_priority">Наивысший</string>
     <string name="lists_low_priority">Низкий</string>
@@ -58,10 +59,30 @@
     <string name="repeat_daily">Ежедневно</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">до %1$s</string>
-    <string name="repeat_every_n_days">Каждые %1$s дн.</string>
-    <string name="repeat_every_n_months">Каждые %1$s мес.</string>
-    <string name="repeat_every_n_weeks">Каждые %1$s нед.</string>
-    <string name="repeat_every_n_years">Каждые %1$s г.</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="few">Каждые %1$s дня</item>
+        <item quantity="many">Каждые %1$s дней</item>
+        <item quantity="one">Каждый %1$s день</item>
+        <item quantity="other">Каждые %1$s дня</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="few">Каждые %1$s месяца</item>
+        <item quantity="many">Каждые %1$s месяцев</item>
+        <item quantity="one">Каждый %1$s месяц</item>
+        <item quantity="other">Каждые %1$s месяца</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="few">Каждые %1$s недели</item>
+        <item quantity="many">Каждые %1$s недель</item>
+        <item quantity="one">Каждую %1$s неделю</item>
+        <item quantity="other">Каждые %1$s недели</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="few">Каждые %1$s года</item>
+        <item quantity="many">Каждые %1$s лет</item>
+        <item quantity="one">Каждый %1$s год</item>
+        <item quantity="other">Каждые %1$s года</item>
+    </plurals>
     <string name="repeat_from_due_date">от срока выполнения</string>
     <string name="repeat_monthly">Ежемесячно</string>
     <string name="repeat_on_day_of_month">%1$s числа</string>

@@ -28,6 +28,7 @@
     <string name="filter_priority">Prioriteit</string>
     <string name="filter_repeat">Herhaling</string>
     <string name="filter_repeat_never">Herhaalt niet</string>
+    <string name="format_ordinal_other">%1$se</string>
     <string name="lists_high_priority">Hoog</string>
     <string name="lists_highest_priority">Hoogste</string>
     <string name="lists_low_priority">Laag</string>
@@ -58,10 +59,22 @@
     <string name="repeat_daily">Dagelijks</string>
     <string name="repeat_ends_after">(%1$sx)</string>
     <string name="repeat_ends_on">tot %1$s</string>
-    <string name="repeat_every_n_days">Elke %1$s dagen</string>
-    <string name="repeat_every_n_months">Elke %1$s maanden</string>
-    <string name="repeat_every_n_weeks">Elke %1$s weken</string>
-    <string name="repeat_every_n_years">Elke %1$s jaar</string>
+    <plurals name="repeat_every_n_days">
+        <item quantity="one">Elke dag</item>
+        <item quantity="other">Elke %1$s dagen</item>
+    </plurals>
+    <plurals name="repeat_every_n_months">
+        <item quantity="one">Elke maand</item>
+        <item quantity="other">Elke %1$s maanden</item>
+    </plurals>
+    <plurals name="repeat_every_n_weeks">
+        <item quantity="one">Elke week</item>
+        <item quantity="other">Elke %1$s weken</item>
+    </plurals>
+    <plurals name="repeat_every_n_years">
+        <item quantity="one">Elk jaar</item>
+        <item quantity="other">Elke %1$s jaar</item>
+    </plurals>
     <string name="repeat_from_due_date">vanaf de vervaldatum</string>
     <string name="repeat_monthly">Maandelijks</string>
     <string name="repeat_on_day_of_month">op de %1$s</string>

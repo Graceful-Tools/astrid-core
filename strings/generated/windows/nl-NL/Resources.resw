@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Herhaalt niet</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}e</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>Hoog</value>
   </data>
@@ -181,16 +184,28 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>tot {0}</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_one" xml:space="preserve">
+    <value>Elke dag</value>
+  </data>
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>Elke {0} dagen</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_one" xml:space="preserve">
+    <value>Elke maand</value>
+  </data>
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>Elke {0} maanden</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_one" xml:space="preserve">
+    <value>Elke week</value>
+  </data>
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>Elke {0} weken</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_one" xml:space="preserve">
+    <value>Elk jaar</value>
+  </data>
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>Elke {0} jaar</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">

@@ -770,6 +770,21 @@
       ],
       "type": "string"
     },
+    "CountForm": {
+      "description": "What a number in a message is counting — and so which of CLDR's two sets of rules applies.\n\nThey are genuinely different rules, not two uses of one: English's *cardinal* 3 is `other`\n(\"3 weeks\") while its *ordinal* 3 is `few` (\"3rd\"). Nothing can pick the right form without\nbeing told which question is being asked, and the arm that chose the key already knows.",
+      "oneOf": [
+        {
+          "const": "cardinal",
+          "description": "How many: \"every 2 weeks\", \"10 times\".",
+          "type": "string"
+        },
+        {
+          "const": "ordinal",
+          "description": "Which one in order: \"the 3rd Tuesday\", \"on the 21st\".",
+          "type": "string"
+        }
+      ]
+    },
     "CredentialRow": {
       "description": "One service the account can hold a key for.",
       "properties": {
@@ -2268,6 +2283,17 @@
             "string",
             "null"
           ]
+        },
+        "form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CountForm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What [`Self::count`] is counting, and so which of CLDR's two sets of rules picks its form\n(task 3564db06). Present exactly when there is a count.\n\nThe arm that chose the key already knows whether its number is a quantity or a position,\nand this is that knowledge crossing the boundary instead of being re-derived. Without it a\nshell has to keep a list of which keys are ordinals and an `st`/`nd`/`rd`/`th` helper to\nserve them — which is English's rule, applied in every language."
         },
         "key": {
           "description": "A resource key. Never a word.",

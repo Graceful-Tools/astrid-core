@@ -66,6 +66,7 @@
     "filter.lists.public",
     "filter.repeat",
     "filter.repeat.never",
+    "format.ordinal",
     "lists.highest_priority",
     "picker.afternoon",
     "picker.evening",

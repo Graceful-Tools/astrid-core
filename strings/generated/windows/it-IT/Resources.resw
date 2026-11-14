@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Non si ripete</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}º</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>Alta</value>
   </data>
@@ -181,16 +184,28 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>fino al {0}</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_one" xml:space="preserve">
+    <value>Ogni giorno</value>
+  </data>
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>Ogni {0} giorni</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_one" xml:space="preserve">
+    <value>Ogni mese</value>
+  </data>
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>Ogni {0} mesi</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_one" xml:space="preserve">
+    <value>Ogni settimana</value>
+  </data>
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>Ogni {0} settimane</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_one" xml:space="preserve">
+    <value>Ogni anno</value>
+  </data>
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>Ogni {0} anni</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">

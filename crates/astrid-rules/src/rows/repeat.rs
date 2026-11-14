@@ -18,6 +18,7 @@
 use serde::Serialize;
 
 use crate::model::{CustomRepeatingPattern, RepeatFromMode, Repeating};
+use crate::plurals::CountForm;
 
 /// One fragment of the sentence: a key, plus whatever it interpolates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -29,6 +30,15 @@ pub struct SummaryPart {
     /// The number the key's plural form and its `{0}` refer to, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+    /// What [`Self::count`] is counting, and so which of CLDR's two sets of rules picks its form
+    /// (task 3564db06). Present exactly when there is a count.
+    ///
+    /// The arm that chose the key already knows whether its number is a quantity or a position,
+    /// and this is that knowledge crossing the boundary instead of being re-derived. Without it a
+    /// shell has to keep a list of which keys are ordinals and an `st`/`nd`/`rd`/`th` helper to
+    /// serve them — which is English's rule, applied in every language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form: Option<CountForm>,
     /// Names the key interpolates — weekdays as the wire spells them, so the shell translates
     /// them from its own table rather than being handed English.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -43,15 +53,27 @@ impl SummaryPart {
         SummaryPart {
             key,
             count: None,
+            form: None,
             values: Vec::new(),
             date: None,
         }
     }
 
+    /// A part whose number is a quantity: "every 2 weeks", "10 times".
     fn counted(key: &'static str, count: i64) -> Self {
         SummaryPart {
             count: Some(count),
+            form: Some(CountForm::Cardinal),
             ..Self::key(key)
+        }
+    }
+
+    /// A part whose number is a position: "the 3rd Tuesday", "on the 21st". The catalog spells it
+    /// through [`crate::plurals::ORDINAL_KEY`]; nothing here turns it into a word.
+    fn ranked(key: &'static str, count: i64) -> Self {
+        SummaryPart {
+            form: Some(CountForm::Ordinal),
+            ..Self::counted(key, count)
         }
     }
 }
@@ -187,7 +209,7 @@ fn custom_parts(pattern: &CustomRepeatingPattern) -> Vec<SummaryPart> {
         "months" => match pattern.month_repeat_type.as_deref() {
             Some("same_date") => {
                 if let Some(day) = pattern.month_day {
-                    parts.push(SummaryPart::counted("repeat.on_day_of_month", day));
+                    parts.push(SummaryPart::ranked("repeat.on_day_of_month", day));
                 }
             }
             Some("same_weekday") => {
@@ -200,9 +222,8 @@ fn custom_parts(pattern: &CustomRepeatingPattern) -> Vec<SummaryPart> {
                         }
                     } else {
                         SummaryPart {
-                            count: Some(weekday.week_of_month),
                             values: vec![weekday.weekday.clone()],
-                            ..SummaryPart::key("repeat.on_nth_weekday")
+                            ..SummaryPart::ranked("repeat.on_nth_weekday", weekday.week_of_month)
                         }
                     });
                 }
@@ -212,9 +233,8 @@ fn custom_parts(pattern: &CustomRepeatingPattern) -> Vec<SummaryPart> {
         "years" => {
             if let (Some(month), Some(day)) = (pattern.month, pattern.day) {
                 parts.push(SummaryPart {
-                    count: Some(day),
                     values: vec![month.to_string()],
-                    ..SummaryPart::key("repeat.on_month_and_day")
+                    ..SummaryPart::ranked("repeat.on_month_and_day", day)
                 });
             }
         }

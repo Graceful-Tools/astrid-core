@@ -28,6 +28,13 @@
     "filter.priority": {},
     "filter.repeat": {},
     "filter.repeat.never": {},
+    "format.ordinal": {
+      "args": [
+        "count"
+      ],
+      "plural": true,
+      "ordinal": true
+    },
     "lists.high_priority": {},
     "lists.highest_priority": {},
     "lists.low_priority": {},
@@ -69,22 +76,26 @@
     "repeat.every_n_days": {
       "args": [
         "count"
-      ]
+      ],
+      "plural": true
     },
     "repeat.every_n_months": {
       "args": [
         "count"
-      ]
+      ],
+      "plural": true
     },
     "repeat.every_n_weeks": {
       "args": [
         "count"
-      ]
+      ],
+      "plural": true
     },
     "repeat.every_n_years": {
       "args": [
         "count"
-      ]
+      ],
+      "plural": true
     },
     "repeat.from_due_date": {},
     "repeat.monthly": {},

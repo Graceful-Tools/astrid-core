@@ -26,6 +26,12 @@
   "filter.priority": "Priority",
   "filter.repeat": "Repeat",
   "filter.repeat.never": "Does not repeat",
+  "format.ordinal": {
+    "one": "{count}st",
+    "two": "{count}nd",
+    "few": "{count}rd",
+    "other": "{count}th"
+  },
   "lists.high_priority": "High",
   "lists.highest_priority": "Highest",
   "lists.low_priority": "Low",
@@ -56,10 +62,22 @@
   "repeat.daily": "Daily",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "until {date}",
-  "repeat.every_n_days": "Every {count} days",
-  "repeat.every_n_months": "Every {count} months",
-  "repeat.every_n_weeks": "Every {count} weeks",
-  "repeat.every_n_years": "Every {count} years",
+  "repeat.every_n_days": {
+    "one": "Every day",
+    "other": "Every {count} days"
+  },
+  "repeat.every_n_months": {
+    "one": "Every month",
+    "other": "Every {count} months"
+  },
+  "repeat.every_n_weeks": {
+    "one": "Every week",
+    "other": "Every {count} weeks"
+  },
+  "repeat.every_n_years": {
+    "one": "Every year",
+    "other": "Every {count} years"
+  },
   "repeat.from_due_date": "from due date",
   "repeat.monthly": "Monthly",
   "repeat.on_day_of_month": "on the {ordinal}",

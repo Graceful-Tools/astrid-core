@@ -40,11 +40,20 @@
 //! ICU inline for web, `<plurals>` for Android, a `.stringsdict` for Apple, and one flat resource
 //! per category for Windows, which has no plural resource at all.
 //!
-//! **No key in the catalog declares one yet**, and `strings/README.md` says why: the four
-//! `repeat.every_n_*` keys are the candidates, their per-language categories cannot be harvested
-//! from a catalog that does not have them, and inventing a Russian `few` form is not something
-//! this generator or its author should do. The support is here so that filling them in is a change
-//! to the data rather than to the format.
+//! Five keys declare one (task 3564db06): the four `repeat.every_n_*` cadences and
+//! `format.ordinal`. **Which** category a number selects is not this generator's business and is
+//! not in `strings/` — it is `astrid_rules::plurals::category`, which is also what
+//! [`problems`] checks a key's forms against.
+//!
+//! ## Ordinals
+//!
+//! `"ordinal": true` says those categories are CLDR's ordinal ones rather than its cardinal ones.
+//! "3rd" is `few` in English and "3 weeks" is `other`, so a format that applied the wrong set
+//! would write "3th" — which reads as a typo rather than as the wrong rule.
+//!
+//! Only web can select one natively (ICU `selectordinal`). The other three formats have no ordinal
+//! resource at all, so an ordinal key reaches them as one flat resource per category and the client
+//! picks. See [`KeySpec::ordinal`].
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -74,6 +83,16 @@ struct KeySpec {
     args: Vec<String>,
     /// Whether its value is an object of CLDR plural categories rather than a string.
     plural: bool,
+    /// Whether those categories are the **ordinal** ones rather than the cardinal ones
+    /// (task 3564db06). "3rd" is `few` in English and "3 weeks" is `other`; a format that applied
+    /// the wrong set would write "3th" and look like a typo rather than a bug.
+    ///
+    /// Only web can select an ordinal natively (ICU `selectordinal`). Android's `<plurals>`, a
+    /// `.stringsdict` and a `.resw` are all cardinal-only or flat, so an ordinal key goes to those
+    /// three as one resource per category and the client asks
+    /// `astrid_rules::plurals::category(locale, Ordinal, n)` which to use. That is not a
+    /// shortcoming of this generator: those platforms have no ordinal plural at all.
+    ordinal: bool,
 }
 
 /// One key's words in one language.
@@ -171,6 +190,10 @@ fn read_catalog(root: &Path) -> Result<Catalog, String> {
             KeySpec {
                 args,
                 plural: spec.get("plural").and_then(Value::as_bool).unwrap_or(false),
+                ordinal: spec
+                    .get("ordinal")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             },
         );
     }
@@ -274,6 +297,20 @@ fn problems(catalog: &Catalog) -> Vec<String> {
                         "{key} in {} has no `other` form, which every language needs",
                         locale.tag
                     ));
+                }
+                // And every other form is a category something can ask for. A row spelled `One`
+                // or `plural` is unreachable: `astrid_rules::plurals::category` never returns it,
+                // so the lookup falls back to `other` and the language silently loses its rule.
+                // A language is free to carry FEWER categories than its rule can return — the
+                // Romance millions form spells the same words as `other` — but not other ones.
+                for category in forms.keys() {
+                    if !astrid_rules::plurals::CATEGORIES.contains(&category.as_str()) {
+                        problems.push(format!(
+                            "{key} in {} has a form called `{category}`, which is not a CLDR \
+                             category — nothing will ever look it up",
+                            locale.tag
+                        ));
+                    }
                 }
             }
 
@@ -463,7 +500,14 @@ fn web(catalog: &Catalog, locale: &Locale) -> String {
                     .iter()
                     .map(|(category, text)| format!("{category} {{{text}}}"))
                     .collect();
-                format!("{{{on}, plural, {}}}", arms.join(" "))
+                // `selectordinal` is a different rule set, not a different spelling: ICU's
+                // `plural` would answer `other` for English's 3 and write "3th".
+                let select = if spec.ordinal {
+                    "selectordinal"
+                } else {
+                    "plural"
+                };
+                format!("{{{on}, {select}, {}}}", arms.join(" "))
             }
         };
         rows.push(format!(
@@ -485,11 +529,26 @@ fn apple_strings(catalog: &Catalog, locale: &Locale) -> String {
         let Some(message) = table.get(key) else {
             continue;
         };
-        // A plural lives in the .stringsdict beside this file; what goes here is the fallback a
-        // build with no dictionary falls through to, which is the `other` form.
-        let text = positional(message.representative(), &spec.args, |index| {
-            format!("%{}$@", index + 1)
-        });
+        let render = |index: usize| format!("%{}$@", index + 1);
+        // An ORDINAL key has no home in the .stringsdict — Apple's only rule type is cardinal — so
+        // its categories go here flat, `<key>.one` … `<key>.other`, and the client picks with
+        // `astrid_rules::plurals::category`. The same shape Windows gets, for the same reason.
+        if spec.ordinal {
+            if let Message::Plural(forms) = message {
+                for (category, text) in forms {
+                    body.push_str(&format!(
+                        "\"{}.{}\" = \"{}\";\n",
+                        escape_strings_file(key),
+                        escape_strings_file(category),
+                        escape_strings_file(&positional(text, &spec.args, render))
+                    ));
+                }
+                continue;
+            }
+        }
+        // A cardinal plural lives in the .stringsdict beside this file; what goes here is the
+        // fallback a build with no dictionary falls through to, which is the `other` form.
+        let text = positional(message.representative(), &spec.args, render);
         body.push_str(&format!(
             "\"{}\" = \"{}\";\n",
             escape_strings_file(key),
@@ -508,6 +567,11 @@ fn apple_stringsdict(catalog: &Catalog, locale: &Locale) -> Option<String> {
         let Some(Message::Plural(forms)) = table.get(key) else {
             continue;
         };
+        // `NSStringPluralRuleType` is Apple's only rule type, and it is cardinal. An ordinal key
+        // therefore cannot live here at all; `apple_strings` writes its categories flat instead.
+        if spec.ordinal {
+            continue;
+        }
         let on = spec.args.first().map(String::as_str).unwrap_or("count");
         let index = spec.args.iter().position(|arg| arg == on).unwrap_or(0) + 1;
         entries.push_str(&format!(
@@ -548,6 +612,17 @@ fn android(catalog: &Catalog, locale: &Locale) -> String {
                 "    <string name=\"{name}\">{}</string>\n",
                 escape_android(&positional(text, &spec.args, render))
             )),
+            // `<plurals>`' `quantity` is cardinal — Android has no ordinal resource — so an
+            // ordinal key becomes one `<string>` per category and the client picks.
+            Message::Plural(forms) if spec.ordinal => {
+                for (category, text) in forms {
+                    body.push_str(&format!(
+                        "    <string name=\"{name}_{}\">{}</string>\n",
+                        escape_xml(category),
+                        escape_android(&positional(text, &spec.args, render))
+                    ));
+                }
+            }
             Message::Plural(forms) => {
                 body.push_str(&format!("    <plurals name=\"{name}\">\n"));
                 for (category, text) in forms {
@@ -798,6 +873,7 @@ mod tests {
         KeySpec {
             args: args.iter().map(|arg| arg.to_string()).collect(),
             plural: false,
+            ordinal: false,
         }
     }
 
@@ -874,18 +950,9 @@ mod tests {
         assert_eq!(placeholders("{} {a b}"), Vec::<&str>::new());
     }
 
-    /// A plural renders natively in every format rather than being flattened to its `other` arm.
-    /// No pilot key declares one, so this fixture is the only place the four code paths are
-    /// exercised — which is the point: the next tranche is then data, not a redesign.
-    #[test]
-    fn a_plural_renders_in_every_format_1bdf84d7() {
-        let mut forms = BTreeMap::new();
-        forms.insert("one".to_string(), "Every day".to_string());
-        forms.insert("other".to_string(), "Every {count} days".to_string());
-        let message = Message::Plural(forms);
-        assert_eq!(message.representative(), "Every {count} days");
-
-        let catalog = Catalog {
+    /// A one-locale, one-key catalog, so the four writers can be asked about a single message.
+    fn one_key(key: &str, spec: KeySpec, message: Message) -> Catalog {
+        Catalog {
             locales: vec![Locale {
                 tag: "en".into(),
                 name: "English".into(),
@@ -894,18 +961,80 @@ mod tests {
                 android: "values".into(),
                 windows: "en-US".into(),
             }],
-            keys: BTreeMap::from([(
-                "repeat.every_n_days".to_string(),
-                KeySpec {
-                    args: vec!["count".to_string()],
-                    plural: true,
-                },
-            )]),
+            keys: BTreeMap::from([(key.to_string(), spec)]),
             messages: BTreeMap::from([(
                 "en".to_string(),
-                BTreeMap::from([("repeat.every_n_days".to_string(), message)]),
+                BTreeMap::from([(key.to_string(), message)]),
             )]),
-        };
+        }
+    }
+
+    /// An ORDINAL key is a different rule set, and only one of the four formats can select it
+    /// (task 3564db06).
+    ///
+    /// Web gets ICU's `selectordinal` — `plural` there would answer `other` for English's 3 and
+    /// write "3th", which reads as a typo rather than as the wrong rule. The other three have no
+    /// ordinal resource at all (`<plurals>`' `quantity` is cardinal, `NSStringPluralRuleType` is
+    /// Apple's only rule type, and a `.resw` has nothing), so each gets one flat resource per
+    /// category and the client asks `astrid_rules::plurals::category` which to read.
+    #[test]
+    fn an_ordinal_selects_by_the_ordinal_rules_3564db06() {
+        let forms = BTreeMap::from([
+            ("one".to_string(), "{count}st".to_string()),
+            ("two".to_string(), "{count}nd".to_string()),
+            ("few".to_string(), "{count}rd".to_string()),
+            ("other".to_string(), "{count}th".to_string()),
+        ]);
+        let catalog = one_key(
+            "format.ordinal",
+            KeySpec {
+                args: vec!["count".to_string()],
+                plural: true,
+                ordinal: true,
+            },
+            Message::Plural(forms),
+        );
+        let locale = &catalog.locales[0];
+
+        let web = web(&catalog, locale);
+        assert!(web.contains("selectordinal"), "{web}");
+        assert!(!web.contains("count, plural"), "{web}");
+
+        // Flat, one per category, on the three that cannot select an ordinal themselves.
+        let android = android(&catalog, locale);
+        assert!(android.contains("<string name=\"format_ordinal_few\">%1$srd</string>"));
+        assert!(!android.contains("<plurals"), "{android}");
+        assert!(apple_strings(&catalog, locale).contains("\"format.ordinal.few\" = \"%1$@rd\";"));
+        assert!(
+            apple_stringsdict(&catalog, locale).is_none(),
+            "an ordinal has no home in a .stringsdict"
+        );
+        assert!(windows(&catalog, locale).contains("name=\"format_ordinal_few\""));
+
+        // And it is still a legal catalog: the agreement checks have nothing to say about it.
+        assert!(!problems(&catalog)
+            .iter()
+            .any(|problem| problem.contains("format.ordinal in en")));
+    }
+
+    /// A plural renders natively in every format rather than being flattened to its `other` arm.
+    #[test]
+    fn a_plural_renders_in_every_format_1bdf84d7() {
+        let mut forms = BTreeMap::new();
+        forms.insert("one".to_string(), "Every day".to_string());
+        forms.insert("other".to_string(), "Every {count} days".to_string());
+        let message = Message::Plural(forms);
+        assert_eq!(message.representative(), "Every {count} days");
+
+        let catalog = one_key(
+            "repeat.every_n_days",
+            KeySpec {
+                args: vec!["count".to_string()],
+                plural: true,
+                ordinal: false,
+            },
+            message,
+        );
         let locale = &catalog.locales[0];
 
         assert!(web(&catalog, locale)

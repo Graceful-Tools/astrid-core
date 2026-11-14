@@ -26,6 +26,9 @@
   "filter.priority": "우선순위",
   "filter.repeat": "반복",
   "filter.repeat.never": "반복 안 함",
+  "format.ordinal": {
+    "other": "{count}"
+  },
   "lists.high_priority": "높음",
   "lists.highest_priority": "최고",
   "lists.low_priority": "낮음",
@@ -56,10 +59,18 @@
   "repeat.daily": "매일",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "{date}까지",
-  "repeat.every_n_days": "{count}일마다",
-  "repeat.every_n_months": "{count}개월마다",
-  "repeat.every_n_weeks": "{count}주마다",
-  "repeat.every_n_years": "{count}년마다",
+  "repeat.every_n_days": {
+    "other": "{count}일마다"
+  },
+  "repeat.every_n_months": {
+    "other": "{count}개월마다"
+  },
+  "repeat.every_n_weeks": {
+    "other": "{count}주마다"
+  },
+  "repeat.every_n_years": {
+    "other": "{count}년마다"
+  },
   "repeat.from_due_date": "기한일 기준",
   "repeat.monthly": "매월",
   "repeat.on_day_of_month": "{ordinal}일에",

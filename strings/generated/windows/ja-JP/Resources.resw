@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>繰り返さない</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>高</value>
   </data>
@@ -181,16 +184,16 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>{0}まで</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
+  <data name="repeat_every_n_days_other" xml:space="preserve">
     <value>{0}日ごと</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
+  <data name="repeat_every_n_months_other" xml:space="preserve">
     <value>{0}か月ごと</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
     <value>{0}週間ごと</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
+  <data name="repeat_every_n_years_other" xml:space="preserve">
     <value>{0}年ごと</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">
@@ -209,7 +212,7 @@
     <value>{0}{1}日に</value>
   </data>
   <data name="repeat_on_nth_weekday" xml:space="preserve">
-    <value>{0}{1}に</value>
+    <value>第{0}{1}に</value>
   </data>
   <data name="repeat_on_weekdays" xml:space="preserve">
     <value>{0}に</value>

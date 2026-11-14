@@ -26,6 +26,9 @@
   "filter.priority": "Prioriteit",
   "filter.repeat": "Herhaling",
   "filter.repeat.never": "Herhaalt niet",
+  "format.ordinal": {
+    "other": "{count}e"
+  },
   "lists.high_priority": "Hoog",
   "lists.highest_priority": "Hoogste",
   "lists.low_priority": "Laag",
@@ -56,10 +59,22 @@
   "repeat.daily": "Dagelijks",
   "repeat.ends_after": "({count}x)",
   "repeat.ends_on": "tot {date}",
-  "repeat.every_n_days": "Elke {count} dagen",
-  "repeat.every_n_months": "Elke {count} maanden",
-  "repeat.every_n_weeks": "Elke {count} weken",
-  "repeat.every_n_years": "Elke {count} jaar",
+  "repeat.every_n_days": {
+    "one": "Elke dag",
+    "other": "Elke {count} dagen"
+  },
+  "repeat.every_n_months": {
+    "one": "Elke maand",
+    "other": "Elke {count} maanden"
+  },
+  "repeat.every_n_weeks": {
+    "one": "Elke week",
+    "other": "Elke {count} weken"
+  },
+  "repeat.every_n_years": {
+    "one": "Elk jaar",
+    "other": "Elke {count} jaar"
+  },
   "repeat.from_due_date": "vanaf de vervaldatum",
   "repeat.monthly": "Maandelijks",
   "repeat.on_day_of_month": "op de {ordinal}",

@@ -18,9 +18,10 @@
 //! functions the pickers themselves call. A second hand-written list would be a second place to
 //! add a key, and the whole failure this closes is a key that exists in one place and not another.
 //!
-//! Three modules cannot be read that way, because their keys are chosen in `match` arms that also
-//! decide what each one interpolates: [`repeat::SUMMARY_KEYS`], [`quick_add::PLACEHOLDER_KEYS`] and
-//! [`reminder_picks::NONE_KEY`]. Each of those is a named constant beside the arms, with a test in
+//! Four modules cannot be read that way, because their keys are chosen in `match` arms that also
+//! decide what each one interpolates, or are a lone constant with no table to read:
+//! [`repeat::SUMMARY_KEYS`], [`quick_add::PLACEHOLDER_KEYS`], [`reminder_picks::NONE_KEY`] and
+//! [`plurals::ORDINAL_KEY`]. Each of those is a named constant beside the arms, with a test in
 //! its own module that drives every arm and fails if the two have drifted. And
 //! `tests/strings_catalog.rs` scans this crate's whole source for anything key-shaped that [`keys`]
 //! does not name, which is the backstop for a module nobody thought to add here at all.
@@ -37,6 +38,7 @@ use std::collections::BTreeSet;
 use crate::decisions::{RATING_KEY_PREFIX, RATING_LABEL_KEYS};
 use crate::model::TaskList;
 use crate::parse::quick_add::PLACEHOLDER_KEYS;
+use crate::plurals;
 use crate::rows::{due_picks, filter_picks, list_default_picks, reminder_picks, repeat};
 use crate::smart_tasks;
 
@@ -87,6 +89,11 @@ pub fn keys() -> Vec<String> {
             .map(|preset| preset.title_key.to_string()),
     );
     keys.extend(repeat::SUMMARY_KEYS.iter().map(|key| (*key).to_string()));
+
+    // How a number is spelled as a position — "3rd", "3.", "3" — for the three summary keys whose
+    // count is an ordinal (task 3564db06). Not a word about repeats, which is why it is not in
+    // `SUMMARY_KEYS`: it is a number format, and every language has exactly one.
+    keys.insert(plurals::ORDINAL_KEY.to_string());
 
     // A list's defaults editor: four pickers, whose hours are not keys — only a reader's clock can
     // spell an hour, so those rows carry no key at all.

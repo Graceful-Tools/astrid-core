@@ -91,6 +91,9 @@
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Не повторяется</value>
   </data>
+  <data name="format_ordinal_other" xml:space="preserve">
+    <value>{0}</value>
+  </data>
   <data name="lists_high_priority" xml:space="preserve">
     <value>Высокий</value>
   </data>
@@ -181,17 +184,53 @@
   <data name="repeat_ends_on" xml:space="preserve">
     <value>до {0}</value>
   </data>
-  <data name="repeat_every_n_days" xml:space="preserve">
-    <value>Каждые {0} дн.</value>
+  <data name="repeat_every_n_days_few" xml:space="preserve">
+    <value>Каждые {0} дня</value>
   </data>
-  <data name="repeat_every_n_months" xml:space="preserve">
-    <value>Каждые {0} мес.</value>
+  <data name="repeat_every_n_days_many" xml:space="preserve">
+    <value>Каждые {0} дней</value>
   </data>
-  <data name="repeat_every_n_weeks" xml:space="preserve">
-    <value>Каждые {0} нед.</value>
+  <data name="repeat_every_n_days_one" xml:space="preserve">
+    <value>Каждый {0} день</value>
   </data>
-  <data name="repeat_every_n_years" xml:space="preserve">
-    <value>Каждые {0} г.</value>
+  <data name="repeat_every_n_days_other" xml:space="preserve">
+    <value>Каждые {0} дня</value>
+  </data>
+  <data name="repeat_every_n_months_few" xml:space="preserve">
+    <value>Каждые {0} месяца</value>
+  </data>
+  <data name="repeat_every_n_months_many" xml:space="preserve">
+    <value>Каждые {0} месяцев</value>
+  </data>
+  <data name="repeat_every_n_months_one" xml:space="preserve">
+    <value>Каждый {0} месяц</value>
+  </data>
+  <data name="repeat_every_n_months_other" xml:space="preserve">
+    <value>Каждые {0} месяца</value>
+  </data>
+  <data name="repeat_every_n_weeks_few" xml:space="preserve">
+    <value>Каждые {0} недели</value>
+  </data>
+  <data name="repeat_every_n_weeks_many" xml:space="preserve">
+    <value>Каждые {0} недель</value>
+  </data>
+  <data name="repeat_every_n_weeks_one" xml:space="preserve">
+    <value>Каждую {0} неделю</value>
+  </data>
+  <data name="repeat_every_n_weeks_other" xml:space="preserve">
+    <value>Каждые {0} недели</value>
+  </data>
+  <data name="repeat_every_n_years_few" xml:space="preserve">
+    <value>Каждые {0} года</value>
+  </data>
+  <data name="repeat_every_n_years_many" xml:space="preserve">
+    <value>Каждые {0} лет</value>
+  </data>
+  <data name="repeat_every_n_years_one" xml:space="preserve">
+    <value>Каждый {0} год</value>
+  </data>
+  <data name="repeat_every_n_years_other" xml:space="preserve">
+    <value>Каждые {0} года</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>от срока выполнения</value>
