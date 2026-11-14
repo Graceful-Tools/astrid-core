@@ -9,7 +9,8 @@
 //!
 //! - **When a popup opens.** The trigger character closest to the caret, at the start of the
 //!   text or after whitespace, with no whitespace between it and the caret. A finished
-//!   `@[Jon](id)` earlier in the line does not re-open anything.
+//!   `@[Jon](id)` earlier in the line does not re-open anything. Each sigil is judged on its last
+//!   occurrence alone: an invalid one opens nothing rather than reaching back to an earlier one.
 //! - **What goes into the text.** `@[Name](id)`, `#[Name](id)` or `![Name](id)`, replacing the
 //!   trigger and what was typed after it, plus one space unless one is already there. The server
 //!   resolves exactly that form and nothing else — see `lib/markdown.ts`.
@@ -75,15 +76,20 @@ pub fn find_trigger(text: &str, caret: usize) -> Option<Trigger> {
     let units: Vec<u16> = text.encode_utf16().collect();
     let caret = caret.min(units.len());
     let before = &units[..caret];
-    let mut best: Option<Trigger> = None;
+    // Only the LAST occurrence of each sigil is ever looked at, as `lastIndexOf` reads it — and
+    // an invalid one settles that sigil rather than falling back to an earlier occurrence of it
+    // (task ec0f0e22). `"@jo@b"` opens nothing: the `@` nearest the caret has a letter before it,
+    // and the `@` at 0 is not reconsidered. Web's `handleTextChange` and iOS's
+    // `detectAutocompleteTrigger` both `continue` to the next *sigil* there, not the next match.
+    let mut settled: Vec<TriggerKind> = Vec::new();
     for (index, unit) in before.iter().enumerate().rev() {
         let Some(kind) = TriggerKind::of(*unit) else {
             continue;
         };
-        // Only the LAST occurrence of each sigil counts, as `lastIndexOf` reads it.
-        if best.as_ref().is_some_and(|held| held.kind == kind) {
+        if settled.contains(&kind) {
             continue;
         }
+        settled.push(kind);
         if index > 0 && !is_space(before[index - 1]) {
             continue;
         }
@@ -91,23 +97,15 @@ pub fn find_trigger(text: &str, caret: usize) -> Option<Trigger> {
         if search.iter().any(|unit| is_space(*unit)) {
             continue;
         }
-        let candidate = Trigger {
+        // Scanning backwards, the first sigil that passes is the one closest to the caret, which
+        // is the one web keeps; everything still to come is further away.
+        return Some(Trigger {
             kind,
             start: index,
             query: String::from_utf16_lossy(search),
-        };
-        match &best {
-            Some(held) if held.start >= candidate.start => {}
-            _ => best = Some(candidate),
-        }
-        // Everything earlier is further from the caret; only a different sigil could still
-        // matter, and only if it were closer, which it cannot be.
-        if best.as_ref().is_some_and(|held| held.start == index) && index < before.len() {
-            // keep scanning: a different sigil earlier is never closer, so we can stop.
-            break;
-        }
+        });
     }
-    best
+    None
 }
 
 /// Put a chosen item into the text — web's `insertAutocompleteItem`.
@@ -358,6 +356,26 @@ mod tests {
         let found = find_trigger(text, caret_at_end(text)).expect("a trigger");
         assert_eq!(found.kind, TriggerKind::List);
         assert_eq!(found.query, "hea");
+    }
+
+    /// Only the LAST occurrence of a sigil is ever looked at, so an invalid one opens nothing
+    /// rather than falling back to an earlier occurrence of the same sigil. Web's
+    /// `handleTextChange` `lastIndexOf`es once per sigil and `continue`s to the next *sigil*;
+    /// iOS's `detectAutocompleteTrigger` does the same (task ec0f0e22).
+    #[test]
+    fn an_invalid_last_sigil_opens_nothing_task_ec0f0e22() {
+        assert_eq!(
+            find_trigger("@jo@b", 5),
+            None,
+            "the `@` nearest the caret has a letter before it, so no earlier `@` is tried"
+        );
+
+        // Only that sigil is settled: a different one is still looked at, which is why the
+        // invalid `#` here leaves the `@` to answer, query and all.
+        let found = find_trigger("hi @jo#x", 8).expect("the `@` is still a trigger");
+        assert_eq!(found.kind, TriggerKind::Mention);
+        assert_eq!(found.start, 3);
+        assert_eq!(found.query, "jo#x");
     }
 
     /// The caret, not the end of the text, decides: text after the caret is not the query.
