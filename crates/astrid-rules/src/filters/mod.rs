@@ -222,6 +222,29 @@ fn matches_assigned_by(task: &Task, filter: Option<&str>, current_user_id: Optio
     }
 }
 
+/// Which lists a task is on, as a filter.
+///
+/// `in_list` and `not_in_list` ask only whether the task is filed anywhere, which
+/// [`Task::effective_list_ids`] answers from `listIds` or the nested `lists`, whichever the payload
+/// carries. **`public_lists` is different on purpose**: privacy is a property of the *list*, and an
+/// id carries no privacy, so the only thing a `&Task` can read it from is the nested `lists`. A
+/// task whose payload has `listIds` and no inline list therefore does not match `public_lists`,
+/// even when one of those ids names a public list the cache knows about.
+///
+/// Task `a09a1e2c` asked whether that is a bug to fix before `rowsForList` moves onto
+/// `TaskSummary` — a `task_lists_membership × lists.privacy` join would be *strictly more
+/// permissive* than this. It is **not** a bug, and the behaviour is pinned below:
+///
+/// - `public_lists` is this crate's own choice (`rows::filter_picks::IN_LISTS`), not a shared one.
+///   `astrid-web`'s `filterInLists` is typed `"dont_filter" | "not_in_list" | "in_list"`
+///   (`types/task.ts`) and `applyVirtualListFilter` has no fourth arm, so no cross-client contract
+///   turns on the answer.
+/// - `contracts/fixtures/filters.json` carries no `inLists` case at all, so nothing is locked.
+/// - Widening it would silently *start* showing rows that are hidden today. That is a product
+///   decision with no caller asking for it, not a refactor's to take in passing.
+///
+/// So a summary-backed `rowsForList` must reproduce nested-lists-only here rather than let the
+/// join answer this one arm. See `docs/CONTRACTS.md` → D61.
 fn matches_in_lists(task: &Task, filter: Option<&str>) -> bool {
     let Some(filter) = filter.filter(|value| *value != "dont_filter") else {
         return true;
@@ -728,6 +751,57 @@ mod tests {
             utc(),
         );
         assert_eq!(ids(&filed_only), vec!["filed"]);
+    }
+
+    /// D61, task `a09a1e2c`: `public_lists` reads the task's **nested** lists, because privacy is
+    /// a property of the list and an id carries none. A payload with `listIds` and no inline list
+    /// does not match, even when the id names a list the cache knows to be public.
+    ///
+    /// This is the behaviour a summary-backed `rowsForList` must reproduce: a
+    /// `task_lists_membership × lists.privacy` join would answer `true` for `by_id_only` below,
+    /// which is strictly more permissive than the rule it would be replacing.
+    #[test]
+    fn the_public_lists_filter_reads_the_nested_lists_a09a1e2c() {
+        let mut inline = task("inline");
+        inline.lists = Some(vec![serde_json::from_value(serde_json::json!({
+            "id": "open",
+            "name": "Open to all",
+            "privacy": "PUBLIC",
+        }))
+        .expect("a list")]);
+
+        let mut by_id_only = task("by_id_only");
+        by_id_only.list_ids = Some(vec!["open".into()]);
+
+        let mut inline_private = task("inline_private");
+        inline_private.lists = Some(vec![serde_json::from_value(serde_json::json!({
+            "id": "shut",
+            "name": "Mine",
+            "privacy": "PRIVATE",
+        }))
+        .expect("a list")]);
+
+        let tasks = vec![inline, by_id_only, inline_private];
+
+        let public = filter_for_list(
+            &tasks,
+            &list(serde_json::json!({ "filterInLists": "public_lists" })),
+            None,
+            now(),
+            utc(),
+        );
+        assert_eq!(ids(&public), vec!["inline"]);
+
+        // The sibling arm reads `effective_list_ids()`, so it keeps all three. The two arms
+        // disagreeing about `by_id_only` is the point, not an oversight.
+        let filed = filter_for_list(
+            &tasks,
+            &list(serde_json::json!({ "filterInLists": "in_list" })),
+            None,
+            now(),
+            utc(),
+        );
+        assert_eq!(ids(&filed), vec!["inline", "by_id_only", "inline_private"]);
     }
 
     // ── Sorting ──────────────────────────────────────────────────────────────────────────────

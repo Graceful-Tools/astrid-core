@@ -1339,9 +1339,9 @@ nowhere else.
 (`crates/astrid-rules/src/filters/mod.rs:233-237`, against the `in_a_list` of `:229` that its
 sibling arms use at `:231-232`). Here the mismatch runs the
 other way: a `task_lists_membership × lists.privacy` join is *strictly more permissive* than the
-Rust rule, which sees only the lists the cached `json` happens to carry inline. **Whether that is
-the bug and the join is the correct answer is the open question on `a09a1e2c`.** If it is resolved
-as a bug and fixed, strike this item — the other three stand on their own.
+Rust rule, which sees only the lists the cached `json` happens to carry inline. **Settled as not a
+bug — see D61.** The arm stays nested-lists-only, so a summary-backed reader must reproduce that
+rather than let the join answer it.
 
 ### What *is* safe to push down
 
@@ -1425,3 +1425,44 @@ The guard against a third spelling is that
 `rows::repeat::presets` rather than a written-out list — a second list is what let the two drift.
 `strings/` carries one spelling now, and `check-strings` fails on a catalog key the core no longer
 emits, which is how the five were found and pruned.
+
+### D61 — the `public_lists` filter reads the nested lists, and that is the spec
+
+**Settled against widening** (task `a09a1e2c`, 2026-11-14). Closes the open question left by item 4
+of *Why the palette, mentions and search read every task*, above.
+
+`matches_in_lists` (`crates/astrid-rules/src/filters/mod.rs`) answers `in_list` and `not_in_list`
+from `Task::effective_list_ids()` — `listIds` or the nested `lists`, whichever the payload carries
+— but answers `public_lists` from `task.lists` alone, matching when any inline list has
+`privacy == PUBLIC`. So a task that arrives as `listIds: ["open"]` with no inline list does **not**
+match `public_lists`, even when the cache separately knows `open` is public.
+
+That asymmetry was read as an oversight when `rowsForList` was scoped for a move onto
+`TaskSummary`, because a `task_lists_membership × lists.privacy` join would answer `true` there —
+the inverse of the usual prefilter hazard, SQL being *broader* than the Rust rule rather than
+narrower. It is not an oversight:
+
+- **An id carries no privacy.** The sibling arms ask only whether the task is filed *anywhere*,
+  which an id answers. `public_lists` asks a question about the list itself, and inside a
+  `&Task` the nested `lists` are the only place that property exists. "Use `effective_list_ids()`
+  like the siblings do" is not a smaller fix; it is not expressible.
+- **No client contract turns on it.** `public_lists` is this crate's own fourth choice
+  (`rows::filter_picks::IN_LISTS` → `filter.lists.public`). astrid-web types `filterInLists` as
+  `"dont_filter" | "not_in_list" | "in_list"` (`types/task.ts`) and `applyVirtualListFilter`
+  (`lib/virtual-list-utils.ts`) has no fourth arm at all — it reads `task.lists` for the two it
+  does have.
+- **Nothing is locked.** `contracts/fixtures/filters.json` carries no `inLists` case of any kind,
+  so neither answer is fixtured. The scoping note that read this as a three-client decision was
+  working from an assumption rather than the fixture.
+- **Widening is a product change wearing a refactor's clothes.** Letting the join answer would
+  silently *start* showing rows that are hidden today, with no caller asking for it. A refactor
+  whose whole value is that it decodes less must not also change what it returns.
+
+So: the nested-lists reading stands, and a summary-backed `rowsForList` must reproduce it rather
+than let a membership join answer this one arm. Pinned by
+`filters::tests::the_public_lists_filter_reads_the_nested_lists_a09a1e2c`, which asserts both
+halves — the inline-public task matches, the id-only task does not, and `in_list` keeps all three —
+so a future join cannot adopt the arm quietly.
+
+Widening it remains available as its own decision, with its own fixture cases, if a surface ever
+wants it.
