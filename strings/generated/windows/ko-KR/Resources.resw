@@ -17,7 +17,7 @@
     <value>모두</value>
   </data>
   <data name="filter_assigned_by" xml:space="preserve">
-    <value>할당한 사람</value>
+    <value>할당자</value>
   </data>
   <data name="filter_assigned_by_me" xml:space="preserve">
     <value>나</value>
@@ -50,7 +50,7 @@
     <value>숨기기</value>
   </data>
   <data name="filter_completion_recent" xml:space="preserve">
-    <value>최근 완료됨</value>
+    <value>최근 완료</value>
   </data>
   <data name="filter_due" xml:space="preserve">
     <value>기한</value>
@@ -137,7 +137,7 @@
     <value>낮음</value>
   </data>
   <data name="priority_medium" xml:space="preserve">
-    <value>보통</value>
+    <value>중간</value>
   </data>
   <data name="priority_none" xml:space="preserve">
     <value>없음</value>
@@ -155,10 +155,10 @@
     <value>5분 전</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>기한 시각에</value>
+    <value>마감 시간</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
-    <value>하루 전</value>
+    <value>1일 전</value>
   </data>
   <data name="reminder_hour_before" xml:space="preserve">
     <value>1시간 전</value>
@@ -167,7 +167,7 @@
     <value>알림 없음</value>
   </data>
   <data name="reminder_week_before" xml:space="preserve">
-    <value>일주일 전</value>
+    <value>1주일 전</value>
   </data>
   <data name="repeat_custom" xml:space="preserve">
     <value>사용자 지정</value>
@@ -263,7 +263,7 @@
     <value>마감일 없음</value>
   </data>
   <data name="smart_subtasks_indented" xml:space="preserve">
-    <value>목록에서 들여쓰기</value>
+    <value>목록에 들여쓰기로 표시</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
     <value>상위 작업 안에서만</value>
@@ -272,7 +272,7 @@
     <value>오전 9:00</value>
   </data>
   <data name="smart_time_12_00" xml:space="preserve">
-    <value>오후 12:00(정오)</value>
+    <value>오후 12:00 (정오)</value>
   </data>
   <data name="smart_time_17_00" xml:space="preserve">
     <value>오후 5:00</value>

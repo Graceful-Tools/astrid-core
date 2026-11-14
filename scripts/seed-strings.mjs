@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const web = join(root, '..', 'astrid-web')
 const windows = join(root, '..', 'astrid-windows')
+const ios = join(root, '..', 'astrid-ios')
 const out = join(root, 'strings')
 const check = process.argv.includes('--check')
 
@@ -49,6 +50,42 @@ const LOCALES = [
   { tag: 'zh-CN', name: '简体中文', web: 'zh-CN', apple: 'zh-Hans', android: 'values-zh-rCN', windows: 'zh-Hans-CN' },
   { tag: 'zh-TW', name: '繁體中文', web: 'zh-TW', apple: 'zh-Hant', android: 'values-zh-rTW', windows: 'zh-Hant-TW' },
 ]
+
+// iOS's `.lproj` directories, which are not quite Apple's tags as `LOCALES` spells them for the
+// generated output: astrid-ios ships European Portuguese as plain `pt.lproj`.
+const IOS_LPROJ = { pt: 'pt' }
+
+// Core keys whose meaning iOS already carries in other English (AITD-660). A words-match cannot
+// find these: iOS says "1 hour before" where the core says "An hour before", and "Recently
+// completed" where it says "Recently finished". Each is a real translation of the same choice,
+// which beats one written for this catalog, so it fills a language only where nothing else
+// harvested does. `with` fills a printf argument the iOS string leaves open, since the core's keys
+// fix the number in the key itself.
+//
+// Kept short and checked by eye on purpose. Left out after reading the translations: the four
+// `picker.*` times of day, whose iOS strings add the hour ("Morning (9 AM)") and whose authored
+// words already match iOS once that is stripped; `lists.highest_priority`, which iOS spells
+// "!!! Urgente" in three languages (not "highest"); `sort.manual` and `sort.created`, which
+// the core deliberately words as a sentence ("The order I arranged") where iOS says "Manual".
+const IOS_ALIASES = {
+  'reminder.at_due_time': { ios: 'time.atDueTime' },
+  'reminder.5_minutes_before': { ios: 'time.minutesBefore', with: { count: '5' } },
+  'reminder.15_minutes_before': { ios: 'time.minutesBefore', with: { count: '15' } },
+  'reminder.30_minutes_before': { ios: 'time.minutesBefore', with: { count: '30' } },
+  'reminder.hour_before': { ios: 'time.hourBefore' },
+  'reminder.day_before': { ios: 'time.dayBefore' },
+  'reminder.week_before': { ios: 'time.weekBefore' },
+  'filter.assignee.someone_else': { ios: 'assignee.someone_else' },
+  'filter.assigned_by.someone_else': { ios: 'assignee.someone_else' },
+  'filter.completion.recent': { ios: 'lists.recently_completed' },
+  'filter.lists.not_in_a_list': { ios: 'lists.not_in_any_list' },
+}
+
+// iOS keys a words-match must never take, however well their English agrees, because their
+// translations carry a context the core's key does not have. A snooze duration is "1 week" in
+// English but "1주일 후" (a week later), "1 周后" and "На 1 неделю" (for a week) elsewhere, and it
+// was matched to `smart.offset.1_week`, a due-date offset that is just a length.
+const IOS_NOT_A_WORDS_MATCH = [/^reminders\.snooze_/]
 
 // ── What each key interpolates, IN ORDER ────────────────────────────────────────────────────────
 //
@@ -171,6 +208,71 @@ function windowsResw(language, keys) {
   return table
 }
 
+/**
+ * One of astrid-ios's `Localizable.strings`, flat, as the app looks its strings up (AITD-660).
+ *
+ * The largest body of translation the product has (~1,400 keys in the same twelve languages),
+ * and a source this seeder could not reach in tranche 1. Values keep their printf placeholders
+ * (`%@`, `%d`, `%1$@`); `fromPrintf` turns them into a key's named arguments once it is known
+ * which key they are being asked for. A missing file is an empty table, so a checkout without
+ * astrid-ios beside it seeds exactly as tranche 1 did.
+ */
+function iosCatalog(locale) {
+  const lproj = IOS_LPROJ[locale.tag] ?? locale.apple
+  const path = join(ios, 'Astrid App/Resources/Localizations', `${lproj}.lproj`, 'Localizable.strings')
+  let source
+  try {
+    source = readFileSync(path, 'utf8')
+  } catch {
+    return {}
+  }
+  // Comments first: a quote inside one would otherwise start a phantom entry.
+  source = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const unescape = (text) =>
+    text.replace(/\\(U[0-9a-fA-F]{4}|.)/g, (_, escape) => {
+      if (escape.length === 5) return String.fromCharCode(parseInt(escape.slice(1), 16))
+      return { n: '\n', t: '\t', r: '\r' }[escape] ?? escape
+    })
+  const table = {}
+  for (const match of source.matchAll(/"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/g)) {
+    table[unescape(match[1])] = unescape(match[2])
+  }
+  return table
+}
+
+// A printf conversion as `.strings` files write them: `%@`, `%d`, `%lld`, `%1$@`, `%.1f`, `%%`.
+const PRINTF = /%(?:(\d+)\$)?[-+ 0#]*\d*(?:\.\d+)?(?:hh|h|ll|l|q|z|t|j|L)?([@dDiuUxXoOfeEgGcCsSp%])/g
+
+/**
+ * An iOS value with its printf placeholders rewritten into the catalog's named arguments, or
+ * `undefined` when it cannot be said safely.
+ *
+ * BY INDEX, not by order of appearance: a translation that reorders writes `%2$@ … %1$@`, and the
+ * number is the only thing that says which argument is which (the same trap `renameByPosition`
+ * documents for `{0}`). An unnumbered `%@` takes the next argument, as Foundation does. A value
+ * with a placeholder the key does not declare, or one that leaves out an argument the key does
+ * declare, is refused rather than guessed at: a translation that drops `{count}` says the wrong
+ * number.
+ */
+function fromPrintf(value, names) {
+  let next = 0
+  let refused = false
+  const used = new Set()
+  const rewritten = value.replace(PRINTF, (_, index, conversion) => {
+    if (conversion === '%') return '%'
+    const position = index === undefined ? next++ : Number(index) - 1
+    const name = names[position]
+    if (name === undefined) {
+      refused = true
+      return ''
+    }
+    used.add(name)
+    return `{${name}}`
+  })
+  if (refused || used.size !== names.length) return undefined
+  return rewritten
+}
+
 /** One of web's next-intl catalogs, flattened to the dotted keys next-intl looks them up by. */
 function webCatalog(locale) {
   const nested = JSON.parse(readFileSync(join(web, 'lib/i18n/locales', `${locale}.json`), 'utf8'))
@@ -195,6 +297,7 @@ function webCatalog(locale) {
  */
 function sameWords(text) {
   return text
+    .replace(PRINTF, ' ')
     .replace(/\{[^}]*\}/g, ' ')
     .replace(/[.…]+$/u, '')
     .replace(/\s+/g, ' ')
@@ -227,21 +330,45 @@ for (const [key, text] of Object.entries(catalogs.en)) {
   byEnglish.get(words).push(key)
 }
 
-/** How close a web key is to a core key, for choosing between several that say the same words. */
-function affinity(coreKey, webKey) {
+// iOS's twelve, and the same English index over them (AITD-660).
+const iosCatalogs = Object.fromEntries(LOCALES.map((locale) => [locale.tag, iosCatalog(locale)]))
+// An alias naming an iOS key that has gone is a rename on that side, and it would quietly fall
+// back to the authored words; say so instead. Skipped when astrid-ios is not beside this checkout.
+if (Object.keys(iosCatalogs.en).length > 0) {
+  for (const [key, alias] of Object.entries(IOS_ALIASES)) {
+    if (iosCatalogs.en[alias.ios] === undefined) {
+      throw new Error(`IOS_ALIASES: ${key} names ${alias.ios}, which astrid-ios no longer carries`)
+    }
+  }
+}
+const iosByEnglish = new Map()
+for (const [key, text] of Object.entries(iosCatalogs.en)) {
+  const words = sameWords(text)
+  if (!words) continue
+  if (!iosByEnglish.has(words)) iosByEnglish.set(words, [])
+  iosByEnglish.get(words).push(key)
+}
+
+/** How close a web or iOS key is to a core key, for choosing between several that say the same words. */
+function affinity(coreKey, otherKey) {
   const left = coreKey.split('.')
-  const right = webKey.split('.')
+  const right = otherKey.split('.')
   let shared = 0
   for (const segment of left) if (right.includes(segment)) shared += 1
   // A leaf that matches is worth more than a namespace that does: `filter.due.today` should prefer
-  // web's `...dueToday` over anything else merely sitting under `filter`.
-  if (right[right.length - 1].toLowerCase() === left[left.length - 1].replace(/_/g, '')) shared += 2
+  // web's `...dueToday` over anything else merely sitting under `filter`. Underscores go on both
+  // sides, since web's leaves are camelCase and iOS's are snake_case like the core's.
+  const leaf = (segments) => segments[segments.length - 1].replace(/_/g, '').toLowerCase()
+  if (leaf(right) === leaf(left)) shared += 2
   return shared
 }
 
 const english = {}
 const translations = Object.fromEntries(LOCALES.map((locale) => [locale.tag, {}]))
-const report = { authored: [], exact: [], matched: [], englishOnly: [], noEnglish: [] }
+const report = { authored: [], exact: [], matched: [], englishOnly: [], noEnglish: [], ios: new Map() }
+// Where each value came from, per language and key. `provenance.json` is computed from this, so a
+// key is recorded as authored only while one of its values really is.
+const sourceOf = Object.fromEntries(LOCALES.map((locale) => [locale.tag, {}]))
 
 for (const key of keys) {
   // 1. The English. Authored here where nothing carries it, else the shell's own table, else web's
@@ -267,32 +394,91 @@ for (const key of keys) {
     }
   }
 
+  // iOS, two ways (AITD-660). Under the core's own key, but only while iOS's English says the same
+  // words, because iOS reuses some of these names for different text: its `picker.morning` is
+  // "Morning (9 AM)" and its `priority.none` is "None", and their translations say that. Otherwise,
+  // as with web, the iOS key whose English says the same words, provided its placeholders map onto
+  // this key's arguments.
+  const names = ARGS[key] ?? []
+  const iosEnglish = iosCatalogs.en[key]
+  const iosSameKey =
+    iosEnglish !== undefined &&
+    sameWords(iosEnglish) === sameWords(text) &&
+    fromPrintf(iosEnglish, names) !== undefined
+      ? key
+      : null
+  const iosMatches = (iosByEnglish.get(sameWords(text)) ?? []).filter(
+    (candidate) =>
+      !IOS_NOT_A_WORDS_MATCH.some((pattern) => pattern.test(candidate)) &&
+      fromPrintf(iosCatalogs.en[candidate], names) !== undefined,
+  )
+  const iosWords =
+    iosMatches.length > 0
+      ? iosMatches.slice().sort((a, b) => affinity(key, b) - affinity(key, a))[0]
+      : null
+  // An iOS value identical to the English is iOS not having translated that string yet (it has a
+  // few), so it never outranks a real translation further down the order.
+  const fromIos = (tag, iosKey) => {
+    const raw = iosKey === null ? undefined : iosCatalogs[tag][iosKey]
+    const value = raw === undefined ? undefined : fromPrintf(raw, names)
+    return value === text ? undefined : value
+  }
+  // An alias says the same thing in other English, so it is read with the alias's own arguments and
+  // then has any `with` values filled in.
+  const alias = IOS_ALIASES[key]
+  const fromIosAlias = (tag) => {
+    if (alias === undefined) return undefined
+    const raw = iosCatalogs[tag][alias.ios]
+    const fixed = Object.keys(alias.with ?? {})
+    let value = raw === undefined ? undefined : fromPrintf(raw, [...fixed, ...names])
+    if (value === undefined) return undefined
+    for (const name of fixed) value = value.replaceAll(`{${name}}`, alias.with[name])
+    return raw === iosCatalogs.en[alias.ios] ? undefined : value
+  }
+
   // 3. Fill each language from the best evidence there is for it, in this order:
-  //      the shell's own translation of THIS key > web's, by key or by words > one written for
-  //      this catalog > English.
-  //    The shell's German leads because it is a translation of the very key being asked about; a
-  //    words-match against web is a translation of the same English under a different key, which
-  //    is nearly as good and is still somebody's work rather than a guess.
+  //      the shell's own translation of THIS key > iOS's, under this key with the same English >
+  //      web's, by key or by words > iOS's, by words > one written for this catalog > English.
+  //    The shell's German and iOS's same-key strings lead because each is a translation of the
+  //    very key being asked about. A words-match is a translation of the same English under a
+  //    different key, which is nearly as good and is still somebody's work rather than a guess.
+  //    Web's words-match outranks iOS's only because it came first: a tranche-1 value stays put
+  //    unless something better than another words-match replaces it.
   let harvested = 0
   for (const locale of LOCALES) {
-    if (locale.tag === 'en') {
+    const tag = locale.tag
+    if (tag === 'en') {
       translations.en[key] = text
       continue
     }
-    const fromShell = locale.tag === 'de' ? fromWindowsGerman[key] : undefined
-    const fromWeb = source === null ? undefined : catalogs[locale.tag][source]
-    const written = authoredTranslations[key]?.[locale.tag]
-    const value = fromShell ?? fromWeb ?? written ?? text
+    const candidates = [
+      ['shell', tag === 'de' ? fromWindowsGerman[key] : undefined, 'astrid-windows de-DE'],
+      ['ios', fromIos(tag, iosSameKey), iosSameKey],
+      ['web', source === null ? undefined : catalogs[tag][source], source],
+      ['ios', fromIos(tag, iosWords), iosWords],
+      ['ios', fromIosAlias(tag), alias?.ios ?? null],
+      ['authored',authoredTranslations[key]?.[tag], 'authored-translations.json'],
+    ]
+    const [from, value, where] = candidates.find(([, candidate]) => candidate !== undefined) ?? [
+      'english',
+      text,
+      null,
+    ]
+    sourceOf[tag][key] = from
+    if (from === 'ios') {
+      const line = `${key} ← ${where}`
+      report.ios.set(line, (report.ios.get(line) ?? 0) + 1)
+    }
     if (value !== text) harvested += 1
     // English is the fallback, and a visible one: the report below counts every value that is
     // still English, so "untranslated" is a number somebody can act on rather than a silence.
-    translations[locale.tag][key] = value
+    translations[tag][key] = value
   }
 
   if (source !== null) {
     // already reported as exact or matched
   } else if (harvested > 0) {
-    report.matched.push(`${key} ← astrid-windows de-DE / authored`)
+    report.matched.push(`${key} ← astrid-windows de-DE / astrid-ios / authored`)
   } else if (AUTHORED[key]) {
     report.authored.push(key)
   } else {
@@ -361,6 +547,25 @@ if (report.englishOnly.length > 0) {
 console.log('\nstill English per locale:')
 for (const [tag, count] of Object.entries(untranslated)) console.log(`  ${tag}: ${count}`)
 
+// Values that now come from astrid-ios, and the authored translations they replace (AITD-660).
+// An authored value nothing reads any more is pruned from `authored-translations.json` below, so
+// the file a native speaker is asked to review holds only words that ship. A value identical to
+// the English stays: that entry is what marks it deliberate (see `deliberate`, above).
+const translated = LOCALES.filter((locale) => locale.tag !== 'en').map((locale) => locale.tag)
+const superseded = []
+for (const [key, row] of Object.entries(authoredTranslations)) {
+  if (key.startsWith('$') || english[key] === undefined) continue
+  for (const tag of Object.keys(row)) {
+    if (sourceOf[tag]?.[key] !== 'authored' && translations[tag]?.[key] !== english[key]) {
+      superseded.push([key, tag])
+    }
+  }
+}
+const fromIosCount = [...report.ios.values()].reduce((sum, count) => sum + count, 0)
+console.log(`\nvalues from astrid-ios: ${fromIosCount}, across ${report.ios.size} keys`)
+for (const [line, count] of report.ios) console.log(`  ${line}  (${count} of ${translated.length})`)
+console.log(`authored translations superseded and pruned: ${superseded.length}`)
+
 if (check) process.exit(report.noEnglish.length > 0 ? 1 : 0)
 
 // ── Writing it ──────────────────────────────────────────────────────────────────────────────────
@@ -388,21 +593,55 @@ writeFileSync(join(out, 'catalog.json'), `${JSON.stringify(catalog, null, 2)}\n`
 // from one written for this catalog without reading the seeder. `check-strings` asserts the three
 // lists partition the catalog, which is what stops a key quietly losing its provenance when it
 // gains a translation.
+//
+// Decided from what each value actually came from (AITD-660). Before, a key was "authored"
+// whenever `authored-translations.json` had a row for it, so a key web or iOS had since
+// translated in full still read as wanting a native speaker's pass. Now it is authored while ANY
+// of its languages still rests on that file, English-only while every one is English, and
+// harvested otherwise.
+const restsOn = (key, from) => translated.some((tag) => sourceOf[tag][key] === from)
 const provenance = {
   note: 'GENERATED by scripts/seed-strings.mjs. Which evidence each key\'s translations rest on. See strings/README.md.',
   harvested: Object.keys(english)
-    .filter((key) => !authoredTranslations[key] && untranslated[LOCALES[1].tag] !== undefined)
-    .filter((key) => !stillEnglish[LOCALES[1].tag].includes(key))
-    .sort(),
-  authored: Object.keys(english)
-    .filter((key) => authoredTranslations[key] !== undefined)
-    .sort(),
-  englishOnly: Object.keys(english)
     .filter(
       (key) =>
-        authoredTranslations[key] === undefined && stillEnglish[LOCALES[1].tag].includes(key),
+        !restsOn(key, 'authored') && !translated.every((tag) => sourceOf[tag][key] === 'english'),
     )
     .sort(),
+  authored: Object.keys(english)
+    .filter((key) => restsOn(key, 'authored'))
+    .sort(),
+  englishOnly: Object.keys(english)
+    .filter((key) => translated.every((tag) => sourceOf[tag][key] === 'english'))
+    .sort(),
+}
+
+// Prune the superseded authored translations, line by line, so the file keeps its hand-made
+// layout (one key per line, blank lines between groups) and its diff shows only what went.
+if (superseded.length > 0) {
+  const drop = new Set(superseded.map(([key, tag]) => `${key}\u0000${tag}`))
+  const lines = readFileSync(authoredPath, 'utf8').split('\n')
+  const kept = []
+  for (const line of lines) {
+    const match = line.match(/^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/)
+    if (!match || match[2] === '"$note"') {
+      kept.push(line)
+      continue
+    }
+    const key = JSON.parse(match[2])
+    const row = JSON.parse(match[3])
+    const remaining = Object.entries(row).filter(([tag]) => !drop.has(`${key}\u0000${tag}`))
+    if (remaining.length === 0) continue
+    const body = remaining.map(([tag, value]) => `${JSON.stringify(tag)}: ${JSON.stringify(value)}`)
+    kept.push(`${match[1]}${match[2]}: { ${body.join(', ')} },`)
+  }
+  // Only the last entry goes without a comma, and the one removed may have been it.
+  const last = kept.findLastIndex((line) => /^\s*".*\},?$/.test(line))
+  kept[last] = kept[last].replace(/,$/, '')
+  // A group whose every row went leaves two blank lines where it was.
+  const text = kept.join('\n').replace(/\n{3,}/g, '\n\n')
+  JSON.parse(text) // a malformed rewrite fails here, before anything is written
+  writeFileSync(authoredPath, text)
 }
 writeFileSync(join(out, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`)
 writeFileSync(join(out, 'locales.json'), `${JSON.stringify({ locales: LOCALES }, null, 2)}\n`)

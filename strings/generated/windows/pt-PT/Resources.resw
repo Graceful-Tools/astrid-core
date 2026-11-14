@@ -53,7 +53,7 @@
     <value>Concluídas recentemente</value>
   </data>
   <data name="filter_due" xml:space="preserve">
-    <value>Vencimento</value>
+    <value>Prazo</value>
   </data>
   <data name="filter_due_none" xml:space="preserve">
     <value>Sem data de vencimento</value>
@@ -77,7 +77,7 @@
     <value>Numa lista</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>Fora de qualquer lista</value>
+    <value>Sem lista</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>Numa lista pública</value>
@@ -86,7 +86,7 @@
     <value>Prioridade</value>
   </data>
   <data name="filter_repeat" xml:space="preserve">
-    <value>Repetição</value>
+    <value>Repetir</value>
   </data>
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Não se repete</value>
@@ -122,7 +122,7 @@
     <value>Madrugada</value>
   </data>
   <data name="picker_no_due_date" xml:space="preserve">
-    <value>Sem data de vencimento</value>
+    <value>Sem prazo</value>
   </data>
   <data name="picker_today" xml:space="preserve">
     <value>Hoje</value>
@@ -155,7 +155,7 @@
     <value>5 minutos antes</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>À hora de vencimento</value>
+    <value>Na hora do vencimento</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
     <value>1 dia antes</value>
@@ -224,19 +224,19 @@
     <value>Personalizado</value>
   </data>
   <data name="repeating_daily" xml:space="preserve">
-    <value>Diariamente</value>
+    <value>Diário</value>
   </data>
   <data name="repeating_monthly" xml:space="preserve">
-    <value>Mensalmente</value>
+    <value>Mensal</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
     <value>Nunca</value>
   </data>
   <data name="repeating_weekly" xml:space="preserve">
-    <value>Semanalmente</value>
+    <value>Semanal</value>
   </data>
   <data name="repeating_yearly" xml:space="preserve">
-    <value>Anualmente</value>
+    <value>Anual</value>
   </data>
   <data name="smart_layout_list" xml:space="preserve">
     <value>Lista</value>
@@ -263,7 +263,7 @@
     <value>Sem data de vencimento</value>
   </data>
   <data name="smart_subtasks_indented" xml:space="preserve">
-    <value>Nas listas, com avanço</value>
+    <value>Nas listas, recuadas</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
     <value>Apenas dentro da tarefa principal</value>

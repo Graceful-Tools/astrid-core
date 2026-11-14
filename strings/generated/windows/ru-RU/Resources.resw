@@ -17,7 +17,7 @@
     <value>Любой</value>
   </data>
   <data name="filter_assigned_by" xml:space="preserve">
-    <value>Кем назначено</value>
+    <value>Назначено</value>
   </data>
   <data name="filter_assigned_by_me" xml:space="preserve">
     <value>Я</value>
@@ -77,7 +77,7 @@
     <value>В списке</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>Вне списков</value>
+    <value>Не в списке</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>В общедоступном списке</value>
@@ -143,31 +143,31 @@
     <value>Нет</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
-    <value>За 15 минут</value>
+    <value>За 15 мин.</value>
   </data>
   <data name="reminder_2_hours_before" xml:space="preserve">
     <value>За 2 часа</value>
   </data>
   <data name="reminder_30_minutes_before" xml:space="preserve">
-    <value>За 30 минут</value>
+    <value>За 30 мин.</value>
   </data>
   <data name="reminder_5_minutes_before" xml:space="preserve">
-    <value>За 5 минут</value>
+    <value>За 5 мин.</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>В момент срока</value>
+    <value>В срок</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
-    <value>За день</value>
+    <value>За 1 день</value>
   </data>
   <data name="reminder_hour_before" xml:space="preserve">
-    <value>За час</value>
+    <value>За 1 час</value>
   </data>
   <data name="reminder_none" xml:space="preserve">
     <value>Без напоминания</value>
   </data>
   <data name="reminder_week_before" xml:space="preserve">
-    <value>За неделю</value>
+    <value>За 1 неделю</value>
   </data>
   <data name="repeat_custom" xml:space="preserve">
     <value>Выбрать</value>
@@ -182,16 +182,16 @@
     <value>до {0}</value>
   </data>
   <data name="repeat_every_n_days" xml:space="preserve">
-    <value>Каждые {0} дн.</value>
+    <value>Каждый {0}-й день</value>
   </data>
   <data name="repeat_every_n_months" xml:space="preserve">
-    <value>Каждые {0} мес.</value>
+    <value>Каждый {0}-й месяц</value>
   </data>
   <data name="repeat_every_n_weeks" xml:space="preserve">
-    <value>Каждые {0} нед.</value>
+    <value>Каждую {0}-ю неделю</value>
   </data>
   <data name="repeat_every_n_years" xml:space="preserve">
-    <value>Каждые {0} г.</value>
+    <value>Каждый {0}-й год</value>
   </data>
   <data name="repeat_from_due_date" xml:space="preserve">
     <value>от срока выполнения</value>

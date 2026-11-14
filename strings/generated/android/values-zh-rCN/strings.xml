@@ -3,7 +3,7 @@
 <resources>
     <string name="defaults_all_day">全天</string>
     <string name="filter_any">任意</string>
-    <string name="filter_assigned_by">指派人</string>
+    <string name="filter_assigned_by">分配者</string>
     <string name="filter_assigned_by_me">我</string>
     <string name="filter_assigned_by_someone_else">其他人</string>
     <string name="filter_assignee">指派给</string>
@@ -15,7 +15,7 @@
     <string name="filter_completion_completed">仅已完成</string>
     <string name="filter_completion_incomplete">隐藏</string>
     <string name="filter_completion_recent">最近完成</string>
-    <string name="filter_due">到期</string>
+    <string name="filter_due">截止</string>
     <string name="filter_due_none">无截止日期</string>
     <string name="filter_due_overdue">已逾期</string>
     <string name="filter_due_this_month">本月</string>
@@ -23,7 +23,7 @@
     <string name="filter_due_today">今天</string>
     <string name="filter_lists">列表</string>
     <string name="filter_lists_in_a_list">在列表中</string>
-    <string name="filter_lists_not_in_a_list">不在列表中</string>
+    <string name="filter_lists_not_in_a_list">不在任何列表中</string>
     <string name="filter_lists_public">在公开列表中</string>
     <string name="filter_priority">优先级</string>
     <string name="filter_repeat">重复</string>
@@ -45,15 +45,15 @@
     <string name="priority_low">低</string>
     <string name="priority_medium">中</string>
     <string name="priority_none">无</string>
-    <string name="reminder_15_minutes_before">提前 15 分钟</string>
-    <string name="reminder_2_hours_before">提前 2 小时</string>
-    <string name="reminder_30_minutes_before">提前 30 分钟</string>
-    <string name="reminder_5_minutes_before">提前 5 分钟</string>
-    <string name="reminder_at_due_time">到期时</string>
-    <string name="reminder_day_before">提前 1 天</string>
-    <string name="reminder_hour_before">提前 1 小时</string>
+    <string name="reminder_15_minutes_before">15 分钟前</string>
+    <string name="reminder_2_hours_before">提前2小时</string>
+    <string name="reminder_30_minutes_before">30 分钟前</string>
+    <string name="reminder_5_minutes_before">5 分钟前</string>
+    <string name="reminder_at_due_time">截止时</string>
+    <string name="reminder_day_before">1 天前</string>
+    <string name="reminder_hour_before">1 小时前</string>
     <string name="reminder_none">无提醒</string>
-    <string name="reminder_week_before">提前 1 周</string>
+    <string name="reminder_week_before">1 周前</string>
     <string name="repeat_custom">自定义</string>
     <string name="repeat_daily">每天</string>
     <string name="repeat_ends_after">(%1$sx)</string>
@@ -74,7 +74,7 @@
     <string name="repeating_custom">自定义</string>
     <string name="repeating_daily">每天</string>
     <string name="repeating_monthly">每月</string>
-    <string name="repeating_one_time_only">从不</string>
+    <string name="repeating_one_time_only">永不</string>
     <string name="repeating_weekly">每周</string>
     <string name="repeating_yearly">每年</string>
     <string name="smart_layout_list">列表</string>

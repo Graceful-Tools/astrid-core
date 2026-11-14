@@ -15,7 +15,7 @@
     <string name="filter_completion_completed">Apenas as concluídas</string>
     <string name="filter_completion_incomplete">Ocultá-las</string>
     <string name="filter_completion_recent">Concluídas recentemente</string>
-    <string name="filter_due">Vencimento</string>
+    <string name="filter_due">Prazo</string>
     <string name="filter_due_none">Sem data de vencimento</string>
     <string name="filter_due_overdue">Atrasada</string>
     <string name="filter_due_this_month">Este mês</string>
@@ -23,10 +23,10 @@
     <string name="filter_due_today">Hoje</string>
     <string name="filter_lists">Listas</string>
     <string name="filter_lists_in_a_list">Numa lista</string>
-    <string name="filter_lists_not_in_a_list">Fora de qualquer lista</string>
+    <string name="filter_lists_not_in_a_list">Sem lista</string>
     <string name="filter_lists_public">Numa lista pública</string>
     <string name="filter_priority">Prioridade</string>
-    <string name="filter_repeat">Repetição</string>
+    <string name="filter_repeat">Repetir</string>
     <string name="filter_repeat_never">Não se repete</string>
     <string name="lists_high_priority">Alta</string>
     <string name="lists_highest_priority">Máxima</string>
@@ -38,7 +38,7 @@
     <string name="picker_morning">Manhã</string>
     <string name="picker_next_week">Próxima semana</string>
     <string name="picker_night">Madrugada</string>
-    <string name="picker_no_due_date">Sem data de vencimento</string>
+    <string name="picker_no_due_date">Sem prazo</string>
     <string name="picker_today">Hoje</string>
     <string name="picker_tomorrow">Amanhã</string>
     <string name="priority_high">Alta</string>
@@ -49,7 +49,7 @@
     <string name="reminder_2_hours_before">2 horas antes</string>
     <string name="reminder_30_minutes_before">30 minutos antes</string>
     <string name="reminder_5_minutes_before">5 minutos antes</string>
-    <string name="reminder_at_due_time">À hora de vencimento</string>
+    <string name="reminder_at_due_time">Na hora do vencimento</string>
     <string name="reminder_day_before">1 dia antes</string>
     <string name="reminder_hour_before">1 hora antes</string>
     <string name="reminder_none">Sem lembrete</string>
@@ -72,11 +72,11 @@
     <string name="repeat_weekly">Semanalmente</string>
     <string name="repeat_yearly">Anualmente</string>
     <string name="repeating_custom">Personalizado</string>
-    <string name="repeating_daily">Diariamente</string>
-    <string name="repeating_monthly">Mensalmente</string>
+    <string name="repeating_daily">Diário</string>
+    <string name="repeating_monthly">Mensal</string>
     <string name="repeating_one_time_only">Nunca</string>
-    <string name="repeating_weekly">Semanalmente</string>
-    <string name="repeating_yearly">Anualmente</string>
+    <string name="repeating_weekly">Semanal</string>
+    <string name="repeating_yearly">Anual</string>
     <string name="smart_layout_list">Lista</string>
     <string name="smart_layout_list_desc">A caixa de seleção conclui a tarefa, e prioridade e responsável têm cada um a sua própria linha.</string>
     <string name="smart_layout_project">Projeto</string>
@@ -85,7 +85,7 @@
     <string name="smart_offset_1_week">1 semana</string>
     <string name="smart_offset_3_days">3 dias</string>
     <string name="smart_offset_none">Sem data de vencimento</string>
-    <string name="smart_subtasks_indented">Nas listas, com avanço</string>
+    <string name="smart_subtasks_indented">Nas listas, recuadas</string>
     <string name="smart_subtasks_under_parent">Apenas dentro da tarefa principal</string>
     <string name="smart_time_09_00">9:00</string>
     <string name="smart_time_12_00">12:00 (meio-dia)</string>

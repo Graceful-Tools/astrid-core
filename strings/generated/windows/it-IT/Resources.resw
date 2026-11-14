@@ -77,7 +77,7 @@
     <value>In un elenco</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>Fuori da ogni elenco</value>
+    <value>In nessuna lista</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>In un elenco pubblico</value>
@@ -86,7 +86,7 @@
     <value>Priorità</value>
   </data>
   <data name="filter_repeat" xml:space="preserve">
-    <value>Ripetizione</value>
+    <value>Ripeti</value>
   </data>
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Non si ripete</value>
@@ -155,7 +155,7 @@
     <value>5 minuti prima</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>All'ora di scadenza</value>
+    <value>Alla scadenza</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
     <value>1 giorno prima</value>
@@ -263,10 +263,10 @@
     <value>Nessuna scadenza</value>
   </data>
   <data name="smart_subtasks_indented" xml:space="preserve">
-    <value>Negli elenchi, rientrate</value>
+    <value>Nelle liste, rientrate</value>
   </data>
   <data name="smart_subtasks_under_parent" xml:space="preserve">
-    <value>Solo dentro l'attività principale</value>
+    <value>Solo nell'attività principale</value>
   </data>
   <data name="smart_time_09_00" xml:space="preserve">
     <value>9:00</value>

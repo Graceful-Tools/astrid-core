@@ -77,7 +77,7 @@
     <value>Dans une liste</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>Hors liste</value>
+    <value>Dans aucune liste</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>Dans une liste publique</value>
@@ -86,7 +86,7 @@
     <value>Priorité</value>
   </data>
   <data name="filter_repeat" xml:space="preserve">
-    <value>Répétition</value>
+    <value>Répéter</value>
   </data>
   <data name="filter_repeat_never" xml:space="preserve">
     <value>Ne se répète pas</value>
@@ -116,13 +116,13 @@
     <value>Matin</value>
   </data>
   <data name="picker_next_week" xml:space="preserve">
-    <value>Semaine prochaine</value>
+    <value>La semaine prochaine</value>
   </data>
   <data name="picker_night" xml:space="preserve">
     <value>Nuit</value>
   </data>
   <data name="picker_no_due_date" xml:space="preserve">
-    <value>Pas de date limite</value>
+    <value>Sans échéance</value>
   </data>
   <data name="picker_today" xml:space="preserve">
     <value>Aujourd'hui</value>
@@ -155,7 +155,7 @@
     <value>5 minutes avant</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>À l'heure d'échéance</value>
+    <value>À l'heure limite</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
     <value>1 jour avant</value>
@@ -269,16 +269,16 @@
     <value>Uniquement dans la tâche parente</value>
   </data>
   <data name="smart_time_09_00" xml:space="preserve">
-    <value>09:00</value>
+    <value>9 h 00</value>
   </data>
   <data name="smart_time_12_00" xml:space="preserve">
-    <value>12:00 (midi)</value>
+    <value>12 h 00 (midi)</value>
   </data>
   <data name="smart_time_17_00" xml:space="preserve">
     <value>17:00</value>
   </data>
   <data name="smart_time_20_00" xml:space="preserve">
-    <value>20:00</value>
+    <value>20 h 00</value>
   </data>
   <data name="sort" xml:space="preserve">
     <value>Trier par</value>

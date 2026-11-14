@@ -50,10 +50,10 @@
     <value>Ocultarlas</value>
   </data>
   <data name="filter_completion_recent" xml:space="preserve">
-    <value>Terminadas recientemente</value>
+    <value>Completadas recientemente</value>
   </data>
   <data name="filter_due" xml:space="preserve">
-    <value>Vencimiento</value>
+    <value>Vence</value>
   </data>
   <data name="filter_due_none" xml:space="preserve">
     <value>Sin fecha límite</value>
@@ -77,7 +77,7 @@
     <value>En una lista</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>Fuera de toda lista</value>
+    <value>Sin lista</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>En una lista pública</value>
@@ -86,7 +86,7 @@
     <value>Prioridad</value>
   </data>
   <data name="filter_repeat" xml:space="preserve">
-    <value>Repetición</value>
+    <value>Repetir</value>
   </data>
   <data name="filter_repeat_never" xml:space="preserve">
     <value>No se repite</value>
@@ -155,7 +155,7 @@
     <value>5 minutos antes</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>A la hora de vencimiento</value>
+    <value>A la hora límite</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
     <value>1 día antes</value>
@@ -224,19 +224,19 @@
     <value>Personalizado</value>
   </data>
   <data name="repeating_daily" xml:space="preserve">
-    <value>Diariamente</value>
+    <value>Diario</value>
   </data>
   <data name="repeating_monthly" xml:space="preserve">
-    <value>Mensualmente</value>
+    <value>Mensual</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
     <value>Nunca</value>
   </data>
   <data name="repeating_weekly" xml:space="preserve">
-    <value>Semanalmente</value>
+    <value>Semanal</value>
   </data>
   <data name="repeating_yearly" xml:space="preserve">
-    <value>Anualmente</value>
+    <value>Anual</value>
   </data>
   <data name="smart_layout_list" xml:space="preserve">
     <value>Lista</value>

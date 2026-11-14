@@ -17,7 +17,7 @@
     <value>任意</value>
   </data>
   <data name="filter_assigned_by" xml:space="preserve">
-    <value>指派人</value>
+    <value>分配者</value>
   </data>
   <data name="filter_assigned_by_me" xml:space="preserve">
     <value>我</value>
@@ -53,7 +53,7 @@
     <value>最近完成</value>
   </data>
   <data name="filter_due" xml:space="preserve">
-    <value>到期</value>
+    <value>截止</value>
   </data>
   <data name="filter_due_none" xml:space="preserve">
     <value>无截止日期</value>
@@ -77,7 +77,7 @@
     <value>在列表中</value>
   </data>
   <data name="filter_lists_not_in_a_list" xml:space="preserve">
-    <value>不在列表中</value>
+    <value>不在任何列表中</value>
   </data>
   <data name="filter_lists_public" xml:space="preserve">
     <value>在公开列表中</value>
@@ -143,31 +143,31 @@
     <value>无</value>
   </data>
   <data name="reminder_15_minutes_before" xml:space="preserve">
-    <value>提前 15 分钟</value>
+    <value>15 分钟前</value>
   </data>
   <data name="reminder_2_hours_before" xml:space="preserve">
-    <value>提前 2 小时</value>
+    <value>提前2小时</value>
   </data>
   <data name="reminder_30_minutes_before" xml:space="preserve">
-    <value>提前 30 分钟</value>
+    <value>30 分钟前</value>
   </data>
   <data name="reminder_5_minutes_before" xml:space="preserve">
-    <value>提前 5 分钟</value>
+    <value>5 分钟前</value>
   </data>
   <data name="reminder_at_due_time" xml:space="preserve">
-    <value>到期时</value>
+    <value>截止时</value>
   </data>
   <data name="reminder_day_before" xml:space="preserve">
-    <value>提前 1 天</value>
+    <value>1 天前</value>
   </data>
   <data name="reminder_hour_before" xml:space="preserve">
-    <value>提前 1 小时</value>
+    <value>1 小时前</value>
   </data>
   <data name="reminder_none" xml:space="preserve">
     <value>无提醒</value>
   </data>
   <data name="reminder_week_before" xml:space="preserve">
-    <value>提前 1 周</value>
+    <value>1 周前</value>
   </data>
   <data name="repeat_custom" xml:space="preserve">
     <value>自定义</value>
@@ -230,7 +230,7 @@
     <value>每月</value>
   </data>
   <data name="repeating_one_time_only" xml:space="preserve">
-    <value>从不</value>
+    <value>永不</value>
   </data>
   <data name="repeating_weekly" xml:space="preserve">
     <value>每周</value>

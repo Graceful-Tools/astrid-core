@@ -3,7 +3,7 @@
 <resources>
     <string name="defaults_all_day">하루 종일</string>
     <string name="filter_any">모두</string>
-    <string name="filter_assigned_by">할당한 사람</string>
+    <string name="filter_assigned_by">할당자</string>
     <string name="filter_assigned_by_me">나</string>
     <string name="filter_assigned_by_someone_else">다른 사람</string>
     <string name="filter_assignee">담당자</string>
@@ -14,7 +14,7 @@
     <string name="filter_completion_all">모두 표시</string>
     <string name="filter_completion_completed">완료된 것만</string>
     <string name="filter_completion_incomplete">숨기기</string>
-    <string name="filter_completion_recent">최근 완료됨</string>
+    <string name="filter_completion_recent">최근 완료</string>
     <string name="filter_due">기한</string>
     <string name="filter_due_none">마감일 없음</string>
     <string name="filter_due_overdue">기한 초과</string>
@@ -43,17 +43,17 @@
     <string name="picker_tomorrow">내일</string>
     <string name="priority_high">높음</string>
     <string name="priority_low">낮음</string>
-    <string name="priority_medium">보통</string>
+    <string name="priority_medium">중간</string>
     <string name="priority_none">없음</string>
     <string name="reminder_15_minutes_before">15분 전</string>
     <string name="reminder_2_hours_before">2시간 전</string>
     <string name="reminder_30_minutes_before">30분 전</string>
     <string name="reminder_5_minutes_before">5분 전</string>
-    <string name="reminder_at_due_time">기한 시각에</string>
-    <string name="reminder_day_before">하루 전</string>
+    <string name="reminder_at_due_time">마감 시간</string>
+    <string name="reminder_day_before">1일 전</string>
     <string name="reminder_hour_before">1시간 전</string>
     <string name="reminder_none">알림 없음</string>
-    <string name="reminder_week_before">일주일 전</string>
+    <string name="reminder_week_before">1주일 전</string>
     <string name="repeat_custom">사용자 지정</string>
     <string name="repeat_daily">매일</string>
     <string name="repeat_ends_after">(%1$sx)</string>
@@ -85,10 +85,10 @@
     <string name="smart_offset_1_week">1주</string>
     <string name="smart_offset_3_days">3일</string>
     <string name="smart_offset_none">마감일 없음</string>
-    <string name="smart_subtasks_indented">목록에서 들여쓰기</string>
+    <string name="smart_subtasks_indented">목록에 들여쓰기로 표시</string>
     <string name="smart_subtasks_under_parent">상위 작업 안에서만</string>
     <string name="smart_time_09_00">오전 9:00</string>
-    <string name="smart_time_12_00">오후 12:00(정오)</string>
+    <string name="smart_time_12_00">오후 12:00 (정오)</string>
     <string name="smart_time_17_00">오후 5:00</string>
     <string name="smart_time_20_00">오후 8:00</string>
     <string name="sort">정렬 기준</string>

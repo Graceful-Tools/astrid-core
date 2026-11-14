@@ -116,21 +116,40 @@ paths against a fixture.
 
 `scripts/seed-strings.mjs` wrote the first version of this catalog, and can be re-run. It joins
 what already exists rather than inventing anything: the core key's English (astrid-windows'
-`Strings.cs` fallback table, the only place it was written down), then the web key that says the
-same English, then that key's twelve translations.
+`Strings.cs` fallback table, the only place it was written down), then whatever the other catalogs
+say for that English in the other eleven languages.
 
-`provenance.json` records which of three kinds each key's translations are:
+Each language is filled from the best evidence there is for it, in this order:
 
-- **harvested** — from astrid-web's twelve locales, or from astrid-windows' German `.resw`, which
-  is a translation of these very keys;
-- **authored** — written for this catalog, in `scripts/authored-translations.json`, because no
-  reachable catalog carries the key. **These want a native speaker's pass.** They are kept as a
-  committed input rather than only in the output, so a correction survives a re-run of the seeder;
-- **englishOnly** — neither. Nothing is in this state today.
+1. **astrid-windows' German `.resw`**, a translation of these very keys;
+2. **astrid-ios's `Localizable.strings` under the same key**, but only while iOS's English says the
+   same words: iOS reuses some of these names for other text (its `picker.morning` is
+   "Morning (9 AM)");
+3. **astrid-web's key of the same name, or the web key whose English says the same words**;
+4. **the iOS key whose English says the same words**, or one of the few listed in the seeder's
+   `IOS_ALIASES`, which say the same thing in other English ("1 hour before" for
+   `reminder.hour_before`);
+5. **a translation written for this catalog**, in `scripts/authored-translations.json`;
+6. English.
 
-iOS's `Localizable.strings` is **not** a source yet: it is 1,421 keys in twelve languages and by
-far the largest body of translation the product has, but it lives in astrid-ios. Harvesting the
-420 strings it shares with web is the next tranche, and it belongs to a task on that board.
+iOS's printf placeholders (`%d`, `%2$@`) are read **by their index** into the key's declared
+arguments, so a translation that reorders them keeps them straight. A value iOS has left in
+English never outranks a real translation lower down.
+
+`provenance.json` records which of three kinds each key's translations are, **from where its
+values actually came** rather than from which files mention it:
+
+- **harvested**: every language rests on a shipped catalog (web, iOS or Windows);
+- **authored**: at least one language still rests on `scripts/authored-translations.json`.
+  **These want a native speaker's pass.** They are kept as a committed input rather than only in
+  the output, so a correction survives a re-run of the seeder. A re-run **prunes** each authored
+  value a shipped catalog now supplies, so that file holds only words that ship;
+- **englishOnly**: no translation at all. Nothing is in this state today.
+
+Tranche 2 (AITD-660) added iOS as a source, which took the authored keys from 62 to 32. The 420
+strings iOS and web both carry under different names, none of which the core emits, are not in
+this catalog: putting them here changes what the catalog is (see *The keys*), and that is a
+separate decision.
 
 ## Adoption
 
