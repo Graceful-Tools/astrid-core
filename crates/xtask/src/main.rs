@@ -485,7 +485,7 @@ enum Manifest {
         found: String,
     },
     /// No comparison was possible, and why. **Never a failure.** CI without
-    /// `CONSUMER_PINS_TOKEN` cannot clone the three private repositories, and neither can a fork's
+    /// `CONSUMER_PINS_TOKEN` cannot clone the five private repositories, and neither can a fork's
     /// pull request — failing there would make every outside contribution red for a reason the
     /// contributor cannot fix.
     Unread(String),
@@ -1201,7 +1201,7 @@ uniffi = { git = \"https://github.com/mozilla/uniffi-rs.git\", rev = \"111111111
         );
     }
 
-    /// **An absent checkout is UNCHECKED, never a failure.** CI holds the three private
+    /// **An absent checkout is UNCHECKED, never a failure.** CI holds the five private
     /// repositories only when `CONSUMER_PINS_TOKEN` is set, and a fork's pull request gets no
     /// secrets at all — so failing here would turn every outside contribution red for a reason the
     /// contributor cannot fix, and the check would be worse than the gap it closed.

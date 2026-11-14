@@ -230,6 +230,22 @@ jobs:
     env:
       HAS_PINS_TOKEN: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
     steps:
+      # `HAS_PINS_TOKEN` decides whether five of the six checkouts happen at all, and until now it
+      # was read by the `if:`s and never said out loud. An absent or expired secret then looks
+      # exactly like a healthy run — five rows reported unchecked, job green — and the one person
+      # who can fix it is never told. Nobody outside this repository's settings can tell the two
+      # states apart either, which is how this workflow came to assert the secret exists while
+      # task fd7cf5c6 asserted it does not. One line in every run's log settles it, for a
+      # maintainer and for a fork's contributor wondering why five rows went unchecked.
+      - name: Say whether the pins token is set
+        run: |
+          if [ "$HAS_PINS_TOKEN" = 'true' ]; then
+            echo "CONSUMER_PINS_TOKEN is set: the five private checkouts below were attempted."
+            echo "A row still reported unchecked is one this token cannot reach."
+          else
+            echo "::warning title=CONSUMER_PINS_TOKEN is not set::The five private consumer checkouts are skipped, so their rows are reported unchecked rather than compared. This is expected on a fork's pull request, which gets no secrets at all. On a run in Graceful-Tools/astrid-core it means the secret is missing or expired - see CONSUMERS.md, 'What a comparison needs, and when it is skipped'."
+          fi
+
       # The whole history: `merge-base --is-ancestor` cannot be answered from a shallow clone, and
       # answering it wrong would fail every pin at once.
       - uses: actions/checkout@v4
