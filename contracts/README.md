@@ -82,6 +82,8 @@ cargo xtask check-core-contracts   # fail if stale; `cargo test --workspace` che
 - `cargo xtask check-contracts` skips the core-owned names (`core_contracts::CORE_OWNED`): web's
   copy follows the revision web pins, so a newer one here is web being behind, which web's own
   check reports.
+- `repeat-summary-l10n.json` is core-owned too, but written by the ignored test in
+  `crates/astrid-rules/tests/repeat_summary_l10n.rs` rather than by `gen-core-contracts`.
 - `crates/astrid-rules/tests/waiting_contract.rs` and
   `crates/astrid-rules/tests/list_default_picks_contract.rs` replay every case through `run_json`.
 

@@ -16,8 +16,14 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 /// The fixtures this repository generates, which `check-contracts` does not expect astrid-web to
-/// generate.
-pub const CORE_OWNED: &[&str] = &["waiting.json", "list-default-picks.json"];
+/// generate. Most come from [`generate_all`]; `repeat-summary-l10n.json` is written by the ignored
+/// `write_the_fixture_3564db06` test in `crates/astrid-rules/tests/repeat_summary_l10n.rs`
+/// (task 3564db06), because the renderer it needs lives in that test.
+pub const CORE_OWNED: &[&str] = &[
+    "waiting.json",
+    "list-default-picks.json",
+    "repeat-summary-l10n.json",
+];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
 
@@ -931,6 +937,22 @@ pub fn check_all(root: &Path) -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every fixture generated in this repository is listed as core-owned, or `check-contracts`
+    /// reports it as ORPHANED because astrid-web does not generate it (red on main since aea2d63).
+    #[test]
+    fn every_fixture_core_generates_is_core_owned() {
+        for (name, _) in generate_all().expect("every case answers as expected") {
+            assert!(
+                CORE_OWNED.contains(&name),
+                "{name} is generated here but not in CORE_OWNED"
+            );
+        }
+        assert!(
+            CORE_OWNED.contains(&"repeat-summary-l10n.json"),
+            "repeat-summary-l10n.json is written by astrid-rules' repeat_summary_l10n test, not web"
+        );
+    }
 
     /// The committed core-first fixtures are what the rules answer today — so `cargo test` fails
     /// on a rule change that was not regenerated, without anyone remembering a second command.
