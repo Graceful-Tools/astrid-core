@@ -347,4 +347,23 @@ allow-git = []
                 .ends_with(&format!("deny.{}.toml", consumer.repo)));
         }
     }
+
+    /// AITD-665. astrid-ios and astrid-android build their bindings with uniffi_bindgen, which
+    /// reaches the unmaintained `basic-toml`. Each carried RUSTSEC-2026-0374 in its hand copy; the
+    /// first generated copy dropped it, and their `cargo deny check advisories` failed. The
+    /// ignore lives in the shared source now, and this keeps it reaching the two that need it.
+    #[test]
+    fn the_bindgen_consumers_keep_the_basic_toml_ignore_aitd665() {
+        for repo in ["astrid-ios", "astrid-android"] {
+            let path = format!(
+                "{}/../../supply-chain/deny.{repo}.toml",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let copy = std::fs::read_to_string(&path).expect("a generated copy");
+            assert!(
+                copy.contains("{ id = \"RUSTSEC-2026-0374\""),
+                "{repo}'s deny.toml no longer ignores basic-toml, which its bindgen reaches"
+            );
+        }
+    }
 }
