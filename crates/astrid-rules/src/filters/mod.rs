@@ -44,20 +44,33 @@ pub fn filter_refs<'a>(
 ) -> Vec<&'a Task> {
     tasks
         .iter()
-        .filter(|task| {
-            // Completion first: it is the one that hides most of what it hides, and every other
-            // filter is cheaper to skip than to run.
-            if !shown_by_completion(task, list, now, offset) {
-                return false;
-            }
-            matches_priority(task, list.filter_priority.as_deref())
-                && matches_due_date(task, list.filter_due_date.as_deref(), now, offset)
-                && matches_assignee(task, list.filter_assignee.as_deref(), current_user_id)
-                && matches_repeating(task, list.filter_repeating.as_deref())
-                && matches_assigned_by(task, list.filter_assigned_by.as_deref(), current_user_id)
-                && matches_in_lists(task, list.filter_in_lists.as_deref())
-        })
+        .filter(|task| keeps(task, list, current_user_id, now, offset))
         .collect()
+}
+
+/// Whether every saved filter on `list` keeps this one task — [`filter_refs`] for a single task.
+///
+/// Split out so a caller that already holds references, rather than a `&[Task]` it may sort in
+/// place, filters without first copying them: [`crate::rows::assemble::select`] sorts into
+/// `Vec<&Task>` before anything else runs, and had no way to apply the saved filters to it.
+pub fn keeps(
+    task: &Task,
+    list: &TaskList,
+    current_user_id: Option<&str>,
+    now: DateTime<Utc>,
+    offset: FixedOffset,
+) -> bool {
+    // Completion first: it is the one that hides most of what it hides, and every other
+    // filter is cheaper to skip than to run.
+    if !shown_by_completion(task, list, now, offset) {
+        return false;
+    }
+    matches_priority(task, list.filter_priority.as_deref())
+        && matches_due_date(task, list.filter_due_date.as_deref(), now, offset)
+        && matches_assignee(task, list.filter_assignee.as_deref(), current_user_id)
+        && matches_repeating(task, list.filter_repeating.as_deref())
+        && matches_assigned_by(task, list.filter_assigned_by.as_deref(), current_user_id)
+        && matches_in_lists(task, list.filter_in_lists.as_deref())
 }
 
 /// Whether `list`'s completion filter — with its recently-completed window — keeps `task`.

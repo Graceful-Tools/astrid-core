@@ -20,9 +20,8 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use astrid_rules::filters::my_tasks::{filter, Preferences};
 use astrid_rules::model::{date, Task};
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/my-tasks.json");
@@ -30,10 +29,6 @@ const FIXTURE: &str = include_str!("../../../contracts/fixtures/my-tasks.json");
 struct Fixture {
     raw: Value,
     tasks: BTreeMap<String, Task>,
-}
-
-fn utc() -> FixedOffset {
-    FixedOffset::east_opt(0).expect("UTC")
 }
 
 /// The fixture pins no clock, because nothing it varies depends on one. Any instant will do.
@@ -60,22 +55,31 @@ fn load() -> Fixture {
 /// The whole table goes in and the answer is membership, rather than passing the one task: that is
 /// how the shell calls it, and it is the only way a rule that looked at a task's neighbours could
 /// be caught.
+///
+/// Through the stateless door (task `c2109ff8`): My Tasks is the view the app opens on, and until
+/// now the only client that could ask for it was one that links Rust.
 fn answer(f: &Fixture, case: &Value, now: DateTime<Utc>) -> bool {
-    let preferences = Preferences {
-        filter_priority: serde_json::from_value(case["filterPriority"].clone())
-            .expect("a priority list"),
-        filter_assignee: serde_json::from_value(case["filterAssignee"].clone())
-            .expect("an assignee list"),
-        filter_due_date: "all".into(),
-        filter_completion: "all".into(),
-        ..Default::default()
-    };
-    let table: Vec<Task> = f.tasks.values().cloned().collect();
+    let table: Vec<&Task> = f.tasks.values().collect();
     let wanted = case["task"].as_str().expect("a task id");
-
-    filter(&table, case["reader"].as_str(), &preferences, now, utc())
+    let answered = common::ask(serde_json::json!({
+        "kind": "rows",
+        "now": date::format(now),
+        "list": { "id": astrid_rules::filters::my_tasks::VIRTUAL_ID },
+        "myTasks": {
+            "filterPriority": case["filterPriority"],
+            "filterAssignee": case["filterAssignee"],
+            "filterDueDate": "all",
+            "filterCompletion": "all",
+        },
+        "currentUserId": case["reader"],
+        "tasks": table.iter().map(|task| serde_json::to_value(task).expect("a task")).collect::<Vec<_>>(),
+        "idsOnly": true,
+    }));
+    answered["ids"]
+        .as_array()
+        .expect("ids")
         .iter()
-        .any(|task| task.id == wanted)
+        .any(|id| id.as_str() == Some(wanted))
 }
 
 #[test]

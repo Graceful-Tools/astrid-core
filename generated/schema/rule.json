@@ -331,6 +331,41 @@
       },
       "type": "object"
     },
+    "LinkContext": {
+      "description": "What the reader can see, which is what decides whether a reference becomes a link.\n\nDeserialised because the stateless door takes one (task `c2109ff8`): the VS Code extension\nand web both render task text and both need the same answer about which references link.",
+      "properties": {
+        "hidden": {
+          "default": [],
+          "description": "Individual ids known to be hidden from the reader.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keys": {
+          "default": [],
+          "description": "The project keys the reader can see. Only these link.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "origin": {
+          "default": "",
+          "description": "The reader's server — the App's `Config.base_url`, the web page's own origin — which a\nrelative link resolves against when the text is rendered (`/t/<id>` becomes\n`<origin>/t/<id>`). Passed in, never named here, so a partner build links to the partner's\nsite (AWTD-1630). Empty leaves the link relative.",
+          "type": "string"
+        },
+        "projectKey": {
+          "default": null,
+          "description": "The project whose task or chat this text belongs to. `#N` means this project's key, and\noutside a project it is plain text — a number with a hash in front of it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ListAccess": {
       "description": "The part of a list that decides access.\n\nA subset of the wire shape rather than the whole list: keeping it small means a caller cannot\naccidentally make a permission decision depend on the list's colour, and it can be built from\nany payload that carries these fields.",
       "properties": {
@@ -690,6 +725,48 @@
           "type": "object"
         }
       ]
+    },
+    "Preferences": {
+      "description": "What My Tasks is filtered and sorted by, for this account, on every device.\n\nHeld by the account rather than the machine, which is the whole reason this exists as its own\nendpoint: filters set on a laptop are the filters on the desktop.",
+      "properties": {
+        "filterAssignee": {
+          "default": [],
+          "description": "Carried so a write keeps what another client stored; never applied — iOS's My Tasks does\nnot read it, and its scope already is \"assigned to me\" (D25).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filterCompletion": {
+          "default": "default",
+          "type": "string"
+        },
+        "filterDueDate": {
+          "default": "all",
+          "type": "string"
+        },
+        "filterPriority": {
+          "default": [],
+          "description": "Empty means every priority — see the module note.",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "manualSortOrder": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sortBy": {
+          "default": "auto",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "Priority": {
       "description": "How urgent, 0-3.\n\n**Decoded leniently.** The server's schema puts no cap on `priority`, and two production tasks\nwere observed carrying `4`. Swift's default enum decode threw on those, which failed the decode\nof the WHOLE tasks array and silently broke sync for that account. An unknown value reads as\n[`Priority::None`] so the task stays usable.",
@@ -2856,6 +2933,261 @@
       "required": [
         "kind",
         "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Every row a list draws - [`crate::rows::assemble`]. Filter, sort, splice, window, project,\nin that order, as one answer (task `c2109ff8`).\n\nThe order is the rule. Four contracts run in sequence and a client that ran them in its\nown order is four chances to show a different list from web, which is why this is one\nrequest rather than four. The tasks come in because this door holds nothing: a client that\nhas its own cache hands over the candidates, and a real list hands over its members while\na virtual one hands over everything the account holds.",
+      "properties": {
+        "currentUserId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayMode": {
+          "default": null,
+          "description": "`list` or `project`; anything else reads as `list`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idsOnly": {
+          "default": false,
+          "description": "Ids and counts only, no rows - what a caller that already holds the tasks wants.",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "rows",
+          "type": "string"
+        },
+        "limit": {
+          "default": null,
+          "description": "How many rows; all of them when absent.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The list's saved settings - filters, sort, manual order, `showSubtasks`. Ignored when\n`myTasks` is set, whose settings belong to the account, and so optional: a My Tasks\nrequest has no list to send."
+        },
+        "lists": {
+          "default": [],
+          "description": "Every list, for the chips. Only the ones a task is in are read.",
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "myTasks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preferences"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Present when this is My Tasks, whose scope (\"assigned to me\") is not a list filter."
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Where the window starts.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "subtaskDisplay": {
+          "default": null,
+          "description": "The account's half of the subtask rule - `insideParentOnly` and the rest.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subtasks": {
+          "default": [],
+          "description": "Every cached subtask, wherever it is filed. Also what the subtask-count badge counts,\nso a caller that wants counts sends them even with nothing indented.",
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": "array"
+        },
+        "surface": {
+          "default": null,
+          "description": "`listRow`, `boardCard` or `detail`; anything else reads as `listRow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tasks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": "array"
+        },
+        "users": {
+          "default": [],
+          "description": "Everyone the rows might name, for the assignee.",
+          "items": {
+            "$ref": "#/$defs/User"
+          },
+          "type": "array"
+        },
+        "utcOffsetMinutes": {
+          "default": 0,
+          "description": "The person's offset from UTC now, in minutes.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "What a hand-arranged order becomes once the list it names has moved on -\n[`crate::manual_order::reconcile`]. Asked on every drop, by a client that holds the list.",
+      "properties": {
+        "inListByCreation": {
+          "default": [],
+          "description": "Everything in the list now, oldest first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "manualOrder",
+          "type": "string"
+        },
+        "requested": {
+          "default": [],
+          "description": "The order as the person left it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "When a snoozed reminder comes back - [`crate::reminders::snooze_until`].",
+      "properties": {
+        "kind": {
+          "const": "reminderSnooze",
+          "type": "string"
+        },
+        "minutes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "now",
+        "minutes"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The whole command palette for a query - [`crate::palette::search`]: commands, lists and\ntasks, best first. [`Rule::PaletteRank`] is the scorer alone, for a palette that keeps its\nown rows.",
+      "properties": {
+        "kind": {
+          "const": "palette",
+          "type": "string"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "query": {
+          "type": "string"
+        },
+        "tasks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "query"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Every task reference in a text that the reader could follow -\n[`crate::identifier::find_links`].",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/LinkContext"
+        },
+        "kind": {
+          "const": "identifierLinks",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].\n\nA read normalises: anything a newer build wrote reads as the default rather than as an\nerror, because a value this build has not heard of must not leave somebody with an app\nthat will not draw.",
+      "properties": {
+        "kind": {
+          "const": "theme",
+          "type": "string"
+        },
+        "stored": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
       ],
       "type": "object"
     }

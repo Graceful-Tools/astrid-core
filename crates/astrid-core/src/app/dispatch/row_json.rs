@@ -89,7 +89,7 @@ pub(super) fn rows_for_list(
     // My Tasks is not in the list collection — it is the view the app opens on, and its filters
     // belong to the account rather than to a list row. Everything after this is the same pipeline.
     let my_tasks = list_id == crate::filters::my_tasks::VIRTUAL_ID;
-    let preferences = match (my_tasks, inputs.my_tasks) {
+    let mut preferences = match (my_tasks, inputs.my_tasks) {
         (false, _) => None,
         (true, Some(held)) => Some(held),
         (true, None) => match app.context.account().my_tasks_preferences() {
@@ -98,16 +98,12 @@ pub(super) fn rows_for_list(
         },
     };
     let mut list = match (&preferences, inputs.list) {
-        // A shape rather than a row: the sort setting is read off it below, the same as any
-        // list's, and the completion setting decides which subtasks show.
-        (Some(preferences), _) => {
-            let mut shape = crate::model::TaskList::new(crate::filters::my_tasks::VIRTUAL_ID, "");
-            shape.is_virtual = Some(true);
-            shape.filter_completion = Some(preferences.filter_completion.clone());
-            shape.sort_by = Some(preferences.sort_by.clone());
-            shape.manual_sort_order = Some(preferences.manual_sort_order.clone());
-            shape
-        }
+        // The shape is derived by the pipeline from the preferences, so nothing is built here:
+        // `rows::assemble::select` reads the sort setting off it, the same as any list's, and the
+        // completion setting decides which subtasks show.
+        (Some(_), _) => crate::filters::my_tasks::shape(
+            preferences.as_ref().expect("the preferences just matched"),
+        ),
         (None, Some(held)) => held,
         (None, None) => match app.store.list(list_id) {
             Ok(Some(list)) => list,
@@ -115,8 +111,13 @@ pub(super) fn rows_for_list(
             Err(error) => return Response::failed(error.into()),
         },
     };
+    // A sort chosen for this view. For My Tasks the setting IS a preference, so it goes there —
+    // the pipeline derives the shape from the preferences and would otherwise overwrite it.
     if let Some(sort_by) = inputs.sort_by {
-        list.sort_by = Some(sort_by);
+        match &mut preferences {
+            Some(preferences) => preferences.sort_by = sort_by,
+            None => list.sort_by = Some(sort_by),
+        }
     }
     // A list that has never been given a sort stays unset here: `filters::sort_by_setting` and
     // the answer's `sortBy` both read the absence as auto, as web does (CONTRACTS D40).
@@ -134,150 +135,74 @@ pub(super) fn rows_for_list(
         Some(held) => Ok(Some(held)),
         None => app.context.account().current_user_id(),
     };
-    let (mut tasks, current_user_id) = match (source, current_user_id) {
+    let (tasks, current_user_id) = match (source, current_user_id) {
         (Ok(tasks), Ok(user)) => (tasks, user),
         (Err(error), _) => return Response::failed(error.into()),
         (_, Err(error)) => return Response::failed(error.into()),
     };
-    tasks.sort_by(filters::display_order);
-
-    // Borrowed the whole way down. A list of ten thousand is read once and then referred to: the
-    // owned versions of these would copy every task twice per refresh, and a refresh happens every
-    // time anybody touches anything in the list.
-    let filtered = match &preferences {
-        Some(preferences) => crate::filters::my_tasks::filter(
-            &tasks,
-            current_user_id.as_deref(),
-            preferences,
-            now,
-            offset_from_utc,
-        ),
-        None => filters::filter_refs(
-            &tasks,
-            &list,
-            current_user_id.as_deref(),
-            now,
-            offset_from_utc,
-        ),
-    };
-
-    // Subtasks are spliced under their parents, so the top-level set is what gets sorted.
-    let mut top_level: Vec<&crate::model::Task> = filtered
-        .iter()
-        .filter(|task| task.parent_task_id.is_none())
-        .copied()
-        .collect();
-    filters::sort_by_setting(
-        &mut top_level,
-        list.sort_by.as_deref(),
-        list.manual_sort_order.as_deref(),
-    );
 
     // The account's half of the rule — "inside parent task only" — beside the list's (task
     // 6ac2639a). See `filters::subtasks` for which one wins.
     let subtask_display = inputs
         .subtask_display
         .unwrap_or_else(|| app.context.account().smart_tasks().subtask_display);
-    let indented = filters::subtasks::should_splice(list.show_subtasks, Some(&subtask_display));
     // Every cached subtask, wherever it is filed: iOS splices from its whole store, so a subtask
-    // that was never added to its parent's list still shows under it.
-    // Read for the projection too: a row's subtask count is every subtask it has.
-    let mut subtasks = match indented || !inputs.ids_only {
+    // that was never added to its parent's list still shows under it. Read for the projection
+    // too — a row's subtask count is every subtask it has — so only an ids-only answer with
+    // nothing indented can skip the read.
+    let indented = filters::subtasks::should_splice(list.show_subtasks, Some(&subtask_display));
+    let subtasks = match indented || !inputs.ids_only {
         true => match app.store.subtasks() {
             Ok(subtasks) => subtasks,
             Err(error) => return Response::failed(error.into()),
         },
         false => Vec::new(),
     };
-    subtasks.sort_by(filters::display_order);
-    let ordered = filters::subtasks::splice_refs(&top_level, &subtasks, indented, |task| {
-        filters::shown_by_completion(task, &list, now, offset_from_utc)
-    });
 
-    // Only the window the shell asked for. A list of ten thousand crosses the boundary as the
-    // fifty rows on screen, which is what the M0 spike was worried about.
-    let start = offset.unwrap_or(0).min(ordered.len());
-    let end = limit
-        .map(|limit| (start + limit).min(ordered.len()))
-        .unwrap_or(ordered.len());
-    let window = &ordered[start..end];
-    let sort_by = list.sort_by.as_deref().unwrap_or("auto");
-
-    if inputs.ids_only {
-        return Response::ok(serde_json::json!({
-            "total": ordered.len(),
-            "offset": start,
-            "matched": filtered.len(),
-            "ids": window.iter().map(|task| task.id.as_str()).collect::<Vec<_>>(),
-            "sortBy": sort_by,
-        }));
-    }
-
-    let mut lists = match app.store.lists() {
-        Ok(lists) => lists,
-        Err(error) => return Response::failed(error.into()),
+    let (lists, users) = match inputs.ids_only {
+        true => (Vec::new(), Vec::new()),
+        false => {
+            let mut lists = match app.store.lists() {
+                Ok(lists) => lists,
+                Err(error) => return Response::failed(error.into()),
+            };
+            // A list handed in that this account does not hold — a featured public list — still
+            // decides which rows are someone else's, read-only, copy-only (AATD-46).
+            if !lists.iter().any(|held| held.id == list.id) {
+                lists.push(list.clone());
+            }
+            // Everyone the rows might name. Small: the assignees of the tasks in one list.
+            let users = tasks
+                .iter()
+                .filter_map(|task| task.assignee_id.as_deref())
+                .filter_map(|id| app.store.user(id).ok().flatten())
+                .collect::<Vec<_>>();
+            (lists, users)
+        }
     };
-    // A list handed in that this account does not hold — a featured public list — still decides
-    // which rows are someone else's, read-only, copy-only (AATD-46).
-    if !lists.iter().any(|held| held.id == list.id) {
-        lists.push(list.clone());
-    }
-    // Everyone the rows might name. Small: the assignees of the tasks in one list.
-    let users = tasks
-        .iter()
-        .filter_map(|task| task.assignee_id.as_deref())
-        .filter_map(|id| app.store.user(id).ok().flatten())
-        .collect::<Vec<_>>();
-    // Every task a row's parent chain can pass through: the list's and the subtasks, each once
-    // (a subtask filed in the list is in both). One copy, as before the subtasks were read.
-    let depths_index: std::collections::HashMap<String, crate::model::Task> = tasks
-        .iter()
-        .chain(subtasks.iter())
-        .map(|task| (task.id.clone(), task.clone()))
-        .collect();
-    let depths = window
-        .iter()
-        .map(|task| {
-            (
-                task.id.clone(),
-                filters::subtasks::depth_of(task, &depths_index),
-            )
-        })
-        .collect();
-    let counts = rows::subtask_counts(&subtasks);
 
-    let context = RowContext {
+    // Everything above this line is a fetch. The pipeline itself — filter, sort, splice, window,
+    // project — is `astrid_rules::rows::assemble`, which the stateless door runs too, so a client
+    // that cannot link Rust gets the same list rather than its own approximation of one
+    // (task c2109ff8).
+    let assembled = rows::assemble::assemble(&rows::assemble::Inputs {
+        list: &list,
+        my_tasks: preferences.as_ref(),
+        tasks: &tasks,
+        subtasks: &subtasks,
+        lists: &lists,
+        users: &users,
         current_user_id: current_user_id.as_deref(),
+        subtask_display: Some(&subtask_display),
         display_mode: resolved_display_mode(app, display_mode.as_deref()),
         surface: Command::surface(surface.as_deref()),
         now,
         offset: offset_from_utc,
-        lists: &lists,
-        users: &users,
-        depths: &depths,
-        subtask_counts: &counts,
-    };
-
-    // A virtual list always; a real one by the reader's right to add to it.
-    let can_add_tasks = list.is_virtual.unwrap_or(false)
-        || current_user_id.as_deref().is_some_and(|me| {
-            crate::permissions::can_edit_tasks(me, &crate::permissions::access_of(&list))
-        });
-    Response::ok(serde_json::json!({
-        // The total is what a virtualised list needs to size its scrollbar, and it is the count
-        // AFTER filtering — the number of rows there are to scroll through, not the number of
-        // tasks in the account.
-        "total": ordered.len(),
-        "offset": start,
-        // How many tasks the filters kept, subtasks included — the sidebar's number.
-        "matched": filtered.len(),
-        "rows": serialize_rows(&TaskRow::build_all(window, &context)),
-        // How the rows were sorted, so the shell knows whether a drag may rearrange them
-        // (task 7883f710): only an order made by hand survives a refresh.
-        "sortBy": sort_by,
-        // Whether the quick-add bar is offered here (iOS ListPermissions.canAddTasks, AATD-37).
-        "canAddTasks": can_add_tasks,
-    }))
+        window_offset: offset.unwrap_or(0),
+        limit,
+        ids_only: inputs.ids_only,
+    });
+    Response::ok(rows::json::answer(&assembled, inputs.ids_only))
 }
 
 /// How many tasks each list's saved filters keep (`Command::ListCounts`, AITD-460).
@@ -589,75 +514,18 @@ pub(super) fn reminder_triage_deck(app: &App, reminded_task_id: Option<&str>) ->
 
 /// Rows on the wire.
 ///
-/// Hand-written rather than derived so the field names are chosen for the shell that reads them
-/// and cannot drift when a Rust field is renamed for Rust reasons.
+/// The shape itself is [`rows::json`], in the rules crate, because it is a cross-client contract
+/// and a crate that needs SQLite and tokio is not where a contract web has to match can live
+/// (task `c2109ff8`). These three stay as the names the rest of this dispatch calls.
 pub(super) fn serialize_rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
-    rows.iter()
-        .map(|row| {
-            serde_json::json!({
-                "id": row.id,
-                "title": row.title,
-                "identifier": row.identifier,
-                "showsIdentifier": row.shows_identifier,
-                "offersCopyIdentifier": row.offers_copy_identifier,
-                "completed": row.completed,
-                "priority": row.priority.as_i64(),
-                "due": due_json(&row.due),
-                "dueAt": row.due_at.map(|at| serde_json::json!({
-                    "date": at.format("%Y-%m-%d").to_string(),
-                    "time": at.format("%H:%M").to_string(),
-                })),
-                "isOverdue": row.is_overdue,
-                "leading": leading_json(&row.leading),
-                "action": match row.action {
-                    rows::LeadingAction::Complete => "complete",
-                    rows::LeadingAction::OpenPicker => "openPicker",
-                    rows::LeadingAction::Copy => "copy",
-                },
-                "depth": row.depth,
-                "isPending": row.is_pending,
-                "isPrivate": row.is_private,
-                "isRepeating": row.is_repeating,
-                "hasDescription": row.has_description,
-                "commentCount": row.comment_count,
-                "attachmentCount": row.attachment_count,
-                "subtaskCount": row.subtask_count,
-                "listChips": row.list_chips.iter().map(|chip| serde_json::json!({
-                    "id": chip.id, "name": chip.name, "color": chip.color, "isLabel": chip.is_label,
-                    "glyph": chip.glyph.as_str()
-                })).collect::<Vec<_>>(),
-                "assignee": row.assignee,
-                "statusRole": row.status_role,
-                "isCanceled": row.is_canceled,
-                "syncMark": row.sync_mark,
-                "remote": row.remote_chip.as_ref().map(|(label, url)| serde_json::json!({ "label": label, "url": url })),
-            })
-        })
-        .collect()
+    rows::json::rows(rows)
 }
 
 /// A due label as a key plus its parts. The shell owns the words; see `crate::rows`.
 pub(super) fn due_json(due: &rows::DueLabel) -> serde_json::Value {
-    match due {
-        rows::DueLabel::None => serde_json::json!({ "key": "none" }),
-        rows::DueLabel::Yesterday => serde_json::json!({ "key": "yesterday" }),
-        rows::DueLabel::Today => serde_json::json!({ "key": "today" }),
-        rows::DueLabel::Tomorrow => serde_json::json!({ "key": "tomorrow" }),
-        rows::DueLabel::On { day, time } => serde_json::json!({
-            "key": "on",
-            "date": day.format("%Y-%m-%d").to_string(),
-            "time": time.map(|time| time.format("%H:%M").to_string()),
-        }),
-    }
+    rows::json::due(due)
 }
 
 pub(super) fn leading_json(leading: &rows::LeadingControl) -> serde_json::Value {
-    match leading {
-        rows::LeadingControl::Checkbox => serde_json::json!({ "kind": "checkbox" }),
-        rows::LeadingControl::Unassigned => serde_json::json!({ "kind": "unassigned" }),
-        rows::LeadingControl::Copy => serde_json::json!({ "kind": "copy" }),
-        rows::LeadingControl::Avatar(id) => {
-            serde_json::json!({ "kind": "avatar", "userId": id })
-        }
-    }
+    rows::json::leading(leading)
 }

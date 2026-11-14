@@ -7,9 +7,6 @@
 
 mod common;
 
-use astrid_rules::filters::sort_by_setting;
-use astrid_rules::manual_order::reconcile;
-use astrid_rules::model::Task;
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/manual-order.json");
@@ -23,18 +20,25 @@ fn strings(value: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Both halves through the stateless door (task `c2109ff8`), because both are asked by a client
+/// that does not link this crate: web reconciles on every drop, and the VS Code board draws the
+/// arranged order.
 fn answer(case: &Value) -> Vec<String> {
     if case["id"].as_str().unwrap().starts_with("reconcile/") {
-        reconcile(
-            &strings(&case["requested"]),
-            &strings(&case["inListByCreation"]),
-        )
+        strings(&common::ask(serde_json::json!({
+            "kind": "manualOrder",
+            "requested": case["requested"],
+            "inListByCreation": case["inListByCreation"],
+        })))
     } else {
-        let mut shown: Vec<Task> =
-            serde_json::from_value(case["tasks"].clone()).expect("tasks decode");
-        let order = strings(&case["manualOrder"]);
-        sort_by_setting(&mut shown, Some("manual"), Some(&order));
-        shown.into_iter().map(|t| t.id).collect()
+        let answered = common::ask(serde_json::json!({
+            "kind": "rows",
+            "now": "2026-10-17T12:00:00.000Z",
+            "list": { "id": "l", "sortBy": "manual", "manualSortOrder": case["manualOrder"] },
+            "tasks": case["tasks"],
+            "idsOnly": true,
+        }));
+        strings(&answered["ids"])
     }
 }
 

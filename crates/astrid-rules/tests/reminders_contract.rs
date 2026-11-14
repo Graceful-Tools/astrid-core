@@ -9,7 +9,7 @@
 mod common;
 
 use astrid_rules::model::date;
-use astrid_rules::reminders::{snooze_until, NOTIFICATION_SNOOZE_MINUTES, SNOOZE_CHOICES};
+use astrid_rules::reminders::{NOTIFICATION_SNOOZE_MINUTES, SNOOZE_CHOICES};
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/reminders.json");
@@ -32,7 +32,14 @@ fn every_snooze_comes_back_when_webs_does() {
         );
         let now = date::parse(case["now"].as_str().unwrap()).expect("now");
         let web = date::parse(case["scheduledFor"].as_str().unwrap()).expect("scheduledFor");
-        let ours = snooze_until(now, case["minutes"].as_i64().unwrap());
+        // Through the door, not through `reminders::snooze_until`: a snooze is rescheduled by
+        // the VS Code extension and by web, neither of which links this crate (task c2109ff8).
+        let answered = common::ask(serde_json::json!({
+            "kind": "reminderSnooze",
+            "now": date::format(now),
+            "minutes": case["minutes"],
+        }));
+        let ours = date::parse(answered.as_str().expect("an instant")).expect("snoozed until");
         if ours != web {
             failures.push(format!("{}: web {web}, core {ours}", case["id"]));
         }

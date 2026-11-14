@@ -13,10 +13,8 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use astrid_rules::filters::recently_completed::{should_show_completed, should_show_open};
-use astrid_rules::filters::{matches_due_date, sort_by_setting};
 use astrid_rules::model::{date, RecentlyCompletedWindow, Task};
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/filters.json");
@@ -26,12 +24,7 @@ struct Fixture {
     now: DateTime<Utc>,
     due_tasks: BTreeMap<String, Task>,
     completion_tasks: BTreeMap<String, Task>,
-    windows: BTreeMap<String, Option<RecentlyCompletedWindow>>,
     sort_tasks: Vec<Task>,
-}
-
-fn utc() -> FixedOffset {
-    FixedOffset::east_opt(0).expect("UTC")
 }
 
 fn table(value: &Value) -> BTreeMap<String, Task> {
@@ -48,51 +41,89 @@ fn table(value: &Value) -> BTreeMap<String, Task> {
 
 fn load() -> Fixture {
     let raw: Value = serde_json::from_str(FIXTURE).expect("the fixture parses");
+    // The windows travel to the door as the fixture's own JSON, so nothing here decodes them —
+    // but they must still BE decodable, or every completion case would quietly fall back to the
+    // default window and agree with web for the wrong reason.
+    for (name, window) in raw["windows"].as_object().expect("windows") {
+        serde_json::from_value::<Option<RecentlyCompletedWindow>>(window.clone())
+            .unwrap_or_else(|error| panic!("the window {name} does not decode: {error}"));
+    }
     Fixture {
         now: date::parse(raw["now"].as_str().unwrap()).expect("now"),
         due_tasks: table(&raw["dueTasks"]),
         completion_tasks: table(&raw["completionTasks"]),
-        windows: raw["windows"]
-            .as_object()
-            .unwrap()
-            .iter()
-            .map(|(name, w)| {
-                (
-                    name.clone(),
-                    serde_json::from_value(w.clone()).expect("a window decodes"),
-                )
-            })
-            .collect(),
         sort_tasks: serde_json::from_value(raw["sortTasks"].clone()).expect("sort tasks"),
         raw,
     }
 }
 
 /// The core's answer to one case, in the fixture's terms.
+///
+/// Through the stateless door (task `c2109ff8`), as one `rows` request per case, rather than by
+/// calling `matches_due_date` / `should_show_completed` / `sort_by_setting` directly. The door is
+/// what web and the VS Code extension can reach, and a fixture that only ever exercised the Rust
+/// functions could stay green while the door answered differently — or, as it did until this
+/// task, while the door could not answer at all.
+///
+/// Each case becomes a one-list request whose saved filters are the case's own, with the filters
+/// it does not vary neutralised: a `due/` case sets `filterCompletion: "all"` so a completed task
+/// in the due table is not hidden before its due date is ever consulted, and a `completion/` case
+/// leaves the due filter unset, which is "all".
 fn answer(f: &Fixture, case: &Value) -> Value {
     let id = case["id"].as_str().unwrap();
     if id.starts_with("due/") {
         let task = &f.due_tasks[case["task"].as_str().unwrap()];
-        let filter = case["filter"].as_str().unwrap();
-        Value::Bool(matches_due_date(task, Some(filter), f.now, utc()))
+        let shown = ids(
+            &f.now,
+            serde_json::json!({
+                "id": "l",
+                "filterDueDate": case["filter"],
+                "filterCompletion": "all",
+            }),
+            &[task],
+        );
+        Value::Bool(shown.iter().any(|kept| kept == &task.id))
     } else if id.starts_with("completion/") {
         let task = &f.completion_tasks[case["task"].as_str().unwrap()];
-        let mode = case["mode"].as_str();
         let now = date::parse(case["now"].as_str().unwrap()).expect("now");
-        let window = f.windows[case["window"].as_str().unwrap()].as_ref();
-        Value::Bool(if task.completed {
-            should_show_completed(mode, task.completed_at, task.updated_at, window, now, utc())
-        } else {
-            should_show_open(mode)
-        })
+        let shown = ids(
+            &now,
+            serde_json::json!({
+                "id": "l",
+                "filterCompletion": case["mode"],
+                "recentlyCompletedWindow": f.raw["windows"][case["window"].as_str().unwrap()],
+            }),
+            &[task],
+        );
+        Value::Bool(shown.iter().any(|kept| kept == &task.id))
     } else if id.starts_with("sort/") {
-        let mut tasks = f.sort_tasks.clone();
-        let order: Option<Vec<String>> = serde_json::from_value(case["manualOrder"].clone()).ok();
-        sort_by_setting(&mut tasks, case["sortBy"].as_str(), order.as_deref());
-        Value::from(tasks.into_iter().map(|t| t.id).collect::<Vec<_>>())
+        let tasks: Vec<&Task> = f.sort_tasks.iter().collect();
+        Value::from(ids(
+            &f.now,
+            serde_json::json!({
+                "id": "l",
+                "sortBy": case["sortBy"],
+                "manualSortOrder": case["manualOrder"],
+                "filterCompletion": "all",
+            }),
+            &tasks,
+        ))
     } else {
         panic!("unknown case kind {id}")
     }
+}
+
+/// One `rows` request: the list shape, the tasks, ids back. Zero offset throughout — the fixture
+/// is generated in UTC.
+fn ids(now: &DateTime<Utc>, list: Value, tasks: &[&Task]) -> Vec<String> {
+    let answered = common::ask(serde_json::json!({
+        "kind": "rows",
+        "now": date::format(*now),
+        "list": list,
+        "tasks": tasks.iter().map(|task| serde_json::to_value(task).expect("a task")).collect::<Vec<_>>(),
+        "idsOnly": true,
+    }));
+    serde_json::from_value(answered["ids"].clone()).expect("ids")
 }
 
 #[test]

@@ -91,24 +91,47 @@ pub fn filter<'a>(
     now: DateTime<Utc>,
     offset: FixedOffset,
 ) -> Vec<&'a Task> {
-    // The list's own filter fields, filled in from the preferences, so completion and due-date
-    // mean exactly what they mean everywhere else — including the recently-completed window and
-    // the undated-task rule in `docs/CONTRACTS.md` D7. Two implementations of "due this week" is
-    // two answers to the same question.
-    let mut shape = crate::model::TaskList::new(VIRTUAL_ID, "");
-    shape.filter_completion = Some(preferences.filter_completion.clone());
-    shape.filter_due_date = Some(preferences.filter_due_date.clone());
-
+    let shape = shape(preferences);
     super::filter_refs(tasks, &shape, current_user_id, now, offset)
         .into_iter()
-        .filter(|task| in_scope(task, current_user_id))
-        .filter(|task| {
-            preferences.filter_priority.is_empty()
-                || preferences
-                    .filter_priority
-                    .contains(&task.priority.as_i64())
-        })
+        .filter(|task| in_account_scope(task, current_user_id, preferences))
         .collect()
+}
+
+/// My Tasks as a list shape.
+///
+/// The list's own filter fields, filled in from the preferences, so completion and due-date mean
+/// exactly what they mean everywhere else — including the recently-completed window and the
+/// undated-task rule in `docs/CONTRACTS.md` D7. Two implementations of "due this week" is two
+/// answers to the same question.
+///
+/// The sort fields are here too, because My Tasks is sorted and arranged like any list and the
+/// row pipeline reads the setting off the shape. It was synthesised twice before this was one
+/// function — once for filtering, once for sorting — and the two copies did not carry the same
+/// fields (task `c2109ff8`). Nothing that filters reads `is_virtual` or the sort fields, and
+/// nothing that sorts reads the filters, so one shape serving both changes no answer.
+pub fn shape(preferences: &Preferences) -> crate::model::TaskList {
+    let mut shape = crate::model::TaskList::new(VIRTUAL_ID, "");
+    shape.is_virtual = Some(true);
+    shape.filter_completion = Some(preferences.filter_completion.clone());
+    shape.filter_due_date = Some(preferences.filter_due_date.clone());
+    shape.sort_by = Some(preferences.sort_by.clone());
+    shape.manual_sort_order = Some(preferences.manual_sort_order.clone());
+    shape
+}
+
+/// The half of My Tasks that is not a list filter: assigned to the reader (D25), and the priority
+/// picker, which is a list of priorities rather than the single value a list's filter holds.
+pub fn in_account_scope(
+    task: &Task,
+    current_user_id: Option<&str>,
+    preferences: &Preferences,
+) -> bool {
+    in_scope(task, current_user_id)
+        && (preferences.filter_priority.is_empty()
+            || preferences
+                .filter_priority
+                .contains(&task.priority.as_i64()))
 }
 
 /// Assigned to the reader — iOS's `task.assigneeId == currentUserId`.

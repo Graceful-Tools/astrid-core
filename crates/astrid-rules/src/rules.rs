@@ -15,7 +15,7 @@
 //! crate's models already decode leniently. A shell that keeps its own models hands them over as
 //! it would to the server; nothing is mirrored field by field across the boundary.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -382,6 +382,105 @@ pub enum Rule {
         /// The person's offset from UTC now, in minutes: which calendar day "today" is.
         #[serde(default)]
         utc_offset_minutes: i32,
+    },
+    /// Every row a list draws - [`crate::rows::assemble`]. Filter, sort, splice, window, project,
+    /// in that order, as one answer (task `c2109ff8`).
+    ///
+    /// The order is the rule. Four contracts run in sequence and a client that ran them in its
+    /// own order is four chances to show a different list from web, which is why this is one
+    /// request rather than four. The tasks come in because this door holds nothing: a client that
+    /// has its own cache hands over the candidates, and a real list hands over its members while
+    /// a virtual one hands over everything the account holds.
+    Rows {
+        /// The list's saved settings - filters, sort, manual order, `showSubtasks`. Ignored when
+        /// `myTasks` is set, whose settings belong to the account, and so optional: a My Tasks
+        /// request has no list to send.
+        #[serde(default)]
+        list: Option<Box<crate::model::TaskList>>,
+        /// Present when this is My Tasks, whose scope ("assigned to me") is not a list filter.
+        #[serde(default)]
+        my_tasks: Option<crate::filters::my_tasks::Preferences>,
+        #[serde(default)]
+        tasks: Vec<Task>,
+        /// Every cached subtask, wherever it is filed. Also what the subtask-count badge counts,
+        /// so a caller that wants counts sends them even with nothing indented.
+        #[serde(default)]
+        subtasks: Vec<Task>,
+        /// Every list, for the chips. Only the ones a task is in are read.
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        /// Everyone the rows might name, for the assignee.
+        #[serde(default)]
+        users: Vec<crate::model::User>,
+        #[serde(default)]
+        current_user_id: Option<String>,
+        /// The account's half of the subtask rule - `insideParentOnly` and the rest.
+        #[serde(default)]
+        subtask_display: Option<String>,
+        /// `list` or `project`; anything else reads as `list`.
+        #[serde(default)]
+        display_mode: Option<String>,
+        /// `listRow`, `boardCard` or `detail`; anything else reads as `listRow`.
+        #[serde(default)]
+        surface: Option<String>,
+        /// Where the window starts.
+        #[serde(default)]
+        offset: usize,
+        /// How many rows; all of them when absent.
+        #[serde(default)]
+        limit: Option<usize>,
+        /// Ids and counts only, no rows - what a caller that already holds the tasks wants.
+        #[serde(default)]
+        ids_only: bool,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+    },
+    /// What a hand-arranged order becomes once the list it names has moved on -
+    /// [`crate::manual_order::reconcile`]. Asked on every drop, by a client that holds the list.
+    ManualOrder {
+        /// The order as the person left it.
+        #[serde(default)]
+        requested: Vec<String>,
+        /// Everything in the list now, oldest first.
+        #[serde(default)]
+        in_list_by_creation: Vec<String>,
+    },
+    /// When a snoozed reminder comes back - [`crate::reminders::snooze_until`].
+    ReminderSnooze {
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        minutes: i64,
+    },
+    /// The whole command palette for a query - [`crate::palette::search`]: commands, lists and
+    /// tasks, best first. [`Rule::PaletteRank`] is the scorer alone, for a palette that keeps its
+    /// own rows.
+    Palette {
+        query: String,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        tasks: Vec<Task>,
+    },
+    /// Every task reference in a text that the reader could follow -
+    /// [`crate::identifier::find_links`].
+    IdentifierLinks {
+        text: String,
+        #[serde(default)]
+        context: crate::identifier::LinkContext,
+    },
+    /// Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].
+    ///
+    /// A read normalises: anything a newer build wrote reads as the default rather than as an
+    /// error, because a value this build has not heard of must not leave somebody with an app
+    /// that will not draw.
+    Theme {
+        #[serde(default)]
+        stored: Option<String>,
     },
 }
 
@@ -855,6 +954,75 @@ pub fn run(rule: Rule) -> Response {
             Response::ok(crate::capabilities::for_lists(&list_ids, &lists))
         }
         Rule::PaletteRank { query, titles } => Response::ok(crate::palette::rank(&query, &titles)),
+        Rule::Rows {
+            list,
+            my_tasks,
+            tasks,
+            subtasks,
+            lists,
+            users,
+            current_user_id,
+            subtask_display,
+            display_mode,
+            surface,
+            offset,
+            limit,
+            ids_only,
+            now,
+            utc_offset_minutes,
+        } => {
+            let Some(utc_offset) = utc_offset_minutes
+                .checked_mul(60)
+                .and_then(FixedOffset::east_opt)
+            else {
+                return Response::failed(Failure::bad_request(format!(
+                    "{utc_offset_minutes} minutes is not an offset from UTC"
+                )));
+            };
+            // A request with neither a list nor preferences is a list with no saved settings:
+            // every filter unset, sorted auto. Refusing it would make the commonest call - "lay
+            // these tasks out for me" - need a stanza of empty fields.
+            let unset = crate::model::TaskList::new("", "");
+            let assembled = crate::rows::assemble::assemble(&crate::rows::assemble::Inputs {
+                list: list.as_deref().unwrap_or(&unset),
+                my_tasks: my_tasks.as_ref(),
+                tasks: &tasks,
+                subtasks: &subtasks,
+                lists: &lists,
+                users: &users,
+                current_user_id: current_user_id.as_deref(),
+                subtask_display: subtask_display.as_deref(),
+                display_mode: crate::rows::DisplayMode::from_stored(display_mode.as_deref()),
+                surface: crate::rows::Surface::from_wire(surface.as_deref()),
+                now,
+                offset: utc_offset,
+                window_offset: offset,
+                limit,
+                ids_only,
+            });
+            Response::ok(crate::rows::json::answer(&assembled, ids_only))
+        }
+        Rule::ManualOrder {
+            requested,
+            in_list_by_creation,
+        } => Response::ok(crate::manual_order::reconcile(
+            &requested,
+            &in_list_by_creation,
+        )),
+        Rule::ReminderSnooze { now, minutes } => {
+            Response::ok(date::format(crate::reminders::snooze_until(now, minutes)))
+        }
+        Rule::Palette {
+            query,
+            lists,
+            tasks,
+        } => Response::ok(crate::palette::search(&query, &lists, &tasks)),
+        Rule::IdentifierLinks { text, context } => {
+            Response::ok(crate::identifier::find_links(&text, &context))
+        }
+        Rule::Theme { stored } => {
+            Response::ok(crate::theme::Theme::parse(stored.as_deref().unwrap_or_default()).wire())
+        }
         Rule::Shortcut {
             key,
             has_selection,
@@ -1756,5 +1924,155 @@ mod tests {
 
         let none = answer(json!({ "kind": "paletteRank", "query": "zzz", "titles": ["Today"] }));
         assert_eq!(none["value"], json!([]));
+    }
+
+    /// The whole list pipeline through the door, with rows rather than ids (task `c2109ff8`).
+    ///
+    /// The contract fixtures drive this rule with `idsOnly`, because what they assert is which
+    /// tasks are kept and in what order. Nothing there would notice if the projection half never
+    /// ran, so the row keys a shell reads are checked here instead.
+    #[test]
+    fn c2109ff8_rows_filters_sorts_splices_and_projects_in_one_answer() {
+        let request = json!({
+            "kind": "rows",
+            "now": "2026-10-17T12:00:00.000Z",
+            "list": { "id": "l", "sortBy": "priority", "showSubtasks": true },
+            "subtaskDisplay": "always",
+            "lists": [{ "id": "l", "name": "Home", "color": "#ff0000" }],
+            "tasks": [
+                { "id": "low", "title": "Low", "priority": 1, "listIds": ["l"] },
+                { "id": "high", "title": "High", "priority": 3, "listIds": ["l"] },
+                { "id": "done", "title": "Done", "completed": true, "listIds": ["l"] }
+            ],
+            "subtasks": [{ "id": "kid", "title": "Kid", "parentTaskId": "high", "listIds": ["l"] }],
+        });
+        let value = answer(request.clone())["value"].clone();
+
+        // Sorted by priority, the subtask spliced under its parent, the completed task gone by
+        // the default completion filter.
+        let ids: Vec<&str> = value["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row["id"].as_str().expect("an id"))
+            .collect();
+        assert_eq!(ids, ["high", "kid", "low"], "{value}");
+        assert_eq!(value["total"], 3);
+        assert_eq!(value["matched"], 2, "the completed task is filtered out");
+        assert_eq!(value["sortBy"], "priority");
+
+        // Projected, not just selected: the keys a shell draws from.
+        let parent = &value["rows"][0];
+        assert_eq!(parent["title"], "High");
+        assert_eq!(parent["depth"], 0);
+        assert_eq!(parent["subtaskCount"], 1);
+        assert_eq!(parent["leading"], json!({ "kind": "unassigned" }));
+        assert_eq!(parent["due"], json!({ "key": "none" }));
+        assert_eq!(parent["listChips"][0]["name"], "Home");
+        assert_eq!(value["rows"][1]["depth"], 1, "the subtask is indented");
+
+        // The same request with `idsOnly` is the same selection and no rows at all — the cheap
+        // answer must not be a different answer.
+        let mut cheap = request;
+        cheap["idsOnly"] = json!(true);
+        let cheap = answer(cheap)["value"].clone();
+        assert_eq!(cheap["ids"], json!(["high", "kid", "low"]));
+        assert_eq!(cheap["total"], 3);
+        assert!(cheap.get("rows").is_none(), "{cheap}");
+    }
+
+    /// A window is a window, not a filter: the counts describe what it was cut from.
+    #[test]
+    fn c2109ff8_a_row_window_still_reports_the_whole_list() {
+        let value = answer(json!({
+            "kind": "rows",
+            "now": "2026-10-17T12:00:00.000Z",
+            "list": { "id": "l", "sortBy": "createdAt" },
+            "tasks": [
+                { "id": "a", "createdAt": "2026-10-03T00:00:00Z" },
+                { "id": "b", "createdAt": "2026-10-02T00:00:00Z" },
+                { "id": "c", "createdAt": "2026-10-01T00:00:00Z" }
+            ],
+            "offset": 1,
+            "limit": 1,
+            "idsOnly": true,
+        }))["value"]
+            .clone();
+        assert_eq!(value["ids"], json!(["b"]));
+        assert_eq!(value["offset"], 1);
+        assert_eq!(value["total"], 3);
+    }
+
+    /// An offset no clock has is refused rather than overflowed — the same guard `board` carries.
+    #[test]
+    fn c2109ff8_rows_refuses_an_impossible_utc_offset() {
+        let refused = answer(json!({
+            "kind": "rows",
+            "now": "2026-10-17T12:00:00.000Z",
+            "utcOffsetMinutes": 2147483647,
+        }));
+        assert_eq!(refused["ok"], false, "{refused}");
+    }
+
+    /// The four thin doors this task opened over rules that already existed.
+    #[test]
+    fn c2109ff8_the_remaining_list_rules_are_reachable_without_linking_rust() {
+        // The whole palette, not just the scorer: commands, lists and tasks in one answer.
+        let palette = answer(json!({
+            "kind": "palette",
+            "query": "home",
+            "lists": [{ "id": "l", "name": "Home" }],
+            "tasks": [{ "id": "t", "title": "Buy a home" }],
+        }))["value"]
+            .clone();
+        let kinds: Vec<&str> = palette
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row["kind"].as_str().expect("a kind"))
+            .collect();
+        assert!(kinds.contains(&"list"), "{palette}");
+        assert!(kinds.contains(&"task"), "{palette}");
+
+        // The autolinker, which the VS Code extension and web both need and neither could call.
+        let links = answer(json!({
+            "kind": "identifierLinks",
+            "text": "see AWTD-12 and awtd-13",
+            "context": { "keys": ["AWTD"] },
+        }))["value"]
+            .clone();
+        assert_eq!(links.as_array().expect("links").len(), 1, "{links}");
+        assert_eq!(links[0]["identifier"], "AWTD-12");
+        assert_eq!(links[0]["href"], "/t/AWTD-12");
+
+        // A hand-arranged order against the list as it stands now.
+        let reconciled = answer(json!({
+            "kind": "manualOrder",
+            "requested": ["c", "a", "gone"],
+            "inListByCreation": ["a", "b", "c"],
+        }))["value"]
+            .clone();
+        assert_eq!(reconciled, json!(["c", "a", "b"]), "{reconciled}");
+
+        // A snooze, and the theme — a read normalises rather than failing, so a value written by
+        // a newer build leaves an app that still draws.
+        assert_eq!(
+            answer(json!({
+                "kind": "reminderSnooze",
+                "now": "2026-09-09T09:01:00.000Z",
+                "minutes": 15,
+            }))["value"],
+            // `date::format`'s shape, which is what every other timestamp on this door emits.
+            "2026-09-09T09:16:00Z"
+        );
+        assert_eq!(
+            answer(json!({ "kind": "theme", "stored": "dark" }))["value"],
+            "dark"
+        );
+        assert_eq!(
+            answer(json!({ "kind": "theme", "stored": "plaid" }))["value"],
+            "ocean"
+        );
+        assert_eq!(answer(json!({ "kind": "theme" }))["value"], "ocean");
     }
 }

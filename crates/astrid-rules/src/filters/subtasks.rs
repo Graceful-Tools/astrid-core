@@ -70,20 +70,23 @@ pub fn payload_value(original: Option<bool>, edited: Option<bool>) -> Option<boo
 /// open parent obeys the list's completion filter rather than appearing regardless.
 /// The same, borrowed — which is what the row pipeline uses, because a list of ten thousand has
 /// no use for a second copy of itself on every refresh.
-pub fn splice_refs<'a, T: std::borrow::Borrow<Task>>(
-    top_level: &'a [T],
-    all_tasks: &'a [Task],
+/// Takes and returns references all the way: the row pipeline sorts a list of ten thousand into
+/// a `Vec<&Task>` before anything else runs, and borrowing *through* an owning slice would tie
+/// the answer's lifetime to that local vector rather than to the tasks themselves.
+pub fn splice_refs<'a>(
+    top_level: &[&'a Task],
+    all_tasks: &[&'a Task],
     indented: bool,
     is_visible: impl Fn(&Task) -> bool,
 ) -> Vec<&'a Task> {
-    let top: Vec<&Task> = top_level.iter().map(|task| task.borrow()).collect();
+    let top: Vec<&'a Task> = top_level.to_vec();
     if !indented {
         return top;
     }
 
     let mut by_parent: std::collections::HashMap<&str, Vec<&Task>> =
         std::collections::HashMap::new();
-    for task in all_tasks {
+    for task in all_tasks.iter().copied() {
         if let Some(parent) = task.parent_task_id.as_deref() {
             by_parent.entry(parent).or_default().push(task);
         }
@@ -117,10 +120,15 @@ pub fn splice(
     indented: bool,
     is_visible: impl Fn(&Task) -> bool,
 ) -> Vec<Task> {
-    splice_refs(top_level, all_tasks, indented, is_visible)
-        .into_iter()
-        .cloned()
-        .collect()
+    splice_refs(
+        &top_level.iter().collect::<Vec<_>>(),
+        &all_tasks.iter().collect::<Vec<_>>(),
+        indented,
+        is_visible,
+    )
+    .into_iter()
+    .cloned()
+    .collect()
 }
 
 fn append_subtree<'a>(

@@ -1147,10 +1147,12 @@ pub(super) fn search_tasks(
         .filter(|task| indented && task.parent_task_id.is_some())
         .cloned()
         .collect();
-    let found: Vec<&crate::model::Task> =
-        filters::subtasks::splice_refs(&found, &subtasks, indented, |task| {
-            filters::shown_by_completion(task, &default_view, now, offset)
-        });
+    let found: Vec<&crate::model::Task> = filters::subtasks::splice_refs(
+        &found.iter().collect::<Vec<_>>(),
+        &subtasks.iter().collect::<Vec<_>>(),
+        indented,
+        |task| filters::shown_by_completion(task, &default_view, now, offset),
+    );
 
     let total = found.len();
     let window = &found[..limit.unwrap_or(total).min(total)];

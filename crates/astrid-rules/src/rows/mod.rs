@@ -16,6 +16,7 @@
 //! come to disagree about which day a task is due.
 
 pub mod agent;
+pub mod assemble;
 pub mod assignee;
 pub mod chat;
 pub mod comment;
@@ -25,6 +26,7 @@ pub mod due_picks;
 pub mod filter_picks;
 pub mod github_app;
 pub mod identifier;
+pub mod json;
 pub mod list_default_picks;
 pub mod list_picks;
 pub mod nesting;
@@ -90,11 +92,30 @@ impl DisplayMode {
 /// this?" is what handed list-row behaviour to board cards, where the click that reads as "pick
 /// this one" finished the task instead, with no way back but hunting it down in the Done column
 /// (tasks 9be8cb1b, f9d7ed42).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Surface {
     BoardCard,
+    #[default]
     ListRow,
     Detail,
+}
+
+impl Surface {
+    /// Which surface a row request is drawing.
+    ///
+    /// Unrecognised means a list row, the commonest surface — and the one whose behaviour is
+    /// least surprising if a newer shell asks for something this build has not heard of.
+    ///
+    /// Here rather than on the App door's `Command`, where it was, because the stateless door
+    /// takes the same word and a second copy of this match is a second answer to it
+    /// (task `c2109ff8`).
+    pub fn from_wire(named: Option<&str>) -> Surface {
+        match named {
+            Some("boardCard") => Surface::BoardCard,
+            Some("detail") => Surface::Detail,
+            _ => Surface::ListRow,
+        }
+    }
 }
 
 /// What the control at the leading edge of a task shows (task 42013da7).

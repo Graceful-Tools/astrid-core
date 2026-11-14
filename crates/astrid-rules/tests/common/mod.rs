@@ -66,3 +66,23 @@ pub fn no_failures(fixture: &str, failures: &[String]) {
         failures.join("\n")
     );
 }
+
+/// Ask the stateless door, and insist it answered.
+///
+/// Every contract fixture whose rule the door exposes is driven through here rather than through
+/// the Rust function, because a fixture that only ever reaches the function proves nothing about
+/// the door web and the VS Code extension actually call — which was the whole finding of task
+/// `c2109ff8`: ten rules' worth of list pipeline existed in `astrid-rules` and was reachable only
+/// by a client that links Rust.
+#[allow(dead_code)]
+pub fn ask(request: serde_json::Value) -> serde_json::Value {
+    let answer: serde_json::Value =
+        serde_json::from_str(&astrid_rules::rules::run_json(&request.to_string()))
+            .expect("the door answers JSON");
+    assert_eq!(
+        answer["ok"], true,
+        "the door refused {request}: {}",
+        answer["error"]
+    );
+    answer["value"].clone()
+}

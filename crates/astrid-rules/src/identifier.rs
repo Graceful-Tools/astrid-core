@@ -22,7 +22,7 @@
 //! Rendering costs no lookup: every link points at `/t/<IDENTIFIER>`, and that route resolves the
 //! id, checks access and redirects. So a comment with forty references is still one request.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Project keys are short enough to type and long enough to disambiguate.
 pub const MIN_PROJECT_KEY_LENGTH: usize = 2;
@@ -82,7 +82,12 @@ pub fn format_identifier(key: &str, sequence: u64) -> String {
 }
 
 /// What the reader can see, which is what decides whether a reference becomes a link.
-#[derive(Debug, Clone, Default)]
+///
+/// Deserialised because the stateless door takes one (task `c2109ff8`): the VS Code extension
+/// and web both render task text and both need the same answer about which references link.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", default)]
 pub struct LinkContext {
     /// The project whose task or chat this text belongs to. `#N` means this project's key, and
     /// outside a project it is plain text — a number with a hash in front of it.
@@ -99,7 +104,8 @@ pub struct LinkContext {
 }
 
 /// One reference found in a text, ready to be drawn as a link.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IdentifierLink {
     /// The text as written — `AWTD-12` or `#12`.
     pub matched: String,
