@@ -1382,3 +1382,64 @@ async fn a_board_row_is_its_list_under_the_projects_columns_awtd_1676() {
     .await;
     assert_eq!(missing["ok"], false, "{missing}");
 }
+
+/// A list's board is THAT list's cards under its project's columns, not every list's in the
+/// project (ADEV-3, Jon: "The Astrid-dev project has all the tasks in each list in
+/// iOS. It should not."). With one list per project the two were the same, so nothing showed it;
+/// four boards moved into one project showed each of them the other three's tasks. Web has
+/// narrowed to the selected list since its first board ("the list is the management entity").
+/// Asked with the project alone, the board is still the whole project's.
+#[tokio::test]
+async fn a_lists_board_holds_only_that_lists_cards_adev_3() {
+    let (app, _) = board_rows_app(StubTransport::new());
+    for task in [
+        json!({ "id": "i1", "title": "Paint", "listIds": ["ios"], "statusRole": "ready" }),
+        json!({ "id": "b1", "title": "Both", "listIds": ["ios", "web"], "statusRole": "ready" }),
+        json!({ "id": "w1", "title": "Web only", "listIds": ["web"], "statusRole": "ready" }),
+    ] {
+        app.store
+            .upsert_task(&serde_json::from_value(task).expect("a task"))
+            .expect("stores");
+    }
+    let ready = |answer: &serde_json::Value| -> Vec<String> {
+        let mut ids: Vec<String> = answer["value"]["columns"]
+            .as_array()
+            .expect("columns")
+            .iter()
+            .find(|column| column["id"] == "ready")
+            .expect("a ready column")["ids"]
+            .as_array()
+            .expect("ids")
+            .iter()
+            .map(|id| id.as_str().unwrap_or("").to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+
+    let ios = call(
+        &app,
+        json!({ "kind": "board", "listId": "ios", "idsOnly": true }),
+    )
+    .await;
+    assert_eq!(ios["ok"], true, "{ios}");
+    assert_eq!(ready(&ios), ["b1", "i1"], "not the web list's card");
+
+    let web = call(
+        &app,
+        json!({ "kind": "board", "listId": "web", "idsOnly": true }),
+    )
+    .await;
+    assert_eq!(ready(&web), ["b1", "w1"]);
+
+    let project = call(
+        &app,
+        json!({ "kind": "board", "projectId": "p1", "idsOnly": true }),
+    )
+    .await;
+    assert_eq!(
+        ready(&project),
+        ["b1", "i1", "w1"],
+        "the project alone is the whole board"
+    );
+}
