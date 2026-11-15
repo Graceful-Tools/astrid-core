@@ -109,6 +109,13 @@ jobs:
       - name: Test without the GitHub project fields
         run: cargo test -p astrid-core --no-default-features --features bundled-sqlite,sync-google
 
+      # The browser's build of astrid-rules: no markdown renderer (task 4d05306d). Same argument
+      # as the two above -- `astrid-rules-wasm` is the only thing that compiles this combination,
+      # and it is a `cargo build`, so nobody runs its tests unless this line does.
+      # `tests/browser_build.rs` is the one that cares, and it asserts both halves of the gate.
+      - name: Test the browser build of astrid-rules (no markdown renderer)
+        run: cargo test -p astrid-rules --no-default-features
+
   # astrid-rules is the half of the core the web loads as WebAssembly. It builds for
   # wasm32-unknown-unknown only while it stays pure — no clock, disk, socket or OS entropy — so a
   # dependency that reaches for one fails here, the day it lands, rather than in the web's build.
@@ -144,10 +151,21 @@ jobs:
       - name: Size budget
         run: >
           node scripts/wasm-size.mjs
-          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 331000
+          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 268000
 
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
+
+      # The build above IS the markdown-free one -- `astrid-rules-wasm` takes the crate with
+      # `default-features = false` -- but only through a dependency edge, and nothing else in the
+      # workspace compiles that combination. So clippy it directly, for the same reason the
+      # astrid-core job tests each optional feature off on its own: a `cfg` goes stale the first
+      # time somebody adds a call site, and without this the break would surface as a mysterious
+      # size regression rather than as a compile error naming the line.
+      - name: Clippy the browser build (no markdown renderer)
+        run: >
+          cargo clippy -p astrid-rules --no-default-features --all-targets
+          --target wasm32-unknown-unknown -- -D warnings
 
   # astrid-android builds this crate for Android through the NDK. A dependency that cannot target
   # it — the system OpenSSL that native-tls wants, for one — is caught here, the day it lands

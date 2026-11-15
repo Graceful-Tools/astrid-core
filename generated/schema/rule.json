@@ -2170,7 +2170,7 @@
       "type": "object"
     },
     {
-      "description": "A description, comment or chat message as blocks to draw — see [`crate::markdown`].\nWith `identifiers` (the reader's project keys), task ids in the prose link as well —\n[`crate::markdown::render_with_identifiers`]; without it nothing links, as on the web.\n`origin` is the reader's server, which a relative link (`/lists/…`, an id's `/t/…`)\nresolves against (AWTD-1630) — see [`UNNAMED_ORIGIN`] for a request that leaves it out.",
+      "description": "A description, comment or chat message as blocks to draw — see [`crate::markdown`].\nWith `identifiers` (the reader's project keys), task ids in the prose link as well —\n[`crate::markdown::render_with_identifiers`]; without it nothing links, as on the web.\n`origin` is the reader's server, which a relative link (`/lists/…`, an id's `/t/…`)\nresolves against (AWTD-1630) — see [`UNNAMED_ORIGIN`] for a request that leaves it out.\n\nGone without the `markdown` feature, which is how the browser build is made: the web has\nits own renderer, and this rule is for the clients that do not (task 4d05306d). A request\nfor it then fails to decode, which is the same answer the door gives any rule it has no\nvariant for — a build that cannot do it says so rather than answering emptily.",
       "properties": {
         "identifiers": {
           "anyOf": [

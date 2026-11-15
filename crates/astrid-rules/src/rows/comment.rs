@@ -61,6 +61,11 @@ pub struct CommentRow {
     pub indent_right: bool,
     /// The text as the web draws it — through the same markdown a description gets, so a
     /// mention is a pill and `**bold**` is bold (task 3271a0c5). Empty when there is no text.
+    ///
+    /// Absent without the `markdown` feature, along with [`rows`], which is the only thing that
+    /// fills it: the browser build has no renderer to fill it with (task 4d05306d). The
+    /// predicates below stay — see the feature's comment in `Cargo.toml`.
+    #[cfg(feature = "markdown")]
     pub blocks: Vec<crate::markdown::Block>,
 }
 
@@ -178,6 +183,10 @@ pub fn renders_inline(mime_type: &str) -> bool {
 /// reply right after its parent, in the order the replies were written. A reply whose parent is
 /// not in the thread — deleted, or beyond the page — is drawn as an ordinary comment rather than
 /// as an indent under nothing.
+///
+/// Needs the `markdown` feature: it renders each comment's text. The browser build has neither
+/// (task 4d05306d) — it draws its own transcript and asks this module only the predicates.
+#[cfg(feature = "markdown")]
 pub fn rows(
     comments: &[Comment],
     me: Option<&str>,
@@ -216,6 +225,7 @@ pub fn rows(
 }
 
 /// One row. `under` is the parent it nests beneath, and whether that parent is mine.
+#[cfg(feature = "markdown")]
 fn row(
     comment: &Comment,
     me: Option<&str>,
@@ -287,6 +297,7 @@ fn row(
 }
 
 /// `@login` for a GitHub commenter with no Astrid account (AITD-517).
+#[cfg(feature = "markdown")]
 fn remote_name(comment: &Comment) -> Option<String> {
     comment
         .remote_author_login
@@ -310,7 +321,12 @@ pub fn with_local_paths(rows: &mut [CommentRow], resolve: impl Fn(&str) -> Optio
     }
 }
 
-#[cfg(test)]
+// Every test here goes through [`rows`], including the ones about `shows_text` and `is_empty`:
+// what this module is for is which comments draw and how, and that is a question about a
+// projection. So they go where [`rows`] goes (task 4d05306d). The browser build's side of the
+// feature is covered by `tests/browser_build.rs`, through the door, which is the only way it is
+// reached there anyway.
+#[cfg(all(test, feature = "markdown"))]
 mod tests {
 
     /// AATD-53: three or more completions in a row fold into one streak, as iOS draws them.

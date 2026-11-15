@@ -100,6 +100,12 @@ pub enum Rule {
     /// [`crate::markdown::render_with_identifiers`]; without it nothing links, as on the web.
     /// `origin` is the reader's server, which a relative link (`/lists/…`, an id's `/t/…`)
     /// resolves against (AWTD-1630) — see [`UNNAMED_ORIGIN`] for a request that leaves it out.
+    ///
+    /// Gone without the `markdown` feature, which is how the browser build is made: the web has
+    /// its own renderer, and this rule is for the clients that do not (task 4d05306d). A request
+    /// for it then fails to decode, which is the same answer the door gives any rule it has no
+    /// variant for — a build that cannot do it says so rather than answering emptily.
+    #[cfg(feature = "markdown")]
     RenderMarkdown {
         text: String,
         #[serde(default)]
@@ -695,6 +701,7 @@ pub fn run(rule: Rule) -> Response {
             repeating_data.as_ref(),
             repeat_from,
         )),
+        #[cfg(feature = "markdown")]
         Rule::RenderMarkdown {
             text,
             identifiers,
@@ -1366,6 +1373,10 @@ mod tests {
         assert_eq!(reply["value"]["priority"], 3);
     }
 
+    /// The four `renderMarkdown` tests below belong to the `markdown` feature: without it the
+    /// rule is gone, and what the browser build answers instead is `tests/browser_build.rs`
+    /// (task 4d05306d).
+    #[cfg(feature = "markdown")]
     #[test]
     fn markdown_renders_to_blocks() {
         let reply = answer(json!({ "kind": "renderMarkdown", "text": "**hi**" }));
@@ -1375,6 +1386,7 @@ mod tests {
     }
 
     /// AWTD-1064: a task id links only with the reader's context, as `render_with_identifiers`.
+    #[cfg(feature = "markdown")]
     #[test]
     fn markdown_links_task_ids_with_the_readers_context() {
         let reply = answer(json!({
@@ -1397,6 +1409,7 @@ mod tests {
 
     /// AWTD-1630: a relative link opens on the server the request names — the reader's — and the
     /// id's `/t/…` with it, so a partner build never sends its reader to astrid.cc.
+    #[cfg(feature = "markdown")]
     #[test]
     fn a_relative_link_opens_on_the_origin_the_request_names_awtd_1630() {
         let reply = answer(json!({
@@ -1429,6 +1442,7 @@ mod tests {
 
     /// AWTD-1630: a shell that names no origin yet (iOS, Android today) draws what it always drew;
     /// a `require-base-url` build has no Astrid server to fall back to, so the link stays relative.
+    #[cfg(feature = "markdown")]
     #[test]
     fn a_request_without_an_origin_falls_back_per_build_awtd_1630() {
         let reply = answer(json!({ "kind": "renderMarkdown", "text": "[home](/lists/abc)" }));

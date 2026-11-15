@@ -690,7 +690,7 @@
           ]
         },
         "blocks": {
-          "description": "The text as the web draws it — through the same markdown a description gets, so a\nmention is a pill and `**bold**` is bold (task 3271a0c5). Empty when there is no text.",
+          "description": "The text as the web draws it — through the same markdown a description gets, so a\nmention is a pill and `**bold**` is bold (task 3271a0c5). Empty when there is no text.\n\nAbsent without the `markdown` feature, along with [`rows`], which is the only thing that\nfills it: the browser build has no renderer to fill it with (task 4d05306d). The\npredicates below stay — see the feature's comment in `Cargo.toml`.",
           "items": {
             "$ref": "#/$defs/Block"
           },

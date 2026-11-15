@@ -12,6 +12,16 @@ repository.workspace = true
 # checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
 # getrandom, uuid or iana-time-zone — and chrono without `clock`.
 [features]
+default = ["markdown"]
+# The markdown renderer, and everything that can only be answered by running it: `renderMarkdown`,
+# the chat transcript, and a comment row's `blocks`. ON by default — every shell draws comments —
+# and turned OFF by `astrid-rules-wasm`, because the browser has its own renderer and `renderMarkdown`
+# exists for the clients that do not (task 4d05306d).
+#
+# What stays when it is off is deliberate: `rows::comment`'s `shows_text`, `is_empty`, `files_of`
+# and `renders_inline` are what `Rule::CommentVisibility` asks, and none of them parse anything.
+# Taking the predicates out with the renderer would be a silent capability loss for the browser.
+markdown = ["dep:pulldown-cmark"]
 # No Astrid server in the binary: a `renderMarkdown` request that names no `origin` leaves a
 # relative link relative instead of resolving it on astrid.cc (AWTD-1630). Turned on by
 # astrid-core's feature of the same name (astrid-web AWTD-1627).
@@ -27,7 +37,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "serde"
 chrono-tz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-pulldown-cmark = { workspace = true }
+pulldown-cmark = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 
 # `build.rs` narrows `contracts/fixtures/smart.json` to its `keywords` before they are embedded

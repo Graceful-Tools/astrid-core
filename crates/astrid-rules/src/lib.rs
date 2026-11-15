@@ -27,6 +27,7 @@ pub mod identifier;
 pub mod keyboard;
 pub mod list_defaults;
 pub mod manual_order;
+#[cfg(feature = "markdown")]
 pub mod markdown;
 pub mod model;
 pub mod palette;

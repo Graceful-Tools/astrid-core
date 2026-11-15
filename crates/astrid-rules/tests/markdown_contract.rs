@@ -9,6 +9,10 @@
 //! The two parsers are different programs (`marked` and pulldown-cmark), so the disputed cases
 //! are where they genuinely read the same text differently; D38 in `docs/CONTRACTS.md` lists
 //! them and says which reading this crate keeps.
+//!
+//! The browser build has no renderer to hold to the contract — `astrid-rules-wasm` takes the
+//! crate with `default-features = false` (task 4d05306d) — so the whole file goes with it.
+#![cfg(feature = "markdown")]
 
 mod common;
 

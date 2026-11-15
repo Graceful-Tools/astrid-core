@@ -18,6 +18,8 @@
 pub mod agent;
 pub mod assemble;
 pub mod assignee;
+/// A transcript is markdown all the way down, so it leaves the browser build with the renderer.
+#[cfg(feature = "markdown")]
 pub mod chat;
 pub mod comment;
 pub mod credential;

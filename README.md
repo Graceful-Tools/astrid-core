@@ -125,36 +125,51 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **331,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
-pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds.
+CI's `wasm` job holds it to **268,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
+ratchets down after each saving.** Raising it is allowed; doing either without saying what it
+bought is not.
 
-Measured 2026-11-14 (task `4d05306d`), on that artifact:
+Measured on that artifact (task `4d05306d`):
 
-| | raw | gzip | brotli |
-|---|---:|---:|---:|
-| the shipped profile | 2,187,892 | 486,869 | **322,923** |
-| with `opt-level = "s"`, as it was | 2,375,925 | 531,752 | 353,882 |
+| | raw | gzip | brotli | |
+|---|---:|---:|---:|---|
+| **today** | **1,973,556** | **405,355** | **261,258** | no markdown renderer, 2026-11-15 |
+| before that | 2,193,133 | 488,019 | 324,175 | 2026-11-15, at `108c99f` |
+| with `opt-level = "s"`, as it was | 2,375,925 | 531,752 | 353,882 | 2026-11-14 |
 
-**Where the bytes are**, by `node scripts/wasm-size.mjs <file> --attribute` on a build with
-`--config 'profile.wasm.strip=false'` — the code section, 1,136,835 bytes over 5,175 functions,
-beside a 1,025,331-byte data section that is mostly chrono-tz's zone table:
+**The browser build has no markdown renderer.** `astrid-rules-wasm` takes this crate with
+`default-features = false`, which drops the `markdown` feature: `pulldown-cmark`, `rows::chat`,
+`CommentRow::blocks` with `rows::comment::rows`, and the `renderMarkdown` rule. The web renders
+markdown itself — that rule exists for the clients that do not — so it was downloading a parser in
+order never to call it. **−62,917 brotli bytes, 19.4%**, which is three times `pulldown_cmark`'s
+own 4% code share, because the Unicode tables and the `Block`/`Inline` serde code go with it.
+
+What stays off that module is deliberate: `shows_text`, `is_empty`, `files_of` and
+`renders_inline` are what `Rule::CommentVisibility` asks and none of them parses anything. Both
+halves are asserted in `crates/astrid-rules/tests/browser_build.rs`, and CI clippies and tests the
+combination directly — nothing else in the workspace compiles it.
+
+**Where the bytes are now**, by `node scripts/wasm-size.mjs <file> --attribute` on a build with
+`--config 'profile.wasm.strip=false'` — the code section, 993,771 bytes over 4,610 functions,
+beside a 955,451-byte data section that is mostly chrono-tz's zone table:
 
 | crate | | crate | |
 |---|---:|---|---:|
-| serde | 22% | pulldown_cmark | 4% |
-| astrid_rules | 20% | chrono | 3% |
-| core | 18% | hashbrown | 2% |
-| serde_json | 14% | chrono_tz (code) | 2% |
-| alloc | 9% | serde_core | 2% |
+| serde | 26% | chrono | 4% |
+| astrid_rules | 20% | chrono_tz (code) | 3% |
+| core | 18% | serde_core | 2% |
+| serde_json | 16% | hashbrown | 2% |
+| alloc | 8% | | |
 
-(Those shares are the shipped `opt-level = "z"` build. An unstripped build is larger and keeps its
-name section; it is a different artifact from the one the budget measures, which is the point of
-the two commands being different.)
+(An unstripped build is larger and keeps its name section; it is a different artifact from the one
+the budget measures, which is the point of the two commands being different.)
 
 **chrono-tz is the obvious suspect and it is not the obstacle.** Rebuilt with its zone table
 filtered down to UTC, the artifact loses 904,638 raw bytes (38%) but only **53,437 brotli bytes
 (15%)** — a timezone table compresses almost away. Dropping it costs a cross-crate API change
-(the caller would pass offsets from `Intl` instead of an IANA name) and still leaves ~300 KB.
+(the caller would pass offsets from `Intl` instead of an IANA name) and still leaves ~300 KB —
+~210 KB now that the renderer is out. It is step 3 of the plan below, after the cheaper two.
 
 What the compressed size is actually made of is **code**, and the largest part of that is serde's
 monomorphised deserializers: the biggest non-chrono-tz functions are `Task` and `TaskList`
@@ -163,7 +178,17 @@ monomorphised deserializers: the biggest non-chrono-tz functions are `Task` and 
 internally tagged enum and serde buffers those. That is the door's wire format, not an oversight.
 
 So a materially smaller browser build means compiling **less of the door**, not optimising it
-harder. Raising the budget is allowed; doing it without saying what it bought is not.
+harder — which is what the markdown feature does and what the rest of the plan does. The target
+is **150,000 brotli bytes**, and the agreed order (Jon, 2026-11-15, task `4d05306d`) is one step
+per PR, with the budget ratcheted after each:
+
+1. ~~Drop markdown rendering from the browser build.~~ **Done** — 324,175 → 261,258.
+2. **Feature-gate the wire models down to the rules the browser calls.** Where the money is: most
+   of serde's 26% is `Task`/`TaskList` deserializers, and a browser that asks for quick-add
+   parsing, filters and rows does not need every rule's payload compiled in. It splits `Rule`,
+   which three clients read, so it wants a short design note before any code.
+3. **Time zone offsets from `Intl` instead of `chrono-tz`.** ~53 KB, cross-crate API change.
+   Worth doing after 2, not instead of it.
 
 ## Layout
 

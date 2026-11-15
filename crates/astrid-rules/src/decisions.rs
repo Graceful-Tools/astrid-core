@@ -236,7 +236,9 @@ fn row_marker_len(text: &str) -> Option<usize> {
 
 /// The byte length of a leading marker followed by its punctuation and then space or the end —
 /// the web's `PUNCTUATED_MARKER`, `^\s*(?:[A-Za-z]|\d{1,2})[.):](?:\s+|$)`, which
-/// `markdown::render` uses to drop a grid row's marker from its runs (AWTD-1626).
+/// `markdown::render` uses to drop a grid row's marker from its runs (AWTD-1626) — its only
+/// caller, so it leaves the browser build with the renderer (task 4d05306d).
+#[cfg(feature = "markdown")]
 pub(crate) fn punctuated_marker_len(text: &str) -> Option<usize> {
     let body = text.trim_start();
     let leading = text.len() - body.len();
@@ -253,7 +255,8 @@ pub(crate) fn punctuated_marker_len(text: &str) -> Option<usize> {
 }
 
 /// Is this text a marker and nothing else — the web's `BARE_MARKER`,
-/// `^\s*(?:[A-Za-z]|\d{1,2})[.):]?\s*$` (AWTD-1626)?
+/// `^\s*(?:[A-Za-z]|\d{1,2})[.):]?\s*$` (AWTD-1626)? Read only by `markdown::render`.
+#[cfg(feature = "markdown")]
 pub(crate) fn is_bare_marker(text: &str) -> bool {
     let body = text.trim();
     let Some(lengths) = marker_lengths(body) else {
@@ -574,8 +577,12 @@ fn code_lines(lines: &[&str]) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
+    /// The only test here reads two of the renderer's helpers, so the import goes with it.
+    #[cfg(feature = "markdown")]
     use super::*;
 
+    /// Both functions are the renderer's, so this goes with it (task 4d05306d).
+    #[cfg(feature = "markdown")]
     #[test]
     fn markers_for_a_grid_row_as_the_web_reads_them_awtd_1626() {
         assert_eq!(punctuated_marker_len("A. Lisbon"), Some(3));
