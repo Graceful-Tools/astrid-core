@@ -340,6 +340,13 @@ pub fn project(id: &str) -> String {
     format!("{PROJECTS}/{}", escaped_path_component(id))
 }
 
+/// Which lists this person's multi-list board for a project shows as rows: `GET` answers
+/// `{ listIds: string[] | null }` (null = nothing saved), `PUT { listIds }` saves them (web
+/// AWTD-1660, AWTD-1676).
+pub fn project_board_rows(project_id: &str) -> String {
+    format!("{}/board-rows", project(project_id))
+}
+
 /// A GitHub project's field schema, once per project (web AWTD-1208). `404` on a deployment
 /// without the `githubProjects` capability, and for a board the caller cannot see.
 pub fn project_fields(project_id: &str) -> String {

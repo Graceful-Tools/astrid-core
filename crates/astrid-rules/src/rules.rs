@@ -152,6 +152,35 @@ pub enum Rule {
         #[serde(default)]
         utc_offset_minutes: i32,
     },
+    /// Which lists a project's multi-list board draws as rows, in order, and which lists could be
+    /// added — see [`crate::board_rows`] (AWTD-1676). `saved_list_ids` is what
+    /// `GET /api/v1/projects/{id}/board-rows` answered: absent or `null` for nothing saved (the
+    /// project's own lists), `[]` for a board emptied on purpose.
+    BoardRows {
+        project_id: String,
+        #[serde(default)]
+        saved_list_ids: Option<Vec<String>>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+    },
+    /// One row of the multi-list board: `row_list_id`'s cards under the project's columns, in
+    /// [`Rule::Board`]'s shape — see [`crate::board_rows::row_columns`] (AWTD-1676, D67).
+    /// `custom_states` is the PROJECT's; the row list's manual order and Done window arrange it.
+    BoardRow {
+        row_list_id: String,
+        #[serde(default)]
+        custom_states: Option<serde_json::Value>,
+        #[serde(default)]
+        tasks: Vec<Task>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes: where their day starts for Done's window.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+    },
     /// What dropping `task` on the column `column` (an id from [`Rule::Board`]) writes — see
     /// [`crate::board::resolve_move`]. A drop on Done answers `completed: true`; a shell completes
     /// through [`Rule::Completion`] so a repeating task rolls forward.
@@ -760,13 +789,9 @@ pub fn run(rule: Rule) -> Response {
             now,
             utc_offset_minutes,
         } => {
-            let Some(offset) = utc_offset_minutes
-                .checked_mul(60)
-                .and_then(chrono::FixedOffset::east_opt)
-            else {
-                return Response::failed(Failure::bad_request(format!(
-                    "{utc_offset_minutes} minutes is not an offset from UTC"
-                )));
+            let offset = match utc_offset(utc_offset_minutes) {
+                Ok(offset) => offset,
+                Err(failure) => return Response::failed(failure),
             };
             let columns = crate::board_cards::columns_with_rows(custom_states.as_ref(), &lists);
             let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
@@ -785,6 +810,49 @@ pub fn run(rule: Rule) -> Response {
                         .into_iter()
                         .map(|task| task.id.clone())
                         .collect(),
+                        column: column.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        }
+        Rule::BoardRows {
+            project_id,
+            saved_list_ids,
+            lists,
+        } => {
+            let rows = crate::board_rows::resolve(saved_list_ids.as_deref(), &project_id, &lists);
+            let row_list_ids: Vec<String> = rows.iter().map(|list| list.id.clone()).collect();
+            let candidate_list_ids = crate::board_rows::candidates(&lists, &row_list_ids)
+                .into_iter()
+                .map(|list| list.id.clone())
+                .collect();
+            Response::ok(BoardRowsAnswer {
+                row_list_ids,
+                candidate_list_ids,
+            })
+        }
+        Rule::BoardRow {
+            row_list_id,
+            custom_states,
+            tasks,
+            lists,
+            now,
+            utc_offset_minutes,
+        } => {
+            let offset = match utc_offset(utc_offset_minutes) {
+                Ok(offset) => offset,
+                Err(failure) => return Response::failed(failure),
+            };
+            let columns = crate::board_cards::columns_with_rows(custom_states.as_ref(), &lists);
+            let row = lists.iter().find(|list| list.id == row_list_id);
+            let held =
+                crate::board_rows::row_columns(row, &row_list_id, &tasks, &columns, now, offset);
+            Response::ok(
+                columns
+                    .iter()
+                    .zip(held)
+                    .map(|(column, held)| BoardColumnCards {
+                        task_ids: held.into_iter().map(|task| task.id.clone()).collect(),
                         column: column.clone(),
                     })
                     .collect::<Vec<_>>(),
@@ -1162,6 +1230,23 @@ struct BoardColumnCards {
     task_ids: Vec<String>,
 }
 
+/// What [`Rule::BoardRows`] answers: the rows to draw, in order, and the lists *Add list* offers.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BoardRowsAnswer {
+    row_list_ids: Vec<String>,
+    candidate_list_ids: Vec<String>,
+}
+
+/// An offset from UTC in minutes, or a refusal: an offset no clock has is a bad request, not an
+/// overflow.
+fn utc_offset(minutes: i32) -> Result<FixedOffset, Failure> {
+    minutes
+        .checked_mul(60)
+        .and_then(FixedOffset::east_opt)
+        .ok_or_else(|| Failure::bad_request(format!("{minutes} minutes is not an offset from UTC")))
+}
+
 /// A zone by its IANA name. An unknown name is refused rather than read as UTC: a person in Tokyo
 /// told their Tuesday task is due on Monday is a worse failure than an error in a log.
 fn zone(name: &str) -> Result<Tz, Failure> {
@@ -1234,6 +1319,50 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(absurd["ok"], false);
+    }
+
+    /// AWTD-1676: the multi-list board asks the door which lists are rows and which could be
+    /// added, instead of the Mac's Swift copy of web's `lib/project-board-rows.ts`.
+    #[test]
+    fn the_board_rows_and_their_candidates_come_from_the_door_awtd_1676() {
+        let lists = r#"[{"id":"web","name":"Web","projectId":"p1"},{"id":"ios","name":"iOS","projectId":"p1"},
+            {"id":"label","name":"Bug","projectId":"p1","listType":"label"},{"id":"groceries","name":"Groceries"}]"#;
+        let defaults: serde_json::Value = serde_json::from_str(&run_json(&format!(
+            r#"{{"kind":"boardRows","projectId":"p1","lists":{lists}}}"#
+        )))
+        .unwrap();
+        assert_eq!(
+            defaults["value"],
+            serde_json::json!({ "rowListIds": ["web", "ios"], "candidateListIds": ["groceries"] })
+        );
+        let saved: serde_json::Value = serde_json::from_str(&run_json(&format!(
+            r#"{{"kind":"boardRows","projectId":"p1","savedListIds":["groceries","gone","label"],"lists":{lists}}}"#
+        )))
+        .unwrap();
+        assert_eq!(
+            saved["value"],
+            serde_json::json!({ "rowListIds": ["groceries"], "candidateListIds": ["ios", "web"] })
+        );
+    }
+
+    /// AWTD-1676: one row under the project's columns. A list from no project draws its cards,
+    /// and a role the project has no column for is Inbox.
+    #[test]
+    fn a_board_row_draws_its_list_under_the_projects_columns_awtd_1676() {
+        let answer: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"boardRow","rowListId":"home","now":"2026-11-08T12:00:00.000Z",
+                "customStates":[{"role":"review","name":"Review","order":3}],
+                "lists":[{"id":"home","name":"Home","manualSortOrder":["b","a"]}],
+                "tasks":[{"id":"a","listIds":["home"],"statusRole":"custom-qa"},{"id":"b","listIds":["home"]},
+                         {"id":"c","listIds":["home"],"statusRole":"review"},{"id":"x","listIds":["other"],"statusRole":"review"}]}"#,
+        ))
+        .unwrap();
+        let columns = answer["value"].as_array().expect("columns");
+        assert_eq!(columns.len(), 6);
+        assert_eq!(columns[0]["id"], "__virtual_inbox__");
+        assert_eq!(columns[0]["taskIds"], serde_json::json!(["b", "a"]));
+        assert_eq!(columns[4]["id"], "review");
+        assert_eq!(columns[4]["taskIds"], serde_json::json!(["c"]));
     }
 
     /// AATD-50: the custom editor's Preview words a pattern nobody has saved yet.

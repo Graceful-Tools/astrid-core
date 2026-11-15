@@ -16,6 +16,7 @@ pub mod agent_name;
 pub mod agent_protocol;
 pub mod board;
 pub mod board_cards;
+pub mod board_rows;
 pub mod brand_colors;
 pub mod capabilities;
 pub mod copy;

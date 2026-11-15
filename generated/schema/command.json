@@ -6915,6 +6915,100 @@
       "type": "object"
     },
     {
+      "description": "Which lists this person's multi-list board for a project draws as rows, and which could be\nadded (AWTD-1676; web AWTD-1660). Read from `GET /api/v1/projects/{id}/board-rows`; offline,\nthe last answer, with `fromCache: true`. Answers `{ projectId, savedListIds, rowListIds,\ncandidateListIds, canAddRow, fromCache }` — `savedListIds` is the server's (`null` for\nnothing saved), `rowListIds` the rows to draw, in order ([`crate::board_rows::resolve`]).",
+      "properties": {
+        "kind": {
+          "const": "projectBoardRows",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Save a project board's rows (AWTD-1676): exactly one of the whole ordered `listIds`, a list\nto add at the end (`addListId`) or one to remove (`removeListId`) — the core does the\narithmetic against the rows it last drew. Online only, like web: it is a view preference\nthe server checks against what this person can see, not task data. Answers as\n[`Command::ProjectBoardRows`].",
+      "properties": {
+        "addListId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "const": "saveProjectBoardRows",
+          "type": "string"
+        },
+        "listIds": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "removeListId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One row of a project's multi-list board: `listId`'s cards under the PROJECT's columns, in\n[`Command::Board`]'s shape (AWTD-1676, D67). The row list's manual order and Done window\narrange it; a role the project has no column for is Inbox.",
+      "properties": {
+        "idsOnly": {
+          "default": false,
+          "description": "Each column's card ids rather than rows.",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "projectBoardRow",
+          "type": "string"
+        },
+        "limit": {
+          "default": null,
+          "description": "How many cards to carry per column. The count comes back whole.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "listId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId",
+        "listId"
+      ],
+      "type": "object"
+    },
+    {
       "description": "Fetch what the deployment supports.",
       "properties": {
         "kind": {

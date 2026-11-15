@@ -22,6 +22,7 @@ use std::path::Path;
 pub const CORE_OWNED: &[&str] = &[
     "waiting.json",
     "list-default-picks.json",
+    "board-rows.json",
     "repeat-summary-l10n.json",
     "callout-placement.json",
 ];
@@ -627,7 +628,8 @@ fn waiting_cases() -> Vec<Case> {
 }
 
 /// Whether `actual` says at least what `expected` says: every key of an expected object present
-/// and matching, arrays and scalars equal.
+/// and matching, arrays as long as expected with each element saying at least what its expected
+/// one says, scalars equal.
 fn contains(actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
         (Value::Object(actual), Value::Object(expected)) => expected.iter().all(|(key, value)| {
@@ -635,6 +637,13 @@ fn contains(actual: &Value, expected: &Value) -> bool {
                 .get(key)
                 .is_some_and(|candidate| contains(candidate, value))
         }),
+        (Value::Array(actual), Value::Array(expected)) => {
+            actual.len() == expected.len()
+                && actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(candidate, value)| contains(candidate, value))
+        }
         _ => actual == expected,
     }
 }
@@ -823,6 +832,156 @@ fn list_default_picks_cases() -> Vec<Case> {
     ]
 }
 
+/// The lists of web's `tests/lib/project-board-rows-awtd-1660.test.ts`, plus the Mac test's
+/// virtual list (`ProjectBoardRowsTests`), which *Add list* must never offer.
+fn board_row_lists() -> Value {
+    json!([
+        { "id": "web", "name": "Web", "projectId": "p1" },
+        { "id": "ios", "name": "iOS", "projectId": "p1" },
+        { "id": "status-row", "name": "Ready", "projectId": "p1", "listType": "status" },
+        { "id": "label", "name": "Bug", "projectId": "p1", "listType": "label" },
+        { "id": "groceries", "name": "Groceries" },
+        { "id": "other-project", "name": "Other", "projectId": "p2" },
+        { "id": "smart", "name": "Smart", "isVirtual": true },
+    ])
+}
+
+/// `boardRows` over [`board_row_lists`], with `saved` as the server's `listIds`.
+fn board_rows(saved: Value) -> Value {
+    json!({ "kind": "boardRows", "projectId": "p1", "savedListIds": saved, "lists": board_row_lists() })
+}
+
+/// web's swimlane test board: the three defaults and a Review column.
+fn review_board() -> Value {
+    json!([{ "role": "review", "name": "Review", "order": 3 }])
+}
+
+/// The cards of web's "puts each card in its list's row" test. Done is timed by `updatedAt` on the
+/// native board and by `completedAt` on web's (D43), so the finished card carries both.
+fn board_row_tasks() -> Value {
+    json!([
+        { "id": "a", "listIds": ["web"], "statusRole": "doing" },
+        { "id": "b", "listIds": ["ios"], "statusRole": "review" },
+        { "id": "c", "listIds": ["web"] },
+        { "id": "d", "listIds": ["ios"], "completed": true,
+          "completedAt": "2026-11-12T11:00:00.000Z", "updatedAt": "2026-11-12T11:00:00.000Z" },
+        { "id": "e", "listIds": ["groceries"], "statusRole": "ready" },
+        { "id": "shared", "listIds": ["web", "ios"], "statusRole": "ready" },
+        { "id": "foreign", "listIds": ["groceries"], "statusRole": "custom-qa" },
+    ])
+}
+
+/// `boardRow` for `row` under the review board.
+fn board_row(row: &str, lists: Value) -> Value {
+    json!({ "kind": "boardRow", "rowListId": row, "customStates": review_board(),
+            "lists": lists, "tasks": board_row_tasks(), "now": NOW })
+}
+
+/// One answered column of `boardRow`: its id and its cards' ids.
+fn cell(id: &str, task_ids: Value) -> Value {
+    json!({ "id": id, "taskIds": task_ids })
+}
+
+/// What the multi-list project board draws (AWTD-1676; web AWTD-1660).
+///
+/// Web's TypeScript is canonical, so every `expect` here is one of web's own test assertions
+/// (`tests/lib/project-board-rows-awtd-1660.test.ts`) or the Mac's (`ProjectBoardRowsTests`),
+/// written out rather than computed. The last two cases are D67: a list with no board, and a role
+/// the project has no column for.
+fn board_rows_cases() -> Vec<Case> {
+    let rule = "board_rows";
+    let row_lists = || board_row_lists();
+    vec![
+        case(
+            "rows/nothing-saved-is-the-projects-own-domain-lists",
+            rule,
+            board_rows(Value::Null),
+            ok(json!({ "rowListIds": ["web", "ios"] })),
+        ),
+        case(
+            "rows/saved-rows-draw-in-the-saved-order",
+            rule,
+            board_rows(json!(["groceries", "web"])),
+            ok(json!({ "rowListIds": ["groceries", "web"] })),
+        ),
+        case(
+            "rows/an-emptied-board-stays-empty",
+            rule,
+            board_rows(json!([])),
+            ok(json!({ "rowListIds": [] })),
+        ),
+        case(
+            "rows/unseen-repeated-and-non-domain-ids-are-dropped",
+            rule,
+            board_rows(json!(["gone", "web", "web", "label", "status-row"])),
+            ok(json!({ "rowListIds": ["web"] })),
+        ),
+        case(
+            "candidates/domain-lists-not-virtual-not-rows-by-name",
+            rule,
+            board_rows(json!(["web"])),
+            ok(
+                json!({ "rowListIds": ["web"], "candidateListIds": ["groceries", "ios", "other-project"] }),
+            ),
+        ),
+        case(
+            "row/each-card-in-its-lists-row-and-its-status-column",
+            rule,
+            board_row("web", row_lists()),
+            ok(json!([
+                cell("__virtual_inbox__", json!(["c"])),
+                cell("ready", json!(["shared"])),
+                cell("doing", json!(["a"])),
+                cell("waiting", json!([])),
+                cell("review", json!([])),
+                cell("__virtual_done__", json!([])),
+            ])),
+        ),
+        case(
+            "row/a-card-on-two-row-lists-shows-in-both-and-done-keeps-recent-work",
+            rule,
+            board_row("ios", row_lists()),
+            ok(json!([
+                cell("__virtual_inbox__", json!([])),
+                cell("ready", json!(["shared"])),
+                cell("doing", json!([])),
+                cell("waiting", json!([])),
+                cell("review", json!(["b"])),
+                cell("__virtual_done__", json!(["d"])),
+            ])),
+        ),
+        case(
+            "row/a-list-with-no-board-draws-its-cards-and-a-role-the-project-lacks-is-inbox",
+            "board_rows (D67)",
+            board_row("groceries", row_lists()),
+            ok(json!([
+                cell("__virtual_inbox__", json!(["foreign"])),
+                cell("ready", json!(["e"])),
+                cell("doing", json!([])),
+                cell("waiting", json!([])),
+                cell("review", json!([])),
+                cell("__virtual_done__", json!([])),
+            ])),
+        ),
+        case(
+            "row/the-row-lists-manual-order-arranges-a-column",
+            rule,
+            board_row(
+                "web",
+                json!([{ "id": "web", "name": "Web", "projectId": "p1", "manualSortOrder": ["shared", "c"] }]),
+            ),
+            ok(json!([
+                cell("__virtual_inbox__", json!(["c"])),
+                cell("ready", json!(["shared"])),
+                cell("doing", json!(["a"])),
+                cell("waiting", json!([])),
+                cell("review", json!([])),
+                cell("__virtual_done__", json!([])),
+            ])),
+        ),
+    ]
+}
+
 /// Runs every case through the door, checks it against what a person wrote down, and renders the
 /// fixture.
 fn render(cases: Vec<Case>, generated_from: &str, extra: Value) -> Result<String, String> {
@@ -959,12 +1118,24 @@ pub fn callout_placement_fixture() -> Result<String, String> {
     )
 }
 
+/// The text of `board-rows.json` (AWTD-1676).
+pub fn board_rows_fixture() -> Result<String, String> {
+    render(
+        board_rows_cases(),
+        "crates/astrid-rules/src/board_rows.rs",
+        json!({
+            "canonicalSource": "astrid-web lib/project-board-rows.ts (resolveBoardRows, boardRowCandidates, buildSwimlanes) — the expectations are web's own test cases (tests/lib/project-board-rows-awtd-1660.test.ts). Generated here until web's exporter takes it over; docs/CONTRACTS.md D67.",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
         ("waiting.json", waiting_fixture()?),
         ("list-default-picks.json", list_default_picks_fixture()?),
         ("callout-placement.json", callout_placement_fixture()?),
+        ("board-rows.json", board_rows_fixture()?),
     ])
 }
 
