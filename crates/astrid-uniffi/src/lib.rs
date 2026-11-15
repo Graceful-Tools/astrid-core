@@ -53,6 +53,51 @@ pub fn core_version() -> String {
     )
 }
 
+/// Whether this process can verify a TLS certificate yet: always on Apple, and on Android once the
+/// app has called its TLS init, `Java_com_gracefultools_astrid_core_PlatformTls_initialize`
+/// (AWTD-1673). Until then every request fails with the core's offline failure naming the missing
+/// init, rather than reaching a verifier that would panic.
+#[uniffi::export]
+pub fn platform_tls_ready() -> bool {
+    astrid_core::api::tls::platform_tls_ready()
+}
+
+/// Android's TLS init (AWTD-1673, for AATD-100): hand `rustls-platform-verifier` the JVM and the
+/// app's `Context`, so certificates are verified by Android's own trust manager — the device's
+/// trust store — instead of a root bundle compiled into the library.
+///
+/// A raw JNI export rather than a UniFFI one, because it needs the caller's `JNIEnv` and a live
+/// `Context` reference, and JNA hands over neither. The app declares it in Kotlin as
+///
+/// ```kotlin
+/// package com.gracefultools.astrid.core
+///
+/// object PlatformTls {
+///     init { System.loadLibrary("astrid_uniffi") } // the same .so JNA loads
+///     @JvmStatic external fun initialize(context: android.content.Context)
+/// }
+/// ```
+///
+/// and calls `PlatformTls.initialize(applicationContext)` once, in `Application.onCreate`, before
+/// the first request. A second call is harmless. A failure throws a `RuntimeException` into Kotlin
+/// rather than unwinding (rule 1). The second parameter is the class for a `@JvmStatic` method and
+/// the object for an instance one — both are a `jobject` to the ABI, and neither is used.
+///
+/// The app's Gradle build must also include the verifier's Kotlin half, the
+/// `rustls-platform-verifier-android` Maven artifact, and keep `org.rustls.platformverifier.**`
+/// from R8.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_gracefultools_astrid_core_PlatformTls_initialize<'caller>(
+    mut unowned_env: jni::EnvUnowned<'caller>,
+    _class: jni::objects::JObject<'caller>,
+    context: jni::objects::JObject<'caller>,
+) {
+    unowned_env
+        .with_env(|env| astrid_core::api::tls::android::init(env, context))
+        .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
 /// Answer one pure rule — see [`astrid_core::rules`]. Synchronous, and safe to call from any
 /// thread, including the main one: no rule touches a cache, a clock or the network.
 #[uniffi::export]

@@ -38,5 +38,11 @@ async-trait = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+# The JNI door for Android's TLS init (AWTD-1673): the one call UniFFI cannot carry, because the
+# certificate verifier needs the caller's JNIEnv and Context, which JNA does not hand over. The same
+# `jni` astrid-core and rustls-platform-verifier use, so there is one `Env` type.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22", default-features = false }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
