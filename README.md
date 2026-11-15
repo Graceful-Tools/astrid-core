@@ -125,7 +125,7 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **271,800 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+CI's `wasm` job holds it to **279,800 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
 pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
 ratchets down after each saving.** Raising it is allowed; doing either without saying what it
 bought is not.
@@ -134,7 +134,8 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
-| **today** | 2,058,873 | 418,605 | **271,171** | + the rest of the row rules (AWTD2-216, PR #58), which merged without raising the budget and turned main's `wasm` job red at 271,171 (CI's measurement; 270,912 on macOS). Budget 269,500 → 271,800 in AWTD2-162's step-1 fix, 2026-11-15 |
+| **today** | 2,121,891 | 429,857 | **~279,363** | + the rules door's `sidebar` (AWTD-1681: the sidebar's Projects section, so web and the VS Code extension can draw the same sidebar as the native shells): **+8,192** (279,104 on macOS against 270,912), of which ~5 KB is decoding the request's `Vec<Project>` through serde's buffered `content` path and ~3 KB is serialising `Sections`. Budget 271,800 → 279,800, 2026-11-15 |
+| after the row rules | 2,058,873 | 418,605 | 271,171 | + the rest of the row rules (AWTD2-216, PR #58), which merged without raising the budget and turned main's `wasm` job red at 271,171 (CI's measurement; 270,912 on macOS). Budget 269,500 → 271,800 in AWTD2-162's step-1 fix, 2026-11-15 |
 | before that | | | 269,113 | + board rows, the callout and `listProjectMoves` (astrid-ios AITD-680: who may move a list into or out of a project, which web's server and client both ask); budget 268,000 → 269,500, 2026-11-15 |
 | after task 4d05306d | 1,973,556 | 405,355 | 261,258 | no markdown renderer, 2026-11-15 |
 | before that | 2,193,133 | 488,019 | 324,175 | 2026-11-15, at `108c99f` |

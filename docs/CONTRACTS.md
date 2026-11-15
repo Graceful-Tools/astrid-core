@@ -1695,3 +1695,32 @@ whole project's.
 **Web agreed first:** `project-status-board.tsx` has narrowed the project's domain tasks to the
 selected list since its first board (`3d1bc2a8`: "the list is the management entity"). The core was
 the outlier, so this follows web. Test: `a_lists_board_holds_only_that_lists_cards_adev_3`.
+
+### D70 — the sidebar's Projects section: which projects, in what order, with which lists
+
+**Core-first, following web** (AWTD-1681; web's `components/TaskManager/Sidebar/ProjectsSection.tsx`,
+AWTD-1660, and PRODUCT_CONTRACT §9). Web, Windows and the Apple apps all need a Projects section for
+the Project view. Grouping lists under projects in each shell was three chances to disagree, so the
+`sidebar` projection now answers `projects: [{ id, name, color, lists }] | null`
+(`rows::sidebar::sections`; the rules door's `sidebar`; the App door's `sidebar` command, which reads
+the `project_mode` flag and the cached projects).
+
+1. **Which projects:** every project the reader can see (`GET /api/v1/projects`: owned or member),
+   **including one with no lists**, which must stay reachable to get its first. `projects` is
+   `null` when Project Mode is off (a flag not fetched yet reads as off) or when there are no
+   projects, as web draws no heading then. It is never `[]`.
+2. **Order:** by the project's name (else its key, web's `name || key`), case folded, then id. It is
+   the project's order and the same for every reader, since no per-reader project order exists.
+3. **Lists under a project:** domain lists whose **own `projectId`** names it. Board columns,
+   labels, milestones and iterations are not places (as in Lists). `Project.lists` is never read:
+   it is a nested copy that goes stale when a list moves (D68). Saved board rows are never read
+   either: a list dragged onto another project's board is a row there, not a member. A list
+   therefore sits under at most one project, repeats collapse to the first, and a list naming a
+   project the reader cannot see is only in Lists. The lists are ordered by name like Lists (web
+   draws them in arrival order). They are badged like every other entry.
+4. **A favourite inside a project** shows in Favorites **and** under its project, as on web. The
+   Lists section is unchanged: a project's non-favourite lists stay there too, as on web.
+5. **Archived or hidden projects:** the server's `Project` has neither field, so every visible
+   project is a row. A field arriving later is a decision to make here.
+
+Locked by `contracts/fixtures/sidebar-projects.json` (8 cases).

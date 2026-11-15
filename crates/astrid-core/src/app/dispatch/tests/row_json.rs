@@ -471,3 +471,76 @@ async fn aatd37_rows_say_whether_the_reader_may_add() {
     .await;
     assert_eq!(theirs["value"]["canAddTasks"], false, "{theirs}");
 }
+
+/// AWTD-1681: the sidebar's Projects section is drawn from the cached projects only for someone
+/// with Project Mode — each project expanding to the lists whose own `projectId` names it, a
+/// project with no lists still a row — and absent for everyone else.
+#[tokio::test]
+async fn the_sidebar_draws_projects_only_with_project_mode_awtd_1681() {
+    let app = app_with(StubTransport::new());
+    let seeded = call(
+        &app,
+        json!({
+            "kind": "seedCache",
+            "lists": [
+                { "id": "web", "name": "Web", "projectId": "p1" },
+                { "id": "ios", "name": "iOS", "projectId": "p1" },
+                { "id": "col", "name": "Doing", "projectId": "p1", "listType": "status" },
+                { "id": "home", "name": "Home" },
+            ],
+            "tasks": [],
+        }),
+    )
+    .await;
+    assert_eq!(seeded["value"]["seeded"], true, "{seeded}");
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Astrid", "color": "#ef4444" }))
+                .expect("a project"),
+            serde_json::from_value(json!({ "id": "p2", "name": "Empty" })).expect("a project"),
+        ])
+        .expect("stores");
+
+    let without = call(&app, json!({ "kind": "sidebar" })).await;
+    assert_eq!(without["ok"], true, "{without}");
+    assert_eq!(
+        without["value"]["projects"],
+        serde_json::Value::Null,
+        "no Project Mode, no section: {without}"
+    );
+
+    app.store
+        .set_metadata("account.features", r#"{"project_mode":true}"#)
+        .expect("stores");
+    let with = call(&app, json!({ "kind": "sidebar" })).await;
+    let projects = with["value"]["projects"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a Projects section: {with}"));
+    let shape: Vec<(String, String, Vec<String>)> = projects
+        .iter()
+        .map(|project| {
+            (
+                project["name"].as_str().expect("a name").to_string(),
+                project["color"].as_str().expect("a colour").to_string(),
+                project["lists"]
+                    .as_array()
+                    .expect("lists")
+                    .iter()
+                    .map(|list| list["id"].as_str().expect("an id").to_string())
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (
+                "Astrid".to_string(),
+                "#ef4444".to_string(),
+                vec!["ios".to_string(), "web".to_string()]
+            ),
+            ("Empty".to_string(), "#3b82f6".to_string(), vec![]),
+        ],
+        "{with}"
+    );
+}
