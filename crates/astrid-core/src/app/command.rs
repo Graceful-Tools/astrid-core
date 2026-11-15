@@ -777,6 +777,29 @@ pub enum Command {
         /// `PRIVATE`, `SHARED` or `PUBLIC`; the server's default when absent.
         #[serde(default)]
         privacy: Option<crate::model::Privacy>,
+        /// The project the list is born in (astrid-ios AITD-680), sent on the create so it is
+        /// one request, never create-then-move. Refused locally unless the person is owner,
+        /// admin or member of the project (D68).
+        #[serde(default)]
+        project_id: Option<String>,
+    },
+    /// Move a list into a project, or out of one with `projectId: null` (astrid-ios AITD-680).
+    ///
+    /// Checked against D68 first — owner or admin of the list, and of every project it touches —
+    /// and refused locally with `code: "LIST_PROJECT_MOVE_FORBIDDEN"`. Otherwise applied at once
+    /// (the boards and rows re-derive from the list's `projectId`) and sent through the Outbox as
+    /// `PUT /api/v1/lists/{id} { projectId }`; a refusal there puts the list back where it was.
+    SetListProject {
+        list_id: String,
+        #[serde(default)]
+        project_id: Option<String>,
+    },
+    /// What a list's "Project" control offers — `{ canLeave, destinations, creatableIn }`, the
+    /// rules door's `listProjectMoves` over the signed-in person and the cached projects
+    /// (astrid-ios AITD-680, D68). Without `listId`, only where a new list may be created.
+    ListProjectMoves {
+        #[serde(default)]
+        list_id: Option<String>,
     },
     UpdateList {
         list_id: String,

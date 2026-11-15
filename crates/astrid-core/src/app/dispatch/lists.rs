@@ -46,8 +46,17 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             color,
             description,
             privacy,
+            project_id,
         } => {
-            let created = app.context.lists().create_with(&name, color, privacy);
+            if let Some(project_id) = project_id.as_deref() {
+                if let Err(failure) = may_create_in(app, project_id) {
+                    return Response::failed(failure);
+                }
+            }
+            let created = app
+                .context
+                .lists()
+                .create_in(&name, color, privacy, project_id);
             match (created, description) {
                 // A description rides on the list's first edit, which the journal sends after the
                 // create: the create's body is the web's, and it takes no description.
@@ -65,6 +74,11 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             Ok(changes) => answer(app.context.lists().update(&list_id, &changes)),
             Err(failure) => Response::failed(failure),
         },
+        Command::SetListProject {
+            list_id,
+            project_id,
+        } => set_list_project(app, &list_id, project_id),
+        Command::ListProjectMoves { list_id } => list_project_moves(app, list_id.as_deref()),
         Command::DeleteList { list_id } => match app.context.lists().delete(&list_id) {
             Ok(()) => Response::done(),
             Err(error) => Response::failed(error.into()),
@@ -494,4 +508,89 @@ pub(super) fn list_changes_from_json(
         }
     }
     Ok(changes)
+}
+
+// ─── Lists and projects (astrid-ios AITD-680, D68) ────────────────────────────────────────────
+
+const MOVE_FORBIDDEN: &str = "LIST_PROJECT_MOVE_FORBIDDEN";
+const CREATE_FORBIDDEN: &str = "LIST_PROJECT_CREATE_FORBIDDEN";
+
+/// The signed-in person and the projects the cache holds, which is everything D68 reads.
+fn me_and_projects(app: &App) -> Result<(String, Vec<crate::model::project::Project>), Failure> {
+    let me = app
+        .context
+        .account()
+        .current_user_id()
+        .ok()
+        .flatten()
+        .ok_or_else(Failure::unauthorized)?;
+    let projects = app
+        .store
+        .projects()
+        .map_err(|error| Failure::cache(error.to_string()))?;
+    Ok((me, projects))
+}
+
+fn may_create_in(app: &App, project_id: &str) -> Result<(), Failure> {
+    let (me, projects) = me_and_projects(app)?;
+    let project = projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| Failure::not_found("project", project_id))?;
+    if crate::list_project_moves::can_create_in(&me, project) {
+        Ok(())
+    } else {
+        Err(
+            Failure::refused(403, "You can't create a list in this project")
+                .with_code(CREATE_FORBIDDEN),
+        )
+    }
+}
+
+fn set_list_project(app: &App, list_id: &str, project_id: Option<String>) -> Response {
+    let (me, projects) = match me_and_projects(app) {
+        Ok(found) => found,
+        Err(failure) => return Response::failed(failure),
+    };
+    let list = match app.context.lists().list(list_id) {
+        Ok(Some(list)) => list,
+        Ok(None) => return Response::failed(Failure::not_found("list", list_id)),
+        Err(error) => return Response::failed(error.into()),
+    };
+    if list.project_id == project_id {
+        return Response::ok(list);
+    }
+    let find = |id: &str| projects.iter().find(|project| project.id == id);
+    let to = match project_id.as_deref() {
+        Some(id) => match find(id) {
+            Some(project) => Some(project),
+            None => return Response::failed(Failure::not_found("project", id)),
+        },
+        None => None,
+    };
+    let from = list.project_id.as_deref().and_then(find);
+    if !crate::list_project_moves::can_move(&me, &list, from, to) {
+        return Response::failed(
+            Failure::refused(403, "You can't move this list there").with_code(MOVE_FORBIDDEN),
+        );
+    }
+    answer(app.context.lists().set_project(list_id, project_id))
+}
+
+fn list_project_moves(app: &App, list_id: Option<&str>) -> Response {
+    let (me, projects) = match me_and_projects(app) {
+        Ok(found) => found,
+        Err(failure) => return Response::failed(failure),
+    };
+    let list = match list_id.map(|id| (id, app.context.lists().list(id))) {
+        None => None,
+        Some((_, Ok(Some(list)))) => Some(list),
+        Some((id, Ok(None))) => return Response::failed(Failure::not_found("list", id)),
+        Some((_, Err(error))) => return Response::failed(error.into()),
+    };
+    Response::ok(crate::list_project_moves::moves(
+        &me,
+        list.as_ref(),
+        &projects,
+    ))
 }

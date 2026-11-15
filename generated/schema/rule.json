@@ -801,6 +801,97 @@
       ],
       "type": "string"
     },
+    "Project": {
+      "properties": {
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "customStates": {
+          "description": "The board's own columns, and renames of the three defaults.\n\nFree-form JSON on the wire, and read rather than typed: an entry a newer web writes must not\nstop a board drawing. [`crate::board::parse_custom_states`] is the only place that reads it."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The prefix this project's task identifiers carry — `AWTD` in `AWTD-1007`.\n\nUnique across astrid.cc, and `None` for a project made before identifiers existed. The\nserver is the only minter; this is read so a client knows which keys the reader can see,\nwhich is what decides whether `AWTD-1007` in a comment becomes a link\n([`crate::identifier::find_links`], task 5f3453e2).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lists": {
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/ProjectMember"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "ProjectAccess": {
       "description": "The part of a list's project that decides access to the list — what astrid-web's\n`PROJECT_ACCESS_INCLUDE` loads.",
       "properties": {
@@ -849,6 +940,58 @@
     },
     "ProjectListMember": {
       "properties": {
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "type": "object"
+    },
+    "ProjectMember": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Omitted by the embedded member arrays, like [`super::list::ListMember`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "default": "",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/User"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "userId": {
           "type": "string"
         }
@@ -2394,6 +2537,41 @@
       "required": [
         "kind",
         "projectId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "What a list's \"Project\" control offers: whether it may leave its project, which projects\nit may move into, and which projects a new list may be made in — see\n[`crate::list_project_moves`] (astrid-ios AITD-680, D68). `projects` is every project the\nperson can see; `list` is absent when only asking where a list may be created.",
+      "properties": {
+        "kind": {
+          "const": "listProjectMoves",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "projects": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Project"
+          },
+          "type": "array"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "userId"
       ],
       "type": "object"
     },

@@ -33,8 +33,8 @@ pub mod sync;
 // the rest still name the same items for every client.
 pub use astrid_rules::{
     board, board_cards, board_rows, copy, decisions, editing, filters, identifier, keyboard,
-    manual_order, markdown, model, palette, parse, permissions, plurals, reminders, repeating,
-    rows, rules, smart_tasks, theme, title_display,
+    list_project_moves, manual_order, markdown, model, palette, parse, permissions, plurals,
+    reminders, repeating, rows, rules, smart_tasks, theme, title_display,
 };
 
 /// Every string-catalog key this core asks a shell to say (task 1bdf84d7).

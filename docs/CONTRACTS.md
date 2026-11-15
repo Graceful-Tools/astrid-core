@@ -1636,3 +1636,45 @@ compares as written. The two orders agree for any name without accents.
 cannot be reached (`fromCache: true`). A refusal (403/404) is still an error. `saveProjectBoardRows`
 is online only, like web and the Mac. It is a view preference the server checks against what the
 person can see, not task data, so it does not go through the Outbox.
+
+### D68 — who may move a list into or out of a project, and create one inside it
+
+**Core-first** (astrid-ios AITD-680; the server enforces the same table in astrid-web AWTD-1702,
+and web's client mirrors the fixture in AWTD-1703). Until this, *Create project board* was the
+only control any client had, and it always made a **new** project. The server's
+`PUT /api/v1/lists/{id}` already took `projectId` (or `null` to detach) and let **any** project
+member attach a list. Project membership cascades onto every list in a project (PRODUCT_CONTRACT),
+so a plain project member could pull somebody's list in and hand the whole project access to it.
+Attaching changes who can see a list, so it now needs both sides' admins.
+
+| Action | The list | The project(s) |
+|---|---|---|
+| Move a list in, out, or across | owner or admin **of the list itself** | owner or admin of the project it joins **and** of the one it leaves |
+| Create a list in a project | — (the creator owns it) | owner, admin or member |
+| Anything, as a viewer or a stranger | nothing | nothing |
+
+- **The list side reads the list's own ownership and membership**, not the role the project
+  cascades onto it (`permissions::access_of`, which carries no project). A project admin who is
+  nobody on a list may not carry it off. Detaching is a move, so it needs admin of the project
+  left, too.
+- **A project role** is the project's `ownerId`, then a membership row read case-blind
+  (`owner`/`admin`/`viewer`; anything else, including missing, is `member`: presence is
+  membership, as on a list). A list in a project the person cannot see cannot be moved, because
+  nothing shows they may leave it.
+- **A board's status list** (`listType: "status"`) is a column, never a movable list.
+- **Destinations** never include the list's current project, and they are ordered by name,
+  case-blind, then id. So is `creatableIn`.
+
+**What moving does to tasks:** they move with the list. A task whose `statusRole` is a custom
+state the destination project doesn't define reads as the **Inbox** there (`board::column_for`'s
+existing unknown-role rule, D67). Its stored role is **not** rewritten, so moving back restores
+it. Saved board rows that name a list that has left the project drop it on the next read
+(`board_rows::resolve`, D67).
+
+**The commands:** `setListProject {listId, projectId | null}` is checked locally against this table
+(`code: "LIST_PROJECT_MOVE_FORBIDDEN"`). It is applied to the cache at once, so boards and rows
+re-derive, and journalled as the list's own PUT. A refusal there puts the cached `projectId` back
+and is dead-lettered with the server's words. `createList` takes `projectId` and sends it on the
+create, so the list is born in the project in one request (`LIST_PROJECT_CREATE_FORBIDDEN` when
+the person is not a member). `listProjectMoves {listId?}` answers the rules door's
+`listProjectMoves` over the signed-in person and the cached projects.

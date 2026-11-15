@@ -735,7 +735,26 @@ async fn update_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
             }
             Outcome::done()
         }
-        Err(error) => from_error(error),
+        Err(error) => {
+            let outcome = from_error(error);
+            if matches!(outcome, Outcome::Dead(_)) {
+                roll_back_project_move(store, list_id, entry);
+            }
+            outcome
+        }
+    }
+}
+
+/// A refused project move (astrid-ios AITD-680) puts the list back in the project it left,
+/// which the entry carries as `previousProjectId` — present only on a `setListProject` write.
+/// The refusal itself is dead-lettered with the server's words, as every refusal is.
+fn roll_back_project_move(store: &Store, list_id: &str, entry: &Entry) {
+    let Some(previous) = entry.payload.get("previousProjectId") else {
+        return;
+    };
+    if let Ok(Some(mut list)) = store.list(list_id) {
+        list.project_id = previous.as_str().map(str::to_string);
+        let _ = store.upsert_list(&list);
     }
 }
 
