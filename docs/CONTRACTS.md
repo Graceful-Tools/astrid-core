@@ -1678,3 +1678,20 @@ and is dead-lettered with the server's words. `createList` takes `projectId` and
 create, so the list is born in the project in one request (`LIST_PROJECT_CREATE_FORBIDDEN` when
 the person is not a member). `listProjectMoves {listId?}` answers the rules door's
 `listProjectMoves` over the signed-in person and the cached projects.
+
+### D69 — an opened list's board is that list's cards (ADEV-3)
+
+`board` with a `listId` drew the list's **project**: every card of every list in it, under the
+project's columns. While each project held one list that was the same thing, so nothing showed it.
+When four boards (web, iOS, Windows, Android) moved into one project, Jon: *"The Astrid-dev project
+has all the tasks in each list in iOS. It should not."* The Mac's list board, which asks `board`
+with the selected list, showed the same.
+
+**Now:** a list opened as a board holds **that list's cards**, top-level, in its manual order with
+its Done window (D43), under its **project's** columns: what `projectBoardRow` already draws for
+one row (D67). Asked with `projectId` alone, or opened from a status list, the board is still the
+whole project's.
+
+**Web agreed first:** `project-status-board.tsx` has narrowed the project's domain tasks to the
+selected list since its first board (`3d1bc2a8`: "the list is the management entity"). The core was
+the outlier, so this follows web. Test: `a_lists_board_holds_only_that_lists_cards_adev_3`.

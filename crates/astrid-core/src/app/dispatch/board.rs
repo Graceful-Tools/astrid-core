@@ -229,7 +229,21 @@ pub(super) fn board(
     };
 
     let columns = board_columns_with_rows(app, Some(&project_id), &lists);
-    let tasks = domain_tasks(app, &lists, &project_id);
+    // An opened list's board is that list's cards under the project's columns, never every list's
+    // in the project (ADEV-3, CONTRACTS D69): the list is what is being managed, as
+    // web's board has always had it. Asked with the project alone, or opened from a status list,
+    // the board is the whole project's.
+    let tasks = match opened {
+        Some(list)
+            if list.project_id.as_deref() == Some(project_id.as_str())
+                && list.list_type.as_deref() != Some("status") =>
+        {
+            app.store
+                .tasks_in_lists(std::slice::from_ref(&list.id))
+                .unwrap_or_default()
+        }
+        _ => domain_tasks(app, &lists, &project_id),
+    };
     // Borrowed, like the row pipeline: a board of ten thousand cards has no use for a second copy
     // of itself every time somebody moves one.
     let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
