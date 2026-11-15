@@ -29,6 +29,7 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | `web/astrid-tokens.css` | astrid-web: CSS custom properties, colours as `r, g, b` triplets | `packages/astrid-design/` with a `REVISION` |
 | `apple/AstridTokens.swift` | astrid-ios (iOS and Mac): SwiftUI values; brand colours stay `Brand.*` | `Astrid App/Utilities/AstridTokens.swift`, hash-checked by `check:contracts` (AITD-605/610) |
 | `android/AstridTokens.kt` | astrid-android: Compose values, one `AstridPalette` per theme and a Material 3 `ColorScheme` built from it; brand colours are a parameter (`AstridBrand`) with Astrid's own as the default, so a partner build passes `BuildConfig`'s instead of regenerating | `app/src/main/java/com/astrid/design/AstridTokens.kt`, the package the file declares (AATD-85) |
+| `windows/AstridTokens.xaml` | astrid-windows: a WinUI resource dictionary. Brushes `Astrid<Token>` in `Default` (the light values, which WinUI resolves when the system states no preference), `Light`, `Dark` and `HighContrast` (the system colours) theme dictionaries; the shell's own names (`AstridSurface`, `AstridSurfaceHover`) and WinUI's accent-button keys; radius, spacing, motion and state. No `ocean`: WinUI has no third theme (AWTD-1699, ADEV-1) | `design/AstridTokens.xaml`, hash-checked; merged into `App.xaml` |
 | `vscode/astrid-{light,dark,ocean}-color-theme.json` | astrid-vscode: one workbench colour theme per Astrid theme, contributed under `themes` | the extension's `themes/` |
 | `tokens.resolved.json` | every client: the source with each theme's `extends` flattened | `packages/astrid-design/` in astrid-web |
 
@@ -37,9 +38,16 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | `android/drawable/checkbox_*.xml` | astrid-android: the three layers as vector drawables; `box` and `repeat` are white, for a tint | `app/src/main/res/drawable/` |
 | `windows/AstridCheckbox.xaml` | astrid-windows: a resource dictionary with one `ContentControl` style per layer; `box` and `repeat` take the control's `Foreground` | merged into `App.xaml` |
 
-The Windows (XAML) token emitter is added to `crates/xtask/src/design.rs` in the change that adopts
-it (AWTD2-155), so it is written against the project that compiles it. Until then Windows reads
-`tokens.resolved.json` in a test.
+The Windows token dictionary carries a few names that are not tokens, so that adopting it deletes
+the shell's hand-written brushes rather than renaming their call sites (ADEV-1). `AstridSurface` is
+the card (DS9): `bg-hover` on light and `bg-secondary` on dark, and `AstridSurfaceHover` is
+`bg-tertiary`. `AccentFillColorDefaultBrush`, `AccentFillColorSecondaryBrush` and
+`TextOnAccentFillColorPrimaryBrush` are WinUI's own keys, set to `accent`, `accent-hover` and
+`accent-text` because DS26 wants one accent fill in every theme where WinUI would derive a pale one;
+they are left out of `HighContrast`, where WinUI's system-colour brushes should win. Both lists are
+in `crates/xtask/src/design.rs` (`XAML_ALIASES`, `XAML_WINUI_KEYS`). WinUI's `SystemAccentColor`
+ramp (`Light1..3`, `Dark1..3`) stays written out in the shell: its six steps are shades the register
+does not hold, and the generator does not derive one colour from another (AWTD2-159).
 
 Two things the emitters deliberately leave out. The Compose file declares a package, because a
 Kotlin file in the default package cannot be imported at all; it is changed in `design.rs` and
