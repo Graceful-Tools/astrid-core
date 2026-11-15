@@ -3532,6 +3532,149 @@
       "type": "object"
     },
     {
+      "description": "What a task's detail draws: its field order, and whether the board-state and blockers rows\nappear - [`crate::rows::detail`] (AWTD2-216; iOS's `TaskDetailFieldOrder`,\n`TaskDetailProjectStateRow.isVisible`, tasks c8a1ff51, AITD-327/332/555).\n\nAsked on its own because the Apple detail views do not read the App door's `taskDetail`.",
+      "properties": {
+        "displayMode": {
+          "default": null,
+          "description": "`list` or `project`; anything else reads as `list`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasBlockers": {
+          "default": false,
+          "type": "boolean"
+        },
+        "isInProject": {
+          "default": false,
+          "type": "boolean"
+        },
+        "isReadOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "detailLayout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "What the leading control's picker offers, and whose task this is -\n[`crate::rows::LeadingControl::picker_shows_project_state`] and\n[`crate::rows::LeadingControl::is_someone_elses_task`] (AWTD2-216; tasks AITD-375, 42013da7).",
+      "properties": {
+        "assigneeId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentUserId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayMode": {
+          "default": null,
+          "description": "`list` or `project`; anything else reads as `list`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "const": "leadingPicker",
+          "type": "string"
+        },
+        "surface": {
+          "default": null,
+          "description": "`listRow`, `boardCard` or `detail`; anything else reads as `listRow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The lists a row draws as chips - [`crate::rows::list_chips`] (AWTD2-216; iOS's\n`chipListsForTaskRow`). `hidden_list_ids` are the lists the surrounding view already shows.",
+      "properties": {
+        "hiddenListIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "listChips",
+          "type": "string"
+        },
+        "listIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Whole days from the reader's today to `date` - [`crate::rows::day_offset`] (AWTD2-216; iOS's\n`DueDateLabel.dayOffset`). An all-day date is compared as a calendar date, a timed one as\nan instant in the reader's zone.",
+      "properties": {
+        "date": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "isAllDay": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "dayOffset",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "utcOffsetMinutes": {
+          "default": 0,
+          "description": "The person's offset from UTC now, in minutes.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "date",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
       "description": "Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].\n\nA read normalises: anything a newer build wrote reads as the default rather than as an\nerror, because a value this build has not heard of must not leave somebody with an app\nthat will not draw.",
       "properties": {
         "kind": {
