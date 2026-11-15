@@ -2224,7 +2224,7 @@ mod tests {
         // A column on the left: the room is to its right.
         let right = place(40.0, 300.0);
         assert_eq!(right["side"], "right", "{right}");
-        assert_eq!(right["left"], 368.0, "a gutter clear of the anchor");
+        assert_eq!(right["left"], 360.0, "on the anchor's edge (AITD-679)");
 
         // A column on the right: it opens the other way.
         let left = place(1000.0, 300.0);
