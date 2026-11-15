@@ -547,6 +547,63 @@ pub enum Rule {
         width: f64,
         height: f64,
     },
+    /// What a task's detail draws: its field order, and whether the board-state and blockers rows
+    /// appear - [`crate::rows::detail`] (AWTD2-216; iOS's `TaskDetailFieldOrder`,
+    /// `TaskDetailProjectStateRow.isVisible`, tasks c8a1ff51, AITD-327/332/555).
+    ///
+    /// Asked on its own because the Apple detail views do not read the App door's `taskDetail`.
+    DetailLayout {
+        /// `list` or `project`; anything else reads as `list`.
+        #[serde(default)]
+        display_mode: Option<String>,
+        #[serde(default)]
+        is_in_project: bool,
+        #[serde(default)]
+        is_read_only: bool,
+        #[serde(default)]
+        has_blockers: bool,
+    },
+    /// What the leading control's picker offers, and whose task this is -
+    /// [`crate::rows::LeadingControl::picker_shows_project_state`] and
+    /// [`crate::rows::LeadingControl::is_someone_elses_task`] (AWTD2-216; tasks AITD-375, 42013da7).
+    LeadingPicker {
+        /// `list` or `project`; anything else reads as `list`.
+        #[serde(default)]
+        display_mode: Option<String>,
+        /// `listRow`, `boardCard` or `detail`; anything else reads as `listRow`.
+        #[serde(default)]
+        surface: Option<String>,
+        #[serde(default)]
+        assignee_id: Option<String>,
+        #[serde(default)]
+        current_user_id: Option<String>,
+    },
+    /// The lists a row draws as chips - [`crate::rows::list_chips`] (AWTD2-216; iOS's
+    /// `chipListsForTaskRow`). `hidden_list_ids` are the lists the surrounding view already shows.
+    ListChips {
+        #[serde(default)]
+        list_ids: Vec<String>,
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        hidden_list_ids: Vec<String>,
+    },
+    /// Whole days from the reader's today to `date` - [`crate::rows::day_offset`] (AWTD2-216; iOS's
+    /// `DueDateLabel.dayOffset`). An all-day date is compared as a calendar date, a timed one as
+    /// an instant in the reader's zone.
+    DayOffset {
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        date: DateTime<Utc>,
+        #[serde(default)]
+        is_all_day: bool,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+        /// The person's offset from UTC now, in minutes.
+        #[serde(default)]
+        utc_offset_minutes: i32,
+    },
     /// Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].
     ///
     /// A read normalises: anything a newer build wrote reads as the default rather than as an
@@ -1068,6 +1125,69 @@ pub fn run(rule: Rule) -> Response {
             Response::ok(crate::capabilities::for_lists(&list_ids, &lists))
         }
         Rule::PaletteRank { query, titles } => Response::ok(crate::palette::rank(&query, &titles)),
+        Rule::DetailLayout {
+            display_mode,
+            is_in_project,
+            is_read_only,
+            has_blockers,
+        } => {
+            let mode = crate::rows::DisplayMode::from_stored(display_mode.as_deref());
+            Response::ok(DetailLayoutAnswer {
+                field_order: crate::rows::detail::field_order(mode)
+                    .iter()
+                    .map(|field| field.name())
+                    .collect(),
+                shows_board_state: crate::rows::detail::shows_board_state(
+                    mode,
+                    is_in_project,
+                    is_read_only,
+                ),
+                shows_task_blockers: crate::rows::detail::shows_task_blockers(
+                    is_in_project,
+                    is_read_only,
+                    has_blockers,
+                ),
+            })
+        }
+        Rule::LeadingPicker {
+            display_mode,
+            surface,
+            assignee_id,
+            current_user_id,
+        } => {
+            let is_someone_elses = crate::rows::LeadingControl::is_someone_elses_task(
+                assignee_id.as_deref(),
+                current_user_id.as_deref(),
+            );
+            Response::ok(LeadingPickerAnswer {
+                picker_shows_project_state: crate::rows::LeadingControl::picker_shows_project_state(
+                    crate::rows::DisplayMode::from_stored(display_mode.as_deref()),
+                    crate::rows::Surface::from_wire(surface.as_deref()),
+                    is_someone_elses,
+                ),
+                is_someone_elses_task: is_someone_elses,
+            })
+        }
+        Rule::ListChips {
+            list_ids,
+            lists,
+            hidden_list_ids,
+        } => Response::ok(crate::rows::json::chips(&crate::rows::list_chips(
+            &list_ids,
+            &lists,
+            &hidden_list_ids,
+        ))),
+        Rule::DayOffset {
+            date,
+            is_all_day,
+            now,
+            utc_offset_minutes,
+        } => match utc_offset(utc_offset_minutes) {
+            Ok(offset) => Response::ok(DayOffsetAnswer {
+                days: crate::rows::day_offset(date, is_all_day, now, offset),
+            }),
+            Err(failure) => Response::failed(failure),
+        },
         Rule::Rows {
             list,
             my_tasks,
@@ -1212,6 +1332,30 @@ struct ShortcutAnswer {
     action: &'static str,
     title: &'static str,
     requires_selection: bool,
+}
+
+/// [`Rule::DetailLayout`]'s answer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DetailLayoutAnswer {
+    /// Field names (`assignee`, `when`, `priority`, `lists`), top to bottom under the title.
+    field_order: Vec<&'static str>,
+    shows_board_state: bool,
+    shows_task_blockers: bool,
+}
+
+/// [`Rule::LeadingPicker`]'s answer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LeadingPickerAnswer {
+    picker_shows_project_state: bool,
+    is_someone_elses_task: bool,
+}
+
+/// [`Rule::DayOffset`]'s answer.
+#[derive(Debug, Serialize)]
+struct DayOffsetAnswer {
+    days: i64,
 }
 
 /// [`Rule::WaitingWake`]'s answer.
@@ -2355,5 +2499,117 @@ mod tests {
             "ocean"
         );
         assert_eq!(answer(json!({ "kind": "theme" }))["value"], "ocean");
+    }
+
+    /// AWTD2-216 (iOS c8a1ff51, AITD-327/332/555): the detail layout through the door.
+    #[test]
+    fn awtd2_216_detail_layout_answers_order_and_the_two_rows() {
+        let list = answer(json!({
+            "kind": "detailLayout", "displayMode": "list", "isInProject": true,
+        }))["value"]
+            .clone();
+        assert_eq!(
+            list,
+            json!({
+                "fieldOrder": ["assignee", "when", "priority", "lists"],
+                "showsBoardState": true,
+                "showsTaskBlockers": true,
+            })
+        );
+        // Project mode drops who and priority; a read-only viewer sees no state mover, but still
+        // sees a blocker that exists.
+        let project = answer(json!({
+            "kind": "detailLayout", "displayMode": "project",
+            "isInProject": true, "isReadOnly": true, "hasBlockers": true,
+        }))["value"]
+            .clone();
+        assert_eq!(
+            project,
+            json!({
+                "fieldOrder": ["when", "lists"],
+                "showsBoardState": false,
+                "showsTaskBlockers": true,
+            })
+        );
+        let off_board = answer(json!({ "kind": "detailLayout" }))["value"].clone();
+        assert_eq!(off_board["showsBoardState"], false);
+        assert_eq!(off_board["showsTaskBlockers"], false);
+    }
+
+    /// AWTD2-216 (iOS AITD-375, 42013da7): the leading picker's two questions.
+    #[test]
+    fn awtd2_216_leading_picker_answers_state_and_ownership() {
+        let someone_elses = answer(json!({
+            "kind": "leadingPicker", "assigneeId": "them", "currentUserId": "me",
+        }))["value"]
+            .clone();
+        assert_eq!(
+            someone_elses,
+            json!({ "pickerShowsProjectState": true, "isSomeoneElsesTask": true })
+        );
+        // Unassigned is nobody's, not someone else's.
+        let unassigned =
+            answer(json!({ "kind": "leadingPicker", "currentUserId": "me" }))["value"].clone();
+        assert_eq!(
+            unassigned,
+            json!({ "pickerShowsProjectState": false, "isSomeoneElsesTask": false })
+        );
+        let card = answer(json!({
+            "kind": "leadingPicker", "surface": "boardCard", "assigneeId": "me",
+            "currentUserId": "me",
+        }))["value"]
+            .clone();
+        assert_eq!(card["pickerShowsProjectState"], true);
+        assert_eq!(card["isSomeoneElsesTask"], false);
+    }
+
+    /// AWTD2-216 (iOS 42013da7): chips skip hidden lists and board columns.
+    #[test]
+    fn awtd2_216_list_chips_skip_hidden_lists_and_columns() {
+        let chips = answer(json!({
+            "kind": "listChips",
+            "listIds": ["home", "viewed", "col", "gone"],
+            "lists": [
+                { "id": "home", "name": "Home", "color": "#ff0000" },
+                { "id": "viewed", "name": "Viewed" },
+                { "id": "col", "name": "Doing", "listType": "status" },
+            ],
+            "hiddenListIds": ["viewed"],
+        }))["value"]
+            .clone();
+        let ids: Vec<&str> = chips
+            .as_array()
+            .expect("chips")
+            .iter()
+            .map(|chip| chip["id"].as_str().expect("id"))
+            .collect();
+        assert_eq!(ids, ["home"], "{chips}");
+        assert_eq!(chips[0]["name"], "Home");
+        assert_eq!(chips[0]["glyph"], "hash");
+    }
+
+    /// AWTD2-216 (iOS c8a1ff51's neighbour `DueDateLabel.dayOffset`): whole days, in the reader's
+    /// zone for a timed date and by calendar date for an all-day one.
+    #[test]
+    fn awtd2_216_day_offset_counts_days_in_the_readers_zone() {
+        let days = |date: &str, all_day: bool, offset: i32| {
+            answer(json!({
+                "kind": "dayOffset", "date": date, "isAllDay": all_day,
+                "now": "2026-10-17T03:00:00.000Z", "utcOffsetMinutes": offset,
+            }))["value"]["days"]
+                .clone()
+        };
+        // 03:00 UTC is still the 16th at UTC-8, and so is 02:00 UTC on the 17th: same day.
+        assert_eq!(days("2026-10-17T02:00:00.000Z", false, -480), json!(0));
+        assert_eq!(days("2026-10-17T02:00:00.000Z", false, 0), json!(0));
+        assert_eq!(days("2026-10-18T09:00:00.000Z", false, -480), json!(2));
+        // All-day: the UTC midnight is the calendar date, whatever the zone.
+        assert_eq!(days("2026-10-17T00:00:00.000Z", true, -480), json!(1));
+        assert_eq!(days("2026-10-16T00:00:00.000Z", true, 0), json!(-1));
+        let bad = answer(json!({
+            "kind": "dayOffset", "date": "2026-10-17T00:00:00.000Z",
+            "now": "2026-10-17T00:00:00.000Z", "utcOffsetMinutes": 99999999,
+        }));
+        assert_ne!(bad["ok"], json!(true), "{bad}");
     }
 }
