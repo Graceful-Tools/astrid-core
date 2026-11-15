@@ -462,6 +462,35 @@ impl ChipGlyph {
     }
 }
 
+/// The lists a task row draws as chips, in the order the task names them.
+///
+/// `hidden_list_ids` are the lists the surrounding view already shows (the list being viewed, a
+/// board's domain list and column), so repeating them on every row would say nothing (AWTD2-216;
+/// iOS's `chipListsForTaskRow`).
+pub fn list_chips(
+    list_ids: &[String],
+    lists: &[TaskList],
+    hidden_list_ids: &[String],
+) -> Vec<ListChip> {
+    list_ids
+        .iter()
+        .filter(|id| !hidden_list_ids.contains(id))
+        .filter_map(|id| lists.iter().find(|list| &list.id == id))
+        // A board column is a state, not a place. Drawing it as a chip beside "Home" and
+        // "Work" tells the reader a task is filed somewhere it is not. A label IS drawn —
+        // that is the whole point of a label — marked so the shell draws it as a tag, and so
+        // are a milestone and an iteration, which are tags too (AITD-506).
+        .filter(|list| !list.is_status_list())
+        .map(|list| ListChip {
+            id: list.id.clone(),
+            name: list.name.clone(),
+            color: list.display_color().to_string(),
+            is_label: list.is_tag_list(),
+            glyph: ChipGlyph::for_list(list),
+        })
+        .collect()
+}
+
 /// What the row builder needs to resolve a task against.
 pub struct RowContext<'a> {
     pub current_user_id: Option<&'a str>,
@@ -513,23 +542,7 @@ impl TaskRow {
             LeadingControl::is_someone_elses_task(assignee_id, context.current_user_id),
         );
 
-        let list_ids = task.effective_list_ids();
-        let list_chips = list_ids
-            .iter()
-            .filter_map(|id| context.lists.iter().find(|list| &list.id == id))
-            // A board column is a state, not a place. Drawing it as a chip beside "Home" and
-            // "Work" tells the reader a task is filed somewhere it is not. A label IS drawn —
-            // that is the whole point of a label — marked so the shell draws it as a tag, and so
-            // are a milestone and an iteration, which are tags too (AITD-506).
-            .filter(|list| !list.is_status_list())
-            .map(|list| ListChip {
-                id: list.id.clone(),
-                name: list.name.clone(),
-                color: list.display_color().to_string(),
-                is_label: list.is_tag_list(),
-                glyph: ChipGlyph::for_list(list),
-            })
-            .collect();
+        let list_chips = list_chips(&task.effective_list_ids(), context.lists, &[]);
 
         let has_identifier = task.identifier.as_deref().is_some_and(|id| !id.is_empty());
         let shows_identifier = identifier::shows_identifier(

@@ -39,6 +39,13 @@ what AITD-656 / AITD-622 / AITD-672 need in order to draw rows from `TaskRow` an
 `TaskLeadingControl` and `TaskDetailProjectStateRow`. The bump itself is a client release decision
 (AITD-673) and is not this repo's to make — the row above still reads `c80b399`.
 
+**astrid-ios is also waiting on the rest of its row rules** (AWTD2-216, AITD-622 / AITD-634). The
+rule door now answers `detailLayout` (field order, `showsBoardState`, `showsTaskBlockers`),
+`leadingPicker` (`pickerShowsProjectState`, `isSomeoneElsesTask`), `listChips` (with
+`hiddenListIds`) and `dayOffset`, so the Apple detail views can delete their Swift copies without
+reading the App door's `taskDetail`. Taking them is a pin bump past the commit that lands this, and
+that bump is a client release decision.
+
 **The table is the source.** `check-pins` reads the rows — the key, the manifest paths out of the
 *Pinned in* cell, and the revision out of the last one. It holds no list of paths of its own, so
 recording a tenth copy is a row here and nothing in `crates/xtask`. What the code still holds is
