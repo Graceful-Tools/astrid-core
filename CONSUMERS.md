@@ -21,9 +21,9 @@ by `<checkout>/<copy>`, not by its repository.
 |---|---|---|---|---|
 | `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `654e00421393753f2797ab4d3214eba5840530a0` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `b213a073c44cfefd89659ba5b928c066f51f7c90` |
+| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `b0947e82b03b1bec135a8c120bef6cc19000acd2` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `24926c36d257192209c55ea5ade8f1ae49a609ab` |
-| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `c80b3999020f321f7b907587a493dbd19e19b1fa` |
+| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `ed8380cf6399233e24f5f2dcf3141340cdf8ebea` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `a503a62039fca9a19ce7802a2d9f6d38ae5f89d8` |
 | `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `143cfd17ba9f8758e4f04562ff5dfdcd342c90a9` |
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `3dcc880a391dee13cce3aa7c0b09544a7b647ca2` |
@@ -33,11 +33,9 @@ by `<checkout>/<copy>`, not by its repository.
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
 that reads like a bad pin.
 
-**`astrid-ios/core` is waiting on a bump, deliberately** (task `aa72f990`, 2026-11-14). The core
-now answers the leading action and the board-state row as iOS does (CONTRACTS D62, D63), which is
-what AITD-656 / AITD-622 / AITD-672 need in order to draw rows from `TaskRow` and delete
-`TaskLeadingControl` and `TaskDetailProjectStateRow`. The bump itself is a client release decision
-(AITD-673) and is not this repo's to make — the row above still reads `c80b399`.
+**`astrid-ios/core` took the bump on 2026-11-15** (`ed8380cf`), past the leading-action and
+board-state answers (CONTRACTS D62, D63) that AITD-656 / AITD-622 / AITD-672 needed to draw rows
+from `TaskRow` and delete `TaskLeadingControl` and `TaskDetailProjectStateRow`.
 
 **astrid-ios is also waiting on the rest of its row rules** (AWTD2-216, AITD-622 / AITD-634). The
 rule door now answers `detailLayout` (field order, `showsBoardState`, `showsTaskBlockers`),

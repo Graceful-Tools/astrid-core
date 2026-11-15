@@ -82,10 +82,13 @@ pub struct Placement {
     pub arrow_offset: f64,
 }
 
-/// The space left between the anchor and the callout, and between the callout and the viewport.
+/// The space kept between the callout and the viewport's edges: a callout that hugs the window
+/// edge reads as clipped.
 ///
-/// One number rather than two: a callout that hugs the window edge reads as clipped, and one that
-/// hugs its anchor reads as attached to the wrong thing. Both want the same small gap.
+/// Not between the callout and its ANCHOR. The callout touches the row it belongs to — its near
+/// edge, where the arrow's tip is, sits on the row's edge (astrid-ios AITD-679, Jon: "the arrow
+/// doesn't touch the task row... It should"). It used to keep this gutter there too, and clients
+/// that docked the panel to the window edge instead left it nowhere near the row.
 pub const GUTTER: f64 = 8.0;
 
 /// How close to a corner the arrow may be drawn.
@@ -112,9 +115,10 @@ pub fn place(anchor: Rect, viewport: Rect, width: f64, height: f64) -> Placement
         Side::Left
     };
 
+    // The near edge on the anchor's edge: the arrow's tip touches the row.
     let wanted_left = match side {
-        Side::Right => anchor.right() + GUTTER,
-        Side::Left => anchor.left - GUTTER - width,
+        Side::Right => anchor.right(),
+        Side::Left => anchor.left - width,
     };
     let left = clamp(
         wanted_left,
@@ -177,13 +181,13 @@ mod tests {
         // A column at the left: everything is to the right of it.
         let left_column = place(anchor(40.0, 300.0), window(), 420.0, 520.0);
         assert_eq!(left_column.side, Side::Right);
-        assert_eq!(left_column.left, 40.0 + 320.0 + GUTTER);
+        assert_eq!(left_column.left, 40.0 + 320.0);
 
         // A column at the right: the room is on the left, so it opens leftward and its own right
-        // edge sits a gutter clear of the anchor.
+        // edge sits on the anchor's left edge (AITD-679).
         let right_column = place(anchor(1000.0, 300.0), window(), 420.0, 520.0);
         assert_eq!(right_column.side, Side::Left);
-        assert_eq!(right_column.left + 420.0, 1000.0 - GUTTER);
+        assert_eq!(right_column.left + 420.0, 1000.0);
     }
 
     /// The arrow points at the ROW, not at the callout's own middle — they are only the same when
@@ -256,6 +260,26 @@ mod tests {
         let placed = place(anchor(10.0, 10.0), tiny, 420.0, 520.0);
         assert_eq!(placed.left, GUTTER);
         assert_eq!(placed.top, GUTTER);
+    }
+
+    /// The callout TOUCHES its anchor (astrid-ios AITD-679, Jon: "the arrow doesn't touch the
+    /// task row... It should"). Its near edge, where the arrow's tip is, sits on the row's edge on
+    /// either side. The gutter is only the clearance from the viewport.
+    #[test]
+    fn the_callout_touches_its_anchor_aitd_679() {
+        let right = place(anchor(40.0, 300.0), window(), 420.0, 520.0);
+        assert_eq!(
+            right.left,
+            40.0 + 320.0,
+            "the arrow's tip on the row's right edge"
+        );
+
+        let left = place(anchor(1000.0, 300.0), window(), 420.0, 520.0);
+        assert_eq!(
+            left.left + left.width,
+            1000.0,
+            "the arrow's tip on the row's left edge"
+        );
     }
 
     /// Ties go right. Stated so it is a decision rather than an accident of `>=`.
