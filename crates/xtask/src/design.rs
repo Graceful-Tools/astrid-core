@@ -1158,11 +1158,27 @@ fn kotlin_type(key: &str) -> &'static str {
 }
 
 /// The names the Windows shell already gives a few brushes, so adopting the generated file is a
-/// deletion of the hand copies rather than a rename of every call site: (brush, token).
-const XAML_ALIASES: &[(&str, &str)] = &[
-    ("AstridSurface", "bg-primary"),
-    ("AstridBorder", "border"),
-    ("AstridTextMuted", "text-muted"),
+/// deletion of the hand copies rather than a rename of every call site: (brush, light token, dark
+/// token). A brush can be a different token in each appearance: the shell's surface is the card,
+/// `bg-hover` on light and `bg-secondary` on dark (DS9, ADEV-1). The shell's other names
+/// (`AstridBorder`, `AstridTextMuted`) are already the tokens' own brush names, so they need no row.
+const XAML_ALIASES: &[(&str, &str, &str)] = &[
+    ("AstridSurface", "bg-hover", "bg-secondary"),
+    ("AstridSurfaceHover", "bg-tertiary", "bg-tertiary"),
+];
+
+/// WinUI's own brush keys, overridden because DS26 wants one accent fill in every theme where WinUI
+/// would derive a pale one from `SystemAccentColor`: (WinUI key, token). Emitted in the Default,
+/// Light and Dark dictionaries only; under High Contrast WinUI's own system-colour brushes win
+/// (ADEV-1).
+///
+/// `SystemAccentColor` and its `Light1..3` / `Dark1..3` ramp are not here: the ramp's six steps are
+/// shades this register does not hold, and the generator does not derive one colour from another
+/// (AWTD2-159), so the shell keeps that block written out.
+const XAML_WINUI_KEYS: &[(&str, &str)] = &[
+    ("AccentFillColorDefaultBrush", "accent"),
+    ("AccentFillColorSecondaryBrush", "accent-hover"),
+    ("TextOnAccentFillColorPrimaryBrush", "accent-text"),
 ];
 
 /// A token's XAML name: `bg-primary` is `AstridBgPrimary`.
@@ -1196,10 +1212,11 @@ fn xaml_size(key: &str, value: &Value) -> String {
     )
 }
 
-/// WinUI: one `ResourceDictionary` with the Light, Dark and HighContrast `ThemeDictionaries` a
-/// `ThemeResource` resolves from, plus the scales that do not change with the theme. WinUI has no
-/// third light-or-dark mode, so a theme beyond `light` and `dark` (`ocean`) is not emitted here;
-/// High Contrast takes the system colours, never Astrid's.
+/// WinUI: one `ResourceDictionary` with the Default, Light, Dark and HighContrast
+/// `ThemeDictionaries` a `ThemeResource` resolves from, plus the scales that do not change with the
+/// theme. WinUI resolves `Default` when the system states no preference, so it carries the light
+/// values beside `Light` (ADEV-1). WinUI has no third light-or-dark mode, so a theme beyond `light`
+/// and `dark` (`ocean`) is not emitted here; High Contrast takes the system colours, never Astrid's.
 fn windows_xaml(tokens: &Tokens) -> String {
     let mut xaml = String::from(
         "<ResourceDictionary\n    xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\n    xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\n\n    <ResourceDictionary.ThemeDictionaries>\n",
@@ -1213,6 +1230,7 @@ fn windows_xaml(tokens: &Tokens) -> String {
         format!("            <SolidColorBrush x:Key=\"{name}\" Color=\"{colour}\" />\n")
     };
     for (dictionary, theme_name) in [
+        ("Default", Some("light")),
         ("Light", Some("light")),
         ("Dark", Some("dark")),
         ("HighContrast", None),
@@ -1221,22 +1239,35 @@ fn windows_xaml(tokens: &Tokens) -> String {
             "        <ResourceDictionary x:Key=\"{dictionary}\">\n"
         ));
         let theme = theme_name.and_then(|n| tokens.themes.iter().find(|(t, _)| t == n));
-        for key in &keys {
-            let colour = match theme {
-                Some((_, theme)) => match &theme.colours[*key] {
-                    Colour::Hex(r, g, b) => format!("#{r:02X}{g:02X}{b:02X}"),
-                    Colour::Brand(reference) => match tokens.brand.get(reference) {
-                        Some((r, g, b)) => format!("#{r:02X}{g:02X}{b:02X}"),
-                        None => continue,
-                    },
+        // A token's colour in this dictionary; `None` for a brand reference with no value.
+        let colour = |key: &str| -> Option<String> {
+            match theme {
+                Some((_, theme)) => match theme.colours.get(key)? {
+                    Colour::Hex(r, g, b) => Some(format!("#{r:02X}{g:02X}{b:02X}")),
+                    Colour::Brand(reference) => tokens
+                        .brand
+                        .get(reference)
+                        .map(|(r, g, b)| format!("#{r:02X}{g:02X}{b:02X}")),
                 },
-                None => format!("{{ThemeResource {}}}", high_contrast_colour(key)),
-            };
-            xaml.push_str(&brush(&xaml_name(key), &colour));
-            for (alias, token) in XAML_ALIASES {
-                // `border` is already `AstridBorder`: a repeated key is not valid XAML.
-                if token == key && *alias != xaml_name(key) {
-                    xaml.push_str(&brush(alias, &colour));
+                None => Some(format!("{{ThemeResource {}}}", high_contrast_colour(key))),
+            }
+        };
+        for key in &keys {
+            if let Some(colour) = colour(key) {
+                xaml.push_str(&brush(&xaml_name(key), &colour));
+            }
+        }
+        let dark = theme.is_some_and(|(_, theme)| theme.appearance == "dark");
+        for (alias, light_token, dark_token) in XAML_ALIASES {
+            let token = if dark { dark_token } else { light_token };
+            if let Some(colour) = colour(token) {
+                xaml.push_str(&brush(alias, &colour));
+            }
+        }
+        if theme.is_some() {
+            for (key, token) in XAML_WINUI_KEYS {
+                if let Some(colour) = colour(token) {
+                    xaml.push_str(&brush(key, &colour));
                 }
             }
         }
@@ -2203,7 +2234,7 @@ mod tests {
         for name in ["AstridSurface", "AstridBorder", "AstridTextMuted"] {
             assert_eq!(
                 xaml.matches(&format!("x:Key=\"{name}\"")).count(),
-                3,
+                4,
                 "{name} is in every dictionary"
             );
         }
@@ -2216,6 +2247,131 @@ mod tests {
         assert!(outputs(&tokens)
             .iter()
             .any(|(path, _)| path == "windows/AstridTokens.xaml"));
+    }
+
+    /// The brushes of one theme dictionary in the generated XAML: (key, colour).
+    fn xaml_brushes(xaml: &str, dictionary: &str) -> Vec<(String, String)> {
+        let start = format!("<ResourceDictionary x:Key=\"{dictionary}\">");
+        let body = xaml
+            .split(&start)
+            .nth(1)
+            .unwrap_or_else(|| panic!("no {dictionary} dictionary"));
+        let body = body.split("</ResourceDictionary>").next().unwrap();
+        body.lines()
+            .filter_map(|line| {
+                let key = line.split("x:Key=\"").nth(1)?.split('"').next()?;
+                let colour = line.split("Color=\"").nth(1)?.split('"').next()?;
+                Some((key.to_string(), colour.to_string()))
+            })
+            .collect()
+    }
+
+    fn committed_xaml() -> String {
+        let root = crate::repo_root();
+        let text = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        windows_xaml(&parse(&text, &core_theme_names()).expect("valid"))
+    }
+
+    /// ADEV-1, gap 1: WinUI resolves `Default`, not `Light`, when the system states no preference,
+    /// and the shell's `ThemeBrushes.Resolve` asks for `"Default"` by name. It carries the light
+    /// values, and `Light` stays beside it.
+    #[test]
+    fn xaml_has_a_default_dictionary_with_the_light_values_adev_1() {
+        let xaml = committed_xaml();
+        let default = xaml_brushes(&xaml, "Default");
+        assert!(!default.is_empty(), "Default dictionary has brushes");
+        assert_eq!(default, xaml_brushes(&xaml, "Light"), "Default is Light");
+        assert_ne!(default, xaml_brushes(&xaml, "Dark"));
+        let order: Vec<usize> = ["Default", "Light", "Dark", "HighContrast"]
+            .iter()
+            .map(|d| xaml.find(&format!("x:Key=\"{d}\"")).expect(d))
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "dictionary order");
+    }
+
+    /// ADEV-1, gaps 2 and 3: the five names astrid-windows' `GeneratedNames` table maps by hand
+    /// (`DesignTokenTests.cs`), each the token that table names in that theme. `AstridSurface` is
+    /// the card (DS9): `bg-hover` on light, `bg-secondary` on dark.
+    #[test]
+    fn xaml_emits_the_shells_surface_and_winui_accent_names_adev_1() {
+        let xaml = committed_xaml();
+        let expected = [
+            ("AstridSurface", "AstridBgHover", "AstridBgSecondary"),
+            ("AstridSurfaceHover", "AstridBgTertiary", "AstridBgTertiary"),
+            (
+                "AccentFillColorDefaultBrush",
+                "AstridAccent",
+                "AstridAccent",
+            ),
+            (
+                "AccentFillColorSecondaryBrush",
+                "AstridAccentHover",
+                "AstridAccentHover",
+            ),
+            (
+                "TextOnAccentFillColorPrimaryBrush",
+                "AstridAccentText",
+                "AstridAccentText",
+            ),
+        ];
+        for (dictionary, dark) in [("Default", false), ("Light", false), ("Dark", true)] {
+            let brushes = xaml_brushes(&xaml, dictionary);
+            let colour = |name: &str| {
+                let found: Vec<&String> = brushes
+                    .iter()
+                    .filter(|(key, _)| key == name)
+                    .map(|(_, colour)| colour)
+                    .collect();
+                assert_eq!(found.len(), 1, "{name} once in {dictionary}");
+                found[0].clone()
+            };
+            for (alias, light_source, dark_source) in expected {
+                let source = if dark { dark_source } else { light_source };
+                assert_eq!(colour(alias), colour(source), "{alias} in {dictionary}");
+            }
+        }
+        // The case the old single-token alias got wrong: Dark's card is not its page.
+        let dark = xaml_brushes(&xaml, "Dark");
+        assert!(dark.contains(&("AstridSurface".into(), "#1F2937".into())));
+
+        // High Contrast: the Astrid surfaces take the system window colour, and WinUI's own accent
+        // keys are left to WinUI, which derives them from the user's high-contrast colours.
+        let contrast = xaml_brushes(&xaml, "HighContrast");
+        for alias in ["AstridSurface", "AstridSurfaceHover"] {
+            assert!(contrast.contains(&(
+                alias.into(),
+                "{ThemeResource SystemColorWindowColor}".into()
+            )));
+        }
+        for winui in [
+            "AccentFillColorDefaultBrush",
+            "AccentFillColorSecondaryBrush",
+            "TextOnAccentFillColorPrimaryBrush",
+        ] {
+            assert!(
+                contrast.iter().all(|(key, _)| key != winui),
+                "{winui} is not overridden under High Contrast"
+            );
+        }
+    }
+
+    /// ADEV-1: an alias that is also a token's own brush name would be a duplicate key, which is
+    /// not valid XAML. Every key in a dictionary is unique.
+    #[test]
+    fn xaml_keys_are_unique_in_every_dictionary_adev_1() {
+        let xaml = committed_xaml();
+        for dictionary in ["Default", "Light", "Dark", "HighContrast"] {
+            let brushes = xaml_brushes(&xaml, dictionary);
+            let mut keys: Vec<&String> = brushes.iter().map(|(key, _)| key).collect();
+            let all = keys.len();
+            keys.sort();
+            keys.dedup();
+            assert_eq!(keys.len(), all, "duplicate key in {dictionary}");
+        }
+        for (alias, light, dark) in XAML_ALIASES {
+            assert_ne!(*alias, xaml_name(light), "{alias} is a token's own name");
+            assert_ne!(*alias, xaml_name(dark), "{alias} is a token's own name");
+        }
     }
 
     /// The stamp is a hash of the body, so a consumer can detect a hand edit on its own.
