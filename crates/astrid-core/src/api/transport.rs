@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -108,6 +108,14 @@ pub enum TransportError {
     /// a 401 on the live stream has to be told apart from a network that is not there.
     #[error("the server refused the stream with {0}")]
     Refused(u16),
+    /// Android only: the app has not yet handed the platform certificate verifier its JVM
+    /// ([`super::tls::android::init`]), so nothing can be verified and nothing was sent. Retryable:
+    /// the init is a startup step, and a write queued before it should wait for it, not be dropped
+    /// (AWTD-1673).
+    #[error(
+        "the platform certificate verifier has not been initialised; the app must call the TLS init before the first request"
+    )]
+    TlsNotInitialized,
 }
 
 impl TransportError {
@@ -149,24 +157,95 @@ pub trait HttpTransport: Send + Sync {
 }
 
 /// The real one, over the platform's TLS stack. See the workspace `Cargo.toml` for why it is the
-/// platform's and not a bundled one.
+/// platform's and not a bundled one, and `crates/astrid-core/Cargo.toml` for Android's.
 pub struct ReqwestTransport {
-    client: reqwest::Client,
+    /// Built on the first request that passes the gate rather than up front, because on Android the
+    /// verifier inside it cannot be relied on before the app's TLS init. Everywhere else
+    /// [`ReqwestTransport::new`] builds it at once, exactly as before.
+    client: OnceLock<reqwest::Client>,
+    /// Asked before every request: whether this process's TLS can verify a certificate yet
+    /// ([`super::tls::platform_tls_ready`] on Android, always yes elsewhere).
+    ready: fn() -> bool,
 }
 
 impl ReqwestTransport {
+    #[cfg(not(target_os = "android"))]
     pub fn new() -> Self {
-        Self::with_client(
-            reqwest::Client::builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .expect("the default HTTP client always builds"),
-        )
+        Self::with_client(default_client().expect("the default HTTP client always builds"))
     }
 
-    pub fn with_client(client: reqwest::Client) -> Self {
-        ReqwestTransport { client }
+    /// On Android the client waits for the app's TLS init ([`super::tls::android::init`]); a
+    /// request before it is [`TransportError::TlsNotInitialized`], not a panic in the verifier.
+    #[cfg(target_os = "android")]
+    pub fn new() -> Self {
+        ReqwestTransport {
+            client: OnceLock::new(),
+            ready: super::tls::platform_tls_ready,
+        }
     }
+
+    /// A caller's own client, used as given: whatever TLS it was built with is the caller's to
+    /// have initialised.
+    pub fn with_client(client: reqwest::Client) -> Self {
+        ReqwestTransport {
+            client: OnceLock::from(client),
+            ready: || true,
+        }
+    }
+
+    /// The default client behind a readiness gate of the test's choosing, so the pre-init path is
+    /// testable on a target whose real gate is always open.
+    #[cfg(test)]
+    fn gated_by(ready: fn() -> bool) -> Self {
+        ReqwestTransport {
+            client: OnceLock::new(),
+            ready,
+        }
+    }
+
+    fn client(&self) -> Result<&reqwest::Client, TransportError> {
+        if !(self.ready)() {
+            return Err(TransportError::TlsNotInitialized);
+        }
+        if let Some(client) = self.client.get() {
+            return Ok(client);
+        }
+        let built = default_client()?;
+        Ok(self.client.get_or_init(|| built))
+    }
+}
+
+/// The client every target ships: the platform's TLS (native-tls, from the workspace manifest).
+#[cfg(not(target_os = "android"))]
+fn default_client() -> Result<reqwest::Client, TransportError> {
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| TransportError::Invalid(error.to_string()))
+}
+
+/// Android's: rustls, with certificates verified by Android's own trust manager through
+/// `rustls-platform-verifier` rather than a root bundle compiled into the library (AWTD-1673).
+#[cfg(target_os = "android")]
+fn default_client() -> Result<reqwest::Client, TransportError> {
+    use rustls_platform_verifier::BuilderVerifierExt;
+
+    let invalid = |error: rustls::Error| TransportError::Invalid(error.to_string());
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(invalid)?
+        .with_platform_verifier()
+        .map_err(invalid)?
+        .with_no_client_auth();
+    // What reqwest's own rustls config offers; a preconfigured one is used exactly as given, and
+    // without this every connection would settle for HTTP/1.1.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .use_preconfigured_tls(config)
+        .build()
+        .map_err(|error| TransportError::Invalid(error.to_string()))
 }
 
 impl Default for ReqwestTransport {
@@ -180,7 +259,7 @@ impl HttpTransport for ReqwestTransport {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
         let method = reqwest::Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|error| TransportError::Invalid(error.to_string()))?;
-        let mut builder = self.client.request(method, &request.url);
+        let mut builder = self.client()?.request(method, &request.url);
         for (name, value) in &request.headers {
             builder = builder.header(name, value);
         }
@@ -226,7 +305,7 @@ impl HttpTransport for ReqwestTransport {
         let method = reqwest::Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|error| TransportError::Invalid(error.to_string()))?;
         let mut builder = self
-            .client
+            .client()?
             .request(method, &request.url)
             // No timeout: the whole point of this connection is to stay open with nothing on it.
             // The request timeout that protects an ordinary call would close a healthy stream
@@ -409,6 +488,65 @@ mod tests {
         assert!(TransportError::Timeout.is_retryable());
         assert!(TransportError::Unreachable("dns".into()).is_retryable());
         assert!(!TransportError::Invalid("bad url".into()).is_retryable());
+    }
+
+    fn get(url: &str) -> HttpRequest {
+        HttpRequest {
+            method: Method::Get,
+            url: url.into(),
+            headers: Vec::new(),
+            body: None,
+        }
+    }
+
+    /// AWTD-1673: on Android the certificate verifier needs the app's JVM before it can verify
+    /// anything, and it panics when asked first. A request made before the init must come back as
+    /// a typed transport error — never a panic, and never a request on the wire. The gate is the
+    /// same function on every target, so this runs on the desktop with a gate that says "not yet".
+    #[tokio::test]
+    async fn a_request_before_the_platform_tls_init_is_a_typed_error_awtd_1673() {
+        let transport = ReqwestTransport::gated_by(|| false);
+        // A port nothing listens on: had the gate let it through, the error would be Unreachable.
+        let error = transport
+            .send(get("https://127.0.0.1:9/api/v1/tasks"))
+            .await
+            .expect_err("the verifier is not ready");
+        assert!(
+            matches!(error, TransportError::TlsNotInitialized),
+            "{error:?}"
+        );
+
+        let error = match transport
+            .open_stream(get("https://127.0.0.1:9/api/v1/events"))
+            .await
+        {
+            Ok(_) => panic!("the verifier is not ready"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(error, TransportError::TlsNotInitialized),
+            "{error:?}"
+        );
+    }
+
+    /// Retryable, so a write queued before the init waits in the Outbox instead of being dropped.
+    #[test]
+    fn a_missing_tls_init_is_retryable_awtd_1673() {
+        assert!(TransportError::TlsNotInitialized.is_retryable());
+    }
+
+    /// Once the gate opens, the request goes out as before.
+    #[tokio::test]
+    async fn a_ready_gate_lets_the_request_through_awtd_1673() {
+        let transport = ReqwestTransport::gated_by(|| true);
+        let error = transport
+            .send(get("http://127.0.0.1:9/api/v1/tasks"))
+            .await
+            .expect_err("nothing listens on the discard port");
+        assert!(
+            !matches!(error, TransportError::TlsNotInitialized),
+            "{error:?}"
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub mod frames;
 pub mod pagination;
 pub mod path;
 pub mod platform;
+pub mod tls;
 pub mod transport;
 
 pub use client::{ApiClient, ApiError, Request, API_PREFIX, CLIENT_ID_HEADER};
