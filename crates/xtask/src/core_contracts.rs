@@ -26,6 +26,7 @@ pub const CORE_OWNED: &[&str] = &[
     "list-project-moves.json",
     "repeat-summary-l10n.json",
     "callout-placement.json",
+    "sidebar-projects.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -1101,6 +1102,138 @@ fn list_project_moves_cases() -> Vec<Case> {
     ]
 }
 
+/// The lists every `sidebar` case sees: two projects' lists, a board column and a label inside
+/// one, a favourite inside one, a list naming a project the reader cannot see, and a plain list.
+fn sidebar_lists() -> Value {
+    json!([
+        { "id": "web", "name": "Web", "projectId": "astrid" },
+        { "id": "api", "name": "api", "projectId": "astrid" },
+        { "id": "starred", "name": "Roadmap", "projectId": "astrid",
+          "isFavorite": true, "favoriteOrder": 0 },
+        { "id": "doing", "name": "Doing", "projectId": "astrid", "listType": "status" },
+        { "id": "bug", "name": "Bug", "projectId": "astrid", "listType": "label" },
+        { "id": "garden", "name": "Garden", "projectId": "home" },
+        { "id": "secret", "name": "Elsewhere", "projectId": "unseen" },
+        { "id": "groceries", "name": "Groceries" },
+    ])
+}
+
+/// The projects the reader can see: one with lists, one with a list, one with none, and one with
+/// no name but a key. Astrid's nested `lists` is stale — it still claims Garden, which moved to
+/// Home since the projects were read.
+fn sidebar_projects() -> Value {
+    json!([
+        { "id": "home", "name": "home", "color": "#22c55e" },
+        { "id": "astrid", "name": "Astrid", "color": "#ef4444",
+          "lists": [{ "id": "web", "name": "Web" }, { "id": "garden", "name": "Garden" }] },
+        { "id": "empty", "name": "Someday" },
+        { "id": "keyed", "name": "", "key": "MOB" },
+    ])
+}
+
+/// `sidebar` over [`sidebar_lists`], with `projects` as given (`null` is Project Mode off).
+fn sidebar(lists: Value, projects: Value) -> Value {
+    json!({ "kind": "sidebar", "lists": lists, "projects": projects })
+}
+
+/// A project row as the section draws it: its id, name and the ids of the lists under it.
+fn project_row(id: &str, name: &str, list_ids: &[&str]) -> Value {
+    let lists: Vec<Value> = list_ids.iter().map(|id| json!({ "id": id })).collect();
+    json!({ "id": id, "name": name, "lists": lists })
+}
+
+/// The sidebar's Projects section (AWTD-1681, docs/CONTRACTS.md D70).
+///
+/// Web's `components/TaskManager/Sidebar/ProjectsSection.tsx` (AWTD-1660) is the behaviour; the
+/// decisions it left implicit — which list belongs where when two sources disagree, the order of
+/// the lists under a project — are settled in `rows::sidebar` and written out here.
+fn sidebar_projects_cases() -> Vec<Case> {
+    let rule = "sidebar_projects";
+    vec![
+        case(
+            "mode-off/no-section-whatever-projects-exist",
+            rule,
+            sidebar(sidebar_lists(), Value::Null),
+            ok(json!({ "projects": null })),
+        ),
+        case(
+            "mode-on/no-projects-draws-no-section",
+            rule,
+            sidebar(sidebar_lists(), json!([])),
+            ok(json!({ "projects": null })),
+        ),
+        case(
+            "projects/every-visible-project-by-name-each-with-its-own-lists",
+            rule,
+            sidebar(sidebar_lists(), sidebar_projects()),
+            ok(json!({ "projects": [
+                project_row("astrid", "Astrid", &["api", "starred", "web"]),
+                project_row("home", "home", &["garden"]),
+                project_row("keyed", "MOB", &[]),
+                project_row("empty", "Someday", &[]),
+            ] })),
+        ),
+        case(
+            "projects/a-project-with-no-lists-is-still-a-row",
+            rule,
+            sidebar(
+                json!([{ "id": "groceries", "name": "Groceries" }]),
+                json!([{ "id": "empty", "name": "Someday" }]),
+            ),
+            ok(
+                json!({ "projects": [{ "id": "empty", "name": "Someday", "color": "#3b82f6", "lists": [] }] }),
+            ),
+        ),
+        case(
+            "lists/a-list-claimed-by-two-projects-sits-under-its-own-projectId-once",
+            rule,
+            sidebar(
+                json!([
+                    { "id": "garden", "name": "Garden", "projectId": "home" },
+                    { "id": "garden", "name": "Garden", "projectId": "home" },
+                ]),
+                sidebar_projects(),
+            ),
+            ok(json!({ "projects": [
+                project_row("astrid", "Astrid", &[]),
+                project_row("home", "home", &["garden"]),
+                project_row("keyed", "MOB", &[]),
+                project_row("empty", "Someday", &[]),
+            ] })),
+        ),
+        case(
+            "favorites/a-favourite-in-a-project-is-in-favorites-and-under-the-project",
+            rule,
+            sidebar(
+                sidebar_lists(),
+                json!([{ "id": "astrid", "name": "Astrid" }]),
+            ),
+            ok(json!({
+                "favorites": [{ "id": "starred" }],
+                "projects": [project_row("astrid", "Astrid", &["api", "starred", "web"])],
+            })),
+        ),
+        case(
+            "lists/the-lists-section-keeps-project-lists-and-columns-labels-stay-out",
+            rule,
+            sidebar(sidebar_lists(), sidebar_projects()),
+            ok(json!({ "lists": [
+                { "id": "api" }, { "id": "secret" }, { "id": "garden" },
+                { "id": "groceries" }, { "id": "web" },
+            ] })),
+        ),
+        case(
+            "badges/lists-under-a-project-carry-their-badge",
+            rule,
+            json!({ "kind": "sidebar", "lists": [{ "id": "web", "name": "Web", "projectId": "astrid", "taskCount": 90 }],
+                    "badges": { "web": 4 }, "projects": [{ "id": "astrid", "name": "Astrid" }] }),
+            ok(
+                json!({ "projects": [{ "id": "astrid", "lists": [{ "id": "web", "taskCount": 4 }] }] }),
+            ),
+        ),
+    ]
+}
+
 /// Runs every case through the door, checks it against what a person wrote down, and renders the
 /// fixture.
 fn render(cases: Vec<Case>, generated_from: &str, extra: Value) -> Result<String, String> {
@@ -1260,6 +1393,24 @@ pub fn list_project_moves_fixture() -> Result<String, String> {
     )
 }
 
+/// The text of `sidebar-projects.json` (AWTD-1681).
+pub fn sidebar_projects_fixture() -> Result<String, String> {
+    render(
+        sidebar_projects_cases(),
+        "crates/astrid-rules/src/rows/sidebar.rs",
+        json!({
+            "canonicalSource": "astrid-web components/TaskManager/Sidebar/ProjectsSection.tsx (AWTD-1660) is the behaviour; the decisions it leaves implicit are settled core-first in crates/astrid-rules/src/rows/sidebar.rs — docs/CONTRACTS.md D70.",
+            "decisions": {
+                "whichProjects": "Every project the reader can see (GET /api/v1/projects: owned or member), including one with no lists. `projects` is null when Project Mode is off or there are no projects; never [].",
+                "order": "Projects by name (falling back to the key), case folded, then id. The project's order, the same for every reader. Lists under a project by name, case folded, then id.",
+                "listsUnderAProject": "Domain lists (no board columns, labels, milestones, iterations) whose own projectId names the project. Never Project.lists (a nested copy, stale after a move) and never saved board rows. A list sits under at most one project; repeats collapse. A list naming a project the reader cannot see is only in Lists.",
+                "favorites": "A favourited list in a project shows in Favorites AND under its project. The Lists section is unchanged: a project's non-favourite lists stay in it, as on web.",
+                "archivedOrHidden": "The server's Project has no archived or hidden field, so every visible project is a row.",
+            },
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -1268,6 +1419,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("callout-placement.json", callout_placement_fixture()?),
         ("board-rows.json", board_rows_fixture()?),
         ("list-project-moves.json", list_project_moves_fixture()?),
+        ("sidebar-projects.json", sidebar_projects_fixture()?),
     ])
 }
 

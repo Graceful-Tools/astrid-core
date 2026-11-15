@@ -2217,7 +2217,7 @@
           "type": "array"
         },
         "lists": {
-          "description": "Everything else that can hold a task, by name.",
+          "description": "Everything else that can hold a task, by name. A list in a project is here too, as on\nweb: the Projects section is a second way in, not a move.",
           "items": {
             "$ref": "#/$defs/TaskList"
           },
@@ -2233,6 +2233,16 @@
             }
           ],
           "description": "My Tasks: what you are holding, wherever it lives. Above the favourites, because it is the\nview the app opens on rather than one of the lists. `None` when the caller did not ask for\nit — it is synthesised and has no row on the server, so only the caller can say."
+        },
+        "projects": {
+          "description": "Projects, each with its lists (AWTD-1681). `None` when no section is drawn — Project Mode\nis off for this reader, or they can see no project (web draws no heading then either).\nNever an empty array.",
+          "items": {
+            "$ref": "#/$defs/SidebarProject"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -2263,6 +2273,36 @@
       },
       "required": [
         "id"
+      ],
+      "type": "object"
+    },
+    "SidebarProject": {
+      "description": "One project in the sidebar's Projects section (AWTD-1681): tapping it opens the project's\nboard, and its chevron expands to `lists`.",
+      "properties": {
+        "color": {
+          "description": "[`Project::display_color`]: the project's colour, or the default blue when it has none.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lists": {
+          "description": "The domain lists whose own `projectId` is this project, by name, badged like every other\nentry. Empty for a project with no lists, which still shows so it can get its first.",
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "The project's name, else its key, else empty — web's `project.name || project.key || \"\"`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "color",
+        "lists"
       ],
       "type": "object"
     },
