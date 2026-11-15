@@ -92,6 +92,7 @@ listImage
 listInsights
 listMembers
 listPicks
+listProjectMoves
 lists
 loadChatMessages
 loadOAuthClient
@@ -172,6 +173,7 @@ setHotkey
 setInvitationRole
 setListFavorite
 setListImage
+setListProject
 setManualOrder
 setMemberRole
 setMyTasksFilters

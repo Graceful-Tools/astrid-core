@@ -23,6 +23,7 @@ pub const CORE_OWNED: &[&str] = &[
     "waiting.json",
     "list-default-picks.json",
     "board-rows.json",
+    "list-project-moves.json",
     "repeat-summary-l10n.json",
     "callout-placement.json",
 ];
@@ -982,6 +983,124 @@ fn board_rows_cases() -> Vec<Case> {
     ]
 }
 
+/// The projects every `listProjectMoves` case sees: one of each standing "me" can have.
+fn move_projects() -> Value {
+    json!([
+        { "id": "mine", "name": "Alpha", "ownerId": "me" },
+        { "id": "run", "name": "Beta", "ownerId": "boss", "members": [{ "userId": "me", "role": "admin" }] },
+        { "id": "join", "name": "Gamma", "ownerId": "boss", "members": [{ "userId": "me", "role": "member" }] },
+        { "id": "look", "name": "Delta", "ownerId": "boss", "members": [{ "userId": "me", "role": "viewer" }] },
+        { "id": "away", "name": "Epsilon", "ownerId": "boss" },
+    ])
+}
+
+/// A list "me" holds `role` on (`owner`, a membership role, or `none`), in `project`.
+fn move_list(role: &str, project: Value) -> Value {
+    let (owner, members) = match role {
+        "owner" => ("me", json!([])),
+        "none" => ("someone", json!([])),
+        role => ("someone", json!([{ "userId": "me", "role": role }])),
+    };
+    json!({ "id": "l1", "name": "Groceries", "ownerId": owner, "projectId": project, "listMembers": members })
+}
+
+fn moves_request(list: Value) -> Value {
+    json!({ "kind": "listProjectMoves", "userId": "me", "list": list, "projects": move_projects() })
+}
+
+fn moves_answer(can_leave: bool, destinations: Value) -> Value {
+    ok(json!({
+        "canLeave": can_leave,
+        "destinations": destinations,
+        "creatableIn": ["mine", "run", "join"],
+    }))
+}
+
+/// Moving a list into or out of a project, and creating one in a project (astrid-ios AITD-680,
+/// D68): owner/admin/member/viewer of the list by owner/admin/member/viewer/stranger of the
+/// project. Core-first: no client had the rule, so the expectations are D68's table written out.
+fn list_project_moves_cases() -> Vec<Case> {
+    let rule = "list_project_moves (D68)";
+    let none = json!([]);
+    vec![
+        case(
+            "loose/list-owner-moves-into-projects-they-own-or-admin-by-name",
+            rule,
+            moves_request(move_list("owner", Value::Null)),
+            moves_answer(false, json!(["mine", "run"])),
+        ),
+        case(
+            "loose/list-admin-moves-a-list-they-do-not-own",
+            rule,
+            moves_request(move_list("admin", Value::Null)),
+            moves_answer(false, json!(["mine", "run"])),
+        ),
+        case(
+            "loose/list-member-moves-nothing",
+            rule,
+            moves_request(move_list("member", Value::Null)),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "loose/list-viewer-moves-nothing",
+            rule,
+            moves_request(move_list("viewer", Value::Null)),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "in-project/admin-of-the-project-left-may-detach-and-move-on-never-to-its-own",
+            rule,
+            moves_request(move_list("owner", json!("run"))),
+            moves_answer(true, json!(["mine"])),
+        ),
+        case(
+            "in-project/a-plain-member-of-the-project-left-can-neither-detach-nor-move-it",
+            rule,
+            moves_request(move_list("owner", json!("join"))),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "in-project/a-viewer-of-the-project-left-cannot-move-it",
+            rule,
+            moves_request(move_list("owner", json!("look"))),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "in-project/a-project-the-person-cannot-see-holds-the-list",
+            rule,
+            moves_request(move_list("owner", json!("unseen"))),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "in-project/a-project-admin-who-is-nobody-on-the-list-cannot-carry-it-off",
+            rule,
+            moves_request(move_list("none", json!("run"))),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "in-project/a-status-list-is-a-column-and-never-moves",
+            rule,
+            moves_request(json!({
+                "id": "col", "name": "Ready", "ownerId": "me", "projectId": "mine",
+                "listType": "status", "statusRole": "ready",
+            })),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "create/no-list-answers-only-where-a-list-may-be-made",
+            rule,
+            json!({ "kind": "listProjectMoves", "userId": "me", "projects": move_projects() }),
+            moves_answer(false, none.clone()),
+        ),
+        case(
+            "create/a-stranger-to-every-project-may-create-in-none",
+            rule,
+            json!({ "kind": "listProjectMoves", "userId": "stranger", "list": move_list("owner", Value::Null), "projects": move_projects() }),
+            ok(json!({ "canLeave": false, "destinations": [], "creatableIn": [] })),
+        ),
+    ]
+}
+
 /// Runs every case through the door, checks it against what a person wrote down, and renders the
 /// fixture.
 fn render(cases: Vec<Case>, generated_from: &str, extra: Value) -> Result<String, String> {
@@ -1130,6 +1249,17 @@ pub fn board_rows_fixture() -> Result<String, String> {
     )
 }
 
+/// The text of `list-project-moves.json` (astrid-ios AITD-680).
+pub fn list_project_moves_fixture() -> Result<String, String> {
+    render(
+        list_project_moves_cases(),
+        "crates/astrid-rules/src/list_project_moves.rs",
+        json!({
+            "canonicalSource": "astrid-core crates/astrid-rules/src/list_project_moves.rs — core-first; the expectations are docs/CONTRACTS.md D68's permission table written out. astrid-web's PUT /api/v1/lists/{id} and POST /api/v1/lists enforce the same table (AWTD-1702).",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -1137,6 +1267,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("list-default-picks.json", list_default_picks_fixture()?),
         ("callout-placement.json", callout_placement_fixture()?),
         ("board-rows.json", board_rows_fixture()?),
+        ("list-project-moves.json", list_project_moves_fixture()?),
     ])
 }
 

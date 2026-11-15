@@ -77,6 +77,8 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::ListInsights { .. }
         | Command::CreateList { .. }
         | Command::UpdateList { .. }
+        | Command::SetListProject { .. }
+        | Command::ListProjectMoves { .. }
         | Command::DeleteList { .. }
         | Command::SetListFavorite { .. }
         | Command::SetManualOrder { .. }
