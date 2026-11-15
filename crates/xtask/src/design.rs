@@ -575,6 +575,10 @@ pub fn outputs(tokens: &Tokens) -> Vec<(String, String)> {
             "android/AstridTokens.kt".to_string(),
             stamped("//", "", &compose_kotlin(tokens)),
         ),
+        (
+            "windows/AstridTokens.xaml".to_string(),
+            stamped("<!--", " -->", &windows_xaml(tokens)),
+        ),
     ];
     for (name, theme) in &tokens.themes {
         files.push((
@@ -1151,6 +1155,138 @@ fn kotlin_type(key: &str) -> &'static str {
     } else {
         "Dp"
     }
+}
+
+/// The names the Windows shell already gives a few brushes, so adopting the generated file is a
+/// deletion of the hand copies rather than a rename of every call site: (brush, token).
+const XAML_ALIASES: &[(&str, &str)] = &[
+    ("AstridSurface", "bg-primary"),
+    ("AstridBorder", "border"),
+    ("AstridTextMuted", "text-muted"),
+];
+
+/// A token's XAML name: `bg-primary` is `AstridBgPrimary`.
+fn xaml_name(key: &str) -> String {
+    format!("Astrid{}", capitalised(&camel(key)))
+}
+
+/// What a token reads as under Windows High Contrast, where the user's own colours win: text and
+/// edges take the window text colour, a fill the window colour, and the accent the highlight pair.
+fn high_contrast_colour(key: &str) -> &'static str {
+    if key == "accent"
+        || (key.starts_with("accent-") && key != "accent-text" && key != "accent-ink")
+    {
+        "SystemColorHighlightColor"
+    } else if key == "accent-text" {
+        "SystemColorHighlightTextColor"
+    } else if key.starts_with("bg-") || key.ends_with("-bg") || key == "surface-inverse" {
+        "SystemColorWindowColor"
+    } else if key.contains("disabled") {
+        "SystemColorGrayTextColor"
+    } else {
+        "SystemColorWindowTextColor"
+    }
+}
+
+fn xaml_size(key: &str, value: &Value) -> String {
+    format!(
+        "    <x:Double x:Key=\"Astrid{}\">{}</x:Double>\n",
+        capitalised(&camel(key)),
+        number(value)
+    )
+}
+
+/// WinUI: one `ResourceDictionary` with the Light, Dark and HighContrast `ThemeDictionaries` a
+/// `ThemeResource` resolves from, plus the scales that do not change with the theme. WinUI has no
+/// third light-or-dark mode, so a theme beyond `light` and `dark` (`ocean`) is not emitted here;
+/// High Contrast takes the system colours, never Astrid's.
+fn windows_xaml(tokens: &Tokens) -> String {
+    let mut xaml = String::from(
+        "<ResourceDictionary\n    xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\n    xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\n\n    <ResourceDictionary.ThemeDictionaries>\n",
+    );
+    let keys: Vec<&String> = tokens
+        .themes
+        .first()
+        .map(|(_, theme)| theme.colours.keys().collect())
+        .unwrap_or_default();
+    let brush = |name: &str, colour: &str| {
+        format!("            <SolidColorBrush x:Key=\"{name}\" Color=\"{colour}\" />\n")
+    };
+    for (dictionary, theme_name) in [
+        ("Light", Some("light")),
+        ("Dark", Some("dark")),
+        ("HighContrast", None),
+    ] {
+        xaml.push_str(&format!(
+            "        <ResourceDictionary x:Key=\"{dictionary}\">\n"
+        ));
+        let theme = theme_name.and_then(|n| tokens.themes.iter().find(|(t, _)| t == n));
+        for key in &keys {
+            let colour = match theme {
+                Some((_, theme)) => match &theme.colours[*key] {
+                    Colour::Hex(r, g, b) => format!("#{r:02X}{g:02X}{b:02X}"),
+                    Colour::Brand(reference) => match tokens.brand.get(reference) {
+                        Some((r, g, b)) => format!("#{r:02X}{g:02X}{b:02X}"),
+                        None => continue,
+                    },
+                },
+                None => format!("{{ThemeResource {}}}", high_contrast_colour(key)),
+            };
+            xaml.push_str(&brush(&xaml_name(key), &colour));
+            for (alias, token) in XAML_ALIASES {
+                // `border` is already `AstridBorder`: a repeated key is not valid XAML.
+                if token == key && *alias != xaml_name(key) {
+                    xaml.push_str(&brush(alias, &colour));
+                }
+            }
+        }
+        xaml.push_str("        </ResourceDictionary>\n");
+    }
+    xaml.push_str("    </ResourceDictionary.ThemeDictionaries>\n\n");
+
+    for (name, value) in object(&tokens.raw, "radius") {
+        let word = match name.as_str() {
+            "sm" => "Small",
+            "md" => "Medium",
+            "lg" => "Large",
+            "xl" => "XLarge",
+            other => other,
+        };
+        xaml.push_str(&format!(
+            "    <CornerRadius x:Key=\"AstridRadius{word}\">{}</CornerRadius>\n",
+            number(&value)
+        ));
+    }
+    for step in tokens
+        .raw
+        .get("space")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        xaml.push_str(&format!(
+            "    <x:Double x:Key=\"AstridSpace{0}\">{0}</x:Double>\n",
+            number(step)
+        ));
+    }
+    for (name, motion) in object(&tokens.raw, "motion") {
+        let base = capitalised(&camel(&name));
+        xaml.push_str(&format!(
+            "    <x:Double x:Key=\"Astrid{base}Ms\">{}</x:Double>\n",
+            number(&motion["ms"])
+        ));
+        if let Some(damping) = motion.get("damping") {
+            xaml.push_str(&format!(
+                "    <x:Double x:Key=\"Astrid{base}Damping\">{}</x:Double>\n",
+                number(damping)
+            ));
+        }
+    }
+    for (name, value) in object(&tokens.raw, "state") {
+        xaml.push_str(&xaml_size(&name, &value));
+    }
+    xaml.push_str("</ResourceDictionary>\n");
+    xaml
 }
 
 /// VS Code's workbench colours: (theme key, token). Without this the extension has no colour
@@ -2048,6 +2184,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// AWTD-1699: Windows gets its brushes from the register, in the three dictionaries WinUI
+    /// resolves a `ThemeResource` from, under the names the shell already uses.
+    #[test]
+    fn xaml_has_light_dark_and_high_contrast_with_the_shells_names() {
+        let root = crate::repo_root();
+        let text = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&text, &core_theme_names()).expect("valid");
+        let xaml = windows_xaml(&tokens);
+        for key in ["Light", "Dark", "HighContrast"] {
+            assert!(
+                xaml.contains(&format!("x:Key=\"{key}\"")),
+                "{key} dictionary"
+            );
+        }
+        for name in ["AstridSurface", "AstridBorder", "AstridTextMuted"] {
+            assert_eq!(
+                xaml.matches(&format!("x:Key=\"{name}\"")).count(),
+                3,
+                "{name} is in every dictionary"
+            );
+        }
+        assert!(xaml.contains("<CornerRadius x:Key=\"AstridRadiusSmall\">6</CornerRadius>"));
+        assert!(xaml.contains("x:Key=\"AstridSpringDamping\""));
+        assert!(
+            xaml.contains("SystemColorWindowTextColor"),
+            "high contrast uses system colours"
+        );
+        assert!(outputs(&tokens)
+            .iter()
+            .any(|(path, _)| path == "windows/AstridTokens.xaml"));
     }
 
     /// The stamp is a hash of the body, so a consumer can detect a hand edit on its own.
