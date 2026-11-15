@@ -1037,7 +1037,8 @@ pub fn list_default_picks_fixture() -> Result<String, String> {
     )
 }
 
-/// Where a task callout opens, and where its arrow points (task `011080d4`).
+/// Where a task callout opens, and where its arrow points (task `011080d4`); it touches its
+/// anchor (astrid-ios AITD-679).
 ///
 /// A 1400x900 window throughout, with a 320-wide column and a 64-tall row in it, because the
 /// numbers only mean anything relative to each other and one frame makes the table readable.
@@ -1058,13 +1059,13 @@ fn callout_placement_cases() -> Vec<Case> {
             "side/room-on-the-right",
             "calloutPlacement",
             ask(40.0, 300.0, 64.0, 520.0),
-            ok(json!({ "side": "right", "left": 368.0 })),
+            ok(json!({ "side": "right", "left": 360.0 })),
         ),
         case(
             "side/room-on-the-left",
             "calloutPlacement",
             ask(1000.0, 300.0, 64.0, 520.0),
-            ok(json!({ "side": "left", "left": 572.0 })),
+            ok(json!({ "side": "left", "left": 580.0 })),
         ),
         case(
             "side/equal-room-opens-right",
@@ -1110,7 +1111,7 @@ pub fn callout_placement_fixture() -> Result<String, String> {
         callout_placement_cases(),
         "crates/astrid-rules/src/rows/callout.rs",
         json!({
-            "canonicalSource": "astrid-core. Core-first: no client had this rule — Windows' board spliced detail into the column as another card rather than opening a callout at all (task 011080d4), and the Mac, iPad and Android tablet each compute their own. The caller measures the callout; this places it.",
+            "canonicalSource": "astrid-core. Core-first: no client had this rule — Windows' board spliced detail into the column as another card rather than opening a callout at all (task 011080d4), and the Mac, iPad and Android tablet each compute their own. The caller measures the callout, its arrow included; this places it. The callout touches its anchor: its near edge, where the arrow tip is, sits on the anchor's edge (astrid-ios AITD-679), and the gutter is only the clearance from the viewport.",
             "coordinates": "Logical pixels in the window's space, y increasing downward. The caller has already divided by its scale factor.",
             "gutter": astrid_rules::rows::callout::GUTTER,
             "arrowMargin": astrid_rules::rows::callout::ARROW_MARGIN,
