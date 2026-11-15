@@ -361,6 +361,17 @@ pub enum Command {
         list_id: String,
         column_id: String,
         title: String,
+        /// What the column field's priority picker chose, if anything (task `71ad20a0`). Absent
+        /// leaves the list's own default to fill it, which is what this command always did.
+        #[serde(default)]
+        priority: Option<i64>,
+        /// What its assignee picker chose — a user id, or `unassigned`. Absent, as above.
+        ///
+        /// Deliberately no `quickAdd` or `locale` beside these (Jon, 2026-11-14): the column
+        /// already decides the list and completion, so a date or a `#list` tag read out of the
+        /// sentence would be fighting it.
+        #[serde(default)]
+        assignee_id: Option<String>,
         /// A card typed into Waiting needs its condition — see [`WaitOptions`].
         #[serde(flatten)]
         wait: WaitOptions,

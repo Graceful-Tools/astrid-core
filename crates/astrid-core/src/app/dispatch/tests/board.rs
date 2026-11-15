@@ -393,6 +393,52 @@ async fn a_board_answers_with_its_columns_and_their_cards() {
 /// A card typed into a column is BORN in that column — role and all, in one request (task
 /// 95c7a68f).
 ///
+/// A card typed into a column is born with the priority and assignee the picker chose
+/// (task `71ad20a0`).
+///
+/// The field at the top of a LIST has had a priority picker and an assignee picker for a long
+/// time; the field at the bottom of a board COLUMN sent a title and nothing else, so the two
+/// pickers had nowhere to put their answers. Jon's call (2026-11-14) was priority and assignee,
+/// and deliberately NOT smart parsing: the column already decides the list and completion, so a
+/// date or a `#list` tag typed into one would be fighting it.
+#[tokio::test]
+async fn a_card_typed_into_a_column_carries_its_priority_and_assignee_71ad20a0() {
+    let app = board_app(json!({ "id": "l1", "name": "Work", "projectId": "p1" })).await;
+
+    let made = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "doing",
+            "title": "Write it down",
+            "priority": 3,
+            "assigneeId": "u-ada",
+        }),
+    )
+    .await;
+
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["value"]["priority"], 3, "{made}");
+    assert_eq!(made["value"]["assigneeId"], "u-ada", "{made}");
+    // And the column still decides what it decided before.
+    assert_eq!(made["value"]["statusRole"], "doing");
+
+    // Both are optional: a column field with no pickers touched still works, and the list's own
+    // defaults still fill them in, which is what `applyListDefaults` has always done here.
+    let bare = call(
+        &app,
+        json!({
+            "kind": "addBoardCard",
+            "listId": "l1",
+            "columnId": "doing",
+            "title": "No pickers touched",
+        }),
+    )
+    .await;
+    assert_eq!(bare["ok"], true, "{bare}");
+}
+
 /// The Mac's AITD-328: a first version dropped the status role on the way through, so a card
 /// typed into Doing was created with no role, resolved to Inbox, and appeared there. Hence the
 /// assertion on the role itself and not only on which column the board draws it in.

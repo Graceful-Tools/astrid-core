@@ -41,8 +41,21 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             list_id,
             column_id,
             title,
+            priority,
+            assignee_id,
             wait,
-        } => add_board_card(app, &list_id, &column_id, title, &wait).await,
+        } => {
+            add_board_card(
+                app,
+                &list_id,
+                &column_id,
+                title,
+                priority,
+                assignee_id,
+                &wait,
+            )
+            .await
+        }
         Command::TaskStatusOptions { task_id } => task_status_options(app, &task_id),
         Command::SetTaskStatus {
             task_id,
@@ -491,6 +504,8 @@ pub(super) async fn add_board_card(
     list_id: &str,
     column_id: &str,
     title: String,
+    priority: Option<i64>,
+    assignee_id: Option<String>,
     wait: &WaitOptions,
 ) -> Response {
     let lists = app.store.lists().unwrap_or_default();
@@ -527,10 +542,12 @@ pub(super) async fn add_board_card(
             title: title.trim().to_string(),
             description: None,
             list_ids: born.list_ids.unwrap_or_default(),
-            priority: None,
+            // What the column field's pickers chose. `None` leaves `applyListDefaults` below to
+            // fill them, which is what this command did before it had pickers (task `71ad20a0`).
+            priority,
             due_date_time: wait_due.map(date::format),
             is_all_day: wait.is_all_day,
-            assignee_id: None,
+            assignee_id,
             parent_task_id: None,
             // Into Waiting, the role is written by the move below, once the condition is on it.
             status_role: if into_waiting {

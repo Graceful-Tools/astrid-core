@@ -2803,6 +2803,14 @@
     {
       "description": "Add a card at the bottom of a column (task 95c7a68f).\n\nOne request, not a create followed by a move: the column decides the card's lists, its role\nand — for Done — that it is finished, and [`crate::board::resolve_create`] is what says so.\nA card created bare and moved afterwards is the Mac's AITD-328.",
       "properties": {
+        "assigneeId": {
+          "default": null,
+          "description": "What its assignee picker chose — a user id, or `unassigned`. Absent, as above.\n\nDeliberately no `quickAdd` or `locale` beside these (Jon, 2026-11-14): the column\nalready decides the list and completion, so a date or a `#list` tag read out of the\nsentence would be fighting it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "columnId": {
           "type": "string"
         },
@@ -2831,6 +2839,15 @@
         "listId": {
           "description": "The list the board was opened from: the card's own list, and where the project's\ncolumns come from.",
           "type": "string"
+        },
+        "priority": {
+          "default": null,
+          "description": "What the column field's priority picker chose, if anything (task `71ad20a0`). Absent\nleaves the list's own default to fill it, which is what this command always did.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "title": {
           "type": "string"
