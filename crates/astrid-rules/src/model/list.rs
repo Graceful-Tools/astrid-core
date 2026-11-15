@@ -265,7 +265,10 @@ pub enum RepeatMode {
     RollForward,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// `Default` is what a decode of `{}` would give every field but `id` (every other field is
+// `#[serde(default)]` over a `String` or an `Option`). `new` relies on that, and the test
+// `a_new_list_is_what_decoding_its_id_and_name_gives` holds the two together.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskList {
@@ -490,12 +493,17 @@ fn deserialize_recently_completed_window<'de, D: Deserializer<'de>>(
 
 impl TaskList {
     /// A list with nothing but an id and a name, for the paths that build one from scratch.
+    ///
+    /// Built field by field, not by decoding `{"id","name"}`: that `serde_json::from_value` call
+    /// compiled a second complete `TaskList` decoder, `Task`s and members included, over
+    /// `serde_json::Value`, beside the one every request already uses. That was about 85 KB of
+    /// the browser build's code for one constructor (AWTD2-162, step 2).
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
-        serde_json::from_value(serde_json::json!({
-            "id": id.into(),
-            "name": name.into(),
-        }))
-        .expect("a list of an id and a name is always decodable")
+        TaskList {
+            id: id.into(),
+            name: name.into(),
+            ..TaskList::default()
+        }
     }
 
     pub fn display_color(&self) -> &str {
@@ -642,6 +650,20 @@ impl TaskList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `TaskList::new` builds its list from `Default` instead of decoding `{"id","name"}`
+    /// (AWTD2-162). The two must stay the same list: a field given a serde default that is not
+    /// its type's `Default` would make `new` quietly disagree with every decoded list.
+    #[test]
+    fn a_new_list_is_what_decoding_its_id_and_name_gives() {
+        let decoded: TaskList =
+            serde_json::from_value(serde_json::json!({ "id": "l1", "name": "Work" }))
+                .expect("a list of an id and a name");
+        assert_eq!(TaskList::new("l1", "Work"), decoded);
+        let decoded_empty: TaskList =
+            serde_json::from_value(serde_json::json!({ "id": "" })).expect("an id alone");
+        assert_eq!(TaskList::new("", ""), decoded_empty);
+    }
 
     /// AITD-466: `supports` was dropped by the cache shape, so no shell could gate on it.
     #[test]
