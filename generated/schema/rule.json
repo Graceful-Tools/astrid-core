@@ -2576,6 +2576,55 @@
       "type": "object"
     },
     {
+      "description": "The sidebar, whole — My Tasks, Favorites, the Projects section and Lists, in order, each\nentry badged — see [`crate::rows::sidebar::sections`] (AWTD-1681, D70). The App door's\n`sidebar` answers the same over the cache; this one is for a shell that holds its own\nlists, as web does. `projects` is absent or `null` without Project Mode, and otherwise every\nproject the reader can see. `badges` is the number per list id, as `listBadges` answers.",
+      "properties": {
+        "badges": {
+          "additionalProperties": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "kind": {
+          "const": "sidebar",
+          "type": "string"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "myTasks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "projects": {
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/Project"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
       "description": "One row of the multi-list board: `row_list_id`'s cards under the project's columns, in\n[`Rule::Board`]'s shape — see [`crate::board_rows::row_columns`] (AWTD-1676, D67).\n`custom_states` is the PROJECT's; the row list's manual order and Done window arrange it.",
       "properties": {
         "customStates": {
