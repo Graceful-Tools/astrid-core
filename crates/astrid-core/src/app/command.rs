@@ -134,7 +134,8 @@ pub enum Command {
         #[serde(default)]
         current_user_id: Option<String>,
     },
-    /// The sidebar, whole: My Tasks, the favourites and the rest of the places, each in order and
+    /// The sidebar, whole: My Tasks, the favourites, the Projects section (with the `project_mode`
+    /// flag, over the cached projects — AWTD-1681) and the rest of the places, each in order and
     /// carrying the badge `listBadges` would give it (task e22621e2).
     ///
     /// One command rather than three calls and a filter, because "which of these is somewhere to
