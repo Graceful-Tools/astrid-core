@@ -1580,3 +1580,59 @@ would meet far more often.
 the Mac ranks its own `CommandRegistry` rather than `keyboard::ALL`, which is exactly what
 `Rule::PaletteRank` exists for — the scorer alone, for a palette that keeps its own rows. A client
 with its own command list asks `PaletteRank`; one that wants the shared table asks `Palette`.
+
+## The multi-list project board (AWTD-1676, 2026-11-14)
+
+Web shipped the project board in AWTD-1660 (astrid-web `docs/PRODUCT_CONTRACT.md` §9): each chosen
+list is a row, the project's status columns stay columns. The Mac followed (AITD-674) with Swift
+copies of web's pure `lib/project-board-rows.ts` and its own calls to
+`GET|PUT /api/v1/projects/{id}/board-rows`, because this crate had neither. It has both now:
+`astrid_rules::board_rows` (rules door `boardRows`, `boardRow`) and the commands
+`projectBoardRows`, `saveProjectBoardRows` and `projectBoardRow`. The core-first fixture
+`contracts/fixtures/board-rows.json` writes web's own test cases out as its expectations.
+
+### D67 — a row is its list's cards under the PROJECT's columns, whatever board the list has
+
+**The core follows web** (task AWTD-1676). This is not a dispute settled toward iOS. The Mac's
+mapping was a stand-in for a rule this crate did not have, and its own source says it was waiting
+for the core.
+
+- **Web** (`buildSwimlanes`): a row holds the tasks on the row list. Each card's column is
+  `getTaskProjectColumnId` against the **project's** columns: Done when completed, its
+  `statusRole`'s column when the project has one, and the Inbox otherwise. Which project the row
+  list belongs to plays no part, and neither does whether it belongs to one.
+- **The Mac** (`ProjectBoardRows.cells`): it asked the core for the row list's **own** board
+  (`board {listId}`) and mapped its columns onto the project's by id. A column the project lacks
+  sent its cards to the Inbox. A list with **no board of its own** got `columns: []` back, so it
+  drew an **empty row**, even when the list had tasks.
+
+The two agree on everything except that empty row. A card's role is a field on the card, so a
+foreign column that maps onto nothing and a role the project has no column for are one case, and
+both put the card in the Inbox. The core takes web's rule (`board_rows::row_columns`):
+
+1. The columns are the project's (`board_cards::columns_with_rows` over its `customStates`).
+2. The cards are the **top-level** tasks on the row list, chosen by membership of that list
+   alone. A card on two row lists shows in both rows.
+3. A card's column is `board::column_for` against the project's columns. A role the project has no
+   column for is the **Inbox**: it is not dropped, because a card missing from the board but
+   present in the list is the failure `getTaskProjectColumnId`'s own comment warns about.
+4. The **row list's** manual order arranges each column, and its completion filter and window
+   decide Done, as on its own board. Top-level only, and Done timed the native board's way, as D43
+   records for the single-list board.
+
+**Where this still differs from web:** web's swimlanes keep subtasks and time Done by
+`completedAt`. Both are D43's differences, not new ones. The fixture's finished card carries the
+same `completedAt` and `updatedAt`, so web and the core answer it alike.
+
+**The saved rows** follow web exactly. `null` means nothing saved, which draws the project's own
+domain lists. `[]` is a board emptied on purpose, and it stays empty. Ids this person cannot see,
+repeats, status rows and labels are dropped. *Add list* offers domain lists that are neither
+virtual nor already rows, sorted by name. A save is at most 100 non-empty ids with repeats
+removed, refused locally in the server's words. One small judgement call: web's `localeCompare`
+and the Mac's `localizedCompare` sort with collation tables, and the core folds case and then
+compares as written. The two orders agree for any name without accents.
+
+**Offline:** `projectBoardRows` keeps the last answer in metadata and serves it when the server
+cannot be reached (`fromCache: true`). A refusal (403/404) is still an error. `saveProjectBoardRows`
+is online only, like web and the Mac. It is a view preference the server checks against what the
+person can see, not task data, so it does not go through the Outbox.

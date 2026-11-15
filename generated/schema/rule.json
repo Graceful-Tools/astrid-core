@@ -2336,6 +2336,85 @@
       "type": "object"
     },
     {
+      "description": "Which lists a project's multi-list board draws as rows, in order, and which lists could be\nadded — see [`crate::board_rows`] (AWTD-1676). `saved_list_ids` is what\n`GET /api/v1/projects/{id}/board-rows` answered: absent or `null` for nothing saved (the\nproject's own lists), `[]` for a board emptied on purpose.",
+      "properties": {
+        "kind": {
+          "const": "boardRows",
+          "type": "string"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "savedListIds": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One row of the multi-list board: `row_list_id`'s cards under the project's columns, in\n[`Rule::Board`]'s shape — see [`crate::board_rows::row_columns`] (AWTD-1676, D67).\n`custom_states` is the PROJECT's; the row list's manual order and Done window arrange it.",
+      "properties": {
+        "customStates": {
+          "default": null
+        },
+        "kind": {
+          "const": "boardRow",
+          "type": "string"
+        },
+        "lists": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskList"
+          },
+          "type": "array"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "rowListId": {
+          "type": "string"
+        },
+        "tasks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": "array"
+        },
+        "utcOffsetMinutes": {
+          "default": 0,
+          "description": "The person's offset from UTC now, in minutes: where their day starts for Done's window.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "rowListId",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
       "description": "What dropping `task` on the column `column` (an id from [`Rule::Board`]) writes — see\n[`crate::board::resolve_move`]. A drop on Done answers `completed: true`; a shell completes\nthrough [`Rule::Completion`] so a repeating task rolls forward.",
       "properties": {
         "column": {

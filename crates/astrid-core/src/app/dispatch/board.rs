@@ -109,6 +109,29 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         Command::DeleteProject { project_id } => {
             answer(app.context.boards().delete_project(&project_id).await)
         }
+        Command::ProjectBoardRows { project_id } => {
+            match app.context.boards().board_rows(&project_id).await {
+                Ok(saved) => board_rows(
+                    app,
+                    &project_id,
+                    saved.list_ids.as_deref(),
+                    saved.from_cache,
+                ),
+                Err(error) => Response::failed(error.into()),
+            }
+        }
+        Command::SaveProjectBoardRows {
+            project_id,
+            list_ids,
+            add_list_id,
+            remove_list_id,
+        } => save_board_rows(app, &project_id, list_ids, add_list_id, remove_list_id).await,
+        Command::ProjectBoardRow {
+            project_id,
+            list_id,
+            limit,
+            ids_only,
+        } => board_row(app, &project_id, &list_id, limit, ids_only),
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("board"),
@@ -206,11 +229,59 @@ pub(super) fn board(
             crate::board_cards::column_cards(&cards, column, &columns, arrangement, now, offset)
         })
         .collect();
+    draw_board(
+        app,
+        &project_id,
+        opened.map(|list| list.id.as_str()),
+        Drawn {
+            lists: &lists,
+            columns: &columns,
+            held: &held,
+            tasks: &tasks,
+            now,
+            offset,
+        },
+        limit,
+        ids_only,
+    )
+}
 
+/// What [`draw_board`] draws: the columns, each one's cards in order, and what the cards are drawn
+/// against.
+struct Drawn<'a> {
+    lists: &'a [crate::model::TaskList],
+    columns: &'a [crate::board::BoardColumn],
+    held: &'a [Vec<&'a crate::model::Task>],
+    /// Every task the cards came from, for the subtask counts a card shows.
+    tasks: &'a [crate::model::Task],
+    /// The instant and offset the cards were chosen at, so a card's due label reads the same.
+    now: chrono::DateTime<chrono::Utc>,
+    offset: chrono::FixedOffset,
+}
+
+/// A board's answer, from its columns and their cards: each column's ids when `ids_only`, rows
+/// otherwise, [`BOARD_COLUMN_LIMIT`] at a time unless `limit` says. One drawing for the board and
+/// for one row of the multi-list board (AWTD-1676), so a card cannot draw differently in the two.
+fn draw_board(
+    app: &App,
+    project_id: &str,
+    list_id: Option<&str>,
+    drawn: Drawn<'_>,
+    limit: Option<usize>,
+    ids_only: bool,
+) -> Response {
+    let Drawn {
+        lists,
+        columns,
+        held,
+        tasks,
+        now,
+        offset,
+    } = drawn;
     if ids_only {
         let drawn: Vec<serde_json::Value> = columns
             .iter()
-            .zip(&held)
+            .zip(held)
             .map(|(column, held)| {
                 let window = &held[..limit.unwrap_or(usize::MAX).min(held.len())];
                 serde_json::json!({
@@ -225,18 +296,19 @@ pub(super) fn board(
             .collect();
         return Response::ok(serde_json::json!({
             "projectId": project_id,
-            "listId": opened.map(|list| list.id.as_str()),
+            "listId": list_id,
             "columns": drawn,
         }));
     }
 
-    let users: Vec<crate::model::User> = cards
+    let users: Vec<crate::model::User> = held
         .iter()
+        .flatten()
         .filter_map(|task| task.assignee_id.as_deref())
         .filter_map(|id| app.store.user(id).ok().flatten())
         .collect();
     let depths = std::collections::HashMap::new();
-    let counts = rows::subtask_counts(&tasks);
+    let counts = rows::subtask_counts(tasks);
     let current_user_id = app.context.account().current_user_id().ok().flatten();
     let context = RowContext {
         current_user_id: current_user_id.as_deref(),
@@ -244,7 +316,7 @@ pub(super) fn board(
         surface: rows::Surface::BoardCard,
         now,
         offset,
-        lists: &lists,
+        lists,
         users: &users,
         // Cards are flat. A card indented under a parent in another column would be indented
         // against nothing.
@@ -254,7 +326,7 @@ pub(super) fn board(
 
     let drawn: Vec<serde_json::Value> = columns
         .iter()
-        .zip(&held)
+        .zip(held)
         .map(|(column, held)| {
             let window = &held[..limit.unwrap_or(BOARD_COLUMN_LIMIT).min(held.len())];
             serde_json::json!({
@@ -270,9 +342,107 @@ pub(super) fn board(
 
     Response::ok(serde_json::json!({
         "projectId": project_id,
-        "listId": opened.map(|list| list.id.as_str()),
+        "listId": list_id,
         "columns": drawn,
     }))
+}
+
+/// One row of a project's multi-list board: `list_id`'s cards under the project's columns
+/// (AWTD-1676, D67). Not the row list's own board mapped across — a list from another project,
+/// or from none, is drawn under THIS project's columns, a role it has no column for in the Inbox.
+fn board_row(
+    app: &App,
+    project_id: &str,
+    list_id: &str,
+    limit: Option<usize>,
+    ids_only: bool,
+) -> Response {
+    let lists = app.store.lists().unwrap_or_default();
+    let Some(row) = lists.iter().find(|list| list.id == list_id) else {
+        return Response::failed(Failure::not_found("list", list_id));
+    };
+    let columns = board_columns_with_rows(app, Some(project_id), &lists);
+    let tasks = app
+        .store
+        .tasks_in_lists(&[list_id.to_string()])
+        .unwrap_or_default();
+    let now = app.clock.now();
+    let offset = app.clock.utc_offset();
+    let held = crate::board_rows::row_columns(Some(row), list_id, &tasks, &columns, now, offset);
+    draw_board(
+        app,
+        project_id,
+        Some(list_id),
+        Drawn {
+            lists: &lists,
+            columns: &columns,
+            held: &held,
+            tasks: &tasks,
+            now,
+            offset,
+        },
+        limit,
+        ids_only,
+    )
+}
+
+/// The answer to [`Command::ProjectBoardRows`] and [`Command::SaveProjectBoardRows`]: what the
+/// server holds, the rows that draws, and what *Add list* offers.
+fn board_rows(app: &App, project_id: &str, saved: Option<&[String]>, from_cache: bool) -> Response {
+    let lists = app.store.lists().unwrap_or_default();
+    let rows: Vec<String> = crate::board_rows::resolve(saved, project_id, &lists)
+        .into_iter()
+        .map(|list| list.id.clone())
+        .collect();
+    let candidates: Vec<&str> = crate::board_rows::candidates(&lists, &rows)
+        .into_iter()
+        .map(|list| list.id.as_str())
+        .collect();
+    Response::ok(serde_json::json!({
+        "projectId": project_id,
+        "savedListIds": saved,
+        "canAddRow": rows.len() < crate::board_rows::MAX_ROWS,
+        "rowListIds": rows,
+        "candidateListIds": candidates,
+        "fromCache": from_cache,
+    }))
+}
+
+/// Save a board's rows: the whole list, or one added or removed against the rows last drawn.
+async fn save_board_rows(
+    app: &App,
+    project_id: &str,
+    list_ids: Option<Vec<String>>,
+    add_list_id: Option<String>,
+    remove_list_id: Option<String>,
+) -> Response {
+    let boards = app.context.boards();
+    let current = || -> Vec<String> {
+        let saved = boards.cached_board_rows(project_id).unwrap_or_default();
+        let lists = app.store.lists().unwrap_or_default();
+        crate::board_rows::resolve(saved.as_deref(), project_id, &lists)
+            .into_iter()
+            .map(|list| list.id.clone())
+            .collect()
+    };
+    let wanted = match (list_ids, add_list_id, remove_list_id) {
+        (Some(list_ids), None, None) => list_ids,
+        (None, Some(add), None) => crate::board_rows::add(&current(), &add),
+        (None, None, Some(remove)) => crate::board_rows::remove(&current(), &remove),
+        _ => {
+            return Response::failed(Failure::bad_request(
+                "send exactly one of listIds, addListId and removeListId",
+            ))
+        }
+    };
+    let wanted = match crate::board_rows::normalize(&wanted) {
+        Ok(wanted) => wanted,
+        Err(refusal) => return Response::failed(Failure::bad_request(refusal.message())),
+    };
+    match boards.save_board_rows(project_id, &wanted).await {
+        Ok(saved) => board_rows(app, project_id, Some(&saved), false),
+        Err(error) => Response::failed(error.into()),
+    }
 }
 
 /// Move a card to a column.

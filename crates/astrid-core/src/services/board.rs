@@ -52,6 +52,31 @@ pub enum StatusOutcome {
     Refused(StateError),
 }
 
+/// A project board's saved rows, as [`BoardService::board_rows`] read them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedBoardRows {
+    /// The server's `listIds`: `None` for nothing saved — the project's own lists.
+    pub list_ids: Option<Vec<String>>,
+    /// The server could not be reached, and this is the last answer kept.
+    pub from_cache: bool,
+}
+
+/// Where a project's last-read rows are kept. Metadata, so sign-out forgets them with the rest.
+fn board_rows_key(project_id: &str) -> String {
+    format!("project-board-rows.{project_id}")
+}
+
+/// The `listIds` of a board-rows answer: `null` or absent for nothing saved; anything else that is
+/// not an array of ids is a response this client cannot read.
+fn read_board_rows(answer: &serde_json::Value) -> Result<Option<Vec<String>>> {
+    match answer.get("listIds") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(ids) => serde_json::from_value(ids.clone())
+            .map(Some)
+            .map_err(|error| crate::api::ApiError::Decode(error.to_string()).into()),
+    }
+}
+
 pub struct BoardService {
     context: Context,
 }
@@ -260,6 +285,79 @@ impl BoardService {
             }
         }
         Ok(answer)
+    }
+
+    // ─── The multi-list board's rows (AWTD-1676) ────────────────────────────────────────────────
+    //
+    // Which lists one person's board for one project draws as rows, saved on the server so every
+    // device shows the same rows (`GET|PUT /api/v1/projects/{id}/board-rows`). The rules that turn
+    // the saved ids into rows are `crate::board_rows`; this is where they meet the server.
+
+    /// Read the saved rows, and keep the answer for an offline open.
+    ///
+    /// When the server cannot be reached — a transport failure or a 5xx — the last answer kept
+    /// comes back instead, with [`SavedBoardRows::from_cache`] set; with none kept, nothing saved,
+    /// which draws the project's own lists. A refusal (Project Mode not granted, not a member) is
+    /// an error: the cache is for a missing network, not for a server that said no.
+    pub async fn board_rows(&self, project_id: &str) -> Result<SavedBoardRows> {
+        let request = self
+            .context
+            .client
+            .get(endpoints::project_board_rows(project_id));
+        match self.context.client.send(request).await {
+            Ok(answer) => {
+                let list_ids = read_board_rows(&answer)?;
+                self.keep_board_rows(project_id, list_ids.as_deref())?;
+                Ok(SavedBoardRows {
+                    list_ids,
+                    from_cache: false,
+                })
+            }
+            Err(error) if error.is_retryable() => Ok(SavedBoardRows {
+                list_ids: self.cached_board_rows(project_id)?,
+                from_cache: true,
+            }),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// The rows last read or saved for `project_id`, or `None` for nothing kept or nothing saved.
+    pub fn cached_board_rows(&self, project_id: &str) -> Result<Option<Vec<String>>> {
+        Ok(self
+            .context
+            .store
+            .metadata(&board_rows_key(project_id))?
+            .and_then(|kept| serde_json::from_str::<Option<Vec<String>>>(&kept).ok())
+            .flatten())
+    }
+
+    /// Save the rows, in order. Straight to the server and not through the Outbox, as web and the
+    /// Mac do it: a view preference the server checks against what this person can see, which
+    /// refuses the whole write (403) when one list is not. The kept answer changes only when the
+    /// server took it. `list_ids` should already be [`crate::board_rows::normalize`]d.
+    pub async fn save_board_rows(
+        &self,
+        project_id: &str,
+        list_ids: &[String],
+    ) -> Result<Vec<String>> {
+        let request = self
+            .context
+            .client
+            .put(endpoints::project_board_rows(project_id))
+            .value(json!({ "listIds": list_ids }));
+        let answer = self.context.client.send(request).await?;
+        let saved = read_board_rows(&answer)?.unwrap_or_else(|| list_ids.to_vec());
+        self.keep_board_rows(project_id, Some(&saved))?;
+        Ok(saved)
+    }
+
+    fn keep_board_rows(&self, project_id: &str, list_ids: Option<&[String]>) -> Result<()> {
+        let kept = serde_json::to_string(&list_ids)
+            .map_err(|error| crate::api::ApiError::Decode(error.to_string()))?;
+        Ok(self
+            .context
+            .store
+            .set_metadata(&board_rows_key(project_id), &kept)?)
     }
 
     fn read_project(&self, answer: serde_json::Value) -> Result<Project> {

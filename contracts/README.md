@@ -54,6 +54,7 @@ rather than going unnoticed at runtime.
 | `decisions.json` | `lib/comment-formats.ts` (`parseDecision`, `isTradeoffGrid`, `parseRating`, `chosenNumber`, `decisionReply`, `rowName`, `columnLetter`) — **executed**: the canonical example from `lib/decision-examples.ts` plus 11 near-misses (fenced, indented and list-item code examples, a three-digit marker, one option, an unlettered item), 5 tables, 18 replies against a numbered and a lettered option set, 8 row markers and 9 column letters | `astrid_rules::decisions`, and the rules door's `decision`, `tradeoffGrid` and `ratingKey` |
 | `sync-existence.json` | `lib/sync/v1-existence.ts` — **executed** over fixed requests, recording what `POST /api/v1/sync/existence` answers: which of up to 200 ids are gone, in the order asked, where "gone" means the per-row GET would answer 403, 404 or 410 | no consumer here yet: core still prunes from per-row reads, so the batch probe is held for whoever adopts it |
 | `list-default-picks.json` | **core-first**: astrid-core `crates/astrid-rules/src/rows/list_default_picks.rs`, **executed** through the rules door by `cargo xtask gen-core-contracts`: 8 cases — what the repeat, when, priority and time pickers of a list's defaults editor offer, and which row each stored value ticks (unset, set, unrecognised, and a free-form time landing in clock order). Web's own options are inline `SelectItem`s in `components/list-admin/DefaultTaskSettingsSection.tsx` rather than a table, so there was nothing there to export | `astrid_rules::rows::list_default_picks`, and the rules door's `listDefaultPicks`; Windows' `ListSettingsViewModel` (task 92830d81) |
+| `board-rows.json` | **core-first**: astrid-core `crates/astrid-rules/src/board_rows.rs`, **executed** through the rules door by `cargo xtask gen-core-contracts`: 9 cases. The expectations are astrid-web's own test cases for `lib/project-board-rows.ts` (`tests/lib/project-board-rows-awtd-1660.test.ts`) and the Mac's `ProjectBoardRowsTests`, written out: the default rows, the saved order, an emptied board, dropped ids, *Add list*'s candidates, and one row's cards under the project's columns, including a list with no board and a role the project lacks (D67). Generated here until web's exporter takes it over | `astrid_rules::board_rows`, and the rules door's `boardRows` and `boardRow`; the commands `projectBoardRows`, `saveProjectBoardRows` and `projectBoardRow` (AWTD-1676) |
 | `waiting.json` | **core-first**: astrid-core `crates/astrid-rules/src/waiting.rs` and the presets in `board.rs`, **executed** through the rules door (`run_json`, the wasm `runJson`) by `cargo xtask gen-core-contracts`: 57 request/answer pairs — creating in Waiting, entering Waiting with and without a condition (date, blocker, both supplied in the write or already held, past, now, all-day), `keepAssignee`, edits inside Waiting that wake it, wake on date / all-day / last blocker, legacy no-condition → Inbox, Ready-with-a-future-date → Waiting unassigned, the hand-back, and the Testing preset | `astrid_rules::waiting`, `board::available_presets`; web's TypeScript mirror and server; the native apps through dispatch |
 
 ## Core-first fixtures
@@ -84,8 +85,9 @@ cargo xtask check-core-contracts   # fail if stale; `cargo test --workspace` che
   check reports.
 - `repeat-summary-l10n.json` is core-owned too, but written by the ignored test in
   `crates/astrid-rules/tests/repeat_summary_l10n.rs` rather than by `gen-core-contracts`.
-- `crates/astrid-rules/tests/waiting_contract.rs` and
-  `crates/astrid-rules/tests/list_default_picks_contract.rs` replay every case through `run_json`.
+- `crates/astrid-rules/tests/waiting_contract.rs`,
+  `crates/astrid-rules/tests/list_default_picks_contract.rs` and
+  `crates/astrid-rules/tests/board_rows_contract.rs` replay every case through `run_json`.
 
 ## Two kinds of export
 

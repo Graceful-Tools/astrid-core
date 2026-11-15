@@ -110,7 +110,10 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::Projects
         | Command::CreateProject { .. }
         | Command::CreateBoardForList { .. }
-        | Command::DeleteProject { .. }) => board::run(app, command).await,
+        | Command::DeleteProject { .. }
+        | Command::ProjectBoardRows { .. }
+        | Command::SaveProjectBoardRows { .. }
+        | Command::ProjectBoardRow { .. }) => board::run(app, command).await,
         // ── Comments ──
         command @ (Command::Comments { .. }
         | Command::PostComment { .. }

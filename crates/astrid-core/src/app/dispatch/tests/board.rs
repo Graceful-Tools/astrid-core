@@ -1080,3 +1080,259 @@ async fn a_task_created_waiting_on_a_task_gets_its_blocker_then_its_role() {
         "the blocker is journalled: {journal:?}"
     );
 }
+
+/// A project and the lists a multi-list board picks rows from (AWTD-1676).
+fn board_rows_app(transport: StubTransport) -> (App, std::sync::Arc<StubTransport>) {
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_projects(&[serde_json::from_value(json!({
+            "id": "p1", "name": "Ship it",
+            "customStates": [{ "role": "review", "name": "Review", "order": 3 }]
+        }))
+        .expect("a project")])
+        .expect("stores");
+    for list in [
+        json!({ "id": "web", "name": "Web", "projectId": "p1" }),
+        json!({ "id": "ios", "name": "iOS", "projectId": "p1" }),
+        json!({ "id": "bug", "name": "Bug", "projectId": "p1", "listType": "label" }),
+        json!({ "id": "home", "name": "Home", "manualSortOrder": ["h2", "h1"] }),
+        json!({ "id": "other", "name": "Other", "projectId": "p2" }),
+    ] {
+        app.store
+            .upsert_list(&serde_json::from_value(list).expect("a list"))
+            .expect("stores");
+    }
+    (app, transport)
+}
+
+/// The rows come from the server; nothing saved is the project's own lists; the last answer is
+/// what an offline open draws (AWTD-1676 — the Mac's `AstridAPIClient+Projects.swift` and
+/// `ProjectBoardRows.resolve`, moved here).
+#[tokio::test]
+async fn the_board_rows_are_read_from_the_server_and_drawn_offline_awtd_1676() {
+    let (app, transport) = board_rows_app(
+        StubTransport::new()
+            .push_json(
+                "/projects/p1/board-rows",
+                200,
+                json!({ "listIds": null, "meta": { "apiVersion": "v1" } }),
+            )
+            .push_json(
+                "/projects/p1/board-rows",
+                200,
+                json!({ "listIds": ["home", "gone", "bug", "web"] }),
+            )
+            .push(
+                "/projects/p1/board-rows",
+                Err(crate::api::TransportError::Unreachable("offline".into())),
+            ),
+    );
+
+    let first = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(
+        first["value"],
+        json!({
+            "projectId": "p1",
+            "savedListIds": null,
+            "rowListIds": ["web", "ios"],
+            "candidateListIds": ["home", "other"],
+            "canAddRow": true,
+            "fromCache": false,
+        })
+    );
+    let request = &transport.requests()[0];
+    assert_eq!(request.method, crate::api::Method::Get);
+    assert!(request.url.ends_with("/api/v1/projects/p1/board-rows"));
+
+    // Saved rows draw in their order, without a list this person cannot see or a label.
+    let saved = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+    assert_eq!(saved["value"]["rowListIds"], json!(["home", "web"]));
+    assert_eq!(
+        saved["value"]["savedListIds"],
+        json!(["home", "gone", "bug", "web"])
+    );
+
+    // Offline: the last answer, said to be one.
+    let offline = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+    assert_eq!(offline["ok"], true, "{offline}");
+    assert_eq!(offline["value"]["rowListIds"], json!(["home", "web"]));
+    assert_eq!(offline["value"]["fromCache"], true);
+}
+
+/// A server that refuses (Project Mode not granted) is a refusal, not the cache.
+#[tokio::test]
+async fn a_refused_board_rows_read_is_a_failure_awtd_1676() {
+    let (app, _) = board_rows_app(StubTransport::new().push_json(
+        "/projects/p1/board-rows",
+        403,
+        json!({ "error": "not_granted" }),
+    ));
+    let refused = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+}
+
+/// Adding and removing a row PUTs the whole ordered list, and the core does the arithmetic the
+/// Mac did in Swift; a save the server would refuse is refused before it is sent (AWTD-1676).
+#[tokio::test]
+async fn saving_the_board_rows_puts_the_whole_ordered_list_awtd_1676() {
+    let (app, transport) = board_rows_app(
+        StubTransport::new()
+            .push_json("/projects/p1/board-rows", 200, json!({ "listIds": null }))
+            .push_json(
+                "/projects/p1/board-rows",
+                200,
+                json!({ "listIds": ["web", "ios", "home"] }),
+            )
+            .push_json(
+                "/projects/p1/board-rows",
+                200,
+                json!({ "listIds": ["ios", "home"] }),
+            )
+            .push_json(
+                "/projects/p1/board-rows",
+                403,
+                json!({ "error": "You cannot see one or more of these lists", "listIds": ["secret"] }),
+            )
+            .push(
+                "/projects/p1/board-rows",
+                Err(crate::api::TransportError::Unreachable("offline".into())),
+            ),
+    );
+    call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+
+    let added = call(
+        &app,
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "addListId": "home" }),
+    )
+    .await;
+    assert_eq!(added["ok"], true, "{added}");
+    assert_eq!(added["value"]["rowListIds"], json!(["web", "ios", "home"]));
+    let put = &transport.requests()[1];
+    assert_eq!(put.method, crate::api::Method::Put);
+    let body: serde_json::Value =
+        serde_json::from_slice(put.body.as_deref().expect("a body")).expect("JSON");
+    assert_eq!(body, json!({ "listIds": ["web", "ios", "home"] }));
+
+    let removed = call(
+        &app,
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "removeListId": "web" }),
+    )
+    .await;
+    assert_eq!(removed["value"]["rowListIds"], json!(["ios", "home"]));
+    assert_eq!(removed["value"]["savedListIds"], json!(["ios", "home"]));
+
+    // The server's refusal comes back, and the rows stay what they were.
+    let refused = call(
+        &app,
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "listIds": ["secret"] }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+
+    // Refused here, with the server's words, before any request: too many, an empty id, and a
+    // command that names no change or two.
+    let sent = transport.requests().len();
+    let many: Vec<String> = (0..=100).map(|n| format!("l{n}")).collect();
+    for command in [
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "listIds": many }),
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "listIds": ["web", ""] }),
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1" }),
+        json!({ "kind": "saveProjectBoardRows", "projectId": "p1", "addListId": "home", "removeListId": "web" }),
+    ] {
+        let answer = call(&app, command).await;
+        assert_eq!(answer["ok"], false, "{answer}");
+    }
+    assert_eq!(transport.requests().len(), sent);
+    // What the next open draws, offline, is what the server last took.
+    let cached = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "p1" }),
+    )
+    .await;
+    assert_eq!(cached["value"]["rowListIds"], json!(["ios", "home"]));
+}
+
+/// One row of the board: the row list's cards under the PROJECT's columns (AWTD-1676, D67).
+///
+/// The Mac drew each row from the row list's own board and mapped the columns across, so a list
+/// with no board of its own drew an empty row. Here a list from no project draws its cards; a
+/// role this project has no column for is Inbox; the row list's manual order arranges a column.
+#[tokio::test]
+async fn a_board_row_is_its_list_under_the_projects_columns_awtd_1676() {
+    let (app, _) = board_rows_app(StubTransport::new());
+    for task in [
+        json!({ "id": "h1", "title": "Paint", "listIds": ["home"] }),
+        json!({ "id": "h2", "title": "Sweep", "listIds": ["home"], "statusRole": "custom-qa" }),
+        json!({ "id": "h3", "title": "Review", "listIds": ["home", "web"], "statusRole": "review" }),
+        json!({ "id": "w1", "title": "Web only", "listIds": ["web"], "statusRole": "review" }),
+    ] {
+        app.store
+            .upsert_task(&serde_json::from_value(task).expect("a task"))
+            .expect("stores");
+    }
+
+    let row = call(
+        &app,
+        json!({ "kind": "projectBoardRow", "projectId": "p1", "listId": "home", "idsOnly": true }),
+    )
+    .await;
+    assert_eq!(row["ok"], true, "{row}");
+    assert_eq!(row["value"]["projectId"], "p1");
+    assert_eq!(row["value"]["listId"], "home");
+    let columns = row["value"]["columns"].as_array().expect("columns");
+    let ids: Vec<&str> = columns
+        .iter()
+        .map(|column| column["id"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "__virtual_inbox__",
+            "ready",
+            "doing",
+            "waiting",
+            "review",
+            "__virtual_done__"
+        ]
+    );
+    assert_eq!(columns[0]["ids"], json!(["h2", "h1"]));
+    assert_eq!(columns[4]["ids"], json!(["h3"]));
+    assert_eq!(columns[4]["total"], 1);
+
+    // As rows, the cards draw like a board's.
+    let drawn = call(
+        &app,
+        json!({ "kind": "projectBoardRow", "projectId": "p1", "listId": "home" }),
+    )
+    .await;
+    let columns = drawn["value"]["columns"].as_array().expect("columns");
+    assert_eq!(columns[4]["cards"][0]["title"], "Review");
+
+    let missing = call(
+        &app,
+        json!({ "kind": "projectBoardRow", "projectId": "p1", "listId": "nope" }),
+    )
+    .await;
+    assert_eq!(missing["ok"], false, "{missing}");
+}
