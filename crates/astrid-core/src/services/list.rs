@@ -469,12 +469,26 @@ impl ListService {
         color: Option<String>,
         privacy: Option<crate::model::Privacy>,
     ) -> Result<TaskList> {
+        self.create_in(name, color, privacy, None)
+    }
+
+    /// Create a list, born in `project_id` when one is named (astrid-ios AITD-680): the project
+    /// rides on the create's own body, so the list is never seen outside it. Whether the person
+    /// may is the caller's question (`list_project_moves::can_create_in`).
+    pub fn create_in(
+        &self,
+        name: &str,
+        color: Option<String>,
+        privacy: Option<crate::model::Privacy>,
+        project_id: Option<String>,
+    ) -> Result<TaskList> {
         let now = self.context.clock.now();
         let temp_id = outbox::new_temp_id();
 
         let mut list = TaskList::new(temp_id.clone(), name);
         list.color = color.clone();
         list.privacy = privacy;
+        list.project_id = project_id.clone();
         list.created_at = Some(now);
         list.updated_at = Some(now);
         self.context.store.upsert_list(&list)?;
@@ -482,6 +496,9 @@ impl ListService {
         let mut body = json!({ "name": name, "color": color });
         if let Some(privacy) = privacy {
             body["privacy"] = json!(privacy);
+        }
+        if let Some(project_id) = project_id {
+            body["projectId"] = json!(project_id);
         }
         let entry = outbox::build(kind::CREATE_LIST, json!({ "body": body }), &temp_id, now)
             .for_temp_id(&temp_id);
@@ -510,6 +527,38 @@ impl ListService {
         let entry = outbox::build(
             kind::UPDATE_LIST,
             json!({ "listId": id, "body": body }),
+            &outbox::new_temp_id(),
+            now,
+        );
+        let entry = match crate::model::is_temp_id(id) {
+            true => entry.for_temp_id(id),
+            false => entry,
+        };
+        journal::enqueue(&self.context.store, &entry)?;
+        Ok(list)
+    }
+
+    /// Move a list into a project, or out of one with `None` (astrid-ios AITD-680).
+    ///
+    /// The cache changes at once and the move is journalled as the list's own PUT. The entry also
+    /// carries `previousProjectId`, outside the body, so a refusal can put the list back
+    /// (`outbox::handlers::update_list`). Whether the person may is the caller's question
+    /// (`list_project_moves::can_move`).
+    pub fn set_project(&self, id: &str, project_id: Option<String>) -> Result<TaskList> {
+        let now = self.context.clock.now();
+        let mut list = self.require(id)?;
+        let previous = list.project_id.clone();
+        list.project_id = project_id.clone();
+        list.updated_at = Some(now);
+        self.context.store.upsert_list(&list)?;
+
+        let entry = outbox::build(
+            kind::UPDATE_LIST,
+            json!({
+                "listId": id,
+                "body": { "projectId": project_id },
+                "previousProjectId": previous,
+            }),
             &outbox::new_temp_id(),
             now,
         );

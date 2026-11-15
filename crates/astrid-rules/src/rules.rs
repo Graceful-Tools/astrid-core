@@ -163,6 +163,17 @@ pub enum Rule {
         #[serde(default)]
         lists: Vec<crate::model::TaskList>,
     },
+    /// What a list's "Project" control offers: whether it may leave its project, which projects
+    /// it may move into, and which projects a new list may be made in — see
+    /// [`crate::list_project_moves`] (astrid-ios AITD-680, D68). `projects` is every project the
+    /// person can see; `list` is absent when only asking where a list may be created.
+    ListProjectMoves {
+        user_id: String,
+        #[serde(default)]
+        list: Option<Box<crate::model::TaskList>>,
+        #[serde(default)]
+        projects: Vec<crate::model::project::Project>,
+    },
     /// One row of the multi-list board: `row_list_id`'s cards under the project's columns, in
     /// [`Rule::Board`]'s shape — see [`crate::board_rows::row_columns`] (AWTD-1676, D67).
     /// `custom_states` is the PROJECT's; the row list's manual order and Done window arrange it.
@@ -831,6 +842,15 @@ pub fn run(rule: Rule) -> Response {
                 candidate_list_ids,
             })
         }
+        Rule::ListProjectMoves {
+            user_id,
+            list,
+            projects,
+        } => Response::ok(crate::list_project_moves::moves(
+            &user_id,
+            list.as_deref(),
+            &projects,
+        )),
         Rule::BoardRow {
             row_list_id,
             custom_states,

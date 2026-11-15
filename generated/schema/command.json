@@ -4067,11 +4067,63 @@
           ],
           "default": null,
           "description": "`PRIVATE`, `SHARED` or `PUBLIC`; the server's default when absent."
+        },
+        "projectId": {
+          "default": null,
+          "description": "The project the list is born in (astrid-ios AITD-680), sent on the create so it is\none request, never create-then-move. Refused locally unless the person is owner,\nadmin or member of the project (D68).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "kind",
         "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Move a list into a project, or out of one with `projectId: null` (astrid-ios AITD-680).\n\nChecked against D68 first — owner or admin of the list, and of every project it touches —\nand refused locally with `code: \"LIST_PROJECT_MOVE_FORBIDDEN\"`. Otherwise applied at once\n(the boards and rows re-derive from the list's `projectId`) and sent through the Outbox as\n`PUT /api/v1/lists/{id} { projectId }`; a refusal there puts the list back where it was.",
+      "properties": {
+        "kind": {
+          "const": "setListProject",
+          "type": "string"
+        },
+        "listId": {
+          "type": "string"
+        },
+        "projectId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "listId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "What a list's \"Project\" control offers — `{ canLeave, destinations, creatableIn }`, the\nrules door's `listProjectMoves` over the signed-in person and the cached projects\n(astrid-ios AITD-680, D68). Without `listId`, only where a new list may be created.",
+      "properties": {
+        "kind": {
+          "const": "listProjectMoves",
+          "type": "string"
+        },
+        "listId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
       ],
       "type": "object"
     },

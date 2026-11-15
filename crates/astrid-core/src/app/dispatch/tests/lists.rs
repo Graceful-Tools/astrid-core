@@ -1076,3 +1076,190 @@ async fn list_insights_defaults_to_thirty_days_of_utc() {
     assert!(url.contains("days=30"), "{url}");
     assert!(url.contains("tz=UTC"), "{url}");
 }
+
+/// The lists and projects of the AITD-680 tests: "me" owns `loose` and runs `mine` and `run`,
+/// is a plain member of `join`, and is nobody in `away`.
+fn moving_app(transport: StubTransport) -> (App, std::sync::Arc<StubTransport>) {
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("signs in");
+    for list in [
+        json!({ "id": "loose", "name": "Groceries", "ownerId": "me" }),
+        json!({ "id": "theirs", "name": "Theirs", "ownerId": "someone",
+                "listMembers": [{ "userId": "me", "role": "member" }] }),
+        json!({ "id": "web", "name": "Web", "ownerId": "me", "projectId": "mine" }),
+    ] {
+        app.store
+            .upsert_list(&serde_json::from_value(list).expect("a list"))
+            .expect("stores");
+    }
+    let projects: Vec<crate::model::project::Project> = serde_json::from_value(json!([
+        { "id": "mine", "name": "Alpha", "ownerId": "me" },
+        { "id": "run", "name": "Beta", "ownerId": "boss", "members": [{ "userId": "me", "role": "admin" }] },
+        { "id": "join", "name": "Gamma", "ownerId": "boss", "members": [{ "userId": "me", "role": "member" }] },
+        { "id": "away", "name": "Epsilon", "ownerId": "boss" },
+    ]))
+    .expect("projects");
+    app.store.upsert_projects(&projects).expect("stores");
+    (app, transport)
+}
+
+fn put_bodies(transport: &StubTransport, path: &str) -> Vec<serde_json::Value> {
+    transport
+        .requests()
+        .into_iter()
+        .filter(|request| request.method.as_str() == "PUT" && request.url.ends_with(path))
+        .map(|request| {
+            serde_json::from_slice(request.body.as_deref().expect("a body")).expect("json")
+        })
+        .collect()
+}
+
+/// A list moves into a project at once, offline, and the board's rows follow; the move reaches
+/// the server through the Outbox as the list's own PUT (AITD-680).
+#[tokio::test]
+async fn a_list_moves_into_a_project_optimistically_aitd_680() {
+    let (app, transport) = moving_app(
+        StubTransport::new()
+            .push_json("/board-rows", 200, json!({ "listIds": null }))
+            .push_json(
+                "/lists/loose",
+                200,
+                json!({ "list": {
+                "id": "loose", "name": "Groceries", "ownerId": "me", "projectId": "mine" } }),
+            ),
+    );
+
+    let moves = call(
+        &app,
+        json!({ "kind": "listProjectMoves", "listId": "loose" }),
+    )
+    .await;
+    assert_eq!(moves["ok"], true, "{moves}");
+    assert_eq!(moves["value"]["destinations"], json!(["mine", "run"]));
+    assert_eq!(
+        moves["value"]["creatableIn"],
+        json!(["mine", "run", "join"])
+    );
+
+    let moved = call(
+        &app,
+        json!({ "kind": "setListProject", "listId": "loose", "projectId": "mine" }),
+    )
+    .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    assert_eq!(moved["value"]["projectId"], "mine");
+
+    let rows = call(
+        &app,
+        json!({ "kind": "projectBoardRows", "projectId": "mine" }),
+    )
+    .await;
+    assert_eq!(
+        rows["value"]["rowListIds"],
+        json!(["web", "loose"]),
+        "{rows}"
+    );
+
+    call(&app, json!({ "kind": "drain" })).await;
+    assert_eq!(
+        put_bodies(&transport, "/api/v1/lists/loose"),
+        vec![json!({ "projectId": "mine" })]
+    );
+
+    // And out again: null detaches.
+    let left = call(
+        &app,
+        json!({ "kind": "setListProject", "listId": "loose", "projectId": null }),
+    )
+    .await;
+    assert_eq!(left["ok"], true, "{left}");
+    assert!(left["value"]["projectId"].is_null(), "{left}");
+}
+
+/// What D68 refuses is refused here, before any round trip, with a code a shell can read.
+#[tokio::test]
+async fn a_move_d68_forbids_is_refused_locally_aitd_680() {
+    let (app, transport) = moving_app(StubTransport::new());
+    for (list, project) in [
+        ("theirs", json!("mine")), // a plain list member
+        ("loose", json!("join")),  // a plain project member
+        ("loose", json!("away")),  // a stranger to the project
+        ("web", json!("run")),     // leaving needs admin of `mine`: fine; `run` is fine too
+    ] {
+        let answer = call(
+            &app,
+            json!({ "kind": "setListProject", "listId": list, "projectId": project }),
+        )
+        .await;
+        if list == "web" {
+            assert_eq!(answer["ok"], true, "{answer}");
+            continue;
+        }
+        assert_eq!(answer["ok"], false, "{list} -> {project}: {answer}");
+        assert_eq!(answer["error"]["code"], "LIST_PROJECT_MOVE_FORBIDDEN");
+    }
+    let unknown = call(
+        &app,
+        json!({ "kind": "setListProject", "listId": "loose", "projectId": "nowhere" }),
+    )
+    .await;
+    assert_eq!(unknown["error"]["kind"], "notFound", "{unknown}");
+    call(&app, json!({ "kind": "drain" })).await;
+    assert!(put_bodies(&transport, "/api/v1/lists/theirs").is_empty());
+    assert_eq!(put_bodies(&transport, "/api/v1/lists/web").len(), 1);
+}
+
+/// A move the server refuses rolls back: the list is where it was before (AITD-680).
+#[tokio::test]
+async fn a_move_the_server_refuses_rolls_back_aitd_680() {
+    let (app, _transport) = moving_app(StubTransport::new().push_json(
+        "/lists/web",
+        403,
+        json!({ "error": "Only a project admin can move lists", "code": "PROJECT_ATTACH_FORBIDDEN" }),
+    ));
+    let moved = call(
+        &app,
+        json!({ "kind": "setListProject", "listId": "web", "projectId": "run" }),
+    )
+    .await;
+    assert_eq!(moved["value"]["projectId"], "run", "{moved}");
+    call(&app, json!({ "kind": "drain" })).await;
+    let list = call(&app, json!({ "kind": "list", "listId": "web" })).await;
+    assert_eq!(list["value"]["projectId"], "mine", "{list}");
+}
+
+/// A list can be born in a project, in one request, by anyone who may add to it (AITD-680).
+#[tokio::test]
+async fn a_list_is_created_inside_a_project_aitd_680() {
+    let (app, transport) = moving_app(StubTransport::new().push_json(
+        "/api/v1/lists",
+        201,
+        json!({ "list": { "id": "new", "name": "Ops", "ownerId": "me", "projectId": "join" } }),
+    ));
+    let created = call(
+        &app,
+        json!({ "kind": "createList", "name": "Ops", "projectId": "join" }),
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["value"]["projectId"], "join");
+    call(&app, json!({ "kind": "drain" })).await;
+    let post = transport
+        .requests()
+        .into_iter()
+        .find(|request| request.method.as_str() == "POST" && request.url.ends_with("/api/v1/lists"))
+        .expect("the create");
+    let body: serde_json::Value =
+        serde_json::from_slice(post.body.as_deref().expect("a body")).expect("json");
+    assert_eq!(body["projectId"], "join", "{body}");
+
+    let refused = call(
+        &app,
+        json!({ "kind": "createList", "name": "Nope", "projectId": "away" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "LIST_PROJECT_CREATE_FORBIDDEN");
+}
