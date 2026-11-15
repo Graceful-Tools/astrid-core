@@ -125,7 +125,7 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **269,500 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+CI's `wasm` job holds it to **271,800 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
 pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
 ratchets down after each saving.** Raising it is allowed; doing either without saying what it
 bought is not.
@@ -134,14 +134,21 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
-| **today** | | | **269,113** | + board rows, the callout and `listProjectMoves` (astrid-ios AITD-680: who may move a list into or out of a project, which web's server and client both ask); budget 268,000 → 269,500, 2026-11-15 |
+| **today** | 2,058,873 | 418,605 | **271,171** | + the rest of the row rules (AWTD2-216, PR #58), which merged without raising the budget and turned main's `wasm` job red at 271,171 (CI's measurement; 270,912 on macOS). Budget 269,500 → 271,800 in AWTD2-162's step-1 fix, 2026-11-15 |
+| before that | | | 269,113 | + board rows, the callout and `listProjectMoves` (astrid-ios AITD-680: who may move a list into or out of a project, which web's server and client both ask); budget 268,000 → 269,500, 2026-11-15 |
 | after task 4d05306d | 1,973,556 | 405,355 | 261,258 | no markdown renderer, 2026-11-15 |
 | before that | 2,193,133 | 488,019 | 324,175 | 2026-11-15, at `108c99f` |
 | with `opt-level = "s"`, as it was | 2,375,925 | 531,752 | 353,882 | 2026-11-14 |
 
-**The browser build has no markdown renderer.** `astrid-rules-wasm` takes this crate with
-`default-features = false`, which drops the `markdown` feature: `pulldown-cmark`, `rows::chat`,
-`CommentRow::blocks` with `rows::comment::rows`, and the `renderMarkdown` rule. The web renders
+**The browser build has no markdown renderer. The Node build does.** `astrid-rules-wasm` takes this
+crate with `default-features = false`, which drops the `markdown` feature: `pulldown-cmark`,
+`rows::chat`, `CommentRow::blocks` with `rows::comment::rows`, and the `renderMarkdown` rule.
+`astrid-rules-wasm`'s own `markdown` feature turns it back on. `scripts/build-wasm.sh` builds
+twice, `--features markdown` for `node/` and the default for `web/`, and then checks both packages
+(`scripts/check-wasm-packages.mjs`): node must answer `renderMarkdown`, because astrid-web's server
+renders through it and `tests/lib/core-rules-markdown-parity.test.ts` holds web's renderer to it,
+and web must refuse it. The first cut fed both packages from one markdown-free artifact, and the
+Node package lost the renderer that way (AWTD2-162). The web renders
 markdown itself — that rule exists for the clients that do not — so it was downloading a parser in
 order never to call it. **−62,917 brotli bytes, 19.4%**, which is three times `pulldown_cmark`'s
 own 4% code share, because the Unicode tables and the `Block`/`Inline` serde code go with it.
