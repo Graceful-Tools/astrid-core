@@ -1612,6 +1612,41 @@ pub enum Command {
     DeleteProject {
         project_id: String,
     },
+    /// Which lists this person's multi-list board for a project draws as rows, and which could be
+    /// added (AWTD-1676; web AWTD-1660). Read from `GET /api/v1/projects/{id}/board-rows`; offline,
+    /// the last answer, with `fromCache: true`. Answers `{ projectId, savedListIds, rowListIds,
+    /// candidateListIds, canAddRow, fromCache }` — `savedListIds` is the server's (`null` for
+    /// nothing saved), `rowListIds` the rows to draw, in order ([`crate::board_rows::resolve`]).
+    ProjectBoardRows {
+        project_id: String,
+    },
+    /// Save a project board's rows (AWTD-1676): exactly one of the whole ordered `listIds`, a list
+    /// to add at the end (`addListId`) or one to remove (`removeListId`) — the core does the
+    /// arithmetic against the rows it last drew. Online only, like web: it is a view preference
+    /// the server checks against what this person can see, not task data. Answers as
+    /// [`Command::ProjectBoardRows`].
+    SaveProjectBoardRows {
+        project_id: String,
+        #[serde(default)]
+        list_ids: Option<Vec<String>>,
+        #[serde(default)]
+        add_list_id: Option<String>,
+        #[serde(default)]
+        remove_list_id: Option<String>,
+    },
+    /// One row of a project's multi-list board: `listId`'s cards under the PROJECT's columns, in
+    /// [`Command::Board`]'s shape (AWTD-1676, D67). The row list's manual order and Done window
+    /// arrange it; a role the project has no column for is Inbox.
+    ProjectBoardRow {
+        project_id: String,
+        list_id: String,
+        /// How many cards to carry per column. The count comes back whole.
+        #[serde(default)]
+        limit: Option<usize>,
+        /// Each column's card ids rather than rows.
+        #[serde(default)]
+        ids_only: bool,
+    },
     /// Fetch what the deployment supports.
     RefreshCapabilities,
     /// The public list this deployment's Report an Issue opens, from the cached capabilities, or

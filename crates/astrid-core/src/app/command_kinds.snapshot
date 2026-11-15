@@ -114,6 +114,8 @@ postAgentResponse
 postComment
 profileStats
 profileTasks
+projectBoardRow
+projectBoardRows
 projects
 publicList
 publicLists
@@ -152,6 +154,7 @@ revokeConnection
 revokePasskey
 rowsForList
 saveAgentCredential
+saveProjectBoardRows
 saveWebhook
 searchContacts
 searchTasks

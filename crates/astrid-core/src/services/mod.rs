@@ -42,7 +42,7 @@ pub use account::AccountService;
 pub use agents::{AgentMode, AgentService};
 pub use attachment::AttachmentService;
 pub use auth::AuthService;
-pub use board::{BoardService, StatusOutcome};
+pub use board::{BoardService, SavedBoardRows, StatusOutcome};
 pub use chat::ChatService;
 pub use comment::CommentService;
 pub use dependency::{Blocker, Dependencies, TaskDependencyService};
