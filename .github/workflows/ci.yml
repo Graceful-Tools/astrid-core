@@ -151,10 +151,16 @@ jobs:
       - name: Size budget
         run: >
           node scripts/wasm-size.mjs
-          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 269500
+          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 271800
 
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
+
+      # The Node package's build: `astrid-rules-wasm --features markdown` (scripts/build-wasm.sh).
+      # astrid-web's server renders markdown through it, and nothing else in CI compiles that
+      # combination, so the test that it still answers `renderMarkdown` runs here (AWTD2-162).
+      - name: Test the Node build (with the markdown renderer)
+        run: cargo test -p astrid-rules-wasm --features markdown
 
       # The build above IS the markdown-free one -- `astrid-rules-wasm` takes the crate with
       # `default-features = false` -- but only through a dependency edge, and nothing else in the

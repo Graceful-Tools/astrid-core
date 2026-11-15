@@ -34,6 +34,22 @@ mod tests {
         assert_eq!(run_json(request), astrid_rules::rules::run_json(request));
     }
 
+    /// The Node package is built with `markdown` on, and astrid-web's server asks it to render
+    /// (AWTD2-162). The browser build refusing is asserted in `astrid-rules/tests/browser_build.rs`
+    /// and on the built packages by `scripts/build-wasm.sh`. It cannot be asserted here, because
+    /// `cargo test --workspace` unifies `astrid-rules/markdown` back on through astrid-core.
+    #[cfg(feature = "markdown")]
+    #[test]
+    fn the_node_build_renders_markdown() {
+        let reply: serde_json::Value =
+            serde_json::from_str(&run_json(r#"{"kind":"renderMarkdown","text":"**hi**"}"#))
+                .unwrap();
+        assert_eq!(
+            reply["ok"], true,
+            "the Node build must answer renderMarkdown: {reply}"
+        );
+    }
+
     #[test]
     fn a_bad_request_is_an_envelope_not_a_panic() {
         let reply: serde_json::Value = serde_json::from_str(&run_json("not json")).unwrap();

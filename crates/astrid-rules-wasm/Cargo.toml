@@ -11,10 +11,18 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# OFF by default, so `cargo build -p astrid-rules-wasm` is the BROWSER build: no markdown renderer,
+# and no rule that can only be answered by running one (task 4d05306d). The browser renders
+# markdown itself, and `pulldown-cmark` would be bytes it downloads and never calls.
+#
+# ON for the Node package (`scripts/build-wasm.sh` builds twice). astrid-web's server calls
+# `renderMarkdown` through it: `tests/lib/core-rules-markdown-parity.test.ts` holds web's renderer
+# to the core's. Step 1 gated markdown out of this crate as a whole, and because one artifact fed
+# both packages, the Node package lost `renderMarkdown` too (AWTD2-162).
+markdown = ["astrid-rules/markdown"]
+
 [dependencies]
-# `default-features = false` drops the markdown renderer and the rules that can only be answered
-# by running it (task 4d05306d). The browser already renders markdown — `renderMarkdown` is for
-# the clients that do not — and `pulldown-cmark` is bytes the browser downloads to never call.
 astrid-rules = { path = "../astrid-rules", version = "0.1.0", default-features = false }
 wasm-bindgen = "0.2"
 
