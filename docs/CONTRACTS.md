@@ -1518,3 +1518,65 @@ call site can re-add the rule by passing something else; the body ignores it.
 Pinned by the two existing cases in `rows::detail`, one of which asserted the opposite, and by
 `app::dispatch::tests::tasks::the_detail_shows_the_board_state_of_a_board_task_in_both_modes_task_5221e43f`
 — renamed from `..._in_list_mode_...`, which had become a claim the code no longer made.
+
+### D64 — the whole palette breaks an equal score by the shorter title, as the ⌘K scorer already did
+
+**The clients follow iOS** (task `75a27f7f`, 2026-11-14). The Mac's `MacPaletteSearch` sorts a
+higher score first and then gives a tie to the **shorter** title — the closer fit for the same
+letters. `palette::rank`, added for the ⌘K palette as AITD-667, does that and names
+`MacPaletteSearch` in its doc comment. `palette::search` did not: all three of its kinds sorted
+with `sort_by_key(|(score, _)| -score)` under a comment saying *"two equal scores stay in the order
+they were found"*.
+
+So the core answered one question two ways, and which answer a shell got depended only on which
+door it came through — `Rule::PaletteRank` or `Rule::Palette`. Both are documented as the Mac's.
+
+**It was wrong in the shipping table, not only in theory.** With the commands ranked from
+`keyboard::ALL`, the query `t` returns eight rows that all score 5, and the table's own order put a
+31-character title ahead of a 27-character one.
+
+The three sorts are now one function, `palette::best_first`, so the two doors cannot drift apart
+again. It is still a *stable* sort, so an equal score **and** an equal length keep the order they
+were found in — found order is the last tie-break, not the first.
+
+Pinned by `palette::tests::task_75a27f7f_an_equal_score_goes_to_the_shorter_name` and
+`palette::tests::task_75a27f7f_the_commands_are_ordered_the_same_way`, which asserts the ordering
+rather than naming rows that would change whenever a shortcut is added.
+
+### D65 — the palette offers eight of each kind; the Mac offers six
+
+**The core keeps its own number, and this is the open one of the four** (task `75a27f7f`). The
+Mac caps each kind at 6; `palette::PER_KIND` is 8, so a full answer is up to 24 rows against the
+Mac's 18.
+
+Unlike D64 this is not a correctness difference — nothing is ordered wrongly, there is simply more
+of it — and the number is not obviously the Mac's to set. A Mac palette is a floating sheet over a
+window; the Windows and web palettes are the same rule rendered in a desktop-sized list, and
+`PER_KIND`'s own comment argues the cap from readability (*"a hundred rows is a list, and a list is
+what the search box is for"*) without reference to any client.
+
+**Moving 8 to 6 would shrink the palette for every shipped Windows and web client**, so it is
+recorded here rather than changed in passing. If the Apple apps want a shorter palette after
+adopting `Rule::Palette`, the honest fix is a cap the caller passes, not a constant that silently
+means something different per platform.
+
+### D66 — a typed identifier is matched raw, not through `parse_identifier`
+
+**The core keeps its own answer, with a reason** (task `75a27f7f`, recording a decision AWTD2-161
+made in code). The Mac compares the **parsed** identifier on both sides — `TaskIdentifiers.parse`
+of what was typed against `TaskIdentifiers.parse` of the task's. `palette::search` compares the
+typed string against `task.identifier` ASCII-case-insensitively, after using `parse_identifier`
+only to decide that the query *looks* like an identifier at all.
+
+The two differ for exactly one input: a padded sequence. `AWTD-01405` finds the task on the Mac
+and does not here.
+
+The reason is already in the code at `palette.rs`: this is how the search box has always compared
+it (`services::search::search_tasks`), and resolving a padded id in the palette that the search box
+does not would be two answers to one question — a worse divergence than this one, and one a user
+would meet far more often.
+
+**The commands divergence from the same list is already answered**, and needs no row of its own:
+the Mac ranks its own `CommandRegistry` rather than `keyboard::ALL`, which is exactly what
+`Rule::PaletteRank` exists for — the scorer alone, for a palette that keeps its own rows. A client
+with its own command list asks `PaletteRank`; one that wants the shared table asks `Palette`.

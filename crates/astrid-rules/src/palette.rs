@@ -114,6 +114,23 @@ pub struct PaletteRow {
     pub subtitle: Option<String>,
 }
 
+/// [`rank`]'s order, applied to rows that carry their own title: a higher score first, then the
+/// shorter title — the closer fit for the same letters — as the Mac's `MacPaletteSearch` sorts.
+///
+/// One function rather than three copies, so [`Rule::Palette`](crate::rules::Rule::Palette) and
+/// [`Rule::PaletteRank`](crate::rules::Rule::PaletteRank) cannot drift apart again: until task
+/// `75a27f7f` each kind here sorted on the score alone and kept found order for a tie, while
+/// `rank` broke it by length, so one rule had two answers.
+///
+/// The sort is stable, so an equal score *and* an equal length still keep the order they were
+/// found in.
+fn best_first(rows: &mut [(i32, PaletteRow)]) {
+    rows.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.title.chars().count().cmp(&b.1.title.chars().count()))
+    });
+}
+
 /// How many of each kind to answer with.
 ///
 /// A palette is read from the top; a hundred rows is a list, and a list is what the search box is
@@ -146,9 +163,7 @@ pub fn search(query: &str, lists: &[TaskList], tasks: &[Task]) -> Vec<PaletteRow
             })
         })
         .collect();
-    // Best first. Reversed by negating rather than by comparing backwards, which reads the
-    // same and keeps a stable sort — two equal scores stay in the order they were found.
-    commands.sort_by_key(|(score, _)| -score);
+    best_first(&mut commands);
     rows.extend(commands.into_iter().take(PER_KIND).map(|(_, row)| row));
 
     let mut matched_lists: Vec<(i32, PaletteRow)> = lists
@@ -169,9 +184,7 @@ pub fn search(query: &str, lists: &[TaskList], tasks: &[Task]) -> Vec<PaletteRow
             })
         })
         .collect();
-    // Best first. Reversed by negating rather than by comparing backwards, which reads the
-    // same and keeps a stable sort — two equal scores stay in the order they were found.
-    matched_lists.sort_by_key(|(score, _)| -score);
+    best_first(&mut matched_lists);
     rows.extend(matched_lists.into_iter().take(PER_KIND).map(|(_, row)| row));
 
     let row_for = |task: &Task| {
@@ -221,9 +234,7 @@ pub fn search(query: &str, lists: &[TaskList], tasks: &[Task]) -> Vec<PaletteRow
         .filter(|task| exact.as_ref().is_none_or(|row| row.id != task.id))
         .filter_map(|task| score(query, &task.title).map(|score| (score, row_for(task))))
         .collect();
-    // Best first. Reversed by negating rather than by comparing backwards, which reads the
-    // same and keeps a stable sort — two equal scores stay in the order they were found.
-    matched_tasks.sort_by_key(|(score, _)| -score);
+    best_first(&mut matched_tasks);
 
     // The exact hit takes one of the task kind's places rather than being extra, so the palette
     // stays the same length however the query was read.
@@ -244,6 +255,51 @@ mod tests {
 
     fn task(id: &str, title: &str) -> Task {
         Task::new(id, title)
+    }
+
+    /// The Mac breaks an equal score by the shorter title — the closer fit for the same letters —
+    /// and [`rank`] has done that since AITD-667. [`search`] kept the order it happened to find
+    /// things in, so one rule answered two ways depending on which door a shell came through
+    /// (task `75a27f7f`).
+    #[test]
+    fn task_75a27f7f_an_equal_score_goes_to_the_shorter_name() {
+        // Both names match "buy" as a prefix, so they score identically — what follows the match
+        // does not count. The longer one is offered first, so found order and the Mac's order
+        // disagree about them.
+        let lists = vec![list("l-long", "Buy milk and eggs"), list("l-short", "Buy")];
+        let tasks = vec![task("t-long", "Buy milk and eggs"), task("t-short", "Buy")];
+
+        let rows = search("buy", &lists, &tasks);
+        let ids = |kind: RowKind| -> Vec<&str> {
+            rows.iter()
+                .filter(|row| row.kind == kind)
+                .map(|row| row.id.as_str())
+                .collect()
+        };
+
+        assert_eq!(ids(RowKind::List), vec!["l-short", "l-long"]);
+        assert_eq!(ids(RowKind::Task), vec!["t-short", "t-long"]);
+    }
+
+    /// The commands obey the same tie rule. They come from the shared keyboard table rather than
+    /// from the caller, so this asserts the ordering itself rather than naming rows that would
+    /// change whenever a shortcut is added (task `75a27f7f`).
+    #[test]
+    fn task_75a27f7f_the_commands_are_ordered_the_same_way() {
+        let rows = search("t", &[], &[]);
+        let order: Vec<(i32, usize)> = rows
+            .iter()
+            .filter(|row| row.kind == RowKind::Command)
+            .map(|row| {
+                let matched = score("t", &row.title).expect("a returned row matched the query");
+                (-matched, row.title.chars().count())
+            })
+            .collect();
+
+        assert!(order.len() > 1, "the query should match several commands");
+        let mut best_first = order.clone();
+        best_first.sort();
+        assert_eq!(order, best_first, "best first, then the shorter title");
     }
 
     /// Every character, in order, or nothing.
