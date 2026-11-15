@@ -23,7 +23,7 @@ by `<checkout>/<copy>`, not by its repository.
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
 | `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `b0947e82b03b1bec135a8c120bef6cc19000acd2` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
-| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `326a201848ce8d309756d4dfb66801dcf9cef539` |
+| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `8de00507e6e8059932779b20f2985c658ce293c8` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `a503a62039fca9a19ce7802a2d9f6d38ae5f89d8` |
 | `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `143cfd17ba9f8758e4f04562ff5dfdcd342c90a9` |
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `3dcc880a391dee13cce3aa7c0b09544a7b647ca2` |
@@ -33,7 +33,7 @@ by `<checkout>/<copy>`, not by its repository.
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
 that reads like a bad pin.
 
-**`astrid-ios/core` took the bump on 2026-11-15** (`ed8380cf`), past the leading-action and
+**`astrid-ios/core` took the bump on 2026-11-15** (now `8de00507`), past the leading-action and
 board-state answers (CONTRACTS D62, D63) that AITD-656 / AITD-622 / AITD-672 needed to draw rows
 from `TaskRow` and delete `TaskLeadingControl` and `TaskDetailProjectStateRow`.
 
