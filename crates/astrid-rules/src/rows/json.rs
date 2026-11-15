@@ -77,15 +77,25 @@ pub fn rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "commentCount": row.comment_count,
                 "attachmentCount": row.attachment_count,
                 "subtaskCount": row.subtask_count,
-                "listChips": row.list_chips.iter().map(|chip| serde_json::json!({
-                    "id": chip.id, "name": chip.name, "color": chip.color, "isLabel": chip.is_label,
-                    "glyph": chip.glyph.as_str()
-                })).collect::<Vec<_>>(),
+                "listChips": chips(&row.list_chips),
                 "assignee": row.assignee,
                 "statusRole": row.status_role,
                 "isCanceled": row.is_canceled,
                 "syncMark": row.sync_mark,
                 "remote": row.remote_chip.as_ref().map(|(label, url)| serde_json::json!({ "label": label, "url": url })),
+            })
+        })
+        .collect()
+}
+
+/// List chips on the wire.
+pub fn chips(chips: &[super::ListChip]) -> Vec<serde_json::Value> {
+    chips
+        .iter()
+        .map(|chip| {
+            serde_json::json!({
+                "id": chip.id, "name": chip.name, "color": chip.color, "isLabel": chip.is_label,
+                "glyph": chip.glyph.as_str()
             })
         })
         .collect()
