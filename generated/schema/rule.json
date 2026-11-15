@@ -953,6 +953,34 @@
         }
       ]
     },
+    "Rect": {
+      "description": "A rectangle in the window's coordinates, y increasing downward.",
+      "properties": {
+        "height": {
+          "format": "double",
+          "type": "number"
+        },
+        "left": {
+          "format": "double",
+          "type": "number"
+        },
+        "top": {
+          "format": "double",
+          "type": "number"
+        },
+        "width": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
     "ReminderType": {
       "enum": [
         "push",
@@ -3210,6 +3238,39 @@
         "locale",
         "form",
         "count"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Where a task callout opens from its row, and where its arrow points -\n[`crate::rows::callout::place`] (task `011080d4`).\n\nA multi-column screen -- a board, a list beside a detail pane, a tablet in landscape --\nhas to pick a side and aim an arrow before it can draw one. Both are arithmetic, and every\nsuch client repeats them. All coordinates are logical pixels in the window's space, y\nincreasing downward; the caller has already divided by its scale factor.\n\nThe callout's SIZE is the caller's: how big a detail pane wants to be is a design decision\nper platform, and a rule that returned one would be choosing the layout rather than\nplacing it.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/Rect",
+          "description": "The row the callout belongs to."
+        },
+        "height": {
+          "format": "double",
+          "type": "number"
+        },
+        "kind": {
+          "const": "calloutPlacement",
+          "type": "string"
+        },
+        "viewport": {
+          "$ref": "#/$defs/Rect",
+          "description": "What the callout has to fit inside - the window, or the pane it is confined to."
+        },
+        "width": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "anchor",
+        "viewport",
+        "width",
+        "height"
       ],
       "type": "object"
     },

@@ -499,6 +499,25 @@ pub enum Rule {
         form: crate::plurals::CountForm,
         count: i64,
     },
+    /// Where a task callout opens from its row, and where its arrow points -
+    /// [`crate::rows::callout::place`] (task `011080d4`).
+    ///
+    /// A multi-column screen -- a board, a list beside a detail pane, a tablet in landscape --
+    /// has to pick a side and aim an arrow before it can draw one. Both are arithmetic, and every
+    /// such client repeats them. All coordinates are logical pixels in the window's space, y
+    /// increasing downward; the caller has already divided by its scale factor.
+    ///
+    /// The callout's SIZE is the caller's: how big a detail pane wants to be is a design decision
+    /// per platform, and a rule that returned one would be choosing the layout rather than
+    /// placing it.
+    CalloutPlacement {
+        /// The row the callout belongs to.
+        anchor: crate::rows::callout::Rect,
+        /// What the callout has to fit inside - the window, or the pane it is confined to.
+        viewport: crate::rows::callout::Rect,
+        width: f64,
+        height: f64,
+    },
     /// Which look the app wears, from what was stored - [`crate::theme::Theme::parse`].
     ///
     /// A read normalises: anything a newer build wrote reads as the default rather than as an
@@ -1052,6 +1071,12 @@ pub fn run(rule: Rule) -> Response {
             form,
             count,
         } => Response::ok(crate::plurals::category(&locale, form, count)),
+        Rule::CalloutPlacement {
+            anchor,
+            viewport,
+            width,
+            height,
+        } => Response::ok(crate::rows::callout::place(anchor, viewport, width, height)),
         Rule::Theme { stored } => {
             Response::ok(crate::theme::Theme::parse(stored.as_deref().unwrap_or_default()).wire())
         }
@@ -2051,6 +2076,48 @@ mod tests {
             "utcOffsetMinutes": 2147483647,
         }));
         assert_eq!(refused["ok"], false, "{refused}");
+    }
+
+    /// A callout picks its side and aims its arrow, through the door (task `011080d4`).
+    #[test]
+    fn o11080d4_a_callout_places_itself_through_the_door() {
+        let place = |anchor_left: f64, anchor_top: f64| {
+            answer(json!({
+                "kind": "calloutPlacement",
+                "anchor": { "left": anchor_left, "top": anchor_top, "width": 320.0, "height": 64.0 },
+                "viewport": { "left": 0.0, "top": 0.0, "width": 1400.0, "height": 900.0 },
+                "width": 420.0,
+                "height": 520.0,
+            }))["value"]
+                .clone()
+        };
+
+        // A column on the left: the room is to its right.
+        let right = place(40.0, 300.0);
+        assert_eq!(right["side"], "right", "{right}");
+        assert_eq!(right["left"], 368.0, "a gutter clear of the anchor");
+
+        // A column on the right: it opens the other way.
+        let left = place(1000.0, 300.0);
+        assert_eq!(left["side"], "left", "{left}");
+
+        // The arrow points at the row's middle, which for an unclamped callout is its half-height.
+        assert_eq!(right["arrowOffset"], 260.0);
+        assert_eq!(
+            right["top"].as_f64().unwrap() + right["arrowOffset"].as_f64().unwrap(),
+            332.0,
+            "the row's middle"
+        );
+
+        // A row at the top pushes the callout down and walks the arrow UP its edge to keep
+        // pointing at it -- the case a client gets wrong by drawing the arrow at the midpoint.
+        let high = place(40.0, 10.0);
+        assert_eq!(high["top"], 8.0);
+        assert_eq!(
+            high["top"].as_f64().unwrap() + high["arrowOffset"].as_f64().unwrap(),
+            42.0,
+            "still the row's middle"
+        );
     }
 
     /// The row a plural key's translation is read from, through the door (task `bcc8a11e`).

@@ -23,6 +23,7 @@ pub const CORE_OWNED: &[&str] = &[
     "waiting.json",
     "list-default-picks.json",
     "repeat-summary-l10n.json",
+    "callout-placement.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -877,11 +878,93 @@ pub fn list_default_picks_fixture() -> Result<String, String> {
     )
 }
 
+/// Where a task callout opens, and where its arrow points (task `011080d4`).
+///
+/// A 1400x900 window throughout, with a 320-wide column and a 64-tall row in it, because the
+/// numbers only mean anything relative to each other and one frame makes the table readable.
+fn callout_placement_cases() -> Vec<Case> {
+    let viewport = json!({ "left": 0.0, "top": 0.0, "width": 1400.0, "height": 900.0 });
+    let ask = |left: f64, top: f64, height: f64, callout_h: f64| {
+        json!({
+            "kind": "calloutPlacement",
+            "anchor": { "left": left, "top": top, "width": 320.0, "height": height },
+            "viewport": viewport,
+            "width": 420.0,
+            "height": callout_h,
+        })
+    };
+
+    vec![
+        case(
+            "side/room-on-the-right",
+            "calloutPlacement",
+            ask(40.0, 300.0, 64.0, 520.0),
+            ok(json!({ "side": "right", "left": 368.0 })),
+        ),
+        case(
+            "side/room-on-the-left",
+            "calloutPlacement",
+            ask(1000.0, 300.0, 64.0, 520.0),
+            ok(json!({ "side": "left", "left": 572.0 })),
+        ),
+        case(
+            "side/equal-room-opens-right",
+            "calloutPlacement",
+            ask(540.0, 300.0, 64.0, 520.0),
+            ok(json!({ "side": "right" })),
+        ),
+        case(
+            "arrow/points-at-the-rows-middle",
+            "calloutPlacement",
+            ask(40.0, 300.0, 64.0, 520.0),
+            ok(json!({ "top": 72.0, "arrowOffset": 260.0 })),
+        ),
+        case(
+            "arrow/row-near-the-top-walks-the-arrow-up",
+            "calloutPlacement",
+            ask(40.0, 10.0, 64.0, 520.0),
+            ok(json!({ "top": 8.0, "arrowOffset": 34.0 })),
+        ),
+        case(
+            "arrow/row-near-the-bottom-walks-it-down",
+            "calloutPlacement",
+            ask(40.0, 800.0, 64.0, 520.0),
+            ok(json!({ "top": 372.0, "arrowOffset": 460.0 })),
+        ),
+        case(
+            "arrow/kept-off-the-near-corner",
+            "calloutPlacement",
+            ask(40.0, 0.0, 24.0, 120.0),
+            ok(json!({ "arrowOffset": 20.0 })),
+        ),
+        case(
+            "arrow/kept-off-the-far-corner",
+            "calloutPlacement",
+            ask(40.0, 880.0, 64.0, 120.0),
+            ok(json!({ "arrowOffset": 100.0 })),
+        ),
+    ]
+}
+
+pub fn callout_placement_fixture() -> Result<String, String> {
+    render(
+        callout_placement_cases(),
+        "crates/astrid-rules/src/rows/callout.rs",
+        json!({
+            "canonicalSource": "astrid-core. Core-first: no client had this rule — Windows' board spliced detail into the column as another card rather than opening a callout at all (task 011080d4), and the Mac, iPad and Android tablet each compute their own. The caller measures the callout; this places it.",
+            "coordinates": "Logical pixels in the window's space, y increasing downward. The caller has already divided by its scale factor.",
+            "gutter": astrid_rules::rows::callout::GUTTER,
+            "arrowMargin": astrid_rules::rows::callout::ARROW_MARGIN,
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
         ("waiting.json", waiting_fixture()?),
         ("list-default-picks.json", list_default_picks_fixture()?),
+        ("callout-placement.json", callout_placement_fixture()?),
     ])
 }
 
