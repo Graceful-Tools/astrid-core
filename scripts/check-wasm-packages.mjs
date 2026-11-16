@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url'
 const out = path.resolve(process.argv[2] ?? '')
 const markdown = JSON.stringify({ kind: 'renderMarkdown', text: '**hi**' })
 const orchestration = JSON.stringify({ kind: 'orchestrationMay', agent: 'claude', action: 'merge' })
-const ordinary = JSON.stringify({ kind: 'pluralCategory', locale: 'en', form: 'cardinal', count: 1 })
+const ordinary = JSON.stringify({ kind: 'smartParse', text: 'buy milk', today: '2026-03-01' })
 
 const nodePkg = createRequire(path.join(out, 'node', 'x.js'))('./astrid_rules_wasm.js')
 const webPkg = await import(pathToFileURL(path.join(out, 'web', 'astrid_rules_wasm.js')).href)
@@ -43,8 +43,34 @@ for (const [name, pkg] of [['node', nodePkg], ['web', webPkg]]) {
   expect(reply.ok === true, `${name}/ must answer an ordinary rule: ${JSON.stringify(reply)}`)
 }
 
+// AWTD2-162 step 2 (docs/BROWSER_DOOR.md §4): the browser answers only the rules web's client-side
+// code calls, and says which through kinds(). The node package keeps every rule, since astrid-web's
+// server answers all of them.
+const browserKinds = [
+  'board', 'boardMove', 'boardPresets', 'boardRow', 'boardRows', 'identifierFormat',
+  'identifierLinks', 'identifierParse', 'listAccess', 'manualOrder', 'palette', 'reminderSnooze',
+  'rows', 'searchParse', 'smartParse', 'theme',
+]
+const serverOnly = ['completion', 'nextOccurrence', 'waitingWrite', 'decision', 'sidebar', 'shortcut']
+const webKinds = [...webPkg.kinds()]
+expect(JSON.stringify(webKinds) === JSON.stringify([...browserKinds].sort()),
+  `web/ must list exactly the browser's rules: ${JSON.stringify(webKinds)}`)
+const nodeKinds = [...nodePkg.kinds()]
+for (const kind of [...browserKinds, ...serverOnly]) {
+  expect(nodeKinds.includes(kind), `node/ must answer ${kind}: ${JSON.stringify(nodeKinds)}`)
+}
+const completion = JSON.stringify({
+  kind: 'completion', task: { id: 't1', title: 'x' }, completed: true,
+  now: '2026-03-01T12:00:00.000Z', timeZone: 'UTC',
+})
+const nodeCompletion = ask('node', nodePkg, completion)
+expect(nodeCompletion.ok === true, `node/ must answer completion (astrid-web's server calls it): ${JSON.stringify(nodeCompletion)}`)
+const webCompletion = ask('web', webPkg, completion)
+expect(webCompletion.ok === false && /unknown variant `completion`/.test(webCompletion.error?.message ?? ''),
+  `web/ must not carry the repeating rules (they keep chrono-tz's zone table): ${JSON.stringify(webCompletion)}`)
+
 if (failures.length) {
   for (const f of failures) console.error(`check-wasm-packages: ${f}`)
   process.exit(1)
 }
-console.log('check-wasm-packages: node/ renders markdown and answers orchestration, web/ does neither; both answer the door')
+console.log('check-wasm-packages: node/ answers every rule, web/ only the browser set (kinds() agrees); both answer the door')

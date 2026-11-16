@@ -206,8 +206,16 @@ per PR, with the budget ratcheted after each:
    [`docs/BROWSER_DOOR.md`](docs/BROWSER_DOOR.md). Measured there: the internal `kind` tag costs
    only ~4 KB, so the wire format stays. What costs is how many of the 47 rules are compiled. A
    20-rule browser set measures **169,050**, and it drops chrono-tz's zone table without step 3's
-   API change. Slice 1 (the two `from_value` constructors, −11,151) is done. The rule set is
-   the open decision.
+   API change. Slice 1 (the two `from_value` constructors, −11,151) is done. **Slices 2 and 3
+   are done:** four default-on rule-group features on `astrid-rules` (`rules-repeating`,
+   `rules-waiting`, `rules-decisions`, `rules-shell`), `rules::kinds()` and the binding's
+   `kinds()` export, and the browser build now turns all of them off. It answers the 16 rules
+   web's client-side code calls (the decision recorded in `docs/BROWSER_DOOR.md` §4); the Node
+   package is built with `--features full` and answers all of them. The browser artifact is
+   **756,284 bytes raw** (was 1,973,556 + the sidebar, row rules and handoff since). Its brotli
+   size was not measured in the run that landed this (no `node` there): read it off the first
+   CI run's *Size budget* step and ratchet the 290,000 budget down to it, with a row in the table
+   above. The remaining gap to 150,000 is `rows` (§4.1 of the note).
 3. **Time zone offsets from `Intl` instead of `chrono-tz`.** ~53 KB, cross-crate API change.
    Worth doing after 2, not instead of it.
 

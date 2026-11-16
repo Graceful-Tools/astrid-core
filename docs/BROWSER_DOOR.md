@@ -2,7 +2,19 @@
 
 *Design note for step 2 of AWTD2-162 (Jon, 2026-11-14: "feature-gate the wire models down to the
 rules the browser calls; write up the `Rule` split first, since three clients read that door").
-Status: **proposed**. Slice 1 has landed (below). The gate itself waits on the rule set in §4.*
+Status: slices 1–3 have landed (§6). The browser answers the rule set decided in §4 (the agent's
+decision of 2026-11-15, Jon can override): four feature groups, all on by default, all off for
+`web/`. Remaining: close the gap to 150,000 (`rows`, §4.1).*
+
+**What shipped, in the note's own terms.** The groups are `rules-repeating` (`completion`,
+`nextOccurrence`), `rules-waiting` (the five waiting rules), `rules-decisions` (`decision`,
+`tradeoffGrid`, `ratingKey`) and `rules-shell` (the presentation rules, plus `repeatSummary`,
+`listProjectMoves`, `sidebar` and `paletteRank`). The browser's 16 rules are `board`, `boardMove`,
+`boardPresets`, `boardRow`, `boardRows`, `identifierFormat`, `identifierLinks`, `identifierParse`,
+`listAccess`, `manualOrder`, `palette`, `reminderSnooze`, `rows`, `searchParse`, `smartParse` and
+`theme`. `rules::kinds()` lists a build's vocabulary and the binding exports it as `kinds()`;
+`check-wasm-packages.mjs` asserts both packages' lists. A rule can join the browser later by naming
+its group in `astrid-rules-wasm`'s features, at the cost in §2.
 
 ## 1. What the door is, and who reads it
 
@@ -142,7 +154,7 @@ the browser.**
 
 1. ~~Take out the two `from_value` constructors~~. **Done**: 271,185 → 260,034. No wire or API
    change; equivalence tests in `model/list.rs` and `rules.rs`.
-2. The feature groups and `kinds()` (§3), with every group still on for the browser. This is the
-   mechanism only, so its size change is about zero.
-3. Turn the browser's set down to what §4 decides, and ratchet the budget.
+2. ~~The feature groups and `kinds()` (§3).~~ **Done** (AWTD2-162, same PR as 3).
+3. ~~Turn the browser's set down to what §4 decides.~~ **Done**; the budget ratchet waits on
+   CI's brotli number (the raw artifact is 756,284 bytes).
 4. `rows` (§4.1), then whatever else the 150,000 still needs.

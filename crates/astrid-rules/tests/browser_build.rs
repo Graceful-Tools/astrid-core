@@ -32,6 +32,7 @@ fn answer(request: Value) -> Value {
 }
 
 /// The comment one, asked identically in both builds below.
+#[cfg(feature = "rules-shell")]
 fn comment_visibility() -> Value {
     answer(json!({
         "kind": "commentVisibility",
@@ -63,6 +64,7 @@ mod without_the_renderer {
     /// The line the feature draws. `shows_text`, `is_empty`, `files_of` and `renders_inline` are
     /// `rows::comment`'s too, and none of them parses anything — gating the module whole would
     /// take a working browser rule out with the renderer and no other test would notice.
+    #[cfg(feature = "rules-shell")]
     #[test]
     fn comment_visibility_still_answers_without_the_renderer() {
         let reply = comment_visibility();
@@ -90,6 +92,7 @@ mod with_the_renderer {
         );
     }
 
+    #[cfg(feature = "rules-shell")]
     #[test]
     fn comment_visibility_answers_the_same_in_both_builds() {
         let reply = comment_visibility();
@@ -112,4 +115,127 @@ fn orchestration_is_answered_only_where_the_feature_is_on_awtd_1685() {
             "{reply}"
         );
     }
+}
+
+/// AWTD2-162, step 2: one rule from each group, and the feature that owns it. In a build with the
+/// group on the rule answers; in a build without, it is refused BY NAME (the same `unknown variant`
+/// a client sees for a kind its pinned core predates) and `kinds()` does not list it. Asserting both
+/// halves is what keeps a group from being gated out of the enum but left in the vocabulary, or the
+/// other way round.
+#[test]
+fn each_rule_group_answers_only_where_its_feature_is_on_awtd2_162() {
+    let probes: [(&str, bool, Value); 4] = [
+        (
+            "completion",
+            cfg!(feature = "rules-repeating"),
+            json!({
+                "kind": "completion", "task": { "id": "t1", "title": "x" },
+                "completed": true, "now": "2026-03-01T12:00:00.000Z", "timeZone": "UTC"
+            }),
+        ),
+        (
+            "waitingHandoff",
+            cfg!(feature = "rules-waiting"),
+            json!({
+                "kind": "waitingHandoff", "source": { "id": "t1", "title": "x" },
+                "now": "2026-03-01T12:00:00.000Z"
+            }),
+        ),
+        (
+            "ratingKey",
+            cfg!(feature = "rules-decisions"),
+            json!({ "kind": "ratingKey" }),
+        ),
+        (
+            "pluralCategory",
+            cfg!(feature = "rules-shell"),
+            json!({ "kind": "pluralCategory", "locale": "en", "form": "cardinal", "count": 1 }),
+        ),
+    ];
+    let kinds = astrid_rules::rules::kinds();
+    for (kind, on, request) in probes {
+        let reply = answer(request);
+        assert_eq!(kinds.iter().any(|k| k == kind), on, "kinds() and {kind}");
+        if on {
+            assert_eq!(reply["ok"], json!(true), "{kind} should answer: {reply}");
+        } else {
+            assert_eq!(
+                reply["ok"],
+                json!(false),
+                "{kind} should be refused: {reply}"
+            );
+            assert!(
+                reply["error"].to_string().contains(kind),
+                "the refusal has to name {kind}: {reply}"
+            );
+        }
+    }
+}
+
+/// AWTD2-162: what the browser build answers is the rules web's client-side code calls
+/// (docs/BROWSER_DOOR.md §4), and `kinds()` is how web reads that list.
+#[cfg(not(any(
+    feature = "markdown",
+    feature = "orchestration",
+    feature = "rules-repeating",
+    feature = "rules-waiting",
+    feature = "rules-decisions",
+    feature = "rules-shell"
+)))]
+#[test]
+fn the_browser_build_answers_exactly_the_decided_rule_set_awtd2_162() {
+    let mut expected = vec![
+        "board",
+        "boardMove",
+        "boardPresets",
+        "boardRow",
+        "boardRows",
+        "identifierFormat",
+        "identifierLinks",
+        "identifierParse",
+        "listAccess",
+        "manualOrder",
+        "palette",
+        "reminderSnooze",
+        "rows",
+        "searchParse",
+        "smartParse",
+        "theme",
+    ];
+    expected.sort();
+    assert_eq!(astrid_rules::rules::kinds(), expected);
+}
+
+/// The default build answers every rule it ever did: the groups are additive for every shell.
+#[cfg(all(
+    feature = "markdown",
+    feature = "orchestration",
+    feature = "rules-repeating",
+    feature = "rules-waiting",
+    feature = "rules-decisions",
+    feature = "rules-shell"
+))]
+#[test]
+fn the_full_build_lists_every_rule_awtd2_162() {
+    let kinds = astrid_rules::rules::kinds();
+    for kind in [
+        "completion",
+        "nextOccurrence",
+        "renderMarkdown",
+        "orchestrationMay",
+        "waitingWrite",
+        "decision",
+        "sidebar",
+        "smartParse",
+        "rows",
+    ] {
+        assert!(
+            kinds.iter().any(|k| k == kind),
+            "{kind} missing from {kinds:?}"
+        );
+    }
+    assert!(
+        kinds.windows(2).all(|w| w[0] < w[1]),
+        "sorted, no duplicates"
+    );
 }
