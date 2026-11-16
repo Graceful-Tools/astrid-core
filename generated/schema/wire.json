@@ -2708,6 +2708,13 @@
             "null"
           ]
         },
+        "agentClaimRequired": {
+          "description": "Whether an agent must take a claim lease before working a task on this list (astrid-web\nAWTD-1688). Carried so a cached list round-trips; the claim itself is the server's.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "aiAgentConfig": {
           "anyOf": [
             {
