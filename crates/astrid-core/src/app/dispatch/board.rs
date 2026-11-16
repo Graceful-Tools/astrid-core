@@ -122,6 +122,12 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         Command::DeleteProject { project_id } => {
             answer(app.context.boards().delete_project(&project_id).await)
         }
+        Command::RenameProject { project_id, name } => answer(
+            app.context
+                .boards()
+                .rename_project(&project_id, &name)
+                .await,
+        ),
         Command::ProjectBoardRows { project_id } => {
             match app.context.boards().board_rows(&project_id).await {
                 Ok(saved) => board_rows(

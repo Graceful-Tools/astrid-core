@@ -142,6 +142,7 @@ removeTaskBlocker
 removeTaskFromList
 renameBoardStatus
 renamePasskey
+renameProject
 reorderBoardStatus
 repeatOptions
 requestAstridResponse

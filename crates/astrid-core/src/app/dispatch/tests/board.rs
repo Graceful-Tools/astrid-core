@@ -216,6 +216,45 @@ async fn deleting_a_board_detaches_its_lists() {
     assert!(list.project_id.is_none());
 }
 
+/// ADEV-48: renaming a board sends `{ name }` and keeps the cached board, changing only its name.
+#[tokio::test]
+async fn adev_48_renaming_a_board_updates_its_cached_name() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        200,
+        json!({ "project": { "id": "p1", "name": "Renamed" } }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[serde_json::from_value(
+            json!({ "id": "p1", "name": "Work", "key": "WRK" }),
+        )
+        .expect("a project")])
+        .expect("stores");
+
+    let renamed = call(
+        &app,
+        json!({ "kind": "renameProject", "projectId": "p1", "name": "  Renamed  " }),
+    )
+    .await;
+    assert_eq!(renamed["value"]["name"], "Renamed", "{renamed}");
+    let cached = app.store.projects().expect("reads");
+    assert_eq!(cached[0].name, "Renamed");
+    assert_eq!(cached[0].key.as_deref(), Some("WRK"), "the rest is kept");
+}
+
+/// ADEV-48: a blank name never reaches the server.
+#[tokio::test]
+async fn adev_48_renaming_a_board_to_nothing_is_refused() {
+    let app = app_with(StubTransport::new());
+    let refused = call(
+        &app,
+        json!({ "kind": "renameProject", "projectId": "p1", "name": "   " }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+}
+
 /// A board deleted on the web goes on the next refresh; the set is whole.
 #[tokio::test]
 async fn a_board_deleted_elsewhere_goes_on_refresh() {

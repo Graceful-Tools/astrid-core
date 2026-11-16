@@ -287,6 +287,41 @@ impl BoardService {
         Ok(answer)
     }
 
+    /// Rename a board (ADEV-48). Online: the server decides who may (owner or board admin). The
+    /// answer carries only `{ id, name }`, so the cached board keeps everything else.
+    pub async fn rename_project(&self, project_id: &str, name: &str) -> Result<Project> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ServiceError::Api(crate::api::ApiError::Refused(
+                "A board needs a name.".to_owned(),
+            )));
+        }
+        let request = self
+            .context
+            .client
+            .patch(endpoints::project(project_id))
+            .value(json!({ "name": name }));
+        let answer = self.context.client.send(request).await?;
+        let renamed = answer
+            .get("project")
+            .and_then(|project| project.get("name"))
+            .and_then(|value| value.as_str())
+            .unwrap_or(name)
+            .to_owned();
+        let mut project = self
+            .context
+            .store
+            .projects()?
+            .into_iter()
+            .find(|cached| cached.id == project_id)
+            .map_or_else(|| self.read_project(json!({ "id": project_id })), Ok)?;
+        project.name = renamed;
+        self.context
+            .store
+            .upsert_projects(std::slice::from_ref(&project))?;
+        Ok(project)
+    }
+
     // ─── The multi-list board's rows (AWTD-1676) ────────────────────────────────────────────────
     //
     // Which lists one person's board for one project draws as rows, saved on the server so every
