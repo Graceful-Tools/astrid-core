@@ -125,7 +125,7 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **279,800 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+CI's `wasm` job holds it to **269,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
 pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
 ratchets down after each saving.** Raising it is allowed; doing either without saying what it
 bought is not.
@@ -134,7 +134,8 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
-| **today** | 2,121,891 | 429,857 | **~279,363** | + the rules door's `sidebar` (AWTD-1681: the sidebar's Projects section, so web and the VS Code extension can draw the same sidebar as the native shells): **+8,192** (279,104 on macOS against 270,912), of which ~5 KB is decoding the request's `Vec<Project>` through serde's buffered `content` path and ~3 KB is serialising `Sections`. Budget 271,800 → 279,800, 2026-11-15 |
+| **today** | 2,025,151 | 409,141 | **268,013** | no second `TaskList`/`Task` decoder: `TaskList::new` and `nextOccurrence` stopped building values with `serde_json::from_value` (AWTD2-162 step 2, slice 1; −11,091 on top of the sidebar). Budget 279,800 → 269,000 (260,034 before the sidebar merged), 2026-11-15 |
+| after the sidebar | 2,121,891 | 429,857 | ~279,363 | + the rules door's `sidebar` (AWTD-1681: the sidebar's Projects section, so web and the VS Code extension can draw the same sidebar as the native shells): **+8,192** (279,104 on macOS against 270,912), of which ~5 KB is decoding the request's `Vec<Project>` through serde's buffered `content` path and ~3 KB is serialising `Sections`. Budget 271,800 → 279,800, 2026-11-15 |
 | after the row rules | 2,058,873 | 418,605 | 271,171 | + the rest of the row rules (AWTD2-216, PR #58), which merged without raising the budget and turned main's `wasm` job red at 271,171 (CI's measurement; 270,912 on macOS). Budget 269,500 → 271,800 in AWTD2-162's step-1 fix, 2026-11-15 |
 | before that | | | 269,113 | + board rows, the callout and `listProjectMoves` (astrid-ios AITD-680: who may move a list into or out of a project, which web's server and client both ask); budget 268,000 → 269,500, 2026-11-15 |
 | after task 4d05306d | 1,973,556 | 405,355 | 261,258 | no markdown renderer, 2026-11-15 |
@@ -192,10 +193,12 @@ is **150,000 brotli bytes**, and the agreed order (Jon, 2026-11-15, task `4d0530
 per PR, with the budget ratcheted after each:
 
 1. ~~Drop markdown rendering from the browser build.~~ **Done** — 324,175 → 261,258.
-2. **Feature-gate the wire models down to the rules the browser calls.** Where the money is: most
-   of serde's 26% is `Task`/`TaskList` deserializers, and a browser that asks for quick-add
-   parsing, filters and rows does not need every rule's payload compiled in. It splits `Rule`,
-   which three clients read, so it wants a short design note before any code.
+2. **Feature-gate the door down to the rules the browser calls.** Design note:
+   [`docs/BROWSER_DOOR.md`](docs/BROWSER_DOOR.md). Measured there: the internal `kind` tag costs
+   only ~4 KB, so the wire format stays. What costs is how many of the 47 rules are compiled. A
+   20-rule browser set measures **169,050**, and it drops chrono-tz's zone table without step 3's
+   API change. Slice 1 (the two `from_value` constructors, −11,151) is done. The rule set is
+   the open decision.
 3. **Time zone offsets from `Intl` instead of `chrono-tz`.** ~53 KB, cross-crate API change.
    Worth doing after 2, not instead of it.
 
