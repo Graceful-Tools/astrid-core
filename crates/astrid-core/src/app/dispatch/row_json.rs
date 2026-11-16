@@ -333,7 +333,8 @@ fn badge_map(
 /// Three calls and a filter in every shell before this — `lists`, `myTasksList`, `listBadges` —
 /// and the filter was wrong on Android. The lists are the cache's, as `lists` answers them, so
 /// this says the same as the three calls it replaces; what it adds is that the filtering and the
-/// ordering are [`astrid_rules::rows::sidebar::sections`]' and nobody else's.
+/// ordering are [`astrid_rules::rows::sidebar::sections`]' and nobody else's. With the
+/// `project_mode` flag it adds the Projects section over the cached projects (AWTD-1681).
 fn sidebar(app: &App, current_user_id: Option<String>) -> Response {
     let lists = match app.context.lists().all() {
         Ok(lists) => lists,
@@ -348,10 +349,28 @@ fn sidebar(app: &App, current_user_id: Option<String>) -> Response {
         .into_iter()
         .filter_map(|(id, count)| count.as_i64().map(|count| (id, count)))
         .collect();
+    // The Projects section is drawn only with Project Mode (AWTD-1681). A flag not fetched yet
+    // reads as off: a section that appears is better than one that flashes and vanishes.
+    let project_mode = app
+        .context
+        .account()
+        .has_feature("project_mode")
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let projects = if project_mode {
+        match app.store.projects() {
+            Ok(projects) => Some(projects),
+            Err(error) => return Response::failed(error.into()),
+        }
+    } else {
+        None
+    };
     Response::ok(crate::rows::sidebar::sections(
         &lists,
         Some(my_tasks),
         &badges,
+        projects.as_deref(),
     ))
 }
 
