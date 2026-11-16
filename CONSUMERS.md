@@ -76,7 +76,25 @@ schedule. It fails when:
 - a revision is not an **ancestor of `main`** — a pin at an abandoned branch, which is how a
   client ends up running code that was never reviewed;
 - a consumer's own checkout is available, was named on the command line, and the manifest in it
-  disagrees with the row above.
+  disagrees with the row above **in any way but one**: it pins a short sha, a commit that is not
+  here, a commit that is not on `main`, or a commit *older* than the row (the row is ahead of its
+  consumer).
+
+**The one disagreement that does not fail is a row behind its consumer** (task ADEV-7): the
+manifest pins a full sha that is on `main` and descends from the row. That is a client that bumped
+before the table did, which is not a fault this repository can stop, and on 2026-11-15 failing it
+turned core `main` red three times in one day (core PRs #61 and #67), stalling every open PR until
+someone hand-edited a row. `check-pins` reports it as *ROW BEHIND* under *Reported, not failed*, and
+two things catch the table up:
+
+- **`cargo xtask follow-pins <checkouts>`** moves exactly those rows to the consumer's full sha and
+  touches nothing else. It follows only checkouts named on the command line (a sibling beside this
+  repository may hold a bump nobody pushed), and a second run changes nothing.
+- **The `Consumers follow pins` workflow** (`.github/workflows/consumers-follow-pins.yml`) runs it
+  daily at 07:17 UTC and on demand, against the same fresh checkouts and the same
+  `CONSUMER_PINS_TOKEN` the `pins` job uses. When a row moved, it opens or updates one pull request
+  from `chore/consumers-follow-pins` (one commit on today's `main`), dispatches CI on it, and leaves
+  it for a merge-commit merge once green.
 
 Three shapes of manifest are read, by the file the row names:
 
@@ -135,12 +153,16 @@ pointing the other way, so it is not a cheaper route.
 
 ## Bumping a pin
 
-The pin moves in the consumer, and then the row here moves with it. In the same change, so the
-table cannot be a commit behind:
+The pin moves in the consumer, and then the row here moves with it. **A client's pin-bump procedure
+updates this row in the same change** — astrid-ios, astrid-windows, astrid-android, and astrid-web's
+`REVISION` files alike — so the table is never a commit behind. If it is forgotten, core CI stays
+green (the row is only *behind its consumer*) and the daily `Consumers follow pins` workflow opens
+the one-line PR; that is the safety net, not the procedure.
 
 1. In the consumer, set the new revision (`crates/astrid-ffi/Cargo.toml` on Windows, then
    `cargo update -p astrid-core`; the `REVISION` file on web, in astrid-vscode and in astrid-code;
    the UniFFI build on Apple and Android; re-vendoring the generated tokens for a `design` row).
 2. Run that repository's gate. On Windows a bump trips the bindings contract whenever the core has
    gained a command, which is expected and is what the contract is for.
-3. Update this table and run `cargo xtask check-pins`.
+3. Update this table — `cargo xtask follow-pins ../<consumer>` writes the row from the consumer's
+   checkout — and run `cargo xtask check-pins`.

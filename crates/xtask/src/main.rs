@@ -32,6 +32,10 @@ const COMMANDS: &[(&str, &str)] = &[
         "verify CONSUMERS.md's revisions are real, merged commits [consumer checkout paths]",
     ),
     (
+        "follow-pins",
+        "move CONSUMERS.md rows that are behind their consumer's pin on main [consumer checkout paths]",
+    ),
+    (
         "gen-deny",
         "write each consumer's deny.toml into supply-chain/ from this repo's own",
     ),
@@ -82,6 +86,7 @@ fn main() -> ExitCode {
     match command.as_str() {
         "check-contracts" => check_contracts(),
         "check-pins" => check_pins(),
+        "follow-pins" => follow_pins(),
         "gen-core-contracts" => core_contracts::write_all(&repo_root()),
         "check-core-contracts" => core_contracts::check_all(&repo_root()),
         "gen-brand" => {
@@ -326,19 +331,114 @@ impl Consumer {
 /// 2. Is each revision a commit here, and an **ancestor of `main`**? Being *behind* main is fine
 ///    and is only reported — a client bumps when it is ready. Being on a commit that is not in
 ///    main is a pin at a branch nobody merged.
-/// 3. Does each consumer's own manifest agree with its row? Every checkout that is here is
-///    compared against the file the table claims to describe; a consumer that is not here is
-///    reported *unchecked*, never failed. CI has only the public astrid-web checkout unless
-///    `CONSUMER_PINS_TOKEN` is set, and a fork's pull request has no secrets at all (task
+/// 3. Does each consumer's own manifest agree with its row — and if not, **who moved?** A consumer
+///    that bumped to a newer commit of `main` (the row is an ancestor of the manifest's pin) has
+///    left the row *behind its consumer*: that is reported, and `cargo xtask follow-pins` (run
+///    daily by the `consumers-follow-pins` workflow) moves the row. It is not a failure, because
+///    the client did nothing wrong that this repository can stop, and on 2026-11-15 failing it
+///    turned core `main` red three times in a day (task ADEV-7). Every other disagreement still
+///    fails: the manifest pins a short sha, a commit that is not here, a commit that is not on
+///    `main`, or one *older* than the row (the row is ahead of its consumer). A consumer that is
+///    not here is reported *unchecked*, never failed. CI has only the public astrid-web checkout
+///    unless `CONSUMER_PINS_TOKEN` is set, and a fork's pull request has no secrets at all (task
 ///    4c891314).
 fn check_pins() -> ExitCode {
     let root = repo_root();
+    let Some((table, main)) = pins_inputs(&root) else {
+        return ExitCode::FAILURE;
+    };
+    let checkouts = consumer_checkouts(&root);
+    let report = evaluate_pins(&root, main, &table, CONSUMERS, &checkouts);
+
+    println!("Consumer pins, against {main}:\n");
+    for line in &report.lines {
+        println!("{line}");
+    }
+
+    let mut unchecked: Vec<String> = report
+        .behind
+        .iter()
+        .map(|behind| {
+            format!(
+                "{} pins {} in {}, a newer commit of {main} than CONSUMERS.md's {}. The row is \
+                 behind its consumer: `cargo xtask follow-pins` moves it, and the \
+                 consumers-follow-pins workflow does that daily.",
+                behind.key,
+                behind.found,
+                behind.path.display(),
+                behind.row
+            )
+        })
+        .collect();
+    unchecked.extend(report.unchecked);
+
+    if !unchecked.is_empty() {
+        println!("\nReported, not failed:");
+        for row in &unchecked {
+            println!("  {row}");
+        }
+        println!("\nNone of these is a failure. CI holds the five private checkouts only when");
+        println!("CONSUMER_PINS_TOKEN is set, a fork's pull request has no secrets at all, and a");
+        println!("checkout found beside this one is a working copy that may just be behind. A");
+        println!("row behind its consumer is a client that bumped along main before the table");
+        println!("did. A consumer's toolchain is another repository's file, reported and no more.");
+    }
+
+    if report.failed.is_empty() {
+        println!("\nOK");
+        return ExitCode::SUCCESS;
+    }
+    eprintln!();
+    for problem in &report.failed {
+        eprintln!("FAIL  {problem}");
+    }
+    eprintln!("\nThe pins table is out of date. Fix the row, or fix the pin — CONSUMERS.md says");
+    eprintln!("which, and how a bump is supposed to go.");
+    ExitCode::FAILURE
+}
+
+/// Moves every row that is behind its consumer up to the consumer's pin, and writes `CONSUMERS.md`.
+///
+/// This is the other half of ADEV-7's report-only verdict: `check-pins` no longer fails a client
+/// that bumped along `main` before the table did, and this is what catches the table up, so no
+/// human edits it. Only rows `check-pins` would call *behind* move — the manifest names a full sha
+/// that is on `main` and descends from the row — and only against a checkout **named on the
+/// command line**: a sibling found beside this repository may hold a bump nobody pushed. Every other
+/// disagreement is left for `check-pins` to fail. Running it twice changes nothing the second time.
+fn follow_pins() -> ExitCode {
+    let root = repo_root();
+    let Some((table, main)) = pins_inputs(&root) else {
+        return ExitCode::FAILURE;
+    };
+    let checkouts = consumer_checkouts(&root);
+    let (followed, moved) = follow_table(&root, main, &table, CONSUMERS, &checkouts);
+
+    if moved.is_empty() {
+        println!(
+            "Every row is level with its consumer's pin, or cannot be followed. Nothing to do."
+        );
+        return ExitCode::SUCCESS;
+    }
+    let table_path = root.join("CONSUMERS.md");
+    if let Err(err) = std::fs::write(&table_path, followed) {
+        eprintln!("cannot write {}: {err}", table_path.display());
+        return ExitCode::FAILURE;
+    }
+    println!("Rows moved to their consumer's pin (all on {main}):");
+    for behind in &moved {
+        println!("- `{}`: {} -> {}", behind.key, behind.row, behind.found);
+    }
+    ExitCode::SUCCESS
+}
+
+/// `CONSUMERS.md` and the ref ancestry is asked against, or `None` with the reason printed.
+fn pins_inputs(root: &std::path::Path) -> Option<(String, &'static str)> {
     let table_path = root.join("CONSUMERS.md");
     let table = match std::fs::read_to_string(&table_path) {
         Ok(table) => table,
         Err(err) => {
             eprintln!("cannot read {}: {err}", table_path.display());
-            return ExitCode::FAILURE;
+            return None;
         }
     };
 
@@ -349,68 +449,80 @@ fn check_pins() -> ExitCode {
     // request CI checks out a detached head, where `main` exists only as `origin/main` anyway.
     let Some(main) = ["origin/main", "main"]
         .into_iter()
-        .find(|reference| git(&root, &["rev-parse", "--verify", reference]).is_some())
+        .find(|reference| git(root, &["rev-parse", "--verify", reference]).is_some())
     else {
         eprintln!("neither main nor origin/main is in this checkout, so ancestry cannot be asked.");
         eprintln!("CI needs `fetch-depth: 0` — a shallow clone cannot answer it, and a wrong");
         eprintln!("answer would fail every pin at once.");
-        return ExitCode::FAILURE;
+        return None;
     };
+    Some((table, main))
+}
 
-    let checkouts = consumer_checkouts(&root);
+/// What `check-pins` found, before it is printed.
+#[derive(Default)]
+struct PinsReport {
+    /// One line per row: the revision, its age, and what its manifest said.
+    lines: Vec<String>,
+    /// Problems that fail the check.
+    failed: Vec<String>,
+    /// Rows whose consumer moved forward along `main` before the table did (ADEV-7).
+    behind: Vec<RowBehind>,
+    /// Everything else reported and not failed: unread manifests, stale siblings, toolchains.
+    unchecked: Vec<String>,
+}
 
-    let mut failed = Vec::new();
-    let mut unchecked = Vec::new();
+/// A row behind its consumer: the manifest pins a newer commit of `main` than the row says.
+struct RowBehind {
+    key: String,
+    /// The row's revision.
+    row: String,
+    /// The manifest's revision, a full sha that descends from `row` and is on `main`.
+    found: String,
+    path: std::path::PathBuf,
+    /// Whether the checkout was named on the command line; only those are followed.
+    named: bool,
+}
+
+/// Every row of `table` named in `keys`, asked the three questions [`check_pins`] documents.
+fn evaluate_pins(
+    root: &std::path::Path,
+    main: &str,
+    table: &str,
+    keys: &[&str],
+    checkouts: &std::collections::HashMap<String, Checkout>,
+) -> PinsReport {
+    let mut report = PinsReport::default();
     // One line per repository, not per row: astrid-ios holds two copies and has one toolchain.
     let mut toolchains = std::collections::BTreeMap::new();
-    println!("Consumer pins, against {main}:\n");
 
-    for key in CONSUMERS {
-        let Some(consumer) = consumer_row(&table, key) else {
-            failed.push(format!(
+    for key in keys {
+        let Some(consumer) = consumer_row(table, key) else {
+            report.failed.push(format!(
                 "{key} has no row in CONSUMERS.md with a revision in its last column."
             ));
             continue;
         };
         let revision = consumer.revision.clone();
 
-        if !is_full_sha(&revision) {
-            failed.push(format!(
-                "{key} is pinned at '{revision}', which is not a full forty-character sha."
-            ));
-            continue;
-        }
-
-        if git(
-            &root,
-            &["cat-file", "-e", &format!("{revision}^{{commit}}")],
-        )
-        .is_none()
-        {
-            failed.push(format!(
-                "{key} is pinned at {revision}, which is not a commit in this repository."
-            ));
-            continue;
-        }
-
-        if git(&root, &["merge-base", "--is-ancestor", &revision, main]).is_none() {
-            failed.push(format!(
-                "{key} is pinned at {revision}, which is NOT an ancestor of {main} — a branch nobody merged."
-            ));
+        if let Err(why) = on_main(root, main, &revision) {
+            report
+                .failed
+                .push(format!("{key} is pinned at '{revision}', which {why}."));
             continue;
         }
 
         let behind = git(
-            &root,
+            root,
             &["rev-list", "--count", &format!("{revision}..{main}")],
         )
         .unwrap_or_default();
-        let dated = git(&root, &["log", "-1", "--format=%cs", &revision]).unwrap_or_default();
+        let dated = git(root, &["log", "-1", "--format=%cs", &revision]).unwrap_or_default();
         // Commits AND days, because they answer different questions. Twenty commits behind is
         // nothing if they landed this morning, and two commits behind is a client nobody has
         // touched since August — the cross-client review had to work the second one out by hand
         // for every row (task 97285677).
-        let lag = match age(&root, &revision, main) {
+        let lag = match age(root, &revision, main) {
             Some(days) => format!("{behind:>3} behind, {days:>3}d"),
             None => format!("{behind:>3} behind"),
         };
@@ -422,56 +534,140 @@ fn check_pins() -> ExitCode {
         };
         let checkout = checkouts.get(consumer.repo()).unwrap_or(&fallback);
         if consumer.builds_the_core() && checkout.path.is_dir() {
-            if let Some(report) = toolchain_report(&root, &checkout.path, consumer.repo()) {
-                toolchains.insert(consumer.repo().to_string(), report);
+            if let Some(found) = toolchain_report(root, &checkout.path, consumer.repo()) {
+                toolchains.insert(consumer.repo().to_string(), found);
             }
         }
         match read_manifest(&consumer, &checkout.path) {
-            Manifest::Agrees(path) => println!("{shape}  compared against {}", path.display()),
+            Manifest::Agrees(path) => report
+                .lines
+                .push(format!("{shape}  compared against {}", path.display())),
             Manifest::Disagrees { path, found } => {
-                let problem = format!(
-                    "{key} pins {found} in {} but CONSUMERS.md says {revision}.",
-                    path.display()
-                );
-                if checkout.named {
-                    println!("{shape}  MISMATCH");
-                    failed.push(problem);
+                if let Err(why) = consumer_moved_forward(root, main, &revision, &found) {
+                    let problem = format!(
+                        "{key} pins {found} in {} but CONSUMERS.md says {revision}, and the pin {why}.",
+                        path.display()
+                    );
+                    if checkout.named {
+                        report.lines.push(format!("{shape}  MISMATCH"));
+                        report.failed.push(problem);
+                    } else {
+                        report.lines.push(format!(
+                            "{shape}  differs from the checkout beside this one"
+                        ));
+                        report.unchecked.push(format!("{problem} That checkout was not named on the command line, so it may simply need a pull."));
+                    }
                 } else {
-                    println!("{shape}  differs from the checkout beside this one");
-                    unchecked.push(format!("{problem} That checkout was not named on the command line, so it may simply need a pull."));
+                    report.lines.push(format!(
+                        "{shape}  ROW BEHIND its consumer, which pins {}",
+                        &found[..7]
+                    ));
+                    report.behind.push(RowBehind {
+                        key: key.to_string(),
+                        row: revision,
+                        found,
+                        path,
+                        named: checkout.named,
+                    });
                 }
             }
             Manifest::Unread(why) => {
-                println!("{shape}  UNCHECKED");
-                unchecked.push(format!("{key}: {why}"));
+                report.lines.push(format!("{shape}  UNCHECKED"));
+                report.unchecked.push(format!("{key}: {why}"));
             }
         }
     }
 
-    unchecked.extend(toolchains.into_values());
+    report.unchecked.extend(toolchains.into_values());
+    report
+}
 
-    if !unchecked.is_empty() {
-        println!("\nReported, not failed:");
-        for row in &unchecked {
-            println!("  {row}");
+/// `Ok` when `revision` is a full sha naming a commit here that is an ancestor of `main`; otherwise
+/// why not, phrased to follow "which".
+fn on_main(root: &std::path::Path, main: &str, revision: &str) -> Result<(), String> {
+    if !is_full_sha(revision) {
+        return Err("is not a full forty-character sha".to_string());
+    }
+    if git(root, &["cat-file", "-e", &format!("{revision}^{{commit}}")]).is_none() {
+        return Err("is not a commit in this repository".to_string());
+    }
+    if git(root, &["merge-base", "--is-ancestor", revision, main]).is_none() {
+        return Err(format!(
+            "is NOT an ancestor of {main} — a branch nobody merged"
+        ));
+    }
+    Ok(())
+}
+
+/// `Ok` when a consumer whose manifest pins `found` has simply moved forward along `main` from the
+/// row's `row` — the one disagreement that is the table's to catch up with rather than a failure
+/// (ADEV-7). Otherwise why not, phrased to follow "the pin".
+fn consumer_moved_forward(
+    root: &std::path::Path,
+    main: &str,
+    row: &str,
+    found: &str,
+) -> Result<(), String> {
+    on_main(root, main, found)?;
+    if git(root, &["merge-base", "--is-ancestor", found, row]).is_some() {
+        return Err("is OLDER than the row — the row is ahead of its consumer".to_string());
+    }
+    if git(root, &["merge-base", "--is-ancestor", row, found]).is_none() {
+        return Err("does not descend from the row".to_string());
+    }
+    Ok(())
+}
+
+/// `table` with every followable row moved to its consumer's pin, and the rows that moved.
+fn follow_table(
+    root: &std::path::Path,
+    main: &str,
+    table: &str,
+    keys: &[&str],
+    checkouts: &std::collections::HashMap<String, Checkout>,
+) -> (String, Vec<RowBehind>) {
+    let report = evaluate_pins(root, main, table, keys, checkouts);
+    let mut followed = table.to_string();
+    let mut moved = Vec::new();
+    for behind in report.behind.into_iter().filter(|behind| behind.named) {
+        if let Some(next) = with_revision(&followed, &behind.key, &behind.found) {
+            followed = next;
+            moved.push(behind);
         }
-        println!("\nNone of these is a failure. CI holds the five private checkouts only when");
-        println!("CONSUMER_PINS_TOKEN is set, a fork's pull request has no secrets at all, and a");
-        println!("checkout found beside this one is a working copy that may just be behind. A");
-        println!("consumer's toolchain is another repository's file, reported and no more.");
     }
+    (followed, moved)
+}
 
-    if failed.is_empty() {
-        println!("\nOK");
-        return ExitCode::SUCCESS;
+/// `table` with the last cell of `key`'s body row set to `revision`, or `None` if there is no such
+/// row. Every other byte, line endings included, is left alone.
+fn with_revision(table: &str, key: &str, revision: &str) -> Option<String> {
+    let mut out = String::with_capacity(table.len());
+    let mut in_body = false;
+    let mut done = false;
+    for line in table.split_inclusive('\n') {
+        let row = line.trim_end_matches(['\n', '\r']);
+        if !in_body {
+            in_body = is_table_separator(row);
+        } else if !done && row.starts_with('|') {
+            let cells = row_cells(row);
+            if cells
+                .first()
+                .is_some_and(|first| unbackticked(first) == key)
+            {
+                let last = cells.last()?;
+                let at = row.rfind(last.as_str())?;
+                out.push_str(&row[..at]);
+                out.push('`');
+                out.push_str(revision);
+                out.push('`');
+                out.push_str(&line[at + last.len()..]);
+                done = true;
+                continue;
+            }
+        }
+        out.push_str(line);
     }
-    eprintln!();
-    for problem in &failed {
-        eprintln!("FAIL  {problem}");
-    }
-    eprintln!("\nThe pins table is out of date. Fix the row, or fix the pin — CONSUMERS.md says");
-    eprintln!("which, and how a bump is supposed to go.");
-    ExitCode::FAILURE
+    done.then_some(out)
 }
 
 /// What asking a consumer's own manifest produced.
@@ -1276,5 +1472,276 @@ uniffi = { git = \"https://github.com/mozilla/uniffi-rs.git\", rev = \"111111111
     fn a_lone_carriage_return_is_content_f1c7b53f() {
         assert!(!same_fixture(b"{\"a\":1}\r", b"{\"a\":1}"));
         assert!(!same_fixture(b"a\rb", b"ab"));
+    }
+}
+
+/// ADEV-7: a client that bumps its pin along `main` before `CONSUMERS.md` does leaves the row
+/// *behind its consumer*. That is reported and followed, never failed; every other disagreement
+/// still fails. These run against a throwaway git repository, because the verdict is a question
+/// about history and a fake would only test the fake.
+#[cfg(test)]
+mod follow_tests {
+    use super::{evaluate_pins, follow_table, with_revision, Checkout};
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    const WEB: &str = "astrid-web/astrid-rules";
+    const VSCODE: &str = "astrid-vscode/astrid-rules";
+    const CODE: &str = "astrid-code/astrid-rules";
+
+    /// A core with `main` = c1 -> c2 -> c3 and an unmerged branch `side` = c2 -> s1.
+    struct History {
+        dir: PathBuf,
+        core: PathBuf,
+        c1: String,
+        c3: String,
+        s1: String,
+    }
+
+    impl Drop for History {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn git(root: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args([
+                "-c",
+                "user.name=adev-7",
+                "-c",
+                "user.email=adev-7@example.test",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn history(name: &str) -> History {
+        let dir = std::env::temp_dir().join(format!(
+            "astrid-core-check-pins-adev-7-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = dir.join("astrid-core");
+        std::fs::create_dir_all(&core).unwrap();
+        git(&core, &["init", "-q", "-b", "main"]);
+        let commit = |message: &str| {
+            git(&core, &["commit", "-q", "--allow-empty", "-m", message]);
+            git(&core, &["rev-parse", "HEAD"])
+        };
+        let c1 = commit("c1");
+        let _c2 = commit("c2");
+        let c3 = commit("c3");
+        git(&core, &["checkout", "-q", "-b", "side", "HEAD~1"]);
+        let s1 = commit("s1");
+        git(&core, &["checkout", "-q", "main"]);
+        History {
+            dir,
+            core,
+            c1,
+            c3,
+            s1,
+        }
+    }
+
+    fn row(key: &str, revision: &str) -> String {
+        format!("| `{key}` | repo | the rules | `REVISION` | `{revision}` |\n")
+    }
+
+    fn table(rows: &[(&str, &str)]) -> String {
+        let mut table = String::from(
+            "# Pins\n\n| Consumer | Repository | Takes | Pinned in | Revision |\n|---|---|---|---|---|\n",
+        );
+        for (key, revision) in rows {
+            table.push_str(&row(key, revision));
+        }
+        table.push_str("\nProse after the table mentions `REVISION`.\n");
+        table
+    }
+
+    /// A checkout of `key`'s repository whose `REVISION` says `pin`.
+    fn consumer(
+        history: &History,
+        checkouts: &mut HashMap<String, Checkout>,
+        key: &str,
+        pin: &str,
+        named: bool,
+    ) {
+        let repo = key.split('/').next().unwrap();
+        let path = history.dir.join(repo);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("REVISION"), format!("{pin}\n")).unwrap();
+        checkouts.insert(repo.to_string(), Checkout { path, named });
+    }
+
+    #[test]
+    fn a_row_behind_a_consumer_on_main_is_reported_not_failed_adev_7() {
+        let h = history("behind");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c3, true);
+
+        let report = evaluate_pins(&h.core, "main", &table(&[(WEB, &h.c1)]), &[WEB], &checkouts);
+
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(report.behind.len(), 1);
+        assert_eq!(report.behind[0].row, h.c1);
+        assert_eq!(report.behind[0].found, h.c3);
+    }
+
+    #[test]
+    fn a_consumer_pinned_off_main_still_fails_adev_7() {
+        let h = history("off-main");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.s1, true);
+
+        let report = evaluate_pins(&h.core, "main", &table(&[(WEB, &h.c1)]), &[WEB], &checkouts);
+
+        assert!(report.behind.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(
+            report.failed[0].contains("NOT an ancestor"),
+            "{:?}",
+            report.failed
+        );
+    }
+
+    #[test]
+    fn a_row_ahead_of_its_consumer_still_fails_adev_7() {
+        let h = history("ahead");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c1, true);
+
+        let report = evaluate_pins(&h.core, "main", &table(&[(WEB, &h.c3)]), &[WEB], &checkouts);
+
+        assert!(report.behind.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(
+            report.failed[0].contains("ahead of its consumer"),
+            "{:?}",
+            report.failed
+        );
+    }
+
+    #[test]
+    fn a_consumer_with_a_short_pin_still_fails_adev_7() {
+        let h = history("short");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c3[..7], true);
+
+        let report = evaluate_pins(&h.core, "main", &table(&[(WEB, &h.c1)]), &[WEB], &checkouts);
+
+        assert!(report.behind.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(
+            report.failed[0].contains("forty-character"),
+            "{:?}",
+            report.failed
+        );
+    }
+
+    #[test]
+    fn an_unlisted_consumer_and_an_off_main_row_still_fail_adev_7() {
+        let h = history("unlisted");
+        let checkouts = HashMap::new();
+
+        let report = evaluate_pins(
+            &h.core,
+            "main",
+            &table(&[(WEB, &h.s1)]),
+            &[WEB, VSCODE],
+            &checkouts,
+        );
+
+        assert_eq!(report.failed.len(), 2, "{:?}", report.failed);
+        assert!(report
+            .failed
+            .iter()
+            .any(|f| f.starts_with(VSCODE) && f.contains("no row")));
+        assert!(report
+            .failed
+            .iter()
+            .any(|f| f.starts_with(WEB) && f.contains("NOT an ancestor")));
+    }
+
+    #[test]
+    fn follow_pins_rewrites_exactly_the_behind_rows_adev_7() {
+        let h = history("follow");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c3, true); // behind: follows
+        consumer(&h, &mut checkouts, VSCODE, &h.s1, true); // off main: stays, and fails
+        consumer(&h, &mut checkouts, CODE, &h.c1, true); // level: stays
+        let before = table(&[(WEB, &h.c1), (VSCODE, &h.c1), (CODE, &h.c1)]);
+
+        let (after, moved) =
+            follow_table(&h.core, "main", &before, &[WEB, VSCODE, CODE], &checkouts);
+
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].key, WEB);
+        assert_eq!(
+            after,
+            table(&[(WEB, &h.c3), (VSCODE, &h.c1), (CODE, &h.c1)]),
+            "only the behind row's revision changes, to the full sha"
+        );
+        assert!(after.contains(&format!("`{}`", h.c3)));
+    }
+
+    #[test]
+    fn follow_pins_is_idempotent_adev_7() {
+        let h = history("idempotent");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c3, true);
+        let keys = [WEB];
+
+        let (once, _) = follow_table(&h.core, "main", &table(&[(WEB, &h.c1)]), &keys, &checkouts);
+        let (twice, moved) = follow_table(&h.core, "main", &once, &keys, &checkouts);
+
+        assert!(moved.is_empty());
+        assert_eq!(once, twice);
+        let report = evaluate_pins(&h.core, "main", &twice, &keys, &checkouts);
+        assert!(report.failed.is_empty() && report.behind.is_empty());
+    }
+
+    /// A sibling found beside this repository may hold a bump nobody pushed, so only a checkout
+    /// named on the command line is followed. It is still reported as behind.
+    #[test]
+    fn follow_pins_ignores_an_unnamed_checkout_adev_7() {
+        let h = history("unnamed");
+        let mut checkouts = HashMap::new();
+        consumer(&h, &mut checkouts, WEB, &h.c3, false);
+        let before = table(&[(WEB, &h.c1)]);
+
+        let (after, moved) = follow_table(&h.core, "main", &before, &[WEB], &checkouts);
+
+        assert!(moved.is_empty());
+        assert_eq!(after, before);
+    }
+
+    /// The rewrite touches the one cell: other rows, prose, and CRLF line endings are untouched,
+    /// and a key that is a prefix of another does not match it.
+    #[test]
+    fn a_revision_rewrite_touches_one_cell_adev_7() {
+        let old = "a".repeat(40);
+        let new = "b".repeat(40);
+        let crlf = format!(
+            "|K|P|R|\r\n|---|---|---|\r\n| `{WEB}` | `REVISION` | `{old}` |\r\n| `{WEB}-x` | `REVISION` | `{old}` |\r\n"
+        );
+
+        let rewritten = with_revision(&crlf, WEB, &new).unwrap();
+
+        assert_eq!(
+            rewritten,
+            format!(
+                "|K|P|R|\r\n|---|---|---|\r\n| `{WEB}` | `REVISION` | `{new}` |\r\n| `{WEB}-x` | `REVISION` | `{old}` |\r\n"
+            )
+        );
+        assert!(with_revision(&crlf, "astrid-nobody/core", &new).is_none());
     }
 }
