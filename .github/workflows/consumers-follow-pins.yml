@@ -1,0 +1,152 @@
+# The pins table follows the consumers (task ADEV-7).
+#
+# A client bumps its core pin in ITS repository, and CONSUMERS.md lives in THIS one. On 2026-11-15
+# astrid-ios and astrid-windows bumped three times without the table, `check-pins` failed on core
+# main each time, and every open core PR went red until someone hand-edited a row (core PRs #61 and
+# #67). `check-pins` now reports a row that is merely behind its consumer — the manifest pins a
+# newer commit of main — instead of failing it, and this workflow is what catches the table up:
+# it runs `cargo xtask follow-pins` against fresh checkouts and opens (or updates) ONE pull request
+# with the moved rows. Every other disagreement is left for `check-pins` to fail.
+#
+# A client is still meant to update its row in the same change as its bump (CONSUMERS.md, "Bumping
+# a pin"); this is the safety net, so the PR should rarely appear.
+
+name: Consumers follow pins
+
+on:
+  # Daily, 07:17 UTC: a bump lands in another repository on no schedule of ours.
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  # A push or PR made with GITHUB_TOKEN starts no workflow, so CI is dispatched on the branch by
+  # hand below; `workflow_dispatch` is the one event GITHUB_TOKEN may trigger.
+  actions: write
+
+concurrency:
+  group: consumers-follow-pins
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BRANCH: chore/consumers-follow-pins
+
+jobs:
+  follow:
+    name: follow consumer pins
+    runs-on: ubuntu-latest
+    # The same secret, and the same reason, as the `pins` job in ci.yml: five of the six consumer
+    # repositories are private. Without it there is nothing to follow but astrid-web.
+    env:
+      HAS_PINS_TOKEN: ${{ secrets.CONSUMER_PINS_TOKEN != '' }}
+    steps:
+      - name: Say whether the pins token is set
+        run: |
+          if [ "$HAS_PINS_TOKEN" != 'true' ]; then
+            echo "::warning title=CONSUMER_PINS_TOKEN is not set::Only astrid-web can be followed; the five private consumers are skipped."
+          fi
+
+      # The whole history: follow-pins asks `merge-base --is-ancestor`, like check-pins.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: astrid-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Graceful-Tools/astrid-web
+          path: astrid-web
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        with:
+          repository: Graceful-Tools/astrid-windows
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-windows
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        with:
+          repository: Graceful-Tools/astrid-ios
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-ios
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        with:
+          repository: Graceful-Tools/astrid-android
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-android
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        continue-on-error: true
+        with:
+          repository: Graceful-Tools/astrid-vscode
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-vscode
+
+      - uses: actions/checkout@v4
+        if: env.HAS_PINS_TOKEN == 'true'
+        continue-on-error: true
+        with:
+          repository: Graceful-Tools/astrid-code
+          token: ${{ secrets.CONSUMER_PINS_TOKEN }}
+          path: astrid-code
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: astrid-core
+          key: pins
+
+      # The logic is the xtask's, and tested there; this workflow only moves its output into a PR.
+      - name: Move the rows that are behind their consumer
+        working-directory: astrid-core
+        run: |
+          cargo xtask follow-pins ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android ../astrid-vscode ../astrid-code | tee "$RUNNER_TEMP/moved.md"
+
+      - name: Open or update the pull request
+        working-directory: astrid-core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- CONSUMERS.md; then
+            echo "CONSUMERS.md is level with every consumer it can read. Nothing to open."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Always one commit on top of today's main, so the PR merges cleanly with a merge commit
+          # and a stale branch from an earlier run never carries an old answer forward.
+          git checkout -B "$BRANCH"
+          git add CONSUMERS.md
+          git commit -m "CONSUMERS.md follows the consumers' pins (ADEV-7)" -m "$(cat "$RUNNER_TEMP/moved.md")"
+          git push --force origin "$BRANCH"
+
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "The scheduled \`consumers-follow-pins\` workflow found rows of CONSUMERS.md behind their consumer's pin, every one a newer commit of main, and moved them (task ADEV-7)."
+            echo
+            cat "$RUNNER_TEMP/moved.md"
+            echo
+            echo "Merge with a merge commit once CI is green. A client that bumps its pin should update its row in the same change (CONSUMERS.md, \"Bumping a pin\"); this PR is the safety net."
+          } > "$body"
+
+          number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --body-file "$body"
+            echo "Updated PR #$number."
+          else
+            gh pr create --base main --head "$BRANCH" \
+              --title "CONSUMERS.md follows the consumers' pins (ADEV-7)" \
+              --body-file "$body"
+          fi
+
+          # The push above was made with GITHUB_TOKEN, which triggers no `pull_request` run, so the
+          # PR would sit with no checks. Dispatch the gate on the branch instead; its check runs
+          # attach to the branch's head commit, which is the PR's.
+          gh workflow run ci.yml --ref "$BRANCH"
