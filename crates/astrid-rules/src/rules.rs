@@ -228,6 +228,10 @@ pub enum Rule {
         blockers: Vec<crate::waiting::Blocker>,
         #[serde(default)]
         change: crate::waiting::StatusChange,
+        /// R8: the holder a handoff remembered for this task. A write that wakes it answers
+        /// `assignee: "return"` with this id, unless somebody is assigned (AWTD-1686).
+        #[serde(default)]
+        return_assignee_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
@@ -248,6 +252,9 @@ pub enum Rule {
         task: Box<Task>,
         #[serde(default)]
         blockers: Vec<crate::waiting::Blocker>,
+        /// R8: the holder a handoff remembered; waking answers `assignee: "return"` with it.
+        #[serde(default)]
+        return_assignee_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
@@ -299,6 +306,21 @@ pub enum Rule {
         list_owner_id: String,
         #[serde(default)]
         task_creator_id: Option<String>,
+    },
+    /// R8: what handing `source` off to another list writes — [`crate::waiting::handoff`]: the
+    /// half (Ready, the source as its origin), the source's write (Waiting, unassigned), and the
+    /// holder to remember. Refused with `{kind: "refused", code: "HANDOFF_SOURCE_DONE"}` for a
+    /// finished source (AWTD-1686).
+    WaitingHandoff {
+        source: Box<Task>,
+        #[serde(default)]
+        blockers: Vec<crate::waiting::Blocker>,
+        /// The holder an earlier handoff remembered for `source`, if any.
+        #[serde(default)]
+        return_assignee_id: Option<String>,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
     },
     /// R7: the optional preset columns this board can still add — [`crate::board::available_presets`].
     BoardPresets {
@@ -1029,8 +1051,15 @@ pub fn run(rule: Rule) -> Response {
             task,
             blockers,
             change,
+            return_assignee_id,
             now,
-        } => match crate::waiting::resolve_status_write(&task, &blockers, &change, now) {
+        } => match crate::waiting::resolve_status_write_returning(
+            &task,
+            &blockers,
+            &change,
+            return_assignee_id.as_deref(),
+            now,
+        ) {
             Ok(resolved) => Response::ok(resolved),
             Err(crate::waiting::WaitingError::WaitingNeedsCondition) => {
                 Response::failed(Failure::waiting_needs_condition())
@@ -1046,8 +1075,14 @@ pub fn run(rule: Rule) -> Response {
         Rule::WaitingSettle {
             task,
             blockers,
+            return_assignee_id,
             now,
-        } => Response::ok(crate::waiting::settle(&task, &blockers, now)),
+        } => Response::ok(crate::waiting::settle_returning(
+            &task,
+            &blockers,
+            return_assignee_id.as_deref(),
+            now,
+        )),
         Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
         #[cfg(feature = "orchestration")]
         Rule::OrchestrationPolicy { project, list } => Response::ok(crate::orchestration::resolve(
@@ -1087,6 +1122,19 @@ pub fn run(rule: Rule) -> Response {
             &list_owner_id,
             task_creator_id.as_deref(),
         )),
+        Rule::WaitingHandoff {
+            source,
+            blockers,
+            return_assignee_id,
+            now,
+        } => {
+            match crate::waiting::handoff(&source, &blockers, return_assignee_id.as_deref(), now) {
+                Ok(plan) => Response::ok(plan),
+                Err(crate::waiting::HandoffError::SourceDone) => {
+                    Response::failed(Failure::handoff_source_done())
+                }
+            }
+        }
         Rule::BoardPresets { custom_states } => {
             Response::ok(crate::board::available_presets(custom_states.as_ref()))
         }

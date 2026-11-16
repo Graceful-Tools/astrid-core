@@ -45,7 +45,7 @@ fn every_rule_is_covered() {
         .iter()
         .filter_map(|case| case["rule"].as_str())
         .collect();
-    for rule in ["R2", "R3", "R4", "R5", "R7"] {
+    for rule in ["R2", "R3", "R4", "R5", "R7", "R8"] {
         assert!(rules.iter().any(|cited| cited.contains(rule)), "{rule}");
     }
 }

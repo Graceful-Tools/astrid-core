@@ -34,6 +34,18 @@
 //! Is moved to Waiting, the date being its condition, and — since that is entering — unassigned.
 //! [`settle`] answers R3 and R5 together, so a scheduled job runs one function per task.
 //!
+//! ## R8 — handing off (AWTD-1686)
+//!
+//! A handoff files the other half of a task on another list and makes the source wait for it, in
+//! one step: [`handoff`]. The half is born in Ready, with the source as its origin. The source
+//! enters Waiting with the half as its blocker and is unassigned, as any entry is (R2) — but the
+//! plan names who held it (`returnAssigneeId`), and the server remembers that. When the source
+//! leaves Waiting by rule (R3) with nobody assigned, it goes back to that holder:
+//! [`resolve_status_write_returning`] and [`settle_returning`] answer `assignee: "return"` with the
+//! id. Somebody assigned during the wait wins over the remembered holder. A plain move into
+//! Waiting remembers nobody and still unassigns. A finished task cannot be handed off
+//! ([`HANDOFF_SOURCE_DONE`]).
+//!
 //! ## "Due to start"
 //!
 //! Ported from astrid-web `lib/ready-queue-scope.ts` `isDueToStart`: a task with no (readable) date
@@ -50,6 +62,9 @@ use crate::model::{date, Task};
 /// The refusal code for a move into Waiting with no wait condition. The server answers the same
 /// code, so a client branches on one spelling whichever side refused.
 pub const WAITING_NEEDS_CONDITION: &str = "WAITING_NEEDS_CONDITION";
+
+/// The refusal code for a handoff whose source is already finished (R8).
+pub const HANDOFF_SOURCE_DONE: &str = "HANDOFF_SOURCE_DONE";
 
 /// One task this task waits on, and whether it is done.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +118,9 @@ pub enum AssigneeWrite {
     Keep,
     /// Write `assigneeId: null`.
     Clear,
+    /// Write `assigneeId` back to the holder a handoff remembered (R8) — the answer's
+    /// `returnAssigneeId`.
+    Return,
 }
 
 /// Which Waiting rule a resolved write followed — for a toast, a log, a test.
@@ -128,6 +146,9 @@ pub struct ResolvedStatus {
     pub status_role: Option<String>,
     pub assignee: AssigneeWrite,
     pub transition: Transition,
+    /// With `assignee: "return"`: who the task goes back to (R8). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_assignee_id: Option<String>,
 }
 
 /// Why a write was refused.
@@ -211,6 +232,7 @@ pub fn resolve_status_write(
             status_role: asked,
             assignee: AssigneeWrite::Keep,
             transition: Transition::None,
+            return_assignee_id: None,
         });
     }
 
@@ -231,6 +253,7 @@ pub fn resolve_status_write(
                 AssigneeWrite::Keep
             },
             transition: Transition::Enter,
+            return_assignee_id: None,
         });
     }
 
@@ -239,6 +262,7 @@ pub fn resolve_status_write(
             status_role: Some(WAITING_STATUS_ROLE.to_string()),
             assignee: AssigneeWrite::Keep,
             transition: Transition::Stay,
+            return_assignee_id: None,
         });
     }
     // The write took away the last condition the task had: it wakes, whatever is left of it.
@@ -249,12 +273,14 @@ pub fn resolve_status_write(
             status_role: Some(READY_STATUS_ROLE.to_string()),
             assignee: AssigneeWrite::Keep,
             transition: Transition::Wake,
+            return_assignee_id: None,
         }
     } else {
         ResolvedStatus {
             status_role: None,
             assignee: AssigneeWrite::Keep,
             transition: Transition::Inbox,
+            return_assignee_id: None,
         }
     })
 }
@@ -305,6 +331,9 @@ pub struct Settlement {
     /// The role the task should carry afterwards (its current one for `stay`).
     pub status_role: Option<String>,
     pub assignee: AssigneeWrite,
+    /// With `assignee: "return"`: who the task goes back to (R8). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_assignee_id: Option<String>,
 }
 
 /// R3 and R5 in one: what a scheduled job (or a blocker's completion) does to one task.
@@ -313,6 +342,7 @@ pub fn settle(task: &Task, blockers: &[Blocker], now: DateTime<Utc>) -> Settleme
         action: SettleAction::Stay,
         status_role: task.status_role.clone(),
         assignee: AssigneeWrite::Keep,
+        return_assignee_id: None,
     };
     if task.completed {
         return stay;
@@ -324,11 +354,13 @@ pub fn settle(task: &Task, blockers: &[Blocker], now: DateTime<Utc>) -> Settleme
                 action: SettleAction::WakeToReady,
                 status_role: Some(READY_STATUS_ROLE.to_string()),
                 assignee: AssigneeWrite::Keep,
+                return_assignee_id: None,
             },
             Wake::ResolveToInbox => Settlement {
                 action: SettleAction::ResolveToInbox,
                 status_role: None,
                 assignee: AssigneeWrite::Keep,
+                return_assignee_id: None,
             },
         };
     }
@@ -343,10 +375,159 @@ pub fn settle(task: &Task, blockers: &[Blocker], now: DateTime<Utc>) -> Settleme
             } else {
                 AssigneeWrite::Keep
             },
+            return_assignee_id: None,
         };
     }
     stay
 }
+
+/// R8: who a handed-off task goes back to as it leaves Waiting by rule — the remembered holder,
+/// unless somebody has been assigned since (their assignment wins) or nobody was remembered.
+fn holder_to_return(task: &Task, return_to: Option<&str>) -> Option<String> {
+    if task
+        .assignee_id
+        .as_deref()
+        .is_some_and(|held| !held.is_empty())
+    {
+        return None;
+    }
+    return_to
+        .filter(|holder| !holder.is_empty())
+        .map(str::to_string)
+}
+
+/// R1/R2/R8: [`resolve_status_write`] for a task a handoff left waiting, `return_to` being the
+/// holder the server remembered. A write that wakes it (R3) gives it back to that holder.
+pub fn resolve_status_write_returning(
+    task: &Task,
+    blockers: &[Blocker],
+    change: &StatusChange,
+    return_to: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<ResolvedStatus, WaitingError> {
+    let mut resolved = resolve_status_write(task, blockers, change, now)?;
+    if matches!(resolved.transition, Transition::Wake | Transition::Inbox) {
+        if let Some(holder) = holder_to_return(task, return_to) {
+            resolved.assignee = AssigneeWrite::Return;
+            resolved.return_assignee_id = Some(holder);
+        }
+    }
+    Ok(resolved)
+}
+
+/// R3/R5/R8: [`settle`] for a task a handoff left waiting, `return_to` being the holder the server
+/// remembered. Waking (to Ready, or legacy to Inbox) gives it back to that holder.
+pub fn settle_returning(
+    task: &Task,
+    blockers: &[Blocker],
+    return_to: Option<&str>,
+    now: DateTime<Utc>,
+) -> Settlement {
+    let mut settlement = settle(task, blockers, now);
+    if matches!(
+        settlement.action,
+        SettleAction::WakeToReady | SettleAction::ResolveToInbox
+    ) {
+        if let Some(holder) = holder_to_return(task, return_to) {
+            settlement.assignee = AssigneeWrite::Return;
+            settlement.return_assignee_id = Some(holder);
+        }
+    }
+    settlement
+}
+
+/// R8: the other half of a handoff, as it is born.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffHalf {
+    /// Always Ready: the target list's agent or person picks it up as actionable work.
+    pub status_role: String,
+    /// The task it was handed off from, which waits on it.
+    pub origin_task_id: String,
+}
+
+/// R8: what one handoff writes — the half to create, the source's write, and who the source goes
+/// back to when the half is done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Handoff {
+    pub half: HandoffHalf,
+    /// The source's write, the half being its new open blocker: `enter` (unassigned, R2), or
+    /// `stay` for a source already in Waiting.
+    pub source: ResolvedStatus,
+    /// Who held the source: its assignee, or — for a source already waiting unassigned — the
+    /// holder an earlier handoff remembered. `null` when nobody did.
+    pub return_assignee_id: Option<String>,
+}
+
+/// Why a handoff was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum HandoffError {
+    /// The source is finished: there is nothing left to wait for the half (R8).
+    #[serde(rename = "HANDOFF_SOURCE_DONE")]
+    SourceDone,
+}
+
+impl HandoffError {
+    pub fn code(self) -> &'static str {
+        match self {
+            HandoffError::SourceDone => HANDOFF_SOURCE_DONE,
+        }
+    }
+
+    pub fn message(self) -> &'static str {
+        match self {
+            HandoffError::SourceDone => "A finished task cannot be handed off",
+        }
+    }
+}
+
+/// R8: plan a handoff of `source` (as it is now, with its `blockers`). `held_return` is the holder
+/// an earlier handoff remembered for it, if any. The half is not created yet, so it has no id: the
+/// plan holds for whatever id the server gives it, an open blocker being a wait condition by R1.
+pub fn handoff(
+    source: &Task,
+    blockers: &[Blocker],
+    held_return: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<Handoff, HandoffError> {
+    if source.completed {
+        return Err(HandoffError::SourceDone);
+    }
+    let holder = source
+        .assignee_id
+        .clone()
+        .filter(|held| !held.is_empty())
+        .or_else(|| {
+            held_return
+                .filter(|held| !held.is_empty())
+                .map(str::to_string)
+        });
+    let change = StatusChange {
+        status_role: Some(Some(WAITING_STATUS_ROLE.to_string())),
+        add_blockers: vec![Blocker::new(PENDING_HALF_ID, false)],
+        ..Default::default()
+    };
+    // Cannot be refused: the half is an open blocker. Spelled out rather than unwrapped.
+    let source_write =
+        resolve_status_write(source, blockers, &change, now).unwrap_or_else(|_| ResolvedStatus {
+            status_role: Some(WAITING_STATUS_ROLE.to_string()),
+            assignee: AssigneeWrite::Clear,
+            transition: Transition::Enter,
+            return_assignee_id: None,
+        });
+    Ok(Handoff {
+        half: HandoffHalf {
+            status_role: READY_STATUS_ROLE.to_string(),
+            origin_task_id: source.id.clone(),
+        },
+        source: source_write,
+        return_assignee_id: holder,
+    })
+}
+
+/// The stand-in id of a half not created yet, inside [`handoff`]'s own reasoning only.
+const PENDING_HALF_ID: &str = "\u{0}pending-half";
 
 /// R4: what handing a task back to a person writes — Inbox, open, assigned to them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -550,6 +731,101 @@ mod tests {
         assert_eq!(settled.assignee, AssigneeWrite::Clear);
         let due = settle(&task(Some("ready"), Some(NOW), Some("agent")), &[], at(NOW));
         assert_eq!(due.action, SettleAction::Stay);
+    }
+
+    #[test]
+    fn handoff_awtd_1686_parks_the_source_unassigned_and_remembers_its_holder() {
+        let plan = handoff(
+            &task(Some("doing"), None, Some("agent")),
+            &[],
+            None,
+            at(NOW),
+        )
+        .unwrap();
+        assert_eq!(plan.half.status_role, "ready");
+        assert_eq!(plan.half.origin_task_id, "t");
+        assert_eq!(plan.source.status_role.as_deref(), Some("waiting"));
+        assert_eq!(plan.source.assignee, AssigneeWrite::Clear);
+        assert_eq!(plan.source.transition, Transition::Enter);
+        assert_eq!(plan.return_assignee_id.as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn handoff_awtd_1686_of_a_waiting_source_keeps_the_remembered_holder() {
+        let plan = handoff(
+            &task(Some("waiting"), None, None),
+            &[Blocker::new("b", false)],
+            Some("agent"),
+            at(NOW),
+        )
+        .unwrap();
+        assert_eq!(plan.source.transition, Transition::Stay);
+        assert_eq!(plan.return_assignee_id.as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn handoff_awtd_1686_of_a_finished_task_is_refused() {
+        let done = Task {
+            completed: true,
+            ..task(Some("ready"), None, Some("agent"))
+        };
+        assert_eq!(
+            handoff(&done, &[], None, at(NOW)),
+            Err(HandoffError::SourceDone)
+        );
+    }
+
+    #[test]
+    fn awtd_1686_the_half_completing_gives_the_source_back_to_its_holder() {
+        let waiting = task(Some("waiting"), None, None);
+        let settled = settle_returning(
+            &waiting,
+            &[Blocker::new("half", true)],
+            Some("agent"),
+            at(NOW),
+        );
+        assert_eq!(settled.action, SettleAction::WakeToReady);
+        assert_eq!(settled.assignee, AssigneeWrite::Return);
+        assert_eq!(settled.return_assignee_id.as_deref(), Some("agent"));
+        // Still held: nothing returns.
+        let held = settle_returning(
+            &waiting,
+            &[Blocker::new("half", false)],
+            Some("agent"),
+            at(NOW),
+        );
+        assert_eq!(held.assignee, AssigneeWrite::Keep);
+        assert_eq!(held.return_assignee_id, None);
+    }
+
+    #[test]
+    fn awtd_1686_somebody_assigned_during_the_wait_wins() {
+        let settled = settle_returning(
+            &task(Some("waiting"), None, Some("jon")),
+            &[Blocker::new("half", true)],
+            Some("agent"),
+            at(NOW),
+        );
+        assert_eq!(settled.assignee, AssigneeWrite::Keep);
+        assert_eq!(settled.return_assignee_id, None);
+    }
+
+    #[test]
+    fn awtd_1686_removing_the_half_wakes_the_source_back_to_its_holder() {
+        let resolved = resolve_status_write_returning(
+            &task(Some("waiting"), None, None),
+            &[Blocker::new("half", false)],
+            &StatusChange {
+                remove_blocker_ids: vec!["half".into()],
+                ..Default::default()
+            },
+            Some("agent"),
+            at(NOW),
+        )
+        .unwrap();
+        assert_eq!(resolved.transition, Transition::Wake);
+        assert_eq!(resolved.assignee, AssigneeWrite::Return);
+        assert_eq!(resolved.return_assignee_id.as_deref(), Some("agent"));
     }
 
     #[test]

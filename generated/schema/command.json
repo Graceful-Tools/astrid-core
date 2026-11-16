@@ -4331,7 +4331,7 @@
       "type": "object"
     },
     {
-      "description": "A featured public list's rows (AATD-46): its tasks fetched from the server (not cached),\nwith this account's own unsent ones for it, projected as `rowsForList` projects — other\npeople's tasks read-only, their control copying. `list` is the public list as the shell\nholds it, when this account does not.",
+      "description": "A featured public list's rows (AATD-46): its tasks fetched from the server (not cached),\nwith this account's own unsent ones for it, projected as `rowsForList` projects — other\npeople's tasks read-only, their control copying. `list` is the public list as the shell\nholds it, when this account does not. The answer carries those tasks whole as well, as\n`tasks` (AITD-634), for a shell that draws task models.",
       "properties": {
         "kind": {
           "const": "featuredRows",
