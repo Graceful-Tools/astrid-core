@@ -50,38 +50,38 @@ jobs:
           fi
 
       # The whole history: follow-pins asks `merge-base --is-ancestor`, like check-pins.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: astrid-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Graceful-Tools/astrid-web
           path: astrid-web
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-windows
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-windows
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-ios
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-ios
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_PINS_TOKEN == 'true'
         with:
           repository: Graceful-Tools/astrid-android
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-android
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_PINS_TOKEN == 'true'
         continue-on-error: true
         with:
@@ -89,7 +89,7 @@ jobs:
           token: ${{ secrets.CONSUMER_PINS_TOKEN }}
           path: astrid-vscode
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_PINS_TOKEN == 'true'
         continue-on-error: true
         with:
