@@ -254,7 +254,9 @@ jobs:
   # commits behind off a manifest that had already been bumped three times, which is what a table
   # nobody checks costs. `check-pins` asks whether every consumer is listed, whether each revision
   # is a real commit, and whether it is an ancestor of main — a pin at an unmerged branch means a
-  # client is running code nobody reviewed. Being BEHIND main is only reported, never failed.
+  # client is running code nobody reviewed. Being BEHIND main is only reported, never failed —
+  # and so is a row behind its CONSUMER (the manifest pins a newer commit of main than the row):
+  # the daily consumers-follow-pins workflow moves that row (task ADEV-7).
   #
   # Runs on the Monday schedule as well, unlike fmt/clippy/tests: a pin goes stale because time
   # passed in ANOTHER repository, so it has no commit here to answer to.
