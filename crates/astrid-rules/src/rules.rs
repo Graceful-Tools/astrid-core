@@ -322,6 +322,48 @@ pub enum Rule {
         #[serde(with = "date::required")]
         now: DateTime<Utc>,
     },
+    /// Q1 of [`crate::questions`]: record a question to a person and hand the task to them —
+    /// [`crate::questions::ask`]. `question` is the task's latest question, if it has one. Refused
+    /// with a `QUESTION_*` code (AWTD-1687).
+    QuestionAsk {
+        task: Box<Task>,
+        #[serde(default)]
+        question: Option<crate::questions::Question>,
+        ask: crate::questions::Ask,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// Q2: a reply closes the question and returns the task to the asker —
+    /// [`crate::questions::answer`]. Answers `{ question, write }`; `write` is `null` for a
+    /// finished task.
+    #[serde(rename_all = "camelCase")]
+    QuestionAnswer {
+        question: crate::questions::Question,
+        #[serde(default)]
+        task_completed: bool,
+        replier_id: String,
+        #[serde(default)]
+        answer_comment_id: String,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// Q3: the asker picked the answer up — [`crate::questions::resume`].
+    QuestionResume {
+        question: crate::questions::Question,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: DateTime<Utc>,
+    },
+    /// Q4: what a person must answer and resume — [`crate::questions::attention`]. Answers
+    /// `{ waitingOnMe, toResume }`, task ids, oldest question first.
+    #[serde(rename_all = "camelCase")]
+    QuestionAttention {
+        #[serde(default)]
+        questions: Vec<crate::questions::Question>,
+        person_id: String,
+    },
     /// R7: the optional preset columns this board can still add — [`crate::board::available_presets`].
     BoardPresets {
         #[serde(default)]
@@ -1135,6 +1177,39 @@ pub fn run(rule: Rule) -> Response {
                 }
             }
         }
+        Rule::QuestionAsk {
+            task,
+            question,
+            ask,
+            now,
+        } => match crate::questions::ask(&task, question.as_ref(), &ask, now) {
+            Ok(plan) => Response::ok(plan),
+            Err(error) => Response::failed(Failure::question_refused(error)),
+        },
+        Rule::QuestionAnswer {
+            question,
+            task_completed,
+            replier_id,
+            answer_comment_id,
+            now,
+        } => match crate::questions::answer(
+            &question,
+            task_completed,
+            &replier_id,
+            &answer_comment_id,
+            now,
+        ) {
+            Ok(plan) => Response::ok(plan),
+            Err(error) => Response::failed(Failure::question_refused(error)),
+        },
+        Rule::QuestionResume { question, now } => match crate::questions::resume(&question, now) {
+            Ok(closed) => Response::ok(closed),
+            Err(error) => Response::failed(Failure::question_refused(error)),
+        },
+        Rule::QuestionAttention {
+            questions,
+            person_id,
+        } => Response::ok(crate::questions::attention(&questions, &person_id)),
         Rule::BoardPresets { custom_states } => {
             Response::ok(crate::board::available_presets(custom_states.as_ref()))
         }

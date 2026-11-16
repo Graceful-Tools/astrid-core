@@ -28,6 +28,7 @@ pub const CORE_OWNED: &[&str] = &[
     "callout-placement.json",
     "sidebar-projects.json",
     "orchestration.json",
+    "questions.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -1783,6 +1784,189 @@ pub fn orchestration_fixture() -> Result<String, String> {
     )
 }
 
+fn question_json(answered: bool) -> Value {
+    let mut question = json!({
+        "taskId": "t", "askerId": "agent", "answererId": "jon", "questionCommentId": "c1",
+        "resume": "re-run the gate", "returnStatusRole": "doing", "askedAt": "2026-11-16T09:00:00.000Z",
+    });
+    if answered {
+        question["answeredAt"] = json!("2026-11-16T11:00:00.000Z");
+        question["answerCommentId"] = json!("c2");
+    }
+    question
+}
+
+fn refused_with(code: &str) -> Value {
+    json!({ "ok": false, "error": { "kind": "refused", "code": code } })
+}
+
+fn question_ask(task: Value, question: Value, ask: Value) -> Value {
+    json!({ "kind": "questionAsk", "task": task, "question": question, "ask": ask, "now": NOW })
+}
+
+fn question_cases() -> Vec<Case> {
+    let ask = json!({ "askerId": "agent", "answererId": "jon", "questionCommentId": "c1", "resume": "re-run the gate" });
+    let answer = |question: Value, completed: bool, replier: &str| {
+        json!({ "kind": "questionAnswer", "question": question, "taskCompleted": completed,
+                "replierId": replier, "answerCommentId": "c2", "now": NOW })
+    };
+    vec![
+        case(
+            "ask/a-doing-task-goes-to-the-answerer-and-remembers-doing",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing", "assigneeId": "agent" }),
+                Value::Null,
+                ask.clone(),
+            ),
+            ok(json!({
+                "question": { "taskId": "t", "askerId": "agent", "answererId": "jon", "returnStatusRole": "doing" },
+                "write": { "statusRole": null, "assigneeId": "jon", "completed": false }
+            })),
+        ),
+        case(
+            "ask/a-ready-task-remembers-ready",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "ready" }),
+                Value::Null,
+                ask.clone(),
+            ),
+            ok(json!({ "question": { "returnStatusRole": "ready" } })),
+        ),
+        case(
+            "ask/a-person-may-ask-an-agent",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing" }),
+                Value::Null,
+                json!({ "askerId": "jon", "answererId": "agent", "questionCommentId": "c1" }),
+            ),
+            ok(json!({ "write": { "assigneeId": "agent", "statusRole": null } })),
+        ),
+        case(
+            "ask/a-finished-task-is-refused",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "completed": true }),
+                Value::Null,
+                ask.clone(),
+            ),
+            refused_with("QUESTION_TASK_DONE"),
+        ),
+        case(
+            "ask/a-second-open-question-is-refused",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing" }),
+                question_json(false),
+                ask.clone(),
+            ),
+            refused_with("QUESTION_ALREADY_OPEN"),
+        ),
+        case(
+            "ask/an-answered-question-does-not-block-the-next",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing" }),
+                question_json(true),
+                ask.clone(),
+            ),
+            ok(json!({ "write": { "assigneeId": "jon" } })),
+        ),
+        case(
+            "ask/nobody-asks-themselves",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing" }),
+                Value::Null,
+                json!({ "askerId": "agent", "answererId": "agent", "questionCommentId": "c1" }),
+            ),
+            refused_with("QUESTION_NEEDS_ANSWERER"),
+        ),
+        case(
+            "ask/the-question-needs-its-comment",
+            "Q1",
+            question_ask(
+                json!({ "id": "t", "statusRole": "doing" }),
+                Value::Null,
+                json!({ "askerId": "agent", "answererId": "jon", "questionCommentId": "" }),
+            ),
+            refused_with("QUESTION_NEEDS_COMMENT"),
+        ),
+        case(
+            "answer/the-answerer-returns-the-task-to-the-asker-in-its-lane",
+            "Q2",
+            answer(question_json(false), false, "jon"),
+            ok(json!({
+                "question": { "answerCommentId": "c2", "answeredAt": "2026-11-12T12:00:00Z" },
+                "write": { "statusRole": "doing", "assigneeId": "agent", "completed": false }
+            })),
+        ),
+        case(
+            "answer/someone-else-leaves-it-open",
+            "Q2",
+            answer(question_json(false), false, "ana"),
+            refused_with("QUESTION_NOT_ANSWERER"),
+        ),
+        case(
+            "answer/an-answered-question-is-not-answered-twice",
+            "Q2",
+            answer(question_json(true), false, "jon"),
+            refused_with("QUESTION_NOT_OPEN"),
+        ),
+        case(
+            "answer/a-finished-task-is-not-written-to",
+            "Q2",
+            answer(question_json(false), true, "jon"),
+            ok(json!({ "question": { "answeredAt": "2026-11-12T12:00:00Z" }, "write": null })),
+        ),
+        case(
+            "resume/the-asker-picks-the-answer-up",
+            "Q3",
+            json!({ "kind": "questionResume", "question": question_json(true), "now": NOW }),
+            ok(json!({ "resumedAt": "2026-11-12T12:00:00Z", "answerCommentId": "c2" })),
+        ),
+        case(
+            "resume/an-open-question-cannot-be-resumed",
+            "Q3",
+            json!({ "kind": "questionResume", "question": question_json(false), "now": NOW }),
+            refused_with("QUESTION_NOT_ANSWERED"),
+        ),
+        case(
+            "attention/the-answerer-sees-open-questions-oldest-first",
+            "Q4",
+            json!({ "kind": "questionAttention", "personId": "jon", "questions": [
+                { "taskId": "newer", "askerId": "agent", "answererId": "jon", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-16T10:00:00.000Z" },
+                { "taskId": "older", "askerId": "agent", "answererId": "jon", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-15T10:00:00.000Z" },
+                { "taskId": "other", "askerId": "agent", "answererId": "ana", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-14T10:00:00.000Z" }
+            ] }),
+            ok(json!({ "waitingOnMe": ["older", "newer"], "toResume": [] })),
+        ),
+        case(
+            "attention/the-asker-sees-answers-it-has-not-resumed",
+            "Q4",
+            json!({ "kind": "questionAttention", "personId": "agent", "questions": [
+                { "taskId": "answered", "askerId": "agent", "answererId": "jon", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-15T10:00:00.000Z", "answeredAt": "2026-11-16T10:00:00.000Z" },
+                { "taskId": "resumed", "askerId": "agent", "answererId": "jon", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-15T10:00:00.000Z", "answeredAt": "2026-11-16T10:00:00.000Z", "resumedAt": "2026-11-16T11:00:00.000Z" },
+                { "taskId": "open", "askerId": "agent", "answererId": "jon", "questionCommentId": "c", "returnStatusRole": "ready", "askedAt": "2026-11-15T10:00:00.000Z" }
+            ] }),
+            ok(json!({ "waitingOnMe": [], "toResume": ["answered"] })),
+        ),
+    ]
+}
+
+/// The text of `questions.json` (AWTD-1687).
+pub fn questions_fixture() -> Result<String, String> {
+    render(
+        question_cases(),
+        "crates/astrid-rules/src/questions.rs",
+        json!({
+            "canonicalSource": "astrid-core crates/astrid-rules/src/questions.rs — core-first (AWTD-1687). An open question to a person is a recorded fact on the task; the server stores a Question and asks these rules to ask, answer, resume and list.",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -1793,6 +1977,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("list-project-moves.json", list_project_moves_fixture()?),
         ("sidebar-projects.json", sidebar_projects_fixture()?),
         ("orchestration.json", orchestration_fixture()?),
+        ("questions.json", questions_fixture()?),
     ])
 }
 

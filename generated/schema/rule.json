@@ -30,6 +30,30 @@
         }
       ]
     },
+    "Ask": {
+      "description": "Q1: what asking a question is.",
+      "properties": {
+        "answererId": {
+          "type": "string"
+        },
+        "askerId": {
+          "type": "string"
+        },
+        "questionCommentId": {
+          "type": "string"
+        },
+        "resume": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "askerId",
+        "answererId",
+        "questionCommentId"
+      ],
+      "type": "object"
+    },
     "Attachment": {
       "description": "A legacy file attachment. Superseded by [`SecureFile`]; still returned on older tasks.",
       "properties": {
@@ -1230,6 +1254,66 @@
       },
       "required": [
         "userId"
+      ],
+      "type": "object"
+    },
+    "Question": {
+      "description": "One question on one task, as the server stores it.",
+      "properties": {
+        "answerCommentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "answeredAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "answererId": {
+          "type": "string"
+        },
+        "askedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "askerId": {
+          "type": "string"
+        },
+        "questionCommentId": {
+          "description": "The Decision-format comment that carries the question text.",
+          "type": "string"
+        },
+        "resume": {
+          "default": "",
+          "description": "What the asker needs to pick the work up again, in the asker's own words.",
+          "type": "string"
+        },
+        "resumedAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "returnStatusRole": {
+          "description": "`ready` or `doing`: where the task goes back to when the question is answered.",
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "taskId",
+        "askerId",
+        "answererId",
+        "questionCommentId",
+        "returnStatusRole",
+        "askedAt"
       ],
       "type": "object"
     },
@@ -3272,6 +3356,123 @@
         "kind",
         "source",
         "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q1 of [`crate::questions`]: record a question to a person and hand the task to them —\n[`crate::questions::ask`]. `question` is the task's latest question, if it has one. Refused\nwith a `QUESTION_*` code (AWTD-1687).",
+      "properties": {
+        "ask": {
+          "$ref": "#/$defs/Ask"
+        },
+        "kind": {
+          "const": "questionAsk",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Question"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "task": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "ask",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q2: a reply closes the question and returns the task to the asker —\n[`crate::questions::answer`]. Answers `{ question, write }`; `write` is `null` for a\nfinished task.",
+      "properties": {
+        "answerCommentId": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "const": "questionAnswer",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/Question"
+        },
+        "replierId": {
+          "type": "string"
+        },
+        "taskCompleted": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "question",
+        "replierId",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q3: the asker picked the answer up — [`crate::questions::resume`].",
+      "properties": {
+        "kind": {
+          "const": "questionResume",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/Question"
+        }
+      },
+      "required": [
+        "kind",
+        "question",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q4: what a person must answer and resume — [`crate::questions::attention`]. Answers\n`{ waitingOnMe, toResume }`, task ids, oldest question first.",
+      "properties": {
+        "kind": {
+          "const": "questionAttention",
+          "type": "string"
+        },
+        "personId": {
+          "type": "string"
+        },
+        "questions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Question"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "personId"
       ],
       "type": "object"
     },
