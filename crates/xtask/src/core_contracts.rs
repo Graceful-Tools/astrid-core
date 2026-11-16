@@ -28,6 +28,7 @@ pub const CORE_OWNED: &[&str] = &[
     "callout-placement.json",
     "sidebar-projects.json",
     "orchestration.json",
+    "questions.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -1783,6 +1784,161 @@ pub fn orchestration_fixture() -> Result<String, String> {
     )
 }
 
+fn question_cases() -> Vec<Case> {
+    let ask_req = |edit: Value| {
+        let mut base = json!({
+            "kind": "questionAsk", "questionId": "q1", "taskId": "t1", "listId": "l1",
+            "askerId": "claude", "askerIsAgent": true, "answererId": "jon",
+            "questionCommentId": "c1", "resumeStatusRole": "doing",
+            "now": "2026-11-16T10:00:00.000Z"
+        });
+        if let (Value::Object(base), Value::Object(edit)) = (&mut base, edit) {
+            base.extend(edit);
+        }
+        base
+    };
+    let open = json!({
+        "id": "q1", "taskId": "t1", "listId": "l1", "askerId": "claude", "askerIsAgent": true,
+        "answererId": "jon", "questionCommentId": "c1", "resumeStatusRole": "doing",
+        "askedAt": "2026-11-16T10:00:00Z", "state": "open"
+    });
+    let answer_req = |question: Value, author: &str, at: &str| {
+        json!({
+            "kind": "questionAnswer", "question": question,
+            "reply": { "commentId": "c2", "authorId": author, "at": at }
+        })
+    };
+    let refused = |code: &str| json!({ "ok": false, "error": { "kind": "refused", "code": code } });
+    let waiting_q = |id: &str, who: &str, at: &str, state: &str| {
+        let mut question = open.clone();
+        question["id"] = json!(id);
+        question["answererId"] = json!(who);
+        question["askedAt"] = json!(at);
+        question["state"] = json!(state);
+        question
+    };
+    vec![
+        case(
+            "ask/records-the-question-and-hands-the-task-to-the-answerer",
+            "questionAsk",
+            ask_req(json!({})),
+            ok(json!({
+                "question": open.clone(),
+                "handBack": { "statusRole": null, "assigneeId": "jon", "completed": false },
+                "notify": ["jon"]
+            })),
+        ),
+        case(
+            "ask/a-person-may-ask-an-agent",
+            "questionAsk",
+            ask_req(
+                json!({ "askerId": "jon", "askerIsAgent": false, "answererId": "claude", "resumeStatusRole": "ready" }),
+            ),
+            ok(json!({ "handBack": { "assigneeId": "claude" }, "notify": ["claude"] })),
+        ),
+        case(
+            "ask/refused-to-oneself",
+            "questionAsk",
+            ask_req(json!({ "answererId": "claude" })),
+            refused("QUESTION_NEEDS_ANOTHER_PERSON"),
+        ),
+        case(
+            "ask/refused-on-a-finished-task",
+            "questionAsk",
+            ask_req(json!({ "taskCompleted": true })),
+            refused("QUESTION_TASK_DONE"),
+        ),
+        case(
+            "ask/refused-while-another-question-is-open",
+            "questionAsk",
+            ask_req(json!({ "openQuestionId": "q0" })),
+            refused("QUESTION_ALREADY_OPEN"),
+        ),
+        case(
+            "ask/refused-to-resume-in-waiting",
+            "questionAsk",
+            ask_req(json!({ "resumeStatusRole": "waiting" })),
+            refused("QUESTION_BAD_RESUME_ROLE"),
+        ),
+        case(
+            "answer/closes-it-and-returns-the-task-to-the-asker",
+            "questionAnswer",
+            answer_req(open.clone(), "jon", "2026-11-16T11:00:00.000Z"),
+            ok(json!({
+                "question": {
+                    "state": "answered", "answerCommentId": "c2",
+                    "answeredAt": "2026-11-16T11:00:00Z"
+                },
+                "write": { "statusRole": "doing", "assigneeId": "claude", "completed": false },
+                "notify": ["claude"],
+                "resume": { "questionId": "q1", "questionCommentId": "c1", "replyCommentId": "c2" }
+            })),
+        ),
+        case(
+            "answer/refused-from-anyone-but-the-answerer",
+            "questionAnswer",
+            answer_req(open.clone(), "ana", "2026-11-16T11:00:00.000Z"),
+            refused("QUESTION_NOT_ANSWERER"),
+        ),
+        case(
+            "answer/refused-before-the-question-was-asked",
+            "questionAnswer",
+            answer_req(open.clone(), "jon", "2026-11-16T09:00:00.000Z"),
+            refused("QUESTION_REPLY_BEFORE_ASK"),
+        ),
+        case(
+            "answer/refused-twice",
+            "questionAnswer",
+            answer_req(
+                waiting_q("q1", "jon", "2026-11-16T10:00:00.000Z", "answered"),
+                "jon",
+                "2026-11-16T12:00:00.000Z",
+            ),
+            refused("QUESTION_CLOSED"),
+        ),
+        case(
+            "waiting-on/my-open-questions-oldest-first-across-lists",
+            "questionsWaitingOn",
+            json!({
+                "kind": "questionsWaitingOn", "personId": "jon",
+                "questions": [
+                    waiting_q("q2", "jon", "2026-11-16T10:00:00.000Z", "open"),
+                    waiting_q("q3", "ana", "2026-11-16T09:00:00.000Z", "open"),
+                    waiting_q("q1", "jon", "2026-11-14T10:00:00.000Z", "open"),
+                    waiting_q("q0", "jon", "2026-11-13T10:00:00.000Z", "answered")
+                ]
+            }),
+            ok(json!([
+                { "id": "q1" },
+                { "id": "q2" }
+            ])),
+        ),
+        case(
+            "marker/the-old-text-marker-is-still-read",
+            "questionMarker",
+            json!({ "kind": "questionMarker", "comment": "Which one?\n\nAGENT-HANDBACK: claude\n" }),
+            ok(json!("claude")),
+        ),
+        case(
+            "marker/no-marker-no-mailbox",
+            "questionMarker",
+            json!({ "kind": "questionMarker", "comment": "Just a comment" }),
+            ok(json!(null)),
+        ),
+    ]
+}
+
+/// The text of `questions.json` (AWTD-1687).
+pub fn questions_fixture() -> Result<String, String> {
+    render(
+        question_cases(),
+        "crates/astrid-rules/src/questions.rs",
+        json!({
+            "canonicalSource": "astrid-core crates/astrid-rules/src/questions.rs — core-first (AWTD-1687). An open question is recorded on the task; astrid-web stores it, drives get_agent_queue attention from it (the AGENT-HANDBACK text marker stays accepted for one release) and lists the signed-in user's open questions.",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -1793,6 +1949,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("list-project-moves.json", list_project_moves_fixture()?),
         ("sidebar-projects.json", sidebar_projects_fixture()?),
         ("orchestration.json", orchestration_fixture()?),
+        ("questions.json", questions_fixture()?),
     ])
 }
 
