@@ -58,6 +58,15 @@ All seven commands above, green, before pushing (the wasm build needs `rustup ta
 wasm32-unknown-unknown` once). CI runs them on Windows, macOS and Linux and
 checks the fixtures against astrid-web's `main`.
 
+**`main` refuses a red merge (ADEV-17, 2026-11-15).** The `protect_main` ruleset requires
+`core (linux|macos|windows)`, `astrid-rules (wasm32)` (the size budget), `astrid-core (android,
+arm64)`, `cross-platform contracts`, `cargo-deny (licenses bans sources)` and `MSRV`, with no
+bypass. Two are left out on purpose: `consumer pins`, which a client's push can still turn red
+(the daily `consumers-follow-pins` workflow repairs a row that is merely behind), and
+`cargo-deny (advisories)`, which a newly published advisory can turn red overnight. "Branch up to
+date" is not required, so a merge never needs `update-branch`, which would move the head the
+ship job pinned. Renaming a required job means updating the ruleset in the same change.
+
 **A wire type changed means `cargo xtask gen-schema`, and reading the diff.** `generated/schema/`
 is derived from `Command`, `Rule` and the models — it is not a second definition, it is those
 types — and every client's bindings gate reads it. The diff is the list of what the clients must
