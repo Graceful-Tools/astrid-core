@@ -1734,3 +1734,39 @@ the `project_mode` flag and the cached projects).
    project is a row. A field arriving later is a decision to make here.
 
 Locked by `contracts/fixtures/sidebar-projects.json` (8 cases).
+
+## The orchestration policy (AWTD-1685, 2026-11-15)
+
+### D71 — one orchestration policy per project, overridable per list, answered by the core
+
+**Core-first.** No client had this rule. Prompt text, env flags and repo scripts answered it:
+astrid-web's generated skill hard-codes "Never merge or deploy" (`lib/agent-skill/loop-recipes.ts`),
+and Astrid's own loops follow `docs/FIXALL_WORKFLOW.md` → *Autonomy*. The rules are now
+`astrid_rules::orchestration`. The rules door's `orchestrationPolicy`, `orchestrationRoute`,
+`orchestrationMay` and `orchestrationEscalate` answer them. The design is
+[ORCHESTRATION_POLICY.md](./ORCHESTRATION_POLICY.md).
+
+1. **Shape.** A project stores a partial policy (`routing`, `autonomy`, `escalation`), and so may
+   each list. Resolving is field by field: the default, then the project's, then the list's. An
+   absent key inherits. Under `routing`, `null` means "any agent" and overrides.
+2. **The default is today's behaviour.** Every action (`merge`, `deploy`, `migrate` additive and
+   destructive, `release`, `spend`) is `never`. Any agent may claim an unassigned Ready task, and
+   the first claim wins. Questions go to the list owner. Nothing changes until a policy is stored.
+3. **Autonomy floors.** A destructive migration is never answered more freely than an additive
+   one. A migration whose kind is not stated is answered as destructive. An agent the list does
+   not admit is answered `never` for everything.
+4. **Escalation.** `notify` is everyone named, in order and without repeats. `handBack` is the
+   Waiting lane's R4 write for the first of them. Naming nobody falls back to the list owner.
+5. **Astrid's own boards are one stored policy, not a special case.** In the fixture's
+   `astridPolicy`, merge and deploy are allowed, additive migrations are allowed, and destructive
+   migrations, releases and spending ask Jon.
+6. **Where it runs.** Every native client and astrid-web's Node package have these rules (the
+   `orchestration` feature, on by default and forwarded by `astrid-rules-wasm/orchestration`).
+   The browser build leaves them out and refuses the kinds by name. Its artifact did not change:
+   268,013 brotli bytes before and after, and 269,784 on both sides after the handoff rule merged.
+
+Locked by `contracts/fixtures/orchestration.json` (28 cases). Decided by the agent and open to
+Jon's override (ORCHESTRATION_POLICY.md §8): autonomy is per policy rather than per agent, a list
+may loosen its project's policy as well as tighten it, a task on several lists is asked with the
+board being worked, and choosing which list a piece of work belongs on waits for a caller that
+sends a classifier.
