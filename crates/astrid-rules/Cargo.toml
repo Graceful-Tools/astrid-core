@@ -12,7 +12,7 @@ repository.workspace = true
 # checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
 # getrandom, uuid or iana-time-zone — and chrono without `clock`.
 [features]
-default = ["markdown"]
+default = ["markdown", "orchestration"]
 # The markdown renderer, and everything that can only be answered by running it: `renderMarkdown`,
 # the chat transcript, and a comment row's `blocks`. ON by default — every shell draws comments —
 # and turned OFF by `astrid-rules-wasm`, because the browser has its own renderer and `renderMarkdown`
@@ -22,6 +22,13 @@ default = ["markdown"]
 # and `renders_inline` are what `Rule::CommentVisibility` asks, and none of them parse anything.
 # Taking the predicates out with the renderer would be a silent capability loss for the browser.
 markdown = ["dep:pulldown-cmark"]
+# The orchestration policy (AWTD-1685): who takes a task, what an agent may do on its own, who it
+# asks — `orchestration` and the rules door's `orchestrationPolicy`, `orchestrationRoute`,
+# `orchestrationMay` and `orchestrationEscalate`. ON by default, and for astrid-web's Node package
+# (`astrid-rules-wasm/orchestration`), because the server enforces it wherever an agent acts. OFF in
+# the browser build: no page decides what an agent may do, and the browser's size is a budget
+# (README, docs/BROWSER_DOOR.md).
+orchestration = []
 # No Astrid server in the binary: a `renderMarkdown` request that names no `origin` leaves a
 # relative link relative instead of resolving it on astrid.cc (AWTD-1630). Turned on by
 # astrid-core's feature of the same name (astrid-web AWTD-1627).
