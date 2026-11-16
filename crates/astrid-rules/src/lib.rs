@@ -38,6 +38,7 @@ pub mod palette;
 pub mod parse;
 pub mod permissions;
 pub mod plurals;
+pub mod questions;
 pub mod reminders;
 pub mod repeating;
 pub mod rows;
