@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "Action": {
+      "description": "The action classes a policy decides.",
+      "oneOf": [
+        {
+          "const": "merge",
+          "description": "Merge a pull request.",
+          "type": "string"
+        },
+        {
+          "const": "deploy",
+          "description": "Deploy to production.",
+          "type": "string"
+        },
+        {
+          "const": "migrate",
+          "description": "Apply a database migration; its [`MigrationKind`] decides which answer applies.",
+          "type": "string"
+        },
+        {
+          "const": "release",
+          "description": "Submit a release (an App Store or Microsoft Store submission, a signed build).",
+          "type": "string"
+        },
+        {
+          "const": "spend",
+          "description": "Spend money or act as a person outside the repositories.",
+          "type": "string"
+        }
+      ]
+    },
     "Attachment": {
       "description": "A legacy file attachment. Superseded by [`SecureFile`]; still returned on older tasks.",
       "properties": {
@@ -40,6 +70,75 @@
       "required": [
         "id"
       ],
+      "type": "object"
+    },
+    "Autonomy": {
+      "description": "What an agent may do about one action class. Ordered from most to least autonomous, so the\nstricter of two is the greater.",
+      "oneOf": [
+        {
+          "const": "allowed",
+          "description": "Do it.",
+          "type": "string"
+        },
+        {
+          "const": "ask",
+          "description": "Ask the escalation target first, and do it once a person approves.",
+          "type": "string"
+        },
+        {
+          "const": "never",
+          "description": "Never; a person does it.",
+          "type": "string"
+        }
+      ]
+    },
+    "AutonomyOverride": {
+      "description": "[`AutonomyPolicy`], each field optional.",
+      "properties": {
+        "deploy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "merge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "migrate": {
+          "$ref": "#/$defs/MigrationOverride"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "type": "object"
     },
     "Blocker": {
@@ -318,6 +417,57 @@
         "month"
       ],
       "type": "string"
+    },
+    "Escalation": {
+      "description": "Who receives a question or an approval request (O5).",
+      "oneOf": [
+        {
+          "description": "The owner of the list the task is on.",
+          "properties": {
+            "to": {
+              "const": "listOwner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Whoever created the task; the list owner when that is unknown.",
+          "properties": {
+            "to": {
+              "const": "taskCreator",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "These people (by user id), in order; the first is handed the task.",
+          "properties": {
+            "to": {
+              "const": "people",
+              "type": "string"
+            },
+            "userIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "to",
+            "userIds"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Identifiers": {
       "description": "What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the\nweb's names (`lib/task-identifier-links.ts`, `IdentifierLinkContext`).",
@@ -681,6 +831,47 @@
       },
       "type": "object"
     },
+    "MigrationKind": {
+      "description": "What a migration does to existing data.",
+      "oneOf": [
+        {
+          "const": "additive",
+          "description": "A new table, a nullable column, an index: nothing existing changes.",
+          "type": "string"
+        },
+        {
+          "const": "destructive",
+          "description": "`DROP`, `RENAME`, `SET NOT NULL`, `UPDATE`, `DELETE`, `TRUNCATE`: applied before the new\ncode is live, and a redeploy cannot undo it.",
+          "type": "string"
+        }
+      ]
+    },
+    "MigrationOverride": {
+      "description": "[`MigrationAutonomy`], each field optional.",
+      "properties": {
+        "additive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destructive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "MonthWeekday": {
       "properties": {
         "weekOfMonth": {
@@ -740,6 +931,28 @@
           "type": "object"
         }
       ]
+    },
+    "PolicyOverride": {
+      "description": "What a project or a list stores: any subset of a [`Policy`]. An absent key inherits.\n\nFor the two routing fields `null` is a value — \"any agent\" — so it overrides an inherited one;\nonly an absent key inherits.",
+      "properties": {
+        "autonomy": {
+          "$ref": "#/$defs/AutonomyOverride"
+        },
+        "escalation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Escalation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingOverride"
+        }
+      },
+      "type": "object"
     },
     "Preferences": {
       "description": "What My Tasks is filtered and sorted by, for this account, on every device.\n\nHeld by the account rather than the machine, which is the whole reason this exists as its own\nendpoint: filters set on a laptop are the filters on the desktop.",
@@ -1159,6 +1372,27 @@
         "custom"
       ],
       "type": "string"
+    },
+    "RoutingOverride": {
+      "description": "[`Routing`], each field absent (inherit), `null` (any) or set.",
+      "properties": {
+        "agents": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "assignTo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "SecureFile": {
       "description": "A file held by the server's secure-file store. The wire names differ from the field names, and\nthose aliases are the whole reason this type is hand-mapped.",
@@ -2804,6 +3038,180 @@
       "required": [
         "kind",
         "assigneeId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "O1 of [`crate::orchestration`]: the effective policy for a list — the default, then the\nproject's stored override, then the list's (AWTD-1685). Either may be absent or `null`.\nGone without the `orchestration` feature (the browser build), like `renderMarkdown`.",
+      "properties": {
+        "kind": {
+          "const": "orchestrationPolicy",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "O3: may `agent` (a mailbox) take an unassigned Ready task on this list —\n[`crate::orchestration::route`]. Answers `{ take, reason }`.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "orchestrationRoute",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "agent"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "O4: may `agent` do `action` on its own — [`crate::orchestration::may`]. Answers\n`{ decision: \"allowed\" | \"ask\" | \"never\", mustAsk, reason }`. `migration` is read only for\n`action: \"migrate\"`, and a migrate without it is answered as destructive.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "orchestrationMay",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "migration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MigrationKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "agent",
+        "action"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "O5: who receives a question or approval request, and the hand-back write —\n[`crate::orchestration::escalate`]. Answers `{ notify, handBack }`.",
+      "properties": {
+        "kind": {
+          "const": "orchestrationEscalate",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "listOwnerId": {
+          "type": "string"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "taskCreatorId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "listOwnerId"
       ],
       "type": "object"
     },

@@ -32,6 +32,8 @@ pub mod manual_order;
 #[cfg(feature = "markdown")]
 pub mod markdown;
 pub mod model;
+#[cfg(feature = "orchestration")]
+pub mod orchestration;
 pub mod palette;
 pub mod parse;
 pub mod permissions;

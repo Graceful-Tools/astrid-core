@@ -27,6 +27,7 @@ pub const CORE_OWNED: &[&str] = &[
     "repeat-summary-l10n.json",
     "callout-placement.json",
     "sidebar-projects.json",
+    "orchestration.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -1411,6 +1412,303 @@ pub fn sidebar_projects_fixture() -> Result<String, String> {
     )
 }
 
+/// Astrid's own boards as one stored project policy: astrid-web `docs/FIXALL_WORKFLOW.md` →
+/// *Autonomy* (Jon, 2026-11-15). Merge and deploy on green gates, additive migrations ship,
+/// destructive ones and anything outward-facing (a store submission, money) ask Jon.
+fn astrid_policy() -> Value {
+    json!({
+        "autonomy": {
+            "merge": "allowed",
+            "deploy": "allowed",
+            "migrate": { "additive": "allowed", "destructive": "ask" },
+            "release": "ask",
+            "spend": "ask"
+        },
+        "escalation": { "to": "people", "userIds": ["jon"] }
+    })
+}
+
+fn orch(kind: &str, project: Value, list: Value, rest: Value) -> Value {
+    let mut request = json!({ "kind": kind, "project": project, "list": list });
+    if let (Value::Object(request), Value::Object(rest)) = (&mut request, rest) {
+        request.extend(rest);
+    }
+    request
+}
+
+fn may_req(project: Value, list: Value, agent: &str, action: &str, migration: Value) -> Value {
+    orch(
+        "orchestrationMay",
+        project,
+        list,
+        json!({ "agent": agent, "action": action, "migration": migration }),
+    )
+}
+
+fn decided(decision: &str, reason: &str) -> Value {
+    ok(json!({ "decision": decision, "mustAsk": decision == "ask", "reason": reason }))
+}
+
+fn orchestration_cases() -> Vec<Case> {
+    let none = Value::Null;
+    let astrid = astrid_policy;
+    let merge_asks = || json!({ "autonomy": { "merge": "ask" } });
+    let set = || json!({ "routing": { "agents": ["claude", "copilot"] } });
+    let routed = || json!({ "routing": { "assignTo": "codex", "agents": ["claude"] } });
+    let route = |project: Value, agent: &str| {
+        orch(
+            "orchestrationRoute",
+            project,
+            Value::Null,
+            json!({ "agent": agent }),
+        )
+    };
+    let escalate = |project: Value, creator: Value| {
+        orch(
+            "orchestrationEscalate",
+            project,
+            Value::Null,
+            json!({ "listOwnerId": "owner", "taskCreatorId": creator }),
+        )
+    };
+    vec![
+        case(
+            "resolve/nothing-stored-is-todays-behaviour",
+            "orchestrationPolicy",
+            orch("orchestrationPolicy", none.clone(), none.clone(), json!({})),
+            ok(json!({
+                "routing": { "assignTo": null, "agents": null },
+                "autonomy": {
+                    "merge": "never", "deploy": "never",
+                    "migrate": { "additive": "never", "destructive": "never" },
+                    "release": "never", "spend": "never"
+                },
+                "escalation": { "to": "listOwner" }
+            })),
+        ),
+        case(
+            "resolve/astrid-fixall-autonomy-as-a-project-policy",
+            "orchestrationPolicy",
+            orch("orchestrationPolicy", astrid(), none.clone(), json!({})),
+            ok(json!({
+                "routing": { "assignTo": null, "agents": null },
+                "autonomy": astrid()["autonomy"],
+                "escalation": astrid()["escalation"]
+            })),
+        ),
+        case(
+            "resolve/a-list-overrides-one-field-and-inherits-the-rest",
+            "orchestrationPolicy",
+            orch("orchestrationPolicy", astrid(), merge_asks(), json!({})),
+            ok(json!({ "autonomy": { "merge": "ask", "deploy": "allowed" } })),
+        ),
+        case(
+            "resolve/a-list-with-no-project-has-only-its-own",
+            "orchestrationPolicy",
+            orch("orchestrationPolicy", none.clone(), merge_asks(), json!({})),
+            ok(json!({ "autonomy": { "merge": "ask", "deploy": "never" } })),
+        ),
+        case(
+            "resolve/a-null-assign-to-overrides-the-projects-agent",
+            "orchestrationPolicy",
+            orch(
+                "orchestrationPolicy",
+                json!({ "routing": { "assignTo": "claude" } }),
+                json!({ "routing": { "assignTo": null } }),
+                json!({}),
+            ),
+            ok(json!({ "routing": { "assignTo": null } })),
+        ),
+        case(
+            "may/default-never-merges",
+            "orchestrationMay",
+            may_req(none.clone(), none.clone(), "claude", "merge", none.clone()),
+            decided("never", "policy"),
+        ),
+        case(
+            "may/default-never-deploys",
+            "orchestrationMay",
+            may_req(none.clone(), none.clone(), "claude", "deploy", none.clone()),
+            decided("never", "policy"),
+        ),
+        case(
+            "may/astrid-merges",
+            "orchestrationMay",
+            may_req(astrid(), none.clone(), "claude", "merge", none.clone()),
+            decided("allowed", "policy"),
+        ),
+        case(
+            "may/astrid-deploys",
+            "orchestrationMay",
+            may_req(astrid(), none.clone(), "claude", "deploy", none.clone()),
+            decided("allowed", "policy"),
+        ),
+        case(
+            "may/astrid-ships-an-additive-migration",
+            "orchestrationMay",
+            may_req(
+                astrid(),
+                none.clone(),
+                "claude",
+                "migrate",
+                json!("additive"),
+            ),
+            decided("allowed", "policy"),
+        ),
+        case(
+            "may/astrid-asks-before-a-destructive-migration",
+            "orchestrationMay",
+            may_req(
+                astrid(),
+                none.clone(),
+                "claude",
+                "migrate",
+                json!("destructive"),
+            ),
+            decided("ask", "policy"),
+        ),
+        case(
+            "may/an-unclassified-migration-is-destructive",
+            "orchestrationMay",
+            may_req(astrid(), none.clone(), "claude", "migrate", none.clone()),
+            decided("ask", "unclassifiedMigration"),
+        ),
+        case(
+            "may/astrid-asks-before-a-store-release",
+            "orchestrationMay",
+            may_req(astrid(), none.clone(), "claude", "release", none.clone()),
+            decided("ask", "policy"),
+        ),
+        case(
+            "may/astrid-asks-before-spending",
+            "orchestrationMay",
+            may_req(astrid(), none.clone(), "claude", "spend", none.clone()),
+            decided("ask", "policy"),
+        ),
+        case(
+            "may/a-list-that-asks-to-merge-overrides-the-project",
+            "orchestrationMay",
+            may_req(astrid(), merge_asks(), "claude", "merge", none.clone()),
+            decided("ask", "policy"),
+        ),
+        case(
+            "may/a-destructive-migration-is-never-freer-than-an-additive-one",
+            "orchestrationMay",
+            may_req(
+                json!({ "autonomy": { "migrate": { "additive": "never", "destructive": "allowed" } } }),
+                none.clone(),
+                "claude",
+                "migrate",
+                json!("destructive"),
+            ),
+            decided("never", "destructiveFloor"),
+        ),
+        case(
+            "may/an-agent-the-list-does-not-admit-may-do-nothing",
+            "orchestrationMay",
+            may_req(set(), none.clone(), "codex", "merge", none.clone()),
+            decided("never", "notAdmitted"),
+        ),
+        case(
+            "route/default-any-agent-the-claim-decides",
+            "orchestrationRoute",
+            route(none.clone(), "codex"),
+            ok(json!({ "take": true, "reason": "anyAdmittedAgent" })),
+        ),
+        case(
+            "route/an-admitted-agent-takes",
+            "orchestrationRoute",
+            route(set(), "Copilot"),
+            ok(json!({ "take": true, "reason": "anyAdmittedAgent" })),
+        ),
+        case(
+            "route/an-agent-off-the-set-does-not",
+            "orchestrationRoute",
+            route(set(), "codex"),
+            ok(json!({ "take": false, "reason": "notAdmitted" })),
+        ),
+        case(
+            "route/the-routed-agent-takes-even-off-the-set",
+            "orchestrationRoute",
+            route(routed(), "codex"),
+            ok(json!({ "take": true, "reason": "routed" })),
+        ),
+        case(
+            "route/every-other-agent-leaves-it",
+            "orchestrationRoute",
+            route(routed(), "claude"),
+            ok(json!({ "take": false, "reason": "routedElsewhere" })),
+        ),
+        case(
+            "escalate/default-the-list-owner",
+            "orchestrationEscalate",
+            escalate(none.clone(), json!("ana")),
+            ok(json!({
+                "notify": ["owner"],
+                "handBack": { "statusRole": null, "assigneeId": "owner", "completed": false }
+            })),
+        ),
+        case(
+            "escalate/astrid-asks-jon",
+            "orchestrationEscalate",
+            escalate(astrid(), json!("ana")),
+            ok(json!({ "notify": ["jon"], "handBack": { "assigneeId": "jon" } })),
+        ),
+        case(
+            "escalate/the-creator-or-else-the-owner",
+            "orchestrationEscalate",
+            escalate(
+                json!({ "escalation": { "to": "taskCreator" } }),
+                none.clone(),
+            ),
+            ok(json!({ "notify": ["owner"] })),
+        ),
+        case(
+            "escalate/people-in-order-without-repeats",
+            "orchestrationEscalate",
+            escalate(
+                json!({ "escalation": { "to": "people", "userIds": ["jon", "ana", "jon"] } }),
+                none.clone(),
+            ),
+            ok(json!({ "notify": ["jon", "ana"], "handBack": { "assigneeId": "jon" } })),
+        ),
+        case(
+            "escalate/nobody-named-falls-back-to-the-owner",
+            "orchestrationEscalate",
+            escalate(
+                json!({ "escalation": { "to": "people", "userIds": [] } }),
+                none.clone(),
+            ),
+            ok(json!({ "notify": ["owner"] })),
+        ),
+        case(
+            "refused/an-unknown-autonomy-word",
+            "orchestrationMay",
+            may_req(
+                json!({ "autonomy": { "merge": "sometimes" } }),
+                none.clone(),
+                "claude",
+                "merge",
+                none,
+            ),
+            json!({ "ok": false }),
+        ),
+    ]
+}
+
+/// The text of `orchestration.json` (AWTD-1685).
+pub fn orchestration_fixture() -> Result<String, String> {
+    render(
+        orchestration_cases(),
+        "crates/astrid-rules/src/orchestration.rs",
+        json!({
+            "canonicalSource": "astrid-core crates/astrid-rules/src/orchestration.rs — core-first (AWTD-1685); design in docs/ORCHESTRATION_POLICY.md, decision docs/CONTRACTS.md D71. astrid-web stores the policy on Project and the override on TaskList, and its server asks these rules wherever an agent acts.",
+            "astridPolicy": astrid_policy(),
+            "astridPolicySource": "astrid-web docs/FIXALL_WORKFLOW.md → Autonomy (Jon, 2026-11-15): additive migrations ship, destructive ones and anything outward-facing wait for Jon. `jon` stands for his user id.",
+        }),
+    )
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -1420,6 +1718,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("board-rows.json", board_rows_fixture()?),
         ("list-project-moves.json", list_project_moves_fixture()?),
         ("sidebar-projects.json", sidebar_projects_fixture()?),
+        ("orchestration.json", orchestration_fixture()?),
     ])
 }
 

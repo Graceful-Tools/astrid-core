@@ -50,6 +50,18 @@ mod tests {
         );
     }
 
+    /// The Node package is built with `orchestration` on, and astrid-web's server asks it the
+    /// orchestration policy wherever an agent acts (AWTD-1685).
+    #[cfg(feature = "orchestration")]
+    #[test]
+    fn the_node_build_answers_the_orchestration_policy_awtd_1685() {
+        let reply: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"orchestrationMay","agent":"claude","action":"merge"}"#,
+        ))
+        .unwrap();
+        assert_eq!(reply["value"]["decision"], "never", "{reply}");
+    }
+
     #[test]
     fn a_bad_request_is_an_envelope_not_a_panic() {
         let reply: serde_json::Value = serde_json::from_str(&run_json("not json")).unwrap();

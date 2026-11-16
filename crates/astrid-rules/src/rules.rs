@@ -254,6 +254,52 @@ pub enum Rule {
     },
     /// R4: what handing a task back to a person writes — [`crate::waiting::hand_back`].
     HandBack { assignee_id: String },
+    /// O1 of [`crate::orchestration`]: the effective policy for a list — the default, then the
+    /// project's stored override, then the list's (AWTD-1685). Either may be absent or `null`.
+    /// Gone without the `orchestration` feature (the browser build), like `renderMarkdown`.
+    #[cfg(feature = "orchestration")]
+    OrchestrationPolicy {
+        #[serde(default)]
+        project: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        list: Option<crate::orchestration::PolicyOverride>,
+    },
+    /// O3: may `agent` (a mailbox) take an unassigned Ready task on this list —
+    /// [`crate::orchestration::route`]. Answers `{ take, reason }`.
+    #[cfg(feature = "orchestration")]
+    OrchestrationRoute {
+        #[serde(default)]
+        project: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        list: Option<crate::orchestration::PolicyOverride>,
+        agent: String,
+    },
+    /// O4: may `agent` do `action` on its own — [`crate::orchestration::may`]. Answers
+    /// `{ decision: "allowed" | "ask" | "never", mustAsk, reason }`. `migration` is read only for
+    /// `action: "migrate"`, and a migrate without it is answered as destructive.
+    #[cfg(feature = "orchestration")]
+    OrchestrationMay {
+        #[serde(default)]
+        project: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        list: Option<crate::orchestration::PolicyOverride>,
+        agent: String,
+        action: crate::orchestration::Action,
+        #[serde(default)]
+        migration: Option<crate::orchestration::MigrationKind>,
+    },
+    /// O5: who receives a question or approval request, and the hand-back write —
+    /// [`crate::orchestration::escalate`]. Answers `{ notify, handBack }`.
+    #[cfg(feature = "orchestration")]
+    OrchestrationEscalate {
+        #[serde(default)]
+        project: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        list: Option<crate::orchestration::PolicyOverride>,
+        list_owner_id: String,
+        #[serde(default)]
+        task_creator_id: Option<String>,
+    },
     /// R7: the optional preset columns this board can still add — [`crate::board::available_presets`].
     BoardPresets {
         #[serde(default)]
@@ -1003,6 +1049,44 @@ pub fn run(rule: Rule) -> Response {
             now,
         } => Response::ok(crate::waiting::settle(&task, &blockers, now)),
         Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
+        #[cfg(feature = "orchestration")]
+        Rule::OrchestrationPolicy { project, list } => Response::ok(crate::orchestration::resolve(
+            project.as_ref(),
+            list.as_ref(),
+        )),
+        #[cfg(feature = "orchestration")]
+        Rule::OrchestrationRoute {
+            project,
+            list,
+            agent,
+        } => Response::ok(crate::orchestration::route(
+            &crate::orchestration::resolve(project.as_ref(), list.as_ref()),
+            &agent,
+        )),
+        #[cfg(feature = "orchestration")]
+        Rule::OrchestrationMay {
+            project,
+            list,
+            agent,
+            action,
+            migration,
+        } => Response::ok(crate::orchestration::may(
+            &crate::orchestration::resolve(project.as_ref(), list.as_ref()),
+            &agent,
+            action,
+            migration,
+        )),
+        #[cfg(feature = "orchestration")]
+        Rule::OrchestrationEscalate {
+            project,
+            list,
+            list_owner_id,
+            task_creator_id,
+        } => Response::ok(crate::orchestration::escalate(
+            &crate::orchestration::resolve(project.as_ref(), list.as_ref()),
+            &list_owner_id,
+            task_creator_id.as_deref(),
+        )),
         Rule::BoardPresets { custom_states } => {
             Response::ok(crate::board::available_presets(custom_states.as_ref()))
         }

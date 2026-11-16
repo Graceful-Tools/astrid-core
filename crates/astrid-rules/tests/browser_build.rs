@@ -97,3 +97,19 @@ mod with_the_renderer {
         assert_eq!(reply["value"]["showsText"], json!(true));
     }
 }
+
+/// AWTD-1685: the orchestration policy is the server's question, never the browser's, so the
+/// browser build refuses it by name; every other build answers it.
+#[test]
+fn orchestration_is_answered_only_where_the_feature_is_on_awtd_1685() {
+    let reply = answer(json!({ "kind": "orchestrationMay", "agent": "claude", "action": "merge" }));
+    if cfg!(feature = "orchestration") {
+        assert_eq!(reply["ok"], json!(true), "{reply}");
+    } else {
+        assert_eq!(reply["ok"], json!(false), "{reply}");
+        assert!(
+            reply["error"].to_string().contains("orchestrationMay"),
+            "{reply}"
+        );
+    }
+}
