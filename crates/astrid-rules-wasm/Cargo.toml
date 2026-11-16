@@ -21,6 +21,10 @@ crate-type = ["cdylib", "rlib"]
 # to the core's. Step 1 gated markdown out of this crate as a whole, and because one artifact fed
 # both packages, the Node package lost `renderMarkdown` too (AWTD2-162).
 markdown = ["astrid-rules/markdown"]
+# The orchestration policy (AWTD-1685). OFF for the browser and ON for the Node package, like
+# `markdown`: astrid-web's server asks it wherever an agent acts, and no page does, so the browser
+# downloads none of it.
+orchestration = ["astrid-rules/orchestration"]
 
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0", default-features = false }

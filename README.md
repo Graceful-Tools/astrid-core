@@ -155,6 +155,13 @@ markdown itself — that rule exists for the clients that do not — so it was d
 order never to call it. **−62,917 brotli bytes, 19.4%**, which is three times `pulldown_cmark`'s
 own 4% code share, because the Unicode tables and the `Block`/`Inline` serde code go with it.
 
+**The browser build has no orchestration policy either** (AWTD-1685). The `orchestration` feature
+is on for every native client and for the Node package (`astrid-rules-wasm/orchestration`), because
+astrid-web's server asks it wherever an agent acts. No page asks it, so the browser artifact is
+byte-for-byte what it was before the rules existed. `scripts/check-wasm-packages.mjs` asserts that
+node answers `orchestrationMay` and web refuses it. See
+[`docs/ORCHESTRATION_POLICY.md`](docs/ORCHESTRATION_POLICY.md).
+
 What stays off that module is deliberate: `shows_text`, `is_empty`, `files_of` and
 `renders_inline` are what `Rule::CommentVisibility` asks and none of them parses anything. Both
 halves are asserted in `crates/astrid-rules/tests/browser_build.rs`, and CI clippies and tests the
@@ -233,6 +240,7 @@ crates/astrid-core/src/
 crates/xtask/   cargo xtask check-contracts
 contracts/      the fixtures generated from astrid-web, and the exporter (see contracts/README.md)
 docs/CONTRACTS.md   the decisions and known divergences between clients
+docs/ORCHESTRATION_POLICY.md   who takes a task, what an agent may do alone, who it asks (AWTD-1685)
 docs/CROSS_CLIENT_REVIEW_2026-11.md   what each client still re-implements, theming, white-label gaps
 ```
 

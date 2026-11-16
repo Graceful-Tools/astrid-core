@@ -5,12 +5,14 @@
 #
 # Writes two wasm-bindgen packages from two builds:
 #   <out-dir>/node/   CommonJS for Node (Next.js route handlers and server components; vitest).
-#                     Built with `--features markdown`: astrid-web's server renders through it.
+#                     Built with `--features markdown,orchestration`: astrid-web's server renders
+#                     through it, and asks it the orchestration policy (AWTD-1685).
 #   <out-dir>/web/    an ES module for the browser, initialised with the .wasm's URL. The default
 #                     build, with no markdown renderer (task 4d05306d / AWTD2-162): the browser has
 #                     its own, and this is the artifact CI's size budget measures.
 #
-# Then it asks each package for `renderMarkdown` and fails unless node answers and web refuses.
+# Then it asks each package for `renderMarkdown` and `orchestrationMay` and fails unless node
+# answers and web refuses.
 # One artifact used to feed both packages, which is how the Node package once lost the renderer.
 #
 # Needs the wasm32-unknown-unknown target and the wasm-bindgen CLI at the exact version
@@ -38,7 +40,7 @@ wasm="${CARGO_TARGET_DIR:-$root/target}/wasm32-unknown-unknown/wasm/astrid_rules
 rm -rf "$out/node" "$out/web"
 
 # Both builds write the same artifact path, so each is bound before the next build replaces it.
-cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm --features markdown
+cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm --features markdown,orchestration
 wasm-bindgen "$wasm" --out-dir "$out/node" --target nodejs
 cargo build -p astrid-rules-wasm --target wasm32-unknown-unknown --profile wasm
 wasm-bindgen "$wasm" --out-dir "$out/web" --target web
