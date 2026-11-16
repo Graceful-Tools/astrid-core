@@ -359,6 +359,10 @@ pub struct TaskList {
         skip_serializing_if = "Option::is_none"
     )]
     pub ai_agent_configured_by: Option<String>,
+    /// Whether an agent must take a claim lease before working a task on this list (astrid-web
+    /// AWTD-1688). Carried so a cached list round-trips; the claim itself is the server's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_claim_required: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy_count: Option<i64>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
