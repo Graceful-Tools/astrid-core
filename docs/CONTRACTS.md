@@ -1302,6 +1302,23 @@ shape a quick pick does, because the shell must not do this arithmetic. Tests:
 
 ---
 
+## `rowsForList` decodes only its window (task `a09a1e2c`, AWTD2-145)
+
+From the cache, `rowsForList` no longer decodes the candidates. `select` — the same
+`astrid_rules::rows::assemble::select` the stateless door runs — runs over tasks rebuilt from the
+indexed columns (`TaskSummary::skeleton`), and `assemble::project` is handed only the decoded
+window. **The rules are not written twice**: the skeleton carries exactly the fields the filters,
+sorts, splice and parent chain read (`completed`, `completed_at`, `updated_at`, `created_at`,
+`due_date_time`, `is_all_day`, `priority`, `repeating`, `parent_task_id`, `assignee_id`,
+`creator_id`, and "is filed in a list"), and each column is written from the same expression the
+rules read, so the answer is the same by construction. `the_bounded_answer_is_the_decoding_answer`
+holds the two paths equal, and `rows_for_a_virtual_list_decode_only_the_window` asserts the count.
+
+Two asks still decode everything, on purpose: one that hands over its own `tasks` (a featured
+public list), and a view filtered by `public_lists`, which reads the nested lists no column keeps
+(D61). A new filter that reads a field the skeleton does not carry must add it there, or it will
+see the empty value.
+
 ## Why the palette, mentions and search read every task (task `3845b8a6`, 2026-11-04)
 
 Four reads ask `Store::tasks()` — `SELECT json FROM tasks` plus a full `serde_json` decode per row
