@@ -1648,6 +1648,14 @@ pub enum Command {
     DeleteProject {
         project_id: String,
     },
+    /// Rename a board (ADEV-48): `PATCH /api/v1/projects/{id}` with `{ name }`. The server allows
+    /// the owner or a board admin and refuses anyone else (`PROJECT_RENAME_FORBIDDEN`). The name is
+    /// trimmed here and a blank one is refused before any request. Online only. Answers the
+    /// renamed board from the cache.
+    RenameProject {
+        project_id: String,
+        name: String,
+    },
     /// Which lists this person's multi-list board for a project draws as rows, and which could be
     /// added (AWTD-1676; web AWTD-1660). Read from `GET /api/v1/projects/{id}/board-rows`; offline,
     /// the last answer, with `fromCache: true`. Answers `{ projectId, savedListIds, rowListIds,

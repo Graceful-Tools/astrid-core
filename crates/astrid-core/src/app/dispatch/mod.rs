@@ -113,6 +113,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::CreateProject { .. }
         | Command::CreateBoardForList { .. }
         | Command::DeleteProject { .. }
+        | Command::RenameProject { .. }
         | Command::ProjectBoardRows { .. }
         | Command::SaveProjectBoardRows { .. }
         | Command::ProjectBoardRow { .. }) => board::run(app, command).await,
