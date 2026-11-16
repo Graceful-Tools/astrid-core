@@ -598,6 +598,80 @@ fn waiting_cases() -> Vec<Case> {
             json!({ "kind": "handBack", "assigneeId": "u-jon" }),
             ok(json!({ "statusRole": null, "assigneeId": "u-jon", "completed": false })),
         ),
+        // ── R8: handing off (AWTD-1686) ────────────────────────────────────────────────────
+        // The round trip: the plan, the half completing, the source waking to its holder.
+        case(
+            "handoff/doing-source-waits-unassigned-and-remembers-its-holder",
+            "R8",
+            json!({ "kind": "waitingHandoff", "source": { "id": "src", "statusRole": "doing", "assigneeId": "agent" }, "blockers": [], "now": NOW }),
+            ok(json!({
+                "half": { "statusRole": "ready", "originTaskId": "src" },
+                "source": { "statusRole": "waiting", "assignee": "clear", "transition": "enter" },
+                "returnAssigneeId": "agent"
+            })),
+        ),
+        case(
+            "handoff/ready-source-with-nobody-assigned-remembers-nobody",
+            "R8",
+            json!({ "kind": "waitingHandoff", "source": { "id": "src", "statusRole": "ready" }, "blockers": [], "now": NOW }),
+            ok(json!({
+                "half": { "statusRole": "ready", "originTaskId": "src" },
+                "source": { "statusRole": "waiting", "assignee": "keep", "transition": "enter" },
+                "returnAssigneeId": null
+            })),
+        ),
+        case(
+            "handoff/source-already-waiting-keeps-the-remembered-holder",
+            "R8",
+            json!({ "kind": "waitingHandoff", "source": { "id": "src", "statusRole": "waiting" }, "blockers": [{ "id": "half-1", "completed": false }], "returnAssigneeId": "agent", "now": NOW }),
+            ok(json!({
+                "source": { "statusRole": "waiting", "assignee": "keep", "transition": "stay" },
+                "returnAssigneeId": "agent"
+            })),
+        ),
+        case(
+            "handoff/a-finished-source-is-refused",
+            "R8",
+            json!({ "kind": "waitingHandoff", "source": { "id": "src", "statusRole": "doing", "completed": true, "assigneeId": "agent" }, "blockers": [], "now": NOW }),
+            json!({ "ok": false, "error": { "kind": "refused", "code": "HANDOFF_SOURCE_DONE" } }),
+        ),
+        case(
+            "handoff/half-done-source-wakes-to-ready-back-with-its-holder",
+            "R3/R8",
+            json!({ "kind": "waitingSettle", "task": { "id": "src", "statusRole": "waiting" }, "blockers": [{ "id": "half", "completed": true }], "returnAssigneeId": "agent", "now": NOW }),
+            ok(
+                json!({ "action": "wakeToReady", "statusRole": "ready", "assignee": "return", "returnAssigneeId": "agent" }),
+            ),
+        ),
+        case(
+            "handoff/half-still-open-source-stays-and-returns-nobody",
+            "R3/R8",
+            json!({ "kind": "waitingSettle", "task": { "id": "src", "statusRole": "waiting" }, "blockers": [{ "id": "half", "completed": false }], "returnAssigneeId": "agent", "now": NOW }),
+            ok(json!({ "action": "stay", "statusRole": "waiting", "assignee": "keep" })),
+        ),
+        case(
+            "handoff/somebody-assigned-during-the-wait-wins",
+            "R3/R8",
+            json!({ "kind": "waitingSettle", "task": { "id": "src", "statusRole": "waiting", "assigneeId": "u-jon" }, "blockers": [{ "id": "half", "completed": true }], "returnAssigneeId": "agent", "now": NOW }),
+            ok(json!({ "action": "wakeToReady", "statusRole": "ready", "assignee": "keep" })),
+        ),
+        case(
+            "handoff/removing-the-half-wakes-the-source-back-to-its-holder",
+            "R2/R8",
+            json!({ "kind": "waitingWrite", "task": { "id": "src", "statusRole": "waiting" }, "blockers": [{ "id": "half", "completed": false }], "change": { "removeBlockerIds": ["half"] }, "returnAssigneeId": "agent", "now": NOW }),
+            ok(
+                json!({ "statusRole": "ready", "assignee": "return", "transition": "wake", "returnAssigneeId": "agent" }),
+            ),
+        ),
+        case(
+            "handoff/a-plain-wake-remembers-nobody",
+            "R3/R8",
+            settle(
+                json!({ "id": "t", "statusRole": "waiting" }),
+                json!([{ "id": "b1", "completed": true }]),
+            ),
+            ok(json!({ "action": "wakeToReady", "statusRole": "ready", "assignee": "keep" })),
+        ),
         // ── R7 ─────────────────────────────────────────────────────────────────────────────
         case(
             "presets/a-board-with-no-columns-of-its-own",
@@ -1275,7 +1349,7 @@ pub fn waiting_fixture() -> Result<String, String> {
     render(
         waiting_cases(),
         "crates/astrid-rules/src/waiting.rs, crates/astrid-rules/src/board.rs (presets)",
-        json!({ "waitingNeedsCondition": "WAITING_NEEDS_CONDITION" }),
+        json!({ "waitingNeedsCondition": "WAITING_NEEDS_CONDITION", "handoffSourceDone": "HANDOFF_SOURCE_DONE" }),
     )
 }
 

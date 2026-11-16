@@ -414,6 +414,46 @@ async fn aatd46_a_featured_list_shows_its_tasks_without_caching_them() {
     assert_eq!(cached["ok"], false, "not cached: {cached}");
 }
 
+/// AITD-634: a featured list's answer carries the tasks behind its rows, whole, so a shell that
+/// draws and opens task models (the Apple apps) needs no second fetch of the same list. Still
+/// not cached.
+#[tokio::test]
+async fn aitd634_a_featured_list_answers_the_tasks_behind_its_rows() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/tasks",
+        200,
+        json!({ "tasks": [
+            { "id": "theirs", "title": "Plant tulips", "listIds": ["pub"], "creatorId": "them",
+              "description": "In October" }
+        ] }),
+    );
+    let app = app_with(transport);
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let rows = call(
+        &app,
+        json!({ "kind": "featuredRows", "listId": "pub",
+                "list": { "id": "pub", "name": "Garden tips", "privacy": "PUBLIC", "ownerId": "them" } }),
+    )
+    .await;
+    assert_eq!(rows["ok"], true, "{rows}");
+    let tasks = rows["value"]["tasks"].as_array().expect("tasks");
+    assert_eq!(tasks.len(), 1, "{rows}");
+    assert_eq!(tasks[0]["id"], "theirs");
+    assert_eq!(
+        tasks[0]["description"], "In October",
+        "the whole task: {rows}"
+    );
+    assert_eq!(tasks[0]["creatorId"], "them");
+    assert_eq!(
+        rows["value"]["rows"][0]["id"], "theirs",
+        "rows still answered: {rows}"
+    );
+    let cached = call(&app, json!({ "kind": "task", "taskId": "theirs" })).await;
+    assert_eq!(cached["ok"], false, "not cached: {cached}");
+}
+
 /// AATD-54: the triage deck is the reminded task, then my open tasks due today or overdue —
 /// never someone else's, never a done one.
 #[tokio::test]

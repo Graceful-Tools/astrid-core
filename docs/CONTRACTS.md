@@ -522,6 +522,16 @@ rules; nobody else spells them** — not fixall, not an agent script, not a shel
 - **R6.** Finished work awaiting its deploy stays in Doing. No rule here: `settle` leaves Doing alone.
 - **R7.** Optional preset columns a board can add, none shown by default: `testing` / "Testing" /
   "Deploying, in canary, or in an experiment." A task in it is not Waiting.
+- **R8 — handoff (AWTD-1686).** One step files the other half of a task on another list and makes
+  the source wait for it (`waitingHandoff`). The half is born in Ready with the source as its
+  origin; the source enters Waiting with the half as its blocker, unassigned as any entry is (R2),
+  and the plan names its holder (`returnAssigneeId`), which the server remembers. When the source
+  leaves Waiting by rule with nobody assigned, `waitingSettle` / `waitingWrite` — given the
+  remembered `returnAssigneeId` — answer `assignee: "return"` with that id, so it wakes to Ready in
+  the queue of the agent or person who handed it off. Somebody assigned during the wait wins. A
+  plain move into Waiting remembers nobody and still unassigns. A finished source is refused with
+  `HANDOFF_SOURCE_DONE`. Remembering and creating the half are the server's (astrid-web `POST
+  /api/v1/tasks/{id}/handoff`); a native client sees the result as ordinary task updates.
 
 **"Due to start"** is ported from astrid-web `lib/ready-queue-scope.ts` `isDueToStart`: no
 readable date is due now, a date is due once `due <= now`. All-day dates are stored at midnight
@@ -529,7 +539,7 @@ UTC, so an all-day task wakes at the start of its (UTC) day, and an all-day date
 longer a wait condition once that day has begun.
 
 **The doors.** Rules door (`run_json`, the wasm `runJson`): `waitingWrite`, `waitingWake`,
-`waitingSettle`, `handBack`, `boardPresets`. App door (dispatch): `moveTaskToColumn`,
+`waitingSettle`, `handBack`, `waitingHandoff`, `boardPresets`. App door (dispatch): `moveTaskToColumn`,
 `setTaskStatus`, `dropBoardCard`, `addBoardCard` and `setTaskStatusRole` take the optional
 `dueDateTime`, `isAllDay`, `waitOnTaskId` and `keepAssignee` (`app::command::WaitOptions`), and
 `updateTask` reads `keepAssignee` beside its changes, and `createTask` with
