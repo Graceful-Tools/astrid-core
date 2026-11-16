@@ -79,6 +79,11 @@ now follow (task 9ef7edb4).
 (RED), then port the implementation (GREEN), then refactor. The Swift tests are the specification.
 A divergence found on the way goes in `docs/CONTRACTS.md`, not into the code.
 
+**A client's pin bump updates its `CONSUMERS.md` row in the same change** (ADEV-7). A row left
+behind no longer turns this repo's CI red — `check-pins` reports it, and the daily `Consumers
+follow pins` workflow (`cargo xtask follow-pins`) opens the one-line PR — but that is the safety
+net. A pin at a commit not on `main`, a short sha, or an unlisted consumer still fails.
+
 **A change here reaches a client only when that client bumps its pinned revision.** Say so in the
 completion report: "on `main` of astrid-core at `<sha>`; astrid-windows pins `<older sha>`". If the
 change is one a client must take, file the bump on that client's board.
