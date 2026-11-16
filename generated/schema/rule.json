@@ -2721,6 +2721,14 @@
           "format": "date-time",
           "type": "string"
         },
+        "returnAssigneeId": {
+          "default": null,
+          "description": "R8: the holder a handoff remembered for this task. A write that wakes it answers\n`assignee: \"return\"` with this id, unless somebody is assigned (AWTD-1686).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "task": {
           "$ref": "#/$defs/Task"
         }
@@ -2779,6 +2787,14 @@
           "format": "date-time",
           "type": "string"
         },
+        "returnAssigneeId": {
+          "default": null,
+          "description": "R8: the holder a handoff remembered; waking answers `assignee: \"return\"` with it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "task": {
           "$ref": "#/$defs/Task"
         }
@@ -2804,6 +2820,43 @@
       "required": [
         "kind",
         "assigneeId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "R8: what handing `source` off to another list writes — [`crate::waiting::handoff`]: the\nhalf (Ready, the source as its origin), the source's write (Waiting, unassigned), and the\nholder to remember. Refused with `{kind: \"refused\", code: \"HANDOFF_SOURCE_DONE\"}` for a\nfinished source (AWTD-1686).",
+      "properties": {
+        "blockers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Blocker"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "waitingHandoff",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "returnAssigneeId": {
+          "default": null,
+          "description": "The holder an earlier handoff remembered for `source`, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "now"
       ],
       "type": "object"
     },

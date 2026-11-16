@@ -101,6 +101,16 @@ impl Failure {
         }
     }
 
+    /// R8 of `crate::waiting`: a handoff whose source is already finished. `refused`, with
+    /// `code: "HANDOFF_SOURCE_DONE"` (AWTD-1686).
+    pub fn handoff_source_done() -> Self {
+        let error = crate::waiting::HandoffError::SourceDone;
+        Failure {
+            code: Some(error.code().to_string()),
+            ..Self::of(FailureKind::Refused, error.message())
+        }
+    }
+
     /// A command this build knows but cannot serve, because the feature it needs was compiled out
     /// (astrid-core's `sync-google`, task `b92569a8`).
     ///
