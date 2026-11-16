@@ -22,7 +22,10 @@ and the 150,000-byte brotli target in the README is for that row alone.
 ## 2. What the bytes are. Measured, not the assumption the task started with
 
 All on the pre-`wasm-bindgen` browser artifact, brotli at quality 11 (`scripts/wasm-size.mjs`),
-macOS, after slice 1 (260,034 bytes).
+macOS, after slice 1 (260,034 bytes), at the 47 rules the door had before `sidebar` (AWTD-1681,
++8,192) merged. With `sidebar`, the full door measures 268,013. Candidate A does not include
+`sidebar`, so its number stands. Whether web's browser draws the sidebar through the door is part
+of the §4 question.
 
 **The internal tag is not the cost.** The earlier hypothesis was that `#[serde(tag = "kind")]` makes
 serde buffer every request into `Content` and so doubles the decoders. Rebuilt externally tagged,

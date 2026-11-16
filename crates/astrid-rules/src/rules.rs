@@ -174,6 +174,21 @@ pub enum Rule {
         #[serde(default)]
         projects: Vec<crate::model::project::Project>,
     },
+    /// The sidebar, whole — My Tasks, Favorites, the Projects section and Lists, in order, each
+    /// entry badged — see [`crate::rows::sidebar::sections`] (AWTD-1681, D70). The App door's
+    /// `sidebar` answers the same over the cache; this one is for a shell that holds its own
+    /// lists, as web does. `projects` is absent or `null` without Project Mode, and otherwise every
+    /// project the reader can see. `badges` is the number per list id, as `listBadges` answers.
+    Sidebar {
+        #[serde(default)]
+        lists: Vec<crate::model::TaskList>,
+        #[serde(default)]
+        my_tasks: Option<Box<crate::model::TaskList>>,
+        #[serde(default)]
+        badges: std::collections::BTreeMap<String, i64>,
+        #[serde(default)]
+        projects: Option<Vec<crate::model::project::Project>>,
+    },
     /// One row of the multi-list board: `row_list_id`'s cards under the project's columns, in
     /// [`Rule::Board`]'s shape — see [`crate::board_rows::row_columns`] (AWTD-1676, D67).
     /// `custom_states` is the PROJECT's; the row list's manual order and Done window arrange it.
@@ -911,6 +926,17 @@ pub fn run(rule: Rule) -> Response {
             &user_id,
             list.as_deref(),
             &projects,
+        )),
+        Rule::Sidebar {
+            lists,
+            my_tasks,
+            badges,
+            projects,
+        } => Response::ok(crate::rows::sidebar::sections(
+            &lists,
+            my_tasks.map(|list| *list),
+            &badges.into_iter().collect(),
+            projects.as_deref(),
         )),
         Rule::BoardRow {
             row_list_id,

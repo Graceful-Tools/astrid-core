@@ -2263,7 +2263,7 @@
       "type": "object"
     },
     {
-      "description": "The sidebar, whole: My Tasks, the favourites and the rest of the places, each in order and\ncarrying the badge `listBadges` would give it (task e22621e2).\n\nOne command rather than three calls and a filter, because \"which of these is somewhere to\ngo\" is a product question and every shell had been answering it in its own language —\nAndroid's answer (`SidebarViewModel.kt`) hid board columns and labels but offered GitHub\nmilestones and iterations as lists you could file a task into. The rule is\n`astrid_rules::rows::sidebar::sections`.",
+      "description": "The sidebar, whole: My Tasks, the favourites, the Projects section (with the `project_mode`\nflag, over the cached projects — AWTD-1681) and the rest of the places, each in order and\ncarrying the badge `listBadges` would give it (task e22621e2).\n\nOne command rather than three calls and a filter, because \"which of these is somewhere to\ngo\" is a product question and every shell had been answering it in its own language —\nAndroid's answer (`SidebarViewModel.kt`) hid board columns and labels but offered GitHub\nmilestones and iterations as lists you could file a task into. The rule is\n`astrid_rules::rows::sidebar::sections`.",
       "properties": {
         "currentUserId": {
           "default": null,
