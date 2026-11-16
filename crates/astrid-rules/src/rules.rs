@@ -781,17 +781,21 @@ pub fn run(rule: Rule) -> Response {
                 Ok(zone) => zone,
                 Err(failure) => return Response::failed(failure),
             };
-            // The same fields a task carries, read the way a task is read — so this rule and
-            // `Completion` cannot interpret a pattern differently.
-            let task = serde_json::from_value::<Task>(serde_json::json!({
-                "id": "rule",
-                "repeating": repeating,
-                "repeatingData": pattern,
-                "dueDateTime": current_due_date.map(date::format),
-                "isAllDay": is_all_day,
-                "repeatFrom": repeat_from,
-                "occurrenceCount": occurrence_count,
-            }));
+            // The same fields a task carries, each read with the type the task reads it with, so
+            // this rule and `Completion` cannot interpret a pattern differently.
+            //
+            // Field by field rather than `serde_json::from_value::<Task>` on purpose: that one
+            // call compiled a second, complete `Task` deserializer (over `serde_json::Value`, beside
+            // the one `Rule` already uses), about a tenth of the browser build's code for three
+            // enums and a pattern (AWTD2-162, step 2). The answers and refusals are the same.
+            let task = next_occurrence_task(
+                repeating,
+                pattern,
+                current_due_date,
+                is_all_day,
+                repeat_from,
+                occurrence_count,
+            );
             match task {
                 Ok(task) => {
                     Response::ok(crate::repeating::next_occurrence(&task, completion, zone))
@@ -1428,6 +1432,41 @@ struct BoardRowsAnswer {
     candidate_list_ids: Vec<String>,
 }
 
+/// The task `Rule::NextOccurrence` describes: what `from_value::<Task>` of those fields built,
+/// without compiling a second `Task` deserializer. Each field goes through its own type's
+/// `Deserialize`, which is all the derived `Task` decoder did with it.
+fn next_occurrence_task(
+    repeating: String,
+    pattern: Option<serde_json::Value>,
+    current_due_date: Option<chrono::DateTime<chrono::Utc>>,
+    is_all_day: bool,
+    repeat_from: Option<String>,
+    occurrence_count: i64,
+) -> Result<Task, serde_json::Error> {
+    use crate::model::task::{CustomRepeatingPattern, RepeatFromMode, Repeating};
+    use serde::de::{Deserialize, IntoDeserializer};
+    let text = |value: String| -> serde::de::value::StringDeserializer<serde_json::Error> {
+        value.into_deserializer()
+    };
+    let mut task = Task::new("rule", "");
+    task.repeating = Some(Repeating::deserialize(text(repeating))?);
+    task.repeating_data = match pattern {
+        None | Some(serde_json::Value::Null) => None,
+        Some(pattern) => Some(serde_json::from_value::<CustomRepeatingPattern>(pattern)?),
+    };
+    // Through the wire's text and back, as the task's own `dueDateTime` field reads it.
+    task.due_date_time = current_due_date
+        .map(date::format)
+        .as_deref()
+        .and_then(date::parse);
+    task.is_all_day = is_all_day;
+    task.repeat_from = repeat_from
+        .map(|mode| RepeatFromMode::deserialize(text(mode)))
+        .transpose()?;
+    task.occurrence_count = Some(occurrence_count);
+    Ok(task)
+}
+
 /// An offset from UTC in minutes, or a refusal: an offset no clock has is a bad request, not an
 /// overflow.
 fn utc_offset(minutes: i32) -> Result<FixedOffset, Failure> {
@@ -1456,6 +1495,73 @@ pub fn run_json(request: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `Rule::NextOccurrence` builds its task field by field instead of decoding a JSON object
+    /// (AWTD2-162). It must build exactly what that decode built, and refuse what it refused.
+    #[test]
+    fn next_occurrence_builds_the_task_the_decoder_built() {
+        use super::{next_occurrence_task, Task};
+        let due = crate::model::date::parse("2026-03-08T14:00:00.123Z");
+        let pattern = serde_json::json!({
+            "type": "custom", "unit": "weeks", "interval": 2, "weekdays": ["monday", "friday"],
+            "endCondition": "never"
+        });
+        for (repeating, pattern, due, all_day, from, count) in [
+            ("weekly", None, due, false, None, 0),
+            (
+                "custom",
+                Some(pattern.clone()),
+                due,
+                true,
+                Some("COMPLETION_DATE"),
+                3,
+            ),
+            (
+                "daily",
+                Some(serde_json::Value::Null),
+                None,
+                true,
+                Some("DUE_DATE"),
+                7,
+            ),
+        ] {
+            let decoded = serde_json::from_value::<Task>(serde_json::json!({
+                "id": "rule",
+                "repeating": repeating,
+                "repeatingData": pattern,
+                "dueDateTime": due.map(crate::model::date::format),
+                "isAllDay": all_day,
+                "repeatFrom": from,
+                "occurrenceCount": count,
+            }))
+            .expect("decodes");
+            let built = next_occurrence_task(
+                repeating.to_string(),
+                pattern,
+                due,
+                all_day,
+                from.map(str::to_string),
+                count,
+            )
+            .expect("builds");
+            assert_eq!(built, decoded, "{repeating}");
+        }
+        // What the decoder refused, this refuses.
+        assert!(next_occurrence_task("fortnightly".into(), None, None, true, None, 0).is_err());
+        assert!(
+            next_occurrence_task("daily".into(), None, None, true, Some("SOMETIME".into()), 0)
+                .is_err()
+        );
+        assert!(next_occurrence_task(
+            "custom".into(),
+            Some(serde_json::json!("not a pattern")),
+            None,
+            true,
+            None,
+            0
+        )
+        .is_err());
+    }
 
     /// The Astrid Code project board asks the door for its columns and cards, and for what a
     /// drop writes, instead of keeping its own copy of the board rules.
