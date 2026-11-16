@@ -30,6 +30,63 @@
         }
       ]
     },
+    "AskInput": {
+      "description": "Q1: everything [`ask`] reads.",
+      "properties": {
+        "answererId": {
+          "type": "string"
+        },
+        "askerId": {
+          "type": "string"
+        },
+        "askerIsAgent": {
+          "default": false,
+          "type": "boolean"
+        },
+        "listId": {
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "openQuestionId": {
+          "default": null,
+          "description": "The id of the question already open on the task, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "questionCommentId": {
+          "type": "string"
+        },
+        "questionId": {
+          "type": "string"
+        },
+        "resumeStatusRole": {
+          "type": "string"
+        },
+        "taskCompleted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "questionId",
+        "taskId",
+        "listId",
+        "askerId",
+        "answererId",
+        "questionCommentId",
+        "resumeStatusRole",
+        "now"
+      ],
+      "type": "object"
+    },
     "Attachment": {
       "description": "A legacy file attachment. Superseded by [`SecureFile`]; still returned on older tasks.",
       "properties": {
@@ -1233,6 +1290,78 @@
       ],
       "type": "object"
     },
+    "Question": {
+      "description": "The recorded question: what a server stores on the task.",
+      "properties": {
+        "answerCommentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "answeredAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "answererId": {
+          "type": "string"
+        },
+        "askedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "askerId": {
+          "type": "string"
+        },
+        "askerIsAgent": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "listId": {
+          "type": "string"
+        },
+        "questionCommentId": {
+          "description": "The comment that states the question.",
+          "type": "string"
+        },
+        "resumeStatusRole": {
+          "description": "What the asker needs to resume: `ready` or `doing`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/QuestionState"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "listId",
+        "askerId",
+        "askerIsAgent",
+        "answererId",
+        "questionCommentId",
+        "resumeStatusRole",
+        "askedAt",
+        "state"
+      ],
+      "type": "object"
+    },
+    "QuestionState": {
+      "description": "Whether a question is still waiting.",
+      "enum": [
+        "open",
+        "answered"
+      ],
+      "type": "string"
+    },
     "RecentlyCompletedWindow": {
       "description": "How far back \"Recently completed\" reaches for one list.\n\nMirrors `astrid-web/lib/recently-completed-window.ts`, discriminated by `kind`. The same\nsetting drives the list view's default completion filter and the board's Done column, so the\ntwo views can never disagree. `None` on the list means the legacy 24-hour default.",
       "oneOf": [
@@ -1372,6 +1501,27 @@
         "custom"
       ],
       "type": "string"
+    },
+    "Reply": {
+      "description": "What a person's reply is, for [`answer`].",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "authorId": {
+          "type": "string"
+        },
+        "commentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "commentId",
+        "authorId",
+        "at"
+      ],
+      "type": "object"
     },
     "RoutingOverride": {
       "description": "[`Routing`], each field absent (inherit), `null` (any) or set.",
@@ -3061,6 +3211,82 @@
       "required": [
         "kind",
         "assigneeId"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/AskInput",
+      "description": "Q1 of [`crate::questions`]: record a question to a person and hand the task to them\n(AWTD-1687). Answers `{ question, handBack, notify }`; refused with a `QUESTION_*` code.",
+      "properties": {
+        "kind": {
+          "const": "questionAsk",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q2: close `question` with the answerer's `reply` and return the task to the asker.\nAnswers `{ question, write, notify, resume? }`; refused with a `QUESTION_*` code.",
+      "properties": {
+        "kind": {
+          "const": "questionAnswer",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/Question"
+        },
+        "reply": {
+          "$ref": "#/$defs/Reply"
+        }
+      },
+      "required": [
+        "kind",
+        "question",
+        "reply"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q4: the open questions `person_id` must answer, oldest first, across every list.",
+      "properties": {
+        "kind": {
+          "const": "questionsWaitingOn",
+          "type": "string"
+        },
+        "personId": {
+          "type": "string"
+        },
+        "questions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Question"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "personId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Q5: the mailbox a comment's `AGENT-HANDBACK:` line names, or `null`.",
+      "properties": {
+        "comment": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "questionMarker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "comment"
       ],
       "type": "object"
     },
