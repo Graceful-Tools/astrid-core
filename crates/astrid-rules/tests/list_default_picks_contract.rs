@@ -8,6 +8,8 @@
 //! fails when the file is stale; this one fails when the door answers a recorded case differently,
 //! whatever the generator says.
 
+#![cfg(feature = "rules-shell")]
+
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/list-default-picks.json");

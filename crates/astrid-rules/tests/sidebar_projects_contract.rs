@@ -6,6 +6,8 @@
 //! docs/CONTRACTS.md D70, written out as cases. Web, Windows and the Apple apps adopt against this
 //! table rather than grouping lists themselves.
 
+#![cfg(feature = "rules-shell")]
+
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/sidebar-projects.json");

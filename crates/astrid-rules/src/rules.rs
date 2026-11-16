@@ -16,6 +16,7 @@
 //! it would to the server; nothing is mirrored field by field across the boundary.
 
 use chrono::{DateTime, FixedOffset, Utc};
+#[cfg(feature = "rules-repeating")]
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,7 @@ use crate::envelope::{Failure, Response};
 use crate::model::{date, Task};
 
 /// One question for a pure rule.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, strum::VariantNames)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
@@ -33,6 +34,7 @@ use crate::model::{date, Task};
 pub enum Rule {
     /// What marking `task` completed (or not) at `now` does to it — see
     /// [`crate::repeating::completion`]. `task` is the task as the person sees it.
+    #[cfg(feature = "rules-repeating")]
     Completion {
         task: Box<Task>,
         completed: bool,
@@ -45,6 +47,7 @@ pub enum Rule {
     /// The calculator on its own: where a series goes next from these fields — see
     /// [`crate::repeating::next_occurrence`], which this answers exactly, all-day handling
     /// included.
+    #[cfg(feature = "rules-repeating")]
     NextOccurrence {
         /// `daily`, `weekly`, `monthly`, `yearly` or `custom`, as the wire spells it.
         repeating: String,
@@ -115,6 +118,7 @@ pub enum Rule {
     },
     /// The words for a repeat being edited, before it is saved — the custom editor's Preview
     /// (iOS CustomRepeatingPatternEditor, AATD-50). Same parts as a saved task's `repeatSummary`.
+    #[cfg(feature = "rules-shell")]
     RepeatSummary {
         #[serde(default)]
         repeating: Option<crate::model::Repeating>,
@@ -126,10 +130,12 @@ pub enum Rule {
     /// Whether a custom agent could be registered under the name somebody is typing — see
     /// [`crate::agent_name`]. Through this door rather than the async one because it is asked on
     /// every keystroke, and because the answer depends on nothing but the name.
+    #[cfg(feature = "rules-shell")]
     CustomAgentName { name: String },
     /// Every colour that follows from one brand accent, or why the accent cannot be used — see
     /// [`crate::brand_colors`]. Through this door because the answer depends on nothing but the
     /// accent, and because a partner deployment needs it at runtime as well as at build time.
+    #[cfg(feature = "rules-shell")]
     BrandColors { accent: String },
     /// A project's board as iOS draws it: its columns in order, each with its cards in order —
     /// see [`crate::board_cards`]. `custom_states` is the project's `customStates` as the wire
@@ -167,6 +173,7 @@ pub enum Rule {
     /// it may move into, and which projects a new list may be made in — see
     /// [`crate::list_project_moves`] (astrid-ios AITD-680, D68). `projects` is every project the
     /// person can see; `list` is absent when only asking where a list may be created.
+    #[cfg(feature = "rules-shell")]
     ListProjectMoves {
         user_id: String,
         #[serde(default)]
@@ -179,6 +186,7 @@ pub enum Rule {
     /// `sidebar` answers the same over the cache; this one is for a shell that holds its own
     /// lists, as web does. `projects` is absent or `null` without Project Mode, and otherwise every
     /// project the reader can see. `badges` is the number per list id, as `listBadges` answers.
+    #[cfg(feature = "rules-shell")]
     Sidebar {
         #[serde(default)]
         lists: Vec<crate::model::TaskList>,
@@ -222,6 +230,7 @@ pub enum Rule {
     /// Waiting is allowed, and what it stores — see [`crate::waiting::resolve_status_write`].
     /// `task` and `blockers` are as they are before the write; `change` is the write. Refused with
     /// `{kind: "refused", code: "WAITING_NEEDS_CONDITION"}` when it enters Waiting with no condition.
+    #[cfg(feature = "rules-waiting")]
     WaitingWrite {
         task: Box<Task>,
         #[serde(default)]
@@ -238,6 +247,7 @@ pub enum Rule {
     },
     /// R3: does a Waiting task leave by itself — [`crate::waiting::wake`]. Answers
     /// `{ "action": "stay" | "wakeToReady" | "resolveToInbox" }`.
+    #[cfg(feature = "rules-waiting")]
     WaitingWake {
         task: Box<Task>,
         #[serde(default)]
@@ -248,6 +258,7 @@ pub enum Rule {
     },
     /// R3 + R5: the lane a task belongs in now, and the write that puts it there —
     /// [`crate::waiting::settle`]. What the server's scheduled job runs per task.
+    #[cfg(feature = "rules-waiting")]
     WaitingSettle {
         task: Box<Task>,
         #[serde(default)]
@@ -260,6 +271,7 @@ pub enum Rule {
         now: DateTime<Utc>,
     },
     /// R4: what handing a task back to a person writes — [`crate::waiting::hand_back`].
+    #[cfg(feature = "rules-waiting")]
     HandBack { assignee_id: String },
     /// O1 of [`crate::orchestration`]: the effective policy for a list — the default, then the
     /// project's stored override, then the list's (AWTD-1685). Either may be absent or `null`.
@@ -311,6 +323,7 @@ pub enum Rule {
     /// half (Ready, the source as its origin), the source's write (Waiting, unassigned), and the
     /// holder to remember. Refused with `{kind: "refused", code: "HANDOFF_SOURCE_DONE"}` for a
     /// finished source (AWTD-1686).
+    #[cfg(feature = "rules-waiting")]
     WaitingHandoff {
         source: Box<Task>,
         #[serde(default)]
@@ -329,21 +342,25 @@ pub enum Rule {
     },
     /// Is this comment a Decision, and what does it ask — [`crate::decisions::parse`]. `null` back
     /// means it is not one, and the shell draws the markdown it already has.
+    #[cfg(feature = "rules-decisions")]
     Decision { text: String },
     /// Is this table a trade-off grid, and what does each cell rate —
     /// [`crate::decisions::read_grid`]. `rows` is each body row's cell text, first column included.
+    #[cfg(feature = "rules-decisions")]
     TradeoffGrid {
         #[serde(default)]
         rows: Vec<Vec<String>>,
     },
     /// The rating key a shell draws beside a grid, worst to best —
     /// [`crate::decisions::rating_key`].
+    #[cfg(feature = "rules-decisions")]
     RatingKey,
     /// What a list's defaults editor offers for repeat, when, priority and time, with the list's
     /// own defaults ticked — [`crate::rows::list_default_picks`] (task 92830d81).
     ///
     /// The fields are the list's `default*` columns as the wire spells them; all four are
     /// optional, because an unconfigured list has none of them and that is itself an answer.
+    #[cfg(feature = "rules-shell")]
     ListDefaultPicks {
         #[serde(default)]
         priority: Option<i64>,
@@ -371,6 +388,7 @@ pub enum Rule {
     ///
     /// `tasks` is the rows as drawn, and must include `dragged_id` — the whole answer turns on
     /// the dragged row's own parent, so a missing one is refused rather than answered `none`.
+    #[cfg(feature = "rules-shell")]
     Nesting {
         zone: NestingZone,
         dragged_id: String,
@@ -383,12 +401,14 @@ pub enum Rule {
     ///
     /// `caret` is in **UTF-16 units**, which is what a TextBox's caret and the web's `substring`
     /// both count in. `null` back means no popup — the usual answer, not a failure.
+    #[cfg(feature = "rules-shell")]
     MentionTrigger { text: String, caret: usize },
     /// What picking a row from that popup writes into the box —
     /// [`crate::parse::mentions::insert`]. The server resolves `@[Name](id)` and nothing else, so
     /// the shell asks for the text rather than assembling the reference itself.
     ///
     /// With no trigger at the caret the text comes back untouched.
+    #[cfg(feature = "rules-shell")]
     MentionInsert {
         text: String,
         caret: usize,
@@ -400,6 +420,7 @@ pub enum Rule {
     /// Whether this reader can only copy `task` rather than edit it — [`crate::rows::copy_only`].
     /// iOS's `Tasks/TaskCapabilities.swift` (task `75a27f7f`), asked as a row draws its leading
     /// control. `lists` is the lists the task is on, as the wire carries them.
+    #[cfg(feature = "rules-shell")]
     CopyOnly {
         task: Box<Task>,
         #[serde(default)]
@@ -414,6 +435,7 @@ pub enum Rule {
     /// `isSystem` too (AITD-667): [`crate::model::Comment::is_system`], but never while
     /// `offline`. A cached comment can come back without its `authorId`, so offline "no author"
     /// proves nothing, and hiding a person's own words from their own thread is the worse mistake.
+    #[cfg(feature = "rules-shell")]
     CommentVisibility {
         comment: Box<crate::model::Comment>,
         #[serde(default)]
@@ -423,6 +445,7 @@ pub enum Rule {
     /// [`crate::capabilities::for_lists`]. iOS's `TaskCapabilities.swift` (AITD-667), asked as an
     /// editor draws. `list_ids` is the task's lists; `lists` is every list the shell has loaded,
     /// and only those the task is on are read.
+    #[cfg(feature = "rules-shell")]
     Capabilities {
         #[serde(default)]
         list_ids: Vec<String>,
@@ -432,6 +455,7 @@ pub enum Rule {
     /// Which of `titles` match `query`, best first, as indices — [`crate::palette::rank`]. The
     /// Mac's `FuzzyMatch` (AITD-667), asked on every keystroke in the ⌘K palette, which keeps its
     /// own commands; the App door's `palette` is the cache-backed whole search.
+    #[cfg(feature = "rules-shell")]
     PaletteRank {
         query: String,
         #[serde(default)]
@@ -443,6 +467,7 @@ pub enum Rule {
     /// Suppression is part of the answer, not the caller's job: a key pressed into a text field or
     /// under a modal is text, and an unbound key is `null` too. A shell that decided that itself
     /// would be a second copy of the guard.
+    #[cfg(feature = "rules-shell")]
     Shortcut {
         /// The canonical key, an alias, or a Windows event name (`ArrowDown`).
         key: String,
@@ -466,6 +491,7 @@ pub enum Rule {
     /// what makes that field said — a default never overrides a choice. Nothing here parses the
     /// title: a control that changed as somebody typed "urgent" would fight the choice they made
     /// in it.
+    #[cfg(feature = "rules-shell")]
     QuickAddDefaults {
         #[serde(default)]
         list: Option<Box<crate::model::TaskList>>,
@@ -495,6 +521,7 @@ pub enum Rule {
     ///
     /// The App door also answers `assistant`. That is `users.find(…)` over the cache, a lookup
     /// rather than a rule, so it does not belong here.
+    #[cfg(feature = "rules-shell")]
     ReminderTriage {
         #[serde(default)]
         tasks: Vec<Task>,
@@ -615,6 +642,7 @@ pub enum Rule {
     /// `form` is not inferable from the number. English's **cardinal** 3 is `other` ("3 weeks")
     /// while its **ordinal** 3 is `few` ("3rd") - genuinely different CLDR rules, and the arm that
     /// chose the key already knows which question it is asking.
+    #[cfg(feature = "rules-shell")]
     PluralCategory {
         /// A tag from `strings/locales.json` (`en`, `de`, `zh-CN`). The language subtag decides,
         /// so `de-DE` and `pt-BR` are answered rather than falling through to `other`.
@@ -633,6 +661,7 @@ pub enum Rule {
     /// The callout's SIZE is the caller's: how big a detail pane wants to be is a design decision
     /// per platform, and a rule that returned one would be choosing the layout rather than
     /// placing it.
+    #[cfg(feature = "rules-shell")]
     CalloutPlacement {
         /// The row the callout belongs to.
         anchor: crate::rows::callout::Rect,
@@ -646,6 +675,7 @@ pub enum Rule {
     /// `TaskDetailProjectStateRow.isVisible`, tasks c8a1ff51, AITD-327/332/555).
     ///
     /// Asked on its own because the Apple detail views do not read the App door's `taskDetail`.
+    #[cfg(feature = "rules-shell")]
     DetailLayout {
         /// `list` or `project`; anything else reads as `list`.
         #[serde(default)]
@@ -660,6 +690,7 @@ pub enum Rule {
     /// What the leading control's picker offers, and whose task this is -
     /// [`crate::rows::LeadingControl::picker_shows_project_state`] and
     /// [`crate::rows::LeadingControl::is_someone_elses_task`] (AWTD2-216; tasks AITD-375, 42013da7).
+    #[cfg(feature = "rules-shell")]
     LeadingPicker {
         /// `list` or `project`; anything else reads as `list`.
         #[serde(default)]
@@ -674,6 +705,7 @@ pub enum Rule {
     },
     /// The lists a row draws as chips - [`crate::rows::list_chips`] (AWTD2-216; iOS's
     /// `chipListsForTaskRow`). `hidden_list_ids` are the lists the surrounding view already shows.
+    #[cfg(feature = "rules-shell")]
     ListChips {
         #[serde(default)]
         list_ids: Vec<String>,
@@ -685,6 +717,7 @@ pub enum Rule {
     /// Whole days from the reader's today to `date` - [`crate::rows::day_offset`] (AWTD2-216; iOS's
     /// `DueDateLabel.dayOffset`). An all-day date is compared as a calendar date, a timed one as
     /// an instant in the reader's zone.
+    #[cfg(feature = "rules-shell")]
     DayOffset {
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
@@ -748,6 +781,7 @@ impl From<NestingZone> for crate::rows::nesting::Zone {
 /// `leading` is `dispatch::row_json`'s wire shape rather than this crate's.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct QuickAddDefaultsAnswer {
     priority: i64,
     assignee_id: Option<String>,
@@ -762,6 +796,7 @@ struct QuickAddDefaultsAnswer {
 /// the caller sent.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct ReminderTriageAnswer {
     task_ids: Vec<String>,
 }
@@ -770,11 +805,13 @@ struct ReminderTriageAnswer {
 /// one. `parent_id` is always present so a shell can read one shape rather than two.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct NestingAnswer {
     outcome: &'static str,
     parent_id: Option<String>,
 }
 
+#[cfg(feature = "rules-shell")]
 impl From<crate::rows::nesting::Outcome> for NestingAnswer {
     fn from(outcome: crate::rows::nesting::Outcome) -> Self {
         Self {
@@ -826,6 +863,7 @@ pub struct SearchParse {
 /// Answer one rule.
 pub fn run(rule: Rule) -> Response {
     match rule {
+        #[cfg(feature = "rules-repeating")]
         Rule::Completion {
             task,
             completed,
@@ -835,6 +873,7 @@ pub fn run(rule: Rule) -> Response {
             Ok(zone) => Response::ok(crate::repeating::completion(&task, completed, now, zone)),
             Err(failure) => Response::failed(failure),
         },
+        #[cfg(feature = "rules-repeating")]
         Rule::NextOccurrence {
             repeating,
             pattern,
@@ -895,6 +934,7 @@ pub fn run(rule: Rule) -> Response {
             let is_empty = query.is_empty();
             Response::ok(SearchParse { query, is_empty })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::RepeatSummary {
             repeating,
             repeating_data,
@@ -928,9 +968,11 @@ pub fn run(rule: Rule) -> Response {
                 None => crate::markdown::render(&text, &origin),
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::CustomAgentName { name } => Response::ok(crate::agent_name::check(&name)),
         // A refused accent is a bad request, not an error: the caller sent a colour that cannot
         // carry a label, and the reason names the contrast so a partner can act on it.
+        #[cfg(feature = "rules-shell")]
         Rule::BrandColors { accent } => match crate::brand_colors::derive(&accent) {
             Ok(colours) => Response::ok(colours),
             Err(refusal) => Response::failed(Failure::bad_request(refusal.reason)),
@@ -986,6 +1028,7 @@ pub fn run(rule: Rule) -> Response {
                 candidate_list_ids,
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::ListProjectMoves {
             user_id,
             list,
@@ -995,6 +1038,7 @@ pub fn run(rule: Rule) -> Response {
             list.as_deref(),
             &projects,
         )),
+        #[cfg(feature = "rules-shell")]
         Rule::Sidebar {
             lists,
             my_tasks,
@@ -1047,6 +1091,7 @@ pub fn run(rule: Rule) -> Response {
                 ))),
             }
         }
+        #[cfg(feature = "rules-waiting")]
         Rule::WaitingWrite {
             task,
             blockers,
@@ -1065,6 +1110,7 @@ pub fn run(rule: Rule) -> Response {
                 Response::failed(Failure::waiting_needs_condition())
             }
         },
+        #[cfg(feature = "rules-waiting")]
         Rule::WaitingWake {
             task,
             blockers,
@@ -1072,6 +1118,7 @@ pub fn run(rule: Rule) -> Response {
         } => Response::ok(WakeAnswer {
             action: crate::waiting::wake(&task, &blockers, now),
         }),
+        #[cfg(feature = "rules-waiting")]
         Rule::WaitingSettle {
             task,
             blockers,
@@ -1083,6 +1130,7 @@ pub fn run(rule: Rule) -> Response {
             return_assignee_id.as_deref(),
             now,
         )),
+        #[cfg(feature = "rules-waiting")]
         Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
         #[cfg(feature = "orchestration")]
         Rule::OrchestrationPolicy { project, list } => Response::ok(crate::orchestration::resolve(
@@ -1122,6 +1170,7 @@ pub fn run(rule: Rule) -> Response {
             &list_owner_id,
             task_creator_id.as_deref(),
         )),
+        #[cfg(feature = "rules-waiting")]
         Rule::WaitingHandoff {
             source,
             blockers,
@@ -1138,9 +1187,13 @@ pub fn run(rule: Rule) -> Response {
         Rule::BoardPresets { custom_states } => {
             Response::ok(crate::board::available_presets(custom_states.as_ref()))
         }
+        #[cfg(feature = "rules-decisions")]
         Rule::Decision { text } => Response::ok(crate::decisions::parse(&text)),
+        #[cfg(feature = "rules-decisions")]
         Rule::TradeoffGrid { rows } => Response::ok(crate::decisions::read_grid(&rows)),
+        #[cfg(feature = "rules-decisions")]
         Rule::RatingKey => Response::ok(crate::decisions::rating_key()),
+        #[cfg(feature = "rules-shell")]
         Rule::ListDefaultPicks {
             priority,
             repeating,
@@ -1160,6 +1213,7 @@ pub fn run(rule: Rule) -> Response {
         Rule::IdentifierFormat { key, sequence } => {
             Response::ok(crate::identifier::format_identifier(&key, sequence))
         }
+        #[cfg(feature = "rules-shell")]
         Rule::Nesting {
             zone,
             dragged_id,
@@ -1180,9 +1234,11 @@ pub fn run(rule: Rule) -> Response {
                 &by_id,
             )))
         }
+        #[cfg(feature = "rules-shell")]
         Rule::MentionTrigger { text, caret } => {
             Response::ok(crate::parse::mentions::find_trigger(&text, caret))
         }
+        #[cfg(feature = "rules-shell")]
         Rule::MentionInsert {
             text,
             caret,
@@ -1194,6 +1250,7 @@ pub fn run(rule: Rule) -> Response {
                 crate::parse::mentions::insert(&text, caret, trigger_kind, &label, &id);
             Response::ok(MentionInsertAnswer { text, caret })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::QuickAddDefaults {
             list,
             user_id,
@@ -1257,6 +1314,7 @@ pub fn run(rule: Rule) -> Response {
                 is_private: draft.is_private,
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::ReminderTriage {
             tasks,
             user_id,
@@ -1284,11 +1342,13 @@ pub fn run(rule: Rule) -> Response {
                 task_ids: deck.into_iter().map(|task| task.id.clone()).collect(),
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::CopyOnly {
             task,
             lists,
             user_id,
         } => Response::ok(crate::rows::copy_only(&task, &lists, user_id.as_deref())),
+        #[cfg(feature = "rules-shell")]
         Rule::CommentVisibility { comment, offline } => Response::ok(CommentVisibilityAnswer {
             is_system: !offline && comment.is_system(),
             shows_text: crate::rows::comment::shows_text(&comment.content),
@@ -1303,10 +1363,13 @@ pub fn run(rule: Rule) -> Response {
                 })
                 .collect(),
         }),
+        #[cfg(feature = "rules-shell")]
         Rule::Capabilities { list_ids, lists } => {
             Response::ok(crate::capabilities::for_lists(&list_ids, &lists))
         }
+        #[cfg(feature = "rules-shell")]
         Rule::PaletteRank { query, titles } => Response::ok(crate::palette::rank(&query, &titles)),
+        #[cfg(feature = "rules-shell")]
         Rule::DetailLayout {
             display_mode,
             is_in_project,
@@ -1331,6 +1394,7 @@ pub fn run(rule: Rule) -> Response {
                 ),
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::LeadingPicker {
             display_mode,
             surface,
@@ -1350,6 +1414,7 @@ pub fn run(rule: Rule) -> Response {
                 is_someone_elses_task: is_someone_elses,
             })
         }
+        #[cfg(feature = "rules-shell")]
         Rule::ListChips {
             list_ids,
             lists,
@@ -1359,6 +1424,7 @@ pub fn run(rule: Rule) -> Response {
             &lists,
             &hidden_list_ids,
         ))),
+        #[cfg(feature = "rules-shell")]
         Rule::DayOffset {
             date,
             is_all_day,
@@ -1436,11 +1502,13 @@ pub fn run(rule: Rule) -> Response {
         Rule::IdentifierLinks { text, context } => {
             Response::ok(crate::identifier::find_links(&text, &context))
         }
+        #[cfg(feature = "rules-shell")]
         Rule::PluralCategory {
             locale,
             form,
             count,
         } => Response::ok(crate::plurals::category(&locale, form, count)),
+        #[cfg(feature = "rules-shell")]
         Rule::CalloutPlacement {
             anchor,
             viewport,
@@ -1450,6 +1518,7 @@ pub fn run(rule: Rule) -> Response {
         Rule::Theme { stored } => {
             Response::ok(crate::theme::Theme::parse(stored.as_deref().unwrap_or_default()).wire())
         }
+        #[cfg(feature = "rules-shell")]
         Rule::Shortcut {
             key,
             has_selection,
@@ -1479,6 +1548,7 @@ pub fn run(rule: Rule) -> Response {
 /// [`Rule::MentionInsert`]'s answer: the new text, and where the caret lands in it (UTF-16).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct MentionInsertAnswer {
     text: String,
     caret: usize,
@@ -1488,6 +1558,7 @@ struct MentionInsertAnswer {
 /// anything to draw at all, and how each file is drawn.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct CommentVisibilityAnswer {
     is_system: bool,
     shows_text: bool,
@@ -1500,6 +1571,7 @@ struct CommentVisibilityAnswer {
 /// opinion about, and a shell drawing a bubble should not have to ignore two fields to read one.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct VisibleFile {
     id: String,
     name: String,
@@ -1510,6 +1582,7 @@ struct VisibleFile {
 /// [`Rule::Shortcut`]'s answer, when a key does something.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct ShortcutAnswer {
     action: &'static str,
     title: &'static str,
@@ -1519,6 +1592,7 @@ struct ShortcutAnswer {
 /// [`Rule::DetailLayout`]'s answer.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct DetailLayoutAnswer {
     /// Field names (`assignee`, `when`, `priority`, `lists`), top to bottom under the title.
     field_order: Vec<&'static str>,
@@ -1529,6 +1603,7 @@ struct DetailLayoutAnswer {
 /// [`Rule::LeadingPicker`]'s answer.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-shell")]
 struct LeadingPickerAnswer {
     picker_shows_project_state: bool,
     is_someone_elses_task: bool,
@@ -1536,6 +1611,7 @@ struct LeadingPickerAnswer {
 
 /// [`Rule::DayOffset`]'s answer.
 #[derive(Debug, Serialize)]
+#[cfg(feature = "rules-shell")]
 struct DayOffsetAnswer {
     days: i64,
 }
@@ -1543,6 +1619,7 @@ struct DayOffsetAnswer {
 /// [`Rule::WaitingWake`]'s answer.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "rules-waiting")]
 struct WakeAnswer {
     action: crate::waiting::Wake,
 }
@@ -1567,6 +1644,7 @@ struct BoardRowsAnswer {
 /// The task `Rule::NextOccurrence` describes: what `from_value::<Task>` of those fields built,
 /// without compiling a second `Task` deserializer. Each field goes through its own type's
 /// `Deserialize`, which is all the derived `Task` decoder did with it.
+#[cfg(feature = "rules-repeating")]
 fn next_occurrence_task(
     repeating: String,
     pattern: Option<serde_json::Value>,
@@ -1610,9 +1688,34 @@ fn utc_offset(minutes: i32) -> Result<FixedOffset, Failure> {
 
 /// A zone by its IANA name. An unknown name is refused rather than read as UTC: a person in Tokyo
 /// told their Tuesday task is due on Monday is a worse failure than an error in a log.
+#[cfg(feature = "rules-repeating")]
 fn zone(name: &str) -> Result<Tz, Failure> {
     name.parse::<Tz>()
         .map_err(|_| Failure::bad_request(format!("{name} is not a time zone this build knows")))
+}
+
+/// The `kind` of every rule THIS build answers, sorted: the door's vocabulary after the cargo
+/// features have had their say (`markdown`, `orchestration`, `rules-*`). A caller that wants one
+/// rule asks here instead of discovering a refusal, which is how web's browser package chooses
+/// between the core and its own copy per call (AWTD2-162, docs/BROWSER_DOOR.md §3).
+///
+/// Written by the compiler from the enum, so a variant cannot be missed and a feature that gates
+/// one out takes its name with it. `serde`'s `rename_all = "camelCase"` lowercases the first
+/// letter and nothing else, which is all this does too (`strum`'s own conversion would spell an
+/// acronym differently).
+pub fn kinds() -> Vec<String> {
+    let mut kinds: Vec<String> = <Rule as strum::VariantNames>::VARIANTS
+        .iter()
+        .map(|variant| {
+            let mut chars = variant.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    kinds.sort();
+    kinds
 }
 
 /// Answer one rule given as JSON, as JSON. What a binding calls.
@@ -1630,6 +1733,7 @@ mod tests {
 
     /// `Rule::NextOccurrence` builds its task field by field instead of decoding a JSON object
     /// (AWTD2-162). It must build exactly what that decode built, and refuse what it refused.
+    #[cfg(feature = "rules-repeating")]
     #[test]
     fn next_occurrence_builds_the_task_the_decoder_built() {
         use super::{next_occurrence_task, Task};
@@ -1795,6 +1899,7 @@ mod tests {
 
     /// AATD-50: the custom editor's Preview words a pattern nobody has saved yet.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn aatd_50_a_repeat_being_edited_is_worded_before_it_is_saved() {
         let answer = run(serde_json::from_value(serde_json::json!({
             "kind": "repeatSummary",
@@ -1817,6 +1922,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rules-repeating")]
     fn completion_answers_in_the_wire_shape_the_shell_sent() {
         let reply = answer(json!({
             "kind": "completion",
@@ -1840,6 +1946,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rules-repeating")]
     fn the_calculator_answers_on_its_own() {
         let reply = answer(json!({
             "kind": "nextOccurrence",
@@ -1865,6 +1972,7 @@ mod tests {
     /// An all-day series steps on UTC midnights even when the person is in California, where the
     /// completion instant is already the next UTC day.
     #[test]
+    #[cfg(feature = "rules-repeating")]
     fn an_all_day_series_steps_in_utc_whatever_the_zone() {
         let reply = answer(json!({
             "kind": "nextOccurrence",
@@ -2038,6 +2146,7 @@ mod tests {
     /// R2 through the door: a move into Waiting with nothing to wait on is refused with the code
     /// a client turns into the picker.
     #[test]
+    #[cfg(feature = "rules-waiting")]
     fn a_waiting_write_without_a_condition_is_refused_with_its_code() {
         let reply = answer(json!({
             "kind": "waitingWrite",
@@ -2110,6 +2219,7 @@ mod tests {
     /// tomorrow at five hands quick-add exactly that — from a list **passed over the wire**, since
     /// this door has no cache to look one up in and no clock to ask what tomorrow is.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_resolves_a_new_task_s_defaults() {
         let reply = answer(json!({
             "kind": "quickAddDefaults",
@@ -2144,6 +2254,7 @@ mod tests {
     /// cached, so there is no row to read defaults from, and the creator is still the fallback
     /// there rather than nobody (the web's `components/quick-add.tsx`).
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_a_choice_beats_a_default_and_a_view_still_starts_out_mine() {
         let chosen = answer(json!({
             "kind": "quickAddDefaults",
@@ -2205,6 +2316,7 @@ mod tests {
     /// Task 75a27f7f: `Tasks/ReminderTriage.swift` decides what a tapped notification puts in
     /// front of somebody. Mine, open and due; the reminded one first; ids, not rows.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_deals_the_triage_deck() {
         let tasks = json!([
             { "id": "late", "assigneeId": "me", "dueDateTime": "2000-01-01T00:00:00Z", "isAllDay": true },
@@ -2246,6 +2358,7 @@ mod tests {
     /// drop means while the drag is in flight, so this has to be synchronous too. A drop ON a
     /// row nests; a drop on the LINE leaves the parent; a cycle is refused.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_says_what_a_drop_nests() {
         let tasks = json!([
             { "id": "parent" },
@@ -2316,6 +2429,7 @@ mod tests {
     /// whether a popup is open and what has been typed into it, so it goes through this door.
     /// `null` is the answer when no trigger is live — the usual case, and not a failure.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_finds_the_trigger_the_caret_is_inside() {
         let reply = answer(json!({ "kind": "mentionTrigger", "text": "hi @jo", "caret": 6 }));
         assert_eq!(
@@ -2339,6 +2453,7 @@ mod tests {
     /// Task 75a27f7f: the other half — what the chosen row writes into the box. The server
     /// resolves `@[Name](id)` and nothing else, so the shell must not assemble it itself.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_writes_a_chosen_mention_into_the_text() {
         let reply = answer(json!({
             "kind": "mentionInsert", "text": "hi @jo", "caret": 6,
@@ -2362,6 +2477,7 @@ mod tests {
     /// Task 75a27f7f: `Tasks/TaskCapabilities.swift` decides, as a row draws, whether its leading
     /// control is a checkbox or a copy — a passer-by on a public list can only copy (D15).
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_says_when_a_task_is_only_copyable() {
         let lists = json!([{ "id": "pub", "ownerId": "owner", "privacy": "PUBLIC" }]);
         let task = json!({ "id": "t", "listIds": ["pub"], "creatorId": "owner" });
@@ -2390,6 +2506,7 @@ mod tests {
     /// caption-less attachment gets no text bubble, and an image is shown where it sits while a
     /// document is a chip to open.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_says_what_of_a_comment_is_drawn() {
         let reply = answer(json!({
             "kind": "commentVisibility",
@@ -2432,6 +2549,7 @@ mod tests {
     /// Task 75a27f7f: the Mac's `Keyboard/*` resolves a bare key press to an action while a view
     /// has focus. Suppression is part of the answer — a key pressed into a text field is text.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn task_75a27f7f_the_door_resolves_a_pressed_key_to_its_action() {
         let reply = answer(json!({ "kind": "shortcut", "key": "n" }));
         assert_eq!(
@@ -2462,6 +2580,7 @@ mod tests {
     /// The controls a task's lists let an editor offer (AITD-667, iOS `TaskCapabilities`). A
     /// list the task is on refuses; a list not loaded, or one the task is not on, refuses nothing.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn capabilities_are_refused_only_by_a_loaded_list_the_task_is_on_aitd667() {
         let board = json!({ "id": "board", "name": "Board",
             "supports": { "priority": false, "dueDate": false, "privateTasks": false,
@@ -2510,6 +2629,7 @@ mod tests {
     /// cached comment can lose its `authorId` and "no author" proves nothing (AITD-667, iOS
     /// `CommentVisibility.isSystem`).
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn comment_visibility_names_a_system_comment_but_never_offline_aitd667() {
         let system = json!({ "id": "c1", "content": "marked this as complete" });
         let person = json!({ "id": "c2", "content": "hi", "authorId": "u1" });
@@ -2532,6 +2652,7 @@ mod tests {
     /// The Mac palette's ranking (AITD-667, `FuzzyMatch`, `MacPaletteSearch`, `CommandRegistry`):
     /// matches only, best score first, a tie to the shorter title, then to the order given.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn palette_rank_orders_matches_best_first_and_ties_to_the_shorter_title_aitd667() {
         let reply = answer(json!({
             "kind": "paletteRank", "query": "tdy",
@@ -2637,6 +2758,7 @@ mod tests {
 
     /// A callout picks its side and aims its arrow, through the door (task `011080d4`).
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn o11080d4_a_callout_places_itself_through_the_door() {
         let place = |anchor_left: f64, anchor_top: f64| {
             answer(json!({
@@ -2682,6 +2804,7 @@ mod tests {
     /// `astrid_rules::plurals::category` was reachable only by a client that links Rust, so the
     /// WinUI shell could not adopt the catalog's plural keys and kept `count == 1` arms in C#.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn bcc8a11e_a_json_door_client_can_pick_a_plural_row() {
         let category = |locale: &str, form: &str, count: i64| {
             answer(json!({
@@ -2787,6 +2910,7 @@ mod tests {
 
     /// AWTD2-216 (iOS c8a1ff51, AITD-327/332/555): the detail layout through the door.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn awtd2_216_detail_layout_answers_order_and_the_two_rows() {
         let list = answer(json!({
             "kind": "detailLayout", "displayMode": "list", "isInProject": true,
@@ -2822,6 +2946,7 @@ mod tests {
 
     /// AWTD2-216 (iOS AITD-375, 42013da7): the leading picker's two questions.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn awtd2_216_leading_picker_answers_state_and_ownership() {
         let someone_elses = answer(json!({
             "kind": "leadingPicker", "assigneeId": "them", "currentUserId": "me",
@@ -2849,6 +2974,7 @@ mod tests {
 
     /// AWTD2-216 (iOS 42013da7): chips skip hidden lists and board columns.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn awtd2_216_list_chips_skip_hidden_lists_and_columns() {
         let chips = answer(json!({
             "kind": "listChips",
@@ -2875,6 +3001,7 @@ mod tests {
     /// AWTD2-216 (iOS c8a1ff51's neighbour `DueDateLabel.dayOffset`): whole days, in the reader's
     /// zone for a timed date and by calendar date for an all-day one.
     #[test]
+    #[cfg(feature = "rules-shell")]
     fn awtd2_216_day_offset_counts_days_in_the_readers_zone() {
         let days = |date: &str, all_day: bool, offset: i32| {
             answer(json!({

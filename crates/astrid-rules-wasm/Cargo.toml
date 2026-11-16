@@ -26,6 +26,24 @@ markdown = ["astrid-rules/markdown"]
 # downloads none of it.
 orchestration = ["astrid-rules/orchestration"]
 
+# The rule groups of `astrid-rules` (docs/BROWSER_DOOR.md), OFF for the browser like the two above:
+# it answers only what astrid-web's client-side code calls through core. Each forwards to the
+# feature of the same name.
+rules-repeating = ["astrid-rules/rules-repeating"]
+rules-waiting = ["astrid-rules/rules-waiting"]
+rules-decisions = ["astrid-rules/rules-decisions"]
+rules-shell = ["astrid-rules/rules-shell"]
+# Everything: the Node package (`scripts/build-wasm.sh`). astrid-web's server answers every rule
+# through it, so it must keep every one the door has.
+full = [
+    "markdown",
+    "orchestration",
+    "rules-repeating",
+    "rules-waiting",
+    "rules-decisions",
+    "rules-shell",
+]
+
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0", default-features = false }
 wasm-bindgen = "0.2"

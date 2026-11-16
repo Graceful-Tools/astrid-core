@@ -6,6 +6,8 @@
 //! admin, member, viewer and stranger of the project. astrid-web replays the same file against
 //! its server's checks (AWTD-1702) and the Apple apps reach the same door through UniFFI.
 
+#![cfg(feature = "rules-shell")]
+
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/list-project-moves.json");

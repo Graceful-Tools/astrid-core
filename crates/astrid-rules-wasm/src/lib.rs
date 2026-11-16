@@ -18,6 +18,15 @@ pub fn run_json(request: &str) -> String {
     astrid_rules::rules::run_json(request)
 }
 
+/// The `kind` of every rule this build answers, sorted — `astrid_rules::rules::kinds`.
+///
+/// The browser package answers fewer rules than the Node one (docs/BROWSER_DOOR.md), so a caller
+/// can choose per rule, with the core or with its own copy, rather than discover a refusal.
+#[wasm_bindgen]
+pub fn kinds() -> Vec<String> {
+    astrid_rules::rules::kinds()
+}
+
 /// The crate version this build came from, for a caller's logs.
 #[wasm_bindgen(js_name = coreVersion)]
 pub fn core_version() -> String {
@@ -29,8 +38,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_binding_lists_what_the_rules_door_lists() {
+        assert_eq!(kinds(), astrid_rules::rules::kinds());
+        assert!(kinds().iter().any(|kind| kind == "smartParse"));
+    }
+
+    #[test]
     fn the_binding_answers_what_the_rules_door_answers() {
-        let request = r#"{"kind":"renderMarkdown","text":"**hi**"}"#;
+        let request = r#"{"kind":"smartParse","text":"buy milk","today":"2026-03-01"}"#;
         assert_eq!(run_json(request), astrid_rules::rules::run_json(request));
     }
 
