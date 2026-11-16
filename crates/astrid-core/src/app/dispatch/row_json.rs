@@ -376,6 +376,10 @@ fn sidebar(app: &App, current_user_id: Option<String>) -> Response {
 
 /// A featured public list's rows: the server's tasks plus this account's unsent ones for it,
 /// through the same projection as any list (AATD-46).
+///
+/// The answer also carries those tasks whole, as `tasks` (AITD-634): they are not cached, so a
+/// shell that draws and opens task models — the Apple apps — would otherwise have to fetch the
+/// same list a second time for the rows it was just handed.
 pub(super) async fn featured_rows(
     app: &App,
     list_id: &str,
@@ -405,7 +409,8 @@ pub(super) async fn featured_rows(
             list.privacy = Some(crate::model::Privacy::Public);
             list
         });
-    rows_for_list(
+    let whole = serde_json::to_value(&tasks).unwrap_or_default();
+    let mut answer = rows_for_list(
         app,
         list_id,
         RowsWindow {
@@ -419,7 +424,11 @@ pub(super) async fn featured_rows(
             tasks: Some(tasks),
             ..Default::default()
         },
-    )
+    );
+    if let Some(serde_json::Value::Object(value)) = answer.value.as_mut() {
+        value.insert("tasks".to_string(), whole);
+    }
+    answer
 }
 
 /// A profile's shared tasks, as rows (task da326190).
