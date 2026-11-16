@@ -1762,8 +1762,8 @@ and Astrid's own loops follow `docs/FIXALL_WORKFLOW.md` → *Autonomy*. The rule
    migrations, releases and spending ask Jon.
 6. **Where it runs.** Every native client and astrid-web's Node package have these rules (the
    `orchestration` feature, on by default and forwarded by `astrid-rules-wasm/orchestration`).
-   The browser build leaves them out and refuses the kinds by name. Its artifact did not change
-   (268,013 brotli bytes).
+   The browser build leaves them out and refuses the kinds by name. Its artifact did not change:
+   268,013 brotli bytes before and after, and 269,784 on both sides after the handoff rule merged.
 
 Locked by `contracts/fixtures/orchestration.json` (28 cases). Decided by the agent and open to
 Jon's override (ORCHESTRATION_POLICY.md §8): autonomy is per policy rather than per agent, a list

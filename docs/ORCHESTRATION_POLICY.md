@@ -146,7 +146,8 @@ and so does astrid-web's **Node** package (`astrid-rules-wasm/orchestration`,
 the browser build**: no page decides what an agent may do, and the browser's size is a budget
 (README, [BROWSER_DOOR.md](./BROWSER_DOOR.md)). The browser package refuses
 `orchestration*` kinds by name, and `scripts/check-wasm-packages.mjs` asserts both halves. The
-browser artifact is byte-for-byte what it was (268,013 brotli bytes). The Node package grows by
+browser artifact is byte-for-byte what it was without these rules: 268,013 brotli bytes when
+measured, and 269,784 on both sides after the handoff rule (AWTD-1686) merged. The Node package grows by
 about 6 KB brotli, and the budget does not cover that package.
 
 ## 8. Decisions taken, and the ones left open
