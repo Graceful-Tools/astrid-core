@@ -111,6 +111,14 @@ impl Failure {
         }
     }
 
+    /// A refused `crate::questions` rule (AWTD-1687): `refused` with the `QUESTION_*` code.
+    pub fn question_refused(error: crate::questions::QuestionError) -> Self {
+        Failure {
+            code: Some(error.code().to_string()),
+            ..Self::of(FailureKind::Refused, error.message())
+        }
+    }
+
     /// A command this build knows but cannot serve, because the feature it needs was compiled out
     /// (astrid-core's `sync-google`, task `b92569a8`).
     ///
