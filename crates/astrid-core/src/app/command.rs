@@ -867,7 +867,8 @@ pub enum Command {
     /// A featured public list's rows (AATD-46): its tasks fetched from the server (not cached),
     /// with this account's own unsent ones for it, projected as `rowsForList` projects — other
     /// people's tasks read-only, their control copying. `list` is the public list as the shell
-    /// holds it, when this account does not.
+    /// holds it, when this account does not. The answer carries those tasks whole as well, as
+    /// `tasks` (AITD-634), for a shell that draws task models.
     FeaturedRows {
         list_id: String,
         #[serde(default)]
