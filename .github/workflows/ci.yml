@@ -151,7 +151,7 @@ jobs:
       - name: Size budget
         run: >
           node scripts/wasm-size.mjs
-          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 270000
+          target/wasm32-unknown-unknown/wasm/astrid_rules_wasm.wasm --budget 290000
 
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings

@@ -125,7 +125,7 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **270,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+CI's `wasm` job holds it to **290,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
 pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
 ratchets down after each saving.** Raising it is allowed; doing either without saying what it
 bought is not.
@@ -134,6 +134,7 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
+| **budget +20 KB** | | | 269,757 | Budget 270,000 → 290,000 (Jon, 2026-11-15: *"raise the budget by 20kb"*). It buys headroom: the budget sat 243 bytes above the build, so each new rule on the door turned main's `wasm` job red and every core PR inherited it (PR #58, PR #62). The ratchet still applies: lower it again after the next saving |
 | **today** | | | **269,757** | + the rules door's `waitingHandoff` and the returning holder on `waitingSettle` / `waitingWrite` (AWTD-1686: a handoff files the other half and the source wakes back to the agent that handed it off): **+1,744** (CI's measurement). Budget 269,000 → 270,000, 2026-11-16 |
 | before the handoff | 2,025,151 | 409,141 | 268,013 | no second `TaskList`/`Task` decoder: `TaskList::new` and `nextOccurrence` stopped building values with `serde_json::from_value` (AWTD2-162 step 2, slice 1; −11,091 on top of the sidebar). Budget 279,800 → 269,000 (260,034 before the sidebar merged), 2026-11-15 |
 | after the sidebar | 2,121,891 | 429,857 | ~279,363 | + the rules door's `sidebar` (AWTD-1681: the sidebar's Projects section, so web and the VS Code extension can draw the same sidebar as the native shells): **+8,192** (279,104 on macOS against 270,912), of which ~5 KB is decoding the request's `Vec<Project>` through serde's buffered `content` path and ~3 KB is serialising `Sections`. Budget 271,800 → 279,800, 2026-11-15 |
