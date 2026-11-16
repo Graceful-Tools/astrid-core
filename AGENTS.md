@@ -34,7 +34,8 @@ workflow.
    astrid-web vendors the output at a pinned revision (its `packages/astrid-rules/REVISION`).
 9. **Nothing platform-specific lives here.** A platform need arrives through a trait in
    `astrid_core::platform`, implemented by the shell. The Windows C ABI is astrid-windows's
-   `astrid-ffi`; Apple bindings belong to astrid-ios.
+   `astrid-ffi` (UniFFI has no C# generator); the Swift and Kotlin bindings are
+   `crates/astrid-uniffi`, here, shared by astrid-ios and astrid-android (Jon, 2026-11-12, AWTD2-168).
 
 ---
 
