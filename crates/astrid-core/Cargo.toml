@@ -69,9 +69,11 @@ strum = { workspace = true }
 # manifest). Android has no system OpenSSL for an NDK build to link — native-tls there means
 # OpenSSL, which would also have to be taught Android's certificate store — so on Android it is
 # rustls, with certificates verified by Android's own trust manager through
-# `rustls-platform-verifier` (AWTD-1673). That is the DEVICE's trust store: a root the user or an
-# enterprise policy installed is honoured where the app's network-security config allows it, and a
-# root the device distrusts is refused. This used to be `rustls-tls-webpki-roots`, the Mozilla bundle
+# `rustls-platform-verifier` (AWTD-1673). That is the DEVICE's trust store: the verifier reads
+# `AndroidCAStore` directly, so a root the user or an enterprise policy installed is honoured and a
+# root the device distrusts is refused. The app's network-security config does not decide that; it
+# governs only the verifier's cleartext CRL fetches, which is why astrid-android generates its config
+# from the verifier AAR's CRL hosts (AATD-100, AWTD2-170). This used to be `rustls-tls-webpki-roots`, the Mozilla bundle
 # compiled in, which is neither — an earlier version of this comment claimed it matched what an
 # Android app trusts, and it did not.
 #
