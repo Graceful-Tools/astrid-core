@@ -189,7 +189,9 @@ pub(crate) fn announce_delivery(app: &App, touched: crate::outbox::Delivery) {
 /// interval, as a floor that costs one lookup a minute.
 fn next_delivery_wait(app: &App) -> Duration {
     match app.runner.next_wakeup() {
-        Ok(Some(at)) => (at - app.clock.now()).to_std().unwrap_or(Duration::ZERO),
+        Ok(Some(at)) => {
+            Duration::try_from(at.duration_since(app.clock.now())).unwrap_or(Duration::ZERO)
+        }
         Ok(None) => match crate::outbox::journal::has_pending(&app.store) {
             Ok(true) => Duration::ZERO,
             _ => default_sync_interval(),

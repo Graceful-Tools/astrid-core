@@ -38,12 +38,9 @@ async fn quick_add_takes_the_list_s_defaults_for_what_it_did_not_say_task_c4102c
     // The test clock is 2026-09-07T12:00Z; tomorrow at 17:00 in the clock's own zone.
     let offset = app.clock.utc_offset();
     let expected = "2026-09-08T17:00:00"
-        .parse::<chrono::NaiveDateTime>()
-        .expect("a time")
-        .and_local_timezone(offset)
-        .single()
-        .expect("a local time")
-        .with_timezone(&chrono::Utc);
+        .parse::<jiff::civil::DateTime>()
+        .expect("a time");
+    let expected = offset.to_timestamp(expected).expect("a local time");
     assert_eq!(
         crate::model::date::parse(due).expect("parses"),
         expected,
@@ -1730,7 +1727,7 @@ async fn aitd_561_morning_across_a_dst_change_is_nine_local() {
         std::sync::Arc::new(StubTransport::new()),
         std::sync::Arc::new(
             crate::platform::FixedClock::parsed("2026-10-27T19:00:00Z")
-                .in_named_zone(chrono_tz::America::Los_Angeles),
+                .in_zone_named("America/Los_Angeles"),
         ),
     )
     .expect("starts");

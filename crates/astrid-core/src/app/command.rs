@@ -1860,10 +1860,10 @@ fn wire_spelling(variant: &str) -> String {
 pub struct DueDraft {
     #[cfg_attr(
         feature = "schema",
-        schemars(with = "Option<chrono::DateTime<chrono::Utc>>")
+        schemars(with = "Option<crate::model::date::Timestamp>")
     )]
     #[serde(default, with = "crate::model::date::optional")]
-    pub due_date_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub due_date_time: Option<jiff::Timestamp>,
     #[serde(default)]
     pub is_all_day: bool,
 }

@@ -16,7 +16,8 @@
 //! no board at all, is drawn under this project's columns; a role this project has no column for
 //! is Inbox (`docs/CONTRACTS.md` D67).
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use crate::board::BoardColumn;
 use crate::board_cards::{self, BoardList};
@@ -165,8 +166,8 @@ pub fn row_columns<'a>(
     row_list_id: &str,
     tasks: &'a [Task],
     columns: &[BoardColumn],
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<Vec<&'a Task>> {
     let cards = row_cards(tasks, row_list_id);
     let arrangement = BoardList::of(row);
@@ -273,8 +274,8 @@ mod tests {
         let columns = board::columns(Some(&serde_json::json!([
             { "role": "review", "name": "Review", "order": 3 }
         ])));
-        let now: DateTime<Utc> = "2026-11-14T12:00:00Z".parse().unwrap();
-        let offset = FixedOffset::east_opt(0).unwrap();
+        let now: Timestamp = "2026-11-14T12:00:00Z".parse().unwrap();
+        let offset = Offset::UTC;
         let tasks = vec![
             task(serde_json::json!({ "id": "a", "listIds": ["groceries"], "statusRole": "doing" })),
             task(

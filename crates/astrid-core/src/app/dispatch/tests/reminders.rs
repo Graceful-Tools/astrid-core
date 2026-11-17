@@ -160,7 +160,7 @@ async fn d24_a_snoozed_reminder_comes_back_at_the_snoozed_time() {
         .expect("a list")
         .is_empty());
 
-    clock.advance(chrono::Duration::minutes(15));
+    clock.advance(jiff::SignedDuration::from_mins(15));
     let back = call(&app, json!({ "kind": "remindersDue" })).await;
     let reminders = back["value"]["reminders"].as_array().expect("a list");
     assert_eq!(reminders.len(), 1, "{back}");

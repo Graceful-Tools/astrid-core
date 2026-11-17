@@ -14,14 +14,14 @@ mod common;
 use std::collections::BTreeMap;
 
 use astrid_rules::model::{date, RecentlyCompletedWindow, Task};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/filters.json");
 
 struct Fixture {
     raw: Value,
-    now: DateTime<Utc>,
+    now: Timestamp,
     due_tasks: BTreeMap<String, Task>,
     completion_tasks: BTreeMap<String, Task>,
     sort_tasks: Vec<Task>,
@@ -115,7 +115,7 @@ fn answer(f: &Fixture, case: &Value) -> Value {
 
 /// One `rows` request: the list shape, the tasks, ids back. Zero offset throughout — the fixture
 /// is generated in UTC.
-fn ids(now: &DateTime<Utc>, list: Value, tasks: &[&Task]) -> Vec<String> {
+fn ids(now: &Timestamp, list: Value, tasks: &[&Task]) -> Vec<String> {
     let answered = common::ask(serde_json::json!({
         "kind": "rows",
         "now": date::format(*now),

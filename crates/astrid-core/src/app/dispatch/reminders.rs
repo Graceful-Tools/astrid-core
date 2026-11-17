@@ -31,7 +31,7 @@ pub(super) fn reminder_options(app: &App, task_id: &str) -> Response {
         Err(error) => return Response::failed(error.into()),
     };
     Response::ok(serde_json::json!({
-        "reminderTime": task.reminder_time.map(|at| at.to_rfc3339()),
+        "reminderTime": task.reminder_time.map(date::rfc3339_offset),
         "picks": rows::reminder_picks::options(&task, app.clock.now()),
     }))
 }
@@ -53,7 +53,7 @@ pub(super) fn snoozed_key(task_id: &str) -> String {
 const SNOOZED_PREFIX: &str = "reminder.snoozed.";
 
 /// Every snooze mark on this device, read in one pass.
-fn snoozes(app: &App) -> std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> {
+fn snoozes(app: &App) -> std::collections::HashMap<String, jiff::Timestamp> {
     app.store
         .metadata_with_prefix(SNOOZED_PREFIX)
         .unwrap_or_default()
@@ -77,7 +77,7 @@ fn snoozes(app: &App) -> std::collections::HashMap<String, chrono::DateTime<chro
 /// somebody tapped. Deduplicated by id, since a snoozed task may also be in the window.
 fn candidates(
     app: &App,
-    snoozes: &std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
+    snoozes: &std::collections::HashMap<String, jiff::Timestamp>,
     window: impl FnOnce() -> crate::store::Result<Vec<crate::model::Task>>,
 ) -> crate::store::Result<Vec<crate::model::Task>> {
     let mut tasks = window()?;
@@ -107,7 +107,7 @@ pub(in crate::app) fn due_reminders(
     // Snoozes can only move a reminder later, so the window's lower edge is safe to apply in SQL.
     let tasks = candidates(app, &snoozes, || {
         app.store
-            .tasks_with_reminder_between(now - crate::reminders::GRACE, now)
+            .tasks_with_reminder_between(date::minus(now, crate::reminders::GRACE), now)
     })?;
     Ok(due_now_among(app, &tasks, &snoozes))
 }
@@ -116,7 +116,7 @@ pub(in crate::app) fn due_reminders(
 fn due_now_among(
     app: &App,
     tasks: &[crate::model::Task],
-    snoozes: &std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
+    snoozes: &std::collections::HashMap<String, jiff::Timestamp>,
 ) -> Vec<crate::reminders::Reminder> {
     crate::reminders::due_now(
         tasks,
@@ -127,7 +127,7 @@ fn due_now_among(
                 .metadata(&shown_key(id))
                 .ok()
                 .flatten()
-                .is_some_and(|stamp| stamp == at.to_rfc3339())
+                .is_some_and(|stamp| stamp == date::rfc3339_offset(at))
         },
     )
 }
@@ -151,7 +151,7 @@ pub(super) fn next_reminder(app: &App) -> Response {
                 .metadata(&shown_key(id))
                 .ok()
                 .flatten()
-                .is_some_and(|stamp| stamp == at.to_rfc3339())
+                .is_some_and(|stamp| stamp == date::rfc3339_offset(at))
         },
     );
     Response::ok(serde_json::json!({ "reminder": next }))
@@ -184,7 +184,7 @@ pub(super) fn mark_reminder_shown(app: &App, task_id: &str) -> Response {
     };
     match app
         .store
-        .set_metadata(&shown_key(task_id), &at.to_rfc3339())
+        .set_metadata(&shown_key(task_id), &date::rfc3339_offset(at))
     {
         Ok(()) => Response::done(),
         Err(error) => Response::failed(error.into()),

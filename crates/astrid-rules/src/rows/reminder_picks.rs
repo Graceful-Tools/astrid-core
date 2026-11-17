@@ -12,10 +12,10 @@
 //!
 //! Titles are keys. The shell says the words.
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 
-use crate::model::Task;
+use crate::model::{date, Task};
 
 /// One choice, and the instant it means.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,7 +54,7 @@ pub const OFFSETS: [(&str, i64); 8] = [
 /// A task with no due date has nothing to be "before", so it gets one choice — no reminder — and
 /// whatever it already holds. Offering "an hour before" for a task with no when is offering to
 /// compute something from nothing.
-pub fn options(task: &Task, now: DateTime<Utc>) -> Vec<ReminderPick> {
+pub fn options(task: &Task, now: Timestamp) -> Vec<ReminderPick> {
     let current = task.reminder_time;
     let mut picks = vec![ReminderPick {
         title_key: NONE_KEY,
@@ -67,7 +67,7 @@ pub fn options(task: &Task, now: DateTime<Utc>) -> Vec<ReminderPick> {
     };
 
     for (title_key, minutes) in OFFSETS {
-        let at = due - Duration::minutes(minutes);
+        let at = date::minus(due, SignedDuration::from_mins(minutes));
         // A reminder in the past is one that has already happened. Offering it would store a time
         // the loop skips over, and the picker would show a choice that never arrives.
         if at <= now {
@@ -75,7 +75,7 @@ pub fn options(task: &Task, now: DateTime<Utc>) -> Vec<ReminderPick> {
         }
         picks.push(ReminderPick {
             title_key,
-            reminder_time: Some(at.to_rfc3339()),
+            reminder_time: Some(date::rfc3339_offset(at)),
             is_selected: current == Some(at),
         });
     }
@@ -85,9 +85,8 @@ pub fn options(task: &Task, now: DateTime<Utc>) -> Vec<ReminderPick> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::date;
 
-    fn at(text: &str) -> DateTime<Utc> {
+    fn at(text: &str) -> Timestamp {
         date::parse(text).expect("a date")
     }
 
@@ -117,7 +116,7 @@ mod tests {
             .expect("an hour before");
         assert_eq!(
             hour_before.reminder_time.as_deref(),
-            Some(at("2026-09-20T08:00:00Z").to_rfc3339().as_str())
+            Some(date::rfc3339_offset(at("2026-09-20T08:00:00Z")).as_str())
         );
     }
 

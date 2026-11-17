@@ -21,7 +21,8 @@
 //! A clipboard with nothing attachable on it is still [`Paste::Text`], which is what makes an
 //! ordinary paste an ordinary paste.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 /// How many files one paste may attach.
 ///
@@ -62,15 +63,15 @@ pub enum Paste {
 ///
 /// The format is fixed rather than localised. It names a file, so a machine set to another region
 /// must not sort its staged files differently.
-pub fn pasted_image_name(now: DateTime<Utc>, offset: FixedOffset, extension: &str) -> String {
-    let local = now.with_timezone(&offset);
+pub fn pasted_image_name(now: Timestamp, offset: Offset, extension: &str) -> String {
+    let local = offset.to_datetime(now);
     let extension = match extension.trim().trim_start_matches('.') {
         "" => "png",
         given => given,
     };
     format!(
         "Pasted Image {}.{extension}",
-        local.format("%Y-%m-%d at %H.%M.%S")
+        local.strftime("%Y-%m-%d at %H.%M.%S")
     )
 }
 
@@ -82,7 +83,7 @@ pub fn pasted_image_name(now: DateTime<Utc>, offset: FixedOffset, extension: &st
 ///
 /// **A text-only clipboard is never intercepted.** That is the most common paste in the app, and
 /// breaking it to serve the rarest one would be a bad trade.
-pub fn decide(board: &Clipboard, now: DateTime<Utc>, offset: FixedOffset) -> Paste {
+pub fn decide(board: &Clipboard, now: Timestamp, offset: Offset) -> Paste {
     let files: Vec<String> = board
         .files
         .iter()
@@ -106,12 +107,12 @@ mod tests {
     use super::*;
     use crate::model::date;
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         date::parse("2026-09-07T16:04:05Z").expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("a zone")
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
     /// Copying a file in Explorer puts the file *and* a rendition of it on the board. Taking both
@@ -150,7 +151,7 @@ mod tests {
     /// The name is read by the person who pasted it, so it is in their time rather than UTC.
     #[test]
     fn the_name_is_in_the_readers_own_time() {
-        let behind = FixedOffset::west_opt(7 * 3600).expect("a zone");
+        let behind = Offset::from_seconds(-7 * 3600).expect("a zone");
         assert_eq!(
             pasted_image_name(now(), behind, "png"),
             "Pasted Image 2026-09-07 at 09.04.05.png"

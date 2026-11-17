@@ -28,13 +28,15 @@
 //! So: [`all_day_instant`] writes a day, [`all_day_date`] reads one back, and anything asking
 //! "which day is it where the reader is?" goes through the reader's offset and says so.
 
-use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
+use jiff::civil::Date;
+use jiff::tz::Offset;
+use jiff::Timestamp as Instant;
 use serde::de::{self, Deserializer, Unexpected};
 use serde::{Deserialize, Serializer};
 
 /// The hour an all-day date is stored at, in UTC. Midnight, matching
 /// `astrid-web/lib/date-comparison.ts` and the Google Calendar convention the sync providers use.
-pub const ALL_DAY_ANCHOR_HOUR: u32 = 0;
+pub const ALL_DAY_ANCHOR_HOUR: i8 = 0;
 
 /// What a field written by [`optional`] or [`required`] looks like **to the schema** — an
 /// ISO-8601 instant.
@@ -45,37 +47,339 @@ pub const ALL_DAY_ANCHOR_HOUR: u32 = 0;
 /// type, so the schema that comes out is `{"type":"string","format":"date-time"}` — which is what
 /// goes on the wire.
 ///
-/// Only under `schema`: nothing else in this crate needs a second name for `DateTime<Utc>`.
+/// Only under `schema`: nothing else in this crate needs a second name for an instant.
 #[cfg(feature = "schema")]
-pub type Timestamp = DateTime<Utc>;
+pub struct Timestamp;
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for Timestamp {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DateTime".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string", "format": "date-time" })
+    }
+}
+
+/// What a calendar date (`2026-09-07`) looks like to the schema.
+#[cfg(feature = "schema")]
+pub struct CalendarDate;
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for CalendarDate {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NaiveDate".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string", "format": "date" })
+    }
+}
 
 /// Parse an instant the way the Apple client's decoder does: fractional seconds first, then
 /// without.
 ///
-/// `DateTime::parse_from_rfc3339` accepts both spellings, so the two-step fallback collapses into
-/// one call — but the leniency it stands for is the point, not the number of attempts.
-pub fn parse(text: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(text)
+/// One reader accepts both spellings, so the two-step fallback collapses into one call — but the
+/// leniency it stands for is the point, not the number of attempts.
+///
+/// RFC 3339 and nothing wider: `YYYY-MM-DD`, `T` (or `t`, or a space), `HH:MM:SS`, an optional
+/// fraction of any length, and `Z` or `±HH:MM`. Written out here rather than handed to jiff's
+/// `FromStr`, which also reads zone annotations (`[America/New_York]`), ordinals and week dates —
+/// and carries the zone database's lookup code into the browser build to do it
+/// (`scripts/wasm-size.mjs`). A leap second reads as the last second of the minute.
+pub fn parse(text: &str) -> Option<Instant> {
+    let bytes = text.as_bytes();
+    let number = |from: usize, len: usize| -> Option<i32> {
+        let digits = bytes.get(from..from + len)?;
+        if !digits.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(digits).ok()?.parse().ok()
+    };
+    let at = |index: usize| bytes.get(index).copied();
+
+    let year = number(0, 4)?;
+    let month = number(5, 2)?;
+    let day = number(8, 2)?;
+    let (hour, minute, second) = (number(11, 2)?, number(14, 2)?, number(17, 2)?);
+    if at(4) != Some(b'-') || at(7) != Some(b'-') || at(13) != Some(b':') || at(16) != Some(b':') {
+        return None;
+    }
+    if !matches!(at(10), Some(b'T' | b't' | b' ')) {
+        return None;
+    }
+
+    let mut index = 19;
+    let mut nanos: i32 = 0;
+    if at(index) == Some(b'.') {
+        let start = index + 1;
+        index = start;
+        let mut scale = 100_000_000;
+        while let Some(digit @ b'0'..=b'9') = at(index) {
+            nanos += i32::from(digit - b'0') * scale;
+            scale /= 10;
+            index += 1;
+        }
+        if index == start {
+            return None;
+        }
+    }
+
+    let offset_seconds = match at(index)? {
+        b'Z' | b'z' => {
+            index += 1;
+            0
+        }
+        sign @ (b'+' | b'-') => {
+            let hours = number(index + 1, 2)?;
+            let minutes = number(index + 4, 2)?;
+            if at(index + 3) != Some(b':') || hours > 23 || minutes > 59 {
+                return None;
+            }
+            index += 6;
+            let seconds = hours * 3600 + minutes * 60;
+            if sign == b'-' {
+                -seconds
+            } else {
+                seconds
+            }
+        }
+        _ => return None,
+    };
+    if index != bytes.len() {
+        return None;
+    }
+
+    let date = Date::new(
+        year.try_into().ok()?,
+        month.try_into().ok()?,
+        day.try_into().ok()?,
+    )
+    .ok()?;
+    let time = jiff::civil::Time::new(
+        hour.try_into().ok()?,
+        minute.try_into().ok()?,
+        second.min(59).try_into().ok()?,
+        nanos,
+    )
+    .ok()?;
+    Offset::from_seconds(offset_seconds)
+        .ok()?
+        .to_timestamp(date.to_datetime(time))
         .ok()
-        .map(|dt| dt.with_timezone(&Utc))
 }
 
 /// Format an instant the way this client writes one: `Z`, and whole seconds unless the instant
 /// carries milliseconds — then those too, so two completions made in the same second still sort
 /// (AITD-369). Nothing finer than a millisecond: the server stores no more.
-pub fn format(at: DateTime<Utc>) -> String {
-    match at.timestamp_subsec_millis() {
-        0 => at.to_rfc3339_opts(SecondsFormat::Secs, true),
-        _ => at.to_rfc3339_opts(SecondsFormat::Millis, true),
+pub fn format(at: Instant) -> String {
+    match subsec_nanos(at) / 1_000_000 {
+        0 => format!("{}Z", civil_stamp(at)),
+        millis => format!("{}.{millis:03}Z", civil_stamp(at)),
+    }
+}
+
+/// `2026-09-07T12:34:56`, the UTC reading of an instant to the second. Written out rather than
+/// through `strftime`: the formatter's machinery is a measurable part of the browser build
+/// (`scripts/wasm-size.mjs`), and this is the only shape the door ever writes.
+fn civil_stamp(at: Instant) -> String {
+    let reading = Offset::UTC.to_datetime(at);
+    let year = i32::from(reading.year());
+    let sign = if year < 0 { "-" } else { "" };
+    format!(
+        "{sign}{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        year.abs(),
+        reading.month(),
+        reading.day(),
+        reading.hour(),
+        reading.minute(),
+        reading.second()
+    )
+}
+
+/// A calendar day written `YYYY-MM-DD`, with a month or day that may lack its leading zero — what a
+/// list's "since this date" setting stores. Nothing after the day: a time on the end is not a day.
+pub fn parse_day(text: &str) -> Option<Date> {
+    let mut parts = text.splitn(3, '-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    let digits = |part: &str, longest: usize| {
+        (1..=longest).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_digit())
+    };
+    if !(digits(year, 4) && digits(month, 2) && digits(day, 2)) {
+        return None;
+    }
+    Date::new(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?).ok()
+}
+
+/// A span of whole calendar days, or `None` past what a span can hold.
+///
+/// `Span::days` panics there, and the panic's error formatting is a measurable part of the browser
+/// build (`scripts/wasm-size.mjs`) — so every span in this crate is made with the `try_` builders.
+pub fn span_days(days: i64) -> Option<jiff::Span> {
+    jiff::Span::new().try_days(days).ok()
+}
+
+/// A span of whole calendar months, or `None` past what a span can hold. See [`span_days`].
+pub fn span_months(months: i64) -> Option<jiff::Span> {
+    jiff::Span::new().try_months(months).ok()
+}
+
+/// `day` moved by whole calendar days, or `None` past the edge of the calendar.
+pub fn days_after(day: Date, days: i64) -> Option<Date> {
+    day.checked_add(span_days(days)?).ok()
+}
+
+/// [`days_after`], held at the day itself rather than failing.
+pub fn days_after_or_same(day: Date, days: i64) -> Date {
+    days_after(day, days).unwrap_or(day)
+}
+
+/// `at` moved on by elapsed time, held at the edge of the calendar rather than failing.
+pub fn plus(at: Instant, by: jiff::SignedDuration) -> Instant {
+    at.checked_add(by).unwrap_or(if by.is_negative() {
+        Instant::MIN
+    } else {
+        Instant::MAX
+    })
+}
+
+/// `at` moved back by elapsed time, held at the edge of the calendar rather than failing.
+pub fn minus(at: Instant, by: jiff::SignedDuration) -> Instant {
+    plus(at, -by)
+}
+
+/// The nanoseconds past the whole second, counted forward whichever side of 1970 the instant is on.
+fn subsec_nanos(at: Instant) -> u32 {
+    u32::try_from(at.as_nanosecond().rem_euclid(1_000_000_000)).unwrap_or(0)
+}
+
+/// The instant as RFC 3339 with a numeric `+00:00` offset and as many fractional digits as it
+/// needs, in threes — what `DateTime<Utc>::to_rfc3339` wrote, which one string field of the rules
+/// door still carries (`reminderPicks`), so the text it holds did not change with the library.
+pub fn rfc3339_offset(at: Instant) -> String {
+    format!("{}{}+00:00", civil_stamp(at), auto_fraction(at))
+}
+
+/// The instant as RFC 3339 with `Z` and as many fractional digits as it needs, in threes — what
+/// `DateTime<Utc>`'s own serde wrote, kept for the few fields that never had an adapter.
+pub fn rfc3339_z(at: Instant) -> String {
+    format!("{}{}Z", civil_stamp(at), auto_fraction(at))
+}
+
+/// `""`, `.123`, `.123456` or `.123456789`: the shortest of those that holds the instant exactly.
+fn auto_fraction(at: Instant) -> String {
+    let nanos = subsec_nanos(at);
+    if nanos == 0 {
+        String::new()
+    } else if nanos.is_multiple_of(1_000_000) {
+        format!(".{:03}", nanos / 1_000_000)
+    } else if nanos.is_multiple_of(1_000) {
+        format!(".{:06}", nanos / 1_000)
+    } else {
+        format!(".{nanos:09}")
+    }
+}
+
+/// serde adapter for a plain `Timestamp` field that is written as [`rfc3339_z`] and read strictly.
+pub mod exact {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(value: &Instant, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&super::rfc3339_z(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Instant, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        super::parse(&raw)
+            .ok_or_else(|| de::Error::invalid_value(Unexpected::Str(&raw), &"an ISO-8601 instant"))
+    }
+}
+
+/// [`exact`] for an `Option`, written `null` when absent.
+pub mod exact_optional {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<Instant>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(at) => serializer.serialize_str(&super::rfc3339_z(*at)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Instant>, D::Error> {
+        let Some(raw) = Option::<String>::deserialize(deserializer)? else {
+            return Ok(None);
+        };
+        super::parse(&raw)
+            .map(Some)
+            .ok_or_else(|| de::Error::invalid_value(Unexpected::Str(&raw), &"an ISO-8601 instant"))
+    }
+}
+
+/// `2026-09-07`, written the way a calendar day goes on the wire.
+pub fn format_day(day: Date) -> String {
+    let year = i32::from(day.year());
+    let sign = if year < 0 { "-" } else { "" };
+    format!(
+        "{sign}{:04}-{:02}-{:02}",
+        year.abs(),
+        day.month(),
+        day.day()
+    )
+}
+
+/// serde adapter for a calendar day (`2026-09-07`) that must be present.
+pub mod day {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(value: &Date, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&super::format_day(*value))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Date, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        super::parse_day(&raw)
+            .ok_or_else(|| de::Error::invalid_value(Unexpected::Str(&raw), &"a YYYY-MM-DD day"))
+    }
+}
+
+/// [`day`] for an `Option`, written `null` when absent.
+pub mod day_optional {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<Date>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(day) => serializer.serialize_str(&super::format_day(*day)),
+            None => serializer.serialize_none(),
+        }
     }
 }
 
 /// The instant that represents an all-day task due on `day`.
-pub fn all_day_instant(day: NaiveDate) -> DateTime<Utc> {
-    Utc.from_utc_datetime(
-        &day.and_hms_opt(ALL_DAY_ANCHOR_HOUR, 0, 0)
-            .expect("midnight is a valid time on every day"),
-    )
+pub fn all_day_instant(day: Date) -> Instant {
+    Offset::UTC
+        .to_timestamp(day.to_datetime(jiff::civil::Time::midnight()))
+        // Midnight UTC is an instant on every day jiff can name but its first (the year -9999 starts
+        // a few hours west of what it can represent), so that edge reads as the earliest instant
+        // rather than panicking.
+        .unwrap_or(Instant::MIN)
 }
 
 /// The calendar day an all-day instant means.
@@ -83,8 +387,8 @@ pub fn all_day_instant(day: NaiveDate) -> DateTime<Utc> {
 /// **Always read in UTC**, whatever the reader's offset. Reading it locally moves the date for
 /// anyone west of UTC — a 25 December task prints as the 24th. The reader's own day enters the
 /// comparison on the other side, not here; see the module note.
-pub fn all_day_date(at: DateTime<Utc>) -> NaiveDate {
-    at.date_naive()
+pub fn all_day_date(at: Instant) -> Date {
+    Offset::UTC.to_datetime(at).date()
 }
 
 /// The instant to store for an all-day task due on the reader's today.
@@ -92,11 +396,11 @@ pub fn all_day_date(at: DateTime<Utc>) -> NaiveDate {
 /// Their calendar day, re-expressed as midnight UTC — `getLocalDateAsUTCMidnight` on web. Using
 /// `now`'s UTC date instead would file a task created at 22:00 in California under tomorrow, every
 /// evening.
-pub fn all_day_today(now: DateTime<Utc>, offset: chrono::FixedOffset) -> DateTime<Utc> {
-    all_day_instant(now.with_timezone(&offset).date_naive())
+pub fn all_day_today(now: Instant, offset: Offset) -> Instant {
+    all_day_instant(offset.to_datetime(now).date())
 }
 
-/// serde adapter for `Option<DateTime<Utc>>` fields, which is nearly all of them.
+/// serde adapter for `Option<Instant>` fields, which is nearly all of them.
 ///
 /// Absent, `null`, an empty string and an unparseable string all read as `None`. That last one is
 /// deliberate leniency: one malformed `createdAt` on one comment must not fail the decode of the
@@ -106,7 +410,7 @@ pub mod optional {
     use super::*;
 
     pub fn serialize<S: Serializer>(
-        value: &Option<DateTime<Utc>>,
+        value: &Option<Instant>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         match value {
@@ -117,7 +421,7 @@ pub mod optional {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Option<DateTime<Utc>>, D::Error> {
+    ) -> Result<Option<Instant>, D::Error> {
         let raw = Option::<String>::deserialize(deserializer)?;
         Ok(raw.as_deref().and_then(super::parse))
     }
@@ -127,16 +431,11 @@ pub mod optional {
 pub mod required {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
-        value: &DateTime<Utc>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(value: &Instant, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&super::format(*value))
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<DateTime<Utc>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Instant, D::Error> {
         let raw = String::deserialize(deserializer)?;
         super::parse(&raw)
             .ok_or_else(|| de::Error::invalid_value(Unexpected::Str(&raw), &"an ISO-8601 instant"))
@@ -157,6 +456,86 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn adev_80_a_day_is_read_with_or_without_leading_zeros_and_nothing_else() {
+        assert_eq!(parse_day("2026-01-05"), Date::new(2026, 1, 5).ok());
+        assert_eq!(parse_day("2026-1-5"), Date::new(2026, 1, 5).ok());
+        assert_eq!(
+            parse_day("2026-02-30"),
+            None,
+            "there is no 30th of February"
+        );
+        assert_eq!(parse_day("2026-01-05T00:00:00Z"), None);
+        assert_eq!(parse_day("garbage"), None);
+        assert_eq!(parse_day(""), None);
+    }
+
+    /// What `DateTime::parse_from_rfc3339` read, this reads — and what it refused, this refuses. The
+    /// reader is written here rather than borrowed from jiff, so the edges are pinned.
+    #[test]
+    fn adev_80_the_reader_takes_rfc_3339_and_nothing_wider() {
+        let utc = |text: &str| parse(text).map(format);
+        assert_eq!(
+            utc("2026-09-07T12:34:56z").as_deref(),
+            Some("2026-09-07T12:34:56Z")
+        );
+        assert_eq!(
+            utc("2026-09-07 12:34:56Z").as_deref(),
+            Some("2026-09-07T12:34:56Z")
+        );
+        assert_eq!(
+            utc("2026-09-07t05:04:56-07:30").as_deref(),
+            Some("2026-09-07T12:34:56Z")
+        );
+        assert_eq!(
+            utc("2026-09-07T12:34:56.1234567891Z").as_deref(),
+            Some("2026-09-07T12:34:56.123Z"),
+            "digits past a nanosecond are dropped, not refused"
+        );
+        assert_eq!(
+            utc("2026-09-07T12:34:60Z").as_deref(),
+            Some("2026-09-07T12:34:59Z")
+        );
+        for refused in [
+            "2026-09-07T12:34:56",
+            "2026-09-07T12:34:56Z trailing",
+            "2026-09-07T12:34:56.Z",
+            "2026-09-07T12:34:56+24:00",
+            "2026-09-07T12:34:56+0100",
+            "2026-09-07T12:34:56[America/New_York]",
+            "2026-W37-1T12:34:56Z",
+            "26-09-07T12:34:56Z",
+        ] {
+            assert_eq!(parse(refused), None, "{refused}");
+        }
+    }
+
+    /// The text this module writes for the instants chrono wrote, down to the digits.
+    #[test]
+    fn adev_80_it_writes_the_fractions_chrono_wrote() {
+        let at = |text: &str| parse(text).expect("an instant");
+        assert_eq!(
+            rfc3339_z(at("2026-09-07T12:00:00Z")),
+            "2026-09-07T12:00:00Z"
+        );
+        assert_eq!(
+            rfc3339_z(at("2026-09-07T12:00:00.12Z")),
+            "2026-09-07T12:00:00.120Z"
+        );
+        assert_eq!(
+            rfc3339_z(at("2026-09-07T12:00:00.123456Z")),
+            "2026-09-07T12:00:00.123456Z"
+        );
+        assert_eq!(
+            rfc3339_offset(at("2026-09-07T12:00:00.5Z")),
+            "2026-09-07T12:00:00.500+00:00"
+        );
+        assert_eq!(
+            rfc3339_offset(at("2026-09-07T12:00:00Z")),
+            "2026-09-07T12:00:00+00:00"
+        );
+    }
 
     #[test]
     fn it_reads_the_milliseconds_prisma_writes_and_keeps_them() {
@@ -198,7 +577,7 @@ mod tests {
     /// makes every date this client writes land a day out on one of the other two clients.
     #[test]
     fn an_all_day_date_is_stored_at_midnight_utc() {
-        let day = NaiveDate::from_ymd_opt(2026, 9, 7).expect("a real day");
+        let day = Date::new(2026, 9, 7).expect("a real day");
         assert_eq!(format(all_day_instant(day)), "2026-09-07T00:00:00Z");
     }
 
@@ -206,7 +585,7 @@ mod tests {
     /// person creating it; `now`'s UTC date would file it under tomorrow every evening.
     #[test]
     fn todays_all_day_date_is_the_readers_day_rather_than_utcs() {
-        let california = chrono::FixedOffset::east_opt(-7 * 3600).expect("an offset");
+        let california = Offset::from_seconds(-7 * 3600).expect("an offset");
         // 22:00 on the 7th in California is 05:00 on the 8th in UTC.
         let evening = parse("2026-09-08T05:00:00Z").expect("an instant");
         assert_eq!(
@@ -217,7 +596,7 @@ mod tests {
 
     #[test]
     fn an_all_day_instant_round_trips_through_its_day() {
-        let day = NaiveDate::from_ymd_opt(2028, 2, 29).expect("2028 is a leap year");
+        let day = Date::new(2028, 2, 29).expect("2028 is a leap year");
         assert_eq!(all_day_date(all_day_instant(day)), day);
     }
 }

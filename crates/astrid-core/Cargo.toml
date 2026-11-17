@@ -47,8 +47,9 @@ schema = ["dep:schemars", "astrid-rules/schema"]
 [dependencies]
 astrid-rules = { path = "../astrid-rules", version = "0.1.0" }
 schemars = { workspace = true, optional = true }
-chrono = { workspace = true }
-chrono-tz = { workspace = true }
+# The zone table is bundled, not read from the host: Windows has no zoneinfo directory, and a
+# device's zone name has to resolve the same everywhere (what `chrono-tz` always did).
+jiff = { workspace = true, features = ["tzdb-bundle-always"] }
 iana-time-zone = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

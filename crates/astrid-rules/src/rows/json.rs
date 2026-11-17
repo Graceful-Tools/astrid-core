@@ -57,8 +57,8 @@ pub fn rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "priority": row.priority.as_i64(),
                 "due": due(&row.due),
                 "dueAt": row.due_at.map(|at| serde_json::json!({
-                    "date": at.format("%Y-%m-%d").to_string(),
-                    "time": at.format("%H:%M").to_string(),
+                    "date": crate::model::date::format_day(at.date()),
+                    "time": clock_time(at.time()),
                 })),
                 "isOverdue": row.is_overdue,
                 "leading": leading(&row.leading),
@@ -110,10 +110,15 @@ pub fn due(due: &DueLabel) -> serde_json::Value {
         DueLabel::Tomorrow => serde_json::json!({ "key": "tomorrow" }),
         DueLabel::On { day, time } => serde_json::json!({
             "key": "on",
-            "date": day.format("%Y-%m-%d").to_string(),
-            "time": time.map(|time| time.format("%H:%M").to_string()),
+            "date": crate::model::date::format_day(*day),
+            "time": time.map(clock_time),
         }),
     }
+}
+
+/// `09:05`: a time of day to the minute, the way a due label carries it.
+fn clock_time(time: jiff::civil::Time) -> String {
+    format!("{:02}:{:02}", time.hour(), time.minute())
 }
 
 pub fn leading(leading: &LeadingControl) -> serde_json::Value {

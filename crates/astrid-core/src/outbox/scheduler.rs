@@ -10,9 +10,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 
 use super::entry::{kind, Entry, Status};
+use crate::model::date;
 
 /// Give up on an entry after this many failed attempts.
 pub const MAX_ATTEMPTS: i64 = 8;
@@ -31,16 +32,16 @@ pub const COMPLETED_RETENTION_SECS: i64 = 3600;
 /// and flat, and it costs no attempt: the network coming back also nudges the loop at once.
 pub const OFFLINE_WAIT_SECS: i64 = 30;
 
-pub fn offline_wait() -> Duration {
-    Duration::seconds(OFFLINE_WAIT_SECS)
+pub fn offline_wait() -> SignedDuration {
+    SignedDuration::from_secs(OFFLINE_WAIT_SECS)
 }
 
 /// The longest an entry waits after the `attempts`-th failure — the ceiling
 /// [`jittered_backoff`] spreads beneath.
-pub fn backoff(attempts: i64) -> Duration {
+pub fn backoff(attempts: i64) -> SignedDuration {
     let exponent = attempts.saturating_sub(1).clamp(0, 32) as u32;
     let seconds = BASE_BACKOFF_SECS.saturating_mul(1i64 << exponent);
-    Duration::seconds(seconds.min(MAX_BACKOFF_SECS))
+    SignedDuration::from_secs(seconds.min(MAX_BACKOFF_SECS))
 }
 
 /// How long to wait after the `attempts`-th failure, spread so that entries which failed together
@@ -54,15 +55,15 @@ pub fn backoff(attempts: i64) -> Duration {
 /// **Derived, not random.** `seed` is the entry's own id, so this stays a pure function a test can
 /// call, the core needs no RNG, and one entry's wait is reproducible while two entries' waits
 /// differ — which is the only property that matters here.
-pub fn jittered_backoff(attempts: i64, seed: &str) -> Duration {
-    let full = backoff(attempts).num_milliseconds();
+pub fn jittered_backoff(attempts: i64, seed: &str) -> SignedDuration {
+    let full = i64::try_from(backoff(attempts).as_millis()).unwrap_or(i64::MAX);
     let fixed = full / 2;
     let spread = full - fixed;
     if spread <= 0 {
-        return Duration::milliseconds(full);
+        return SignedDuration::from_millis(full);
     }
     let offset = (spread_seed(seed, attempts) % spread as u64) as i64;
-    Duration::milliseconds(fixed + offset)
+    SignedDuration::from_millis(fixed + offset)
 }
 
 /// FNV-1a over the seed and the attempt count.
@@ -85,8 +86,8 @@ fn spread_seed(seed: &str, attempts: i64) -> u64 {
 ///
 /// `seed` is what decorrelates this entry's wait from everything else that failed at the same
 /// moment; the runner passes the entry's id.
-pub fn next_attempt_at(now: DateTime<Utc>, attempts: i64, seed: &str) -> DateTime<Utc> {
-    now + jittered_backoff(attempts, seed)
+pub fn next_attempt_at(now: Timestamp, attempts: i64, seed: &str) -> Timestamp {
+    date::plus(now, jittered_backoff(attempts, seed))
 }
 
 /// Statuses that will not succeed on a retry, so the entry is dead-lettered at once.
@@ -109,7 +110,7 @@ pub fn dependencies_satisfied(entry: &Entry, completed: &HashSet<String>) -> boo
 /// Whether one entry may run at this instant.
 pub fn is_runnable(
     entry: &Entry,
-    now: DateTime<Utc>,
+    now: Timestamp,
     completed: &HashSet<String>,
     in_flight: &HashSet<String>,
 ) -> bool {
@@ -131,7 +132,7 @@ fn completed_ids(entries: &[Entry]) -> HashSet<String> {
 ///
 /// Completion is derived from the journal itself rather than passed in, so a dependency that
 /// finished a moment ago is already visible here.
-pub fn runnable(entries: &[Entry], now: DateTime<Utc>, in_flight: &HashSet<String>) -> Vec<Entry> {
+pub fn runnable(entries: &[Entry], now: Timestamp, in_flight: &HashSet<String>) -> Vec<Entry> {
     let mut ready: Vec<Entry> = eligible(entries, in_flight)
         .into_iter()
         .filter(|entry| now >= entry.next_attempt_at)
@@ -158,9 +159,9 @@ fn eligible<'a>(entries: &'a [Entry], in_flight: &HashSet<String>) -> Vec<&'a En
     let order = |entry: &Entry| (entry.created_at, entry.sequence);
 
     // The oldest unfinished entry of every lane, and of every temporary id's producers, once.
-    let mut lane_heads: std::collections::HashMap<String, (DateTime<Utc>, i64)> =
+    let mut lane_heads: std::collections::HashMap<String, (Timestamp, i64)> =
         std::collections::HashMap::new();
-    let mut producers: std::collections::HashMap<&str, (DateTime<Utc>, i64)> =
+    let mut producers: std::collections::HashMap<&str, (Timestamp, i64)> =
         std::collections::HashMap::new();
     for entry in entries.iter().filter(|entry| unfinished(entry)) {
         let key = order(entry);
@@ -198,7 +199,7 @@ fn eligible<'a>(entries: &'a [Entry], in_flight: &HashSet<String>) -> Vec<&'a En
 /// dead-lettered with its reason, as [`temp_stranded`] would.
 fn awaits_older_producer(
     entry: &Entry,
-    producers: &std::collections::HashMap<&str, (DateTime<Utc>, i64)>,
+    producers: &std::collections::HashMap<&str, (Timestamp, i64)>,
 ) -> bool {
     let mut named = Vec::new();
     temp_ids_in(&entry.payload, &mut named);
@@ -252,9 +253,9 @@ pub fn concurrent_batch(ready: &[Entry], limit: usize) -> Vec<Entry> {
 /// a timer, and setting one for it would spin.
 pub fn next_wakeup(
     entries: &[Entry],
-    now: DateTime<Utc>,
+    now: Timestamp,
     in_flight: &HashSet<String>,
-) -> Option<DateTime<Utc>> {
+) -> Option<Timestamp> {
     let eligible = eligible(entries, in_flight);
     if eligible.iter().any(|entry| now >= entry.next_attempt_at) {
         return None;
@@ -268,13 +269,13 @@ pub fn next_wakeup(
 ///
 /// Everything else is kept: a completed entry a pending one still depends on is what that
 /// dependency resolves against, and pruning it would strand the dependent.
-pub fn pruned(entries: &[Entry], now: DateTime<Utc>) -> Vec<Entry> {
+pub fn pruned(entries: &[Entry], now: Timestamp) -> Vec<Entry> {
     let referenced: HashSet<&String> = entries
         .iter()
         .filter(|entry| matches!(entry.status, Status::Pending | Status::Running))
         .flat_map(|entry| entry.depends_on.iter())
         .collect();
-    let cutoff = now - Duration::seconds(COMPLETED_RETENTION_SECS);
+    let cutoff = date::minus(now, SignedDuration::from_secs(COMPLETED_RETENTION_SECS));
     entries
         .iter()
         .filter(|entry| {
@@ -377,7 +378,7 @@ mod tests {
     use super::*;
     use crate::model::date;
 
-    fn t0() -> DateTime<Utc> {
+    fn t0() -> Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 
@@ -415,15 +416,15 @@ mod tests {
             self
         }
         fn due_in(mut self, seconds: i64) -> Self {
-            self.entry.next_attempt_at = t0() + Duration::seconds(seconds);
+            self.entry.next_attempt_at = t0() + SignedDuration::from_secs(seconds);
             self
         }
         fn created_at(mut self, offset: i64) -> Self {
-            self.entry.created_at = t0() + Duration::seconds(offset);
+            self.entry.created_at = t0() + SignedDuration::from_secs(offset);
             self
         }
         fn updated_at(mut self, offset: i64) -> Self {
-            self.entry.updated_at = t0() + Duration::seconds(offset);
+            self.entry.updated_at = t0() + SignedDuration::from_secs(offset);
             self
         }
         fn payload(mut self, payload: serde_json::Value) -> Self {
@@ -445,8 +446,8 @@ mod tests {
     fn backoff_grows_and_is_capped() {
         assert!(backoff(1) < backoff(2));
         assert!(backoff(2) < backoff(3));
-        assert_eq!(backoff(1), Duration::seconds(BASE_BACKOFF_SECS));
-        assert_eq!(backoff(100), Duration::seconds(MAX_BACKOFF_SECS));
+        assert_eq!(backoff(1), SignedDuration::from_secs(BASE_BACKOFF_SECS));
+        assert_eq!(backoff(100), SignedDuration::from_secs(MAX_BACKOFF_SECS));
     }
 
     /// The exponent is bounded before it is shifted. A machine that comes back after a month with
@@ -454,8 +455,11 @@ mod tests {
     /// entry the busiest thing in the app.
     #[test]
     fn an_absurd_attempt_count_still_produces_the_cap() {
-        assert_eq!(backoff(i64::MAX), Duration::seconds(MAX_BACKOFF_SECS));
-        assert_eq!(backoff(0), Duration::seconds(BASE_BACKOFF_SECS));
+        assert_eq!(
+            backoff(i64::MAX),
+            SignedDuration::from_secs(MAX_BACKOFF_SECS)
+        );
+        assert_eq!(backoff(0), SignedDuration::from_secs(BASE_BACKOFF_SECS));
     }
 
     #[test]
@@ -472,7 +476,7 @@ mod tests {
     #[test]
     fn f7d45608_waits_are_spread_so_entries_that_failed_together_do_not_return_together() {
         let waits: HashSet<i64> = (0..50)
-            .map(|index| jittered_backoff(4, &format!("entry-{index}")).num_milliseconds())
+            .map(|index| jittered_backoff(4, &format!("entry-{index}")).as_millis() as i64)
             .collect();
         assert!(
             waits.len() > 25,
@@ -632,7 +636,7 @@ mod tests {
         ];
         assert_eq!(
             next_wakeup(&entries, t0(), &HashSet::new()),
-            Some(t0() + Duration::seconds(30)),
+            Some(t0() + SignedDuration::from_secs(30)),
             "a dependency-blocked entry is woken by its dependency, not by a timer"
         );
     }
@@ -641,7 +645,7 @@ mod tests {
 
     #[test]
     fn old_completed_entries_go_and_referenced_ones_stay() {
-        let now = t0() + Duration::seconds(COMPLETED_RETENTION_SECS * 2);
+        let now = t0() + SignedDuration::from_secs(COMPLETED_RETENTION_SECS * 2);
         let entries = vec![
             entry("old").status(Status::Completed).updated_at(0).build(),
             entry("referenced")
@@ -874,7 +878,7 @@ mod tests {
         assert!(runnable(&entries, t0(), &HashSet::new()).is_empty());
         assert_eq!(
             next_wakeup(&entries, t0(), &HashSet::new()),
-            Some(t0() + Duration::seconds(120))
+            Some(t0() + SignedDuration::from_secs(120))
         );
     }
 

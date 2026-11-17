@@ -38,7 +38,9 @@ pub mod repeat;
 pub mod sidebar;
 pub mod triage;
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use jiff::civil::{Date, DateTime, Time};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use crate::filters;
 use crate::model::{date, Priority, Task, TaskList, User};
@@ -221,19 +223,19 @@ pub enum DueLabel {
     /// scheduling, what you want to know about "12 August" is whether it is a Wednesday or a
     /// Saturday, and nothing else on the row says so.
     On {
-        day: NaiveDate,
+        day: Date,
         /// The time of day, for a timed task. `None` for an all-day one.
-        time: Option<chrono::NaiveTime>,
+        time: Option<Time>,
     },
 }
 
 impl DueLabel {
     /// What to show for this due date, as the reader sees it.
     pub fn for_due(
-        due: Option<DateTime<Utc>>,
+        due: Option<Timestamp>,
         is_all_day: bool,
-        now: DateTime<Utc>,
-        offset: FixedOffset,
+        now: Timestamp,
+        offset: Offset,
     ) -> DueLabel {
         let Some(due) = due else {
             return DueLabel::None;
@@ -249,9 +251,9 @@ impl DueLabel {
                         time: None,
                     }
                 } else {
-                    let local = due.with_timezone(&offset);
+                    let local = offset.to_datetime(due);
                     DueLabel::On {
-                        day: local.date_naive(),
+                        day: local.date(),
                         time: Some(local.time()),
                     }
                 }
@@ -267,19 +269,14 @@ impl DueLabel {
 ///
 /// An all-day date is compared as a calendar date — its UTC day against the reader's local day —
 /// and a timed one as an instant in the reader's zone. See [`crate::model::date`] for why.
-pub fn day_offset(
-    due: DateTime<Utc>,
-    is_all_day: bool,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
-) -> i64 {
+pub fn day_offset(due: Timestamp, is_all_day: bool, now: Timestamp, offset: Offset) -> i64 {
     let today = filters::local_day(now, offset);
     let due_day = if is_all_day {
         date::all_day_date(due)
     } else {
         filters::local_day(due, offset)
     };
-    (due_day - today).num_days()
+    i64::from((due_day - today).get_days())
 }
 
 /// Everything one row of a list needs, resolved once.
@@ -307,7 +304,7 @@ pub struct TaskRow {
     /// For a timed task, its date and time where the reader is; `None` for an all-day one or none.
     /// iOS draws a timed row as "Oct 19 6:00 PM" even when it is today, which `due` cannot say
     /// (AATD-36).
-    pub due_at: Option<chrono::NaiveDateTime>,
+    pub due_at: Option<DateTime>,
     pub is_overdue: bool,
     pub leading: LeadingControl,
     pub action: LeadingAction,
@@ -430,8 +427,8 @@ pub fn list_chips(
 pub struct RowContext<'a> {
     pub current_user_id: Option<&'a str>,
     pub surface: Surface,
-    pub now: DateTime<Utc>,
-    pub offset: FixedOffset,
+    pub now: Timestamp,
+    pub offset: Offset,
     /// Every list, for the chips. Only the ones a task is in are read.
     pub lists: &'a [TaskList],
     /// Everyone known, for the assignee. A row whose assignee is not here draws an avatar with no
@@ -496,7 +493,7 @@ impl TaskRow {
             due_at: task
                 .due_date_time
                 .filter(|_| !task.is_all_day)
-                .map(|due| due.with_timezone(&context.offset).naive_local()),
+                .map(|due| context.offset.to_datetime(due)),
             is_overdue: filters::is_overdue(task, context.now, context.offset),
             leading,
             action,
@@ -634,12 +631,16 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC")
+    fn utc() -> Offset {
+        Offset::UTC
+    }
+
+    fn calendar_day(year: i16, month: i8, day: i8) -> Date {
+        Date::new(year, month, day).expect("a real day")
     }
 
     fn context<'a>(
@@ -872,8 +873,7 @@ mod tests {
         let now = at("2026-09-07T12:00:00Z");
         let day = |offset: i64| {
             Some(date::all_day_instant(
-                NaiveDate::from_ymd_opt(2026, 9, 7).expect("a real day") + chrono::Days::new(0)
-                    - chrono::Duration::days(-offset),
+                calendar_day(2026, 9, 7).saturating_add(jiff::Span::new().days(offset)),
             ))
         };
         assert_eq!(DueLabel::for_due(day(0), true, now, utc()), DueLabel::Today);
@@ -892,9 +892,8 @@ mod tests {
     /// everyone west of UTC.
     #[test]
     fn an_all_day_date_keeps_its_own_day_wherever_it_is_read() {
-        let california = FixedOffset::east_opt(-7 * 3600).expect("an offset");
-        let christmas =
-            date::all_day_instant(NaiveDate::from_ymd_opt(2026, 12, 25).expect("a real day"));
+        let california = Offset::from_seconds(-7 * 3600).expect("an offset");
+        let christmas = date::all_day_instant(calendar_day(2026, 12, 25));
         let label = DueLabel::for_due(
             Some(christmas),
             true,
@@ -904,7 +903,7 @@ mod tests {
         assert_eq!(
             label,
             DueLabel::On {
-                day: NaiveDate::from_ymd_opt(2026, 12, 25).expect("a real day"),
+                day: calendar_day(2026, 12, 25),
                 time: None
             }
         );
@@ -914,7 +913,7 @@ mod tests {
     /// the 8th in UTC, and calling it "tomorrow" would be wrong for the person reading it.
     #[test]
     fn a_timed_date_belongs_to_the_readers_day() {
-        let california = FixedOffset::east_opt(-7 * 3600).expect("an offset");
+        let california = Offset::from_seconds(-7 * 3600).expect("an offset");
         // 20:00 on the 7th in California is 03:00 on the 8th in UTC.
         let tonight = at("2026-09-08T03:00:00Z");
         // 12:00 on the 7th in California.
@@ -928,8 +927,7 @@ mod tests {
     #[test]
     fn the_day_offset_is_available_for_a_quick_pick_tick() {
         let now = at("2026-09-07T12:00:00Z");
-        let in_three_days =
-            date::all_day_instant(NaiveDate::from_ymd_opt(2026, 9, 10).expect("a real day"));
+        let in_three_days = date::all_day_instant(calendar_day(2026, 9, 10));
         assert_eq!(day_offset(in_three_days, true, now, utc()), 3);
     }
 
@@ -999,15 +997,7 @@ mod tests {
         timed.is_all_day = false;
         let row = TaskRow::build(&timed, &context(&lists, &users, &depths, &counts));
         assert_eq!(row.due, DueLabel::Today);
-        assert_eq!(
-            row.due_at,
-            Some(
-                NaiveDate::from_ymd_opt(2026, 9, 7)
-                    .expect("a day")
-                    .and_hms_opt(18, 30, 0)
-                    .expect("a time")
-            )
-        );
+        assert_eq!(row.due_at, Some(calendar_day(2026, 9, 7).at(18, 30, 0, 0)));
         let mut all_day = Task::new("t2", "Pay rent");
         all_day.due_date_time = Some(at("2026-09-07T00:00:00Z"));
         all_day.is_all_day = true;

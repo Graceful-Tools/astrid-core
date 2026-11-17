@@ -32,13 +32,17 @@ license = "MIT"
 repository = "https://github.com/Graceful-Tools/astrid-core"
 
 [workspace.dependencies]
-chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
-# Time zones by IANA name, for the calendar arithmetic a repeating task does in the person's own
-# zone: "monthly at 2pm" is 2pm on both sides of a daylight-saving change, and "the third
-# Tuesday" is a Tuesday where they live, not in UTC.
-chrono-tz = { version = "0.10", default-features = false }
-# The device's zone by name, which is what `chrono_tz` needs; chrono's own `Local` knows only the
-# offset at an instant.
+# Instants, civil dates and IANA time zones (replacing chrono and chrono-tz, which were declared
+# unmaintained on 2026-11-17: RUSTSEC-2026-0543, RUSTSEC-2026-0555; ADEV-80). Zones matter for the
+# calendar arithmetic a repeating task does in the person's own zone: "monthly at 2pm" is 2pm on
+# both sides of a daylight-saving change, and "the third Tuesday" is a Tuesday where they live,
+# not in UTC. No `tz-system` and no `js`: nothing here reads a clock or a tzdb from the host, and
+# the zone table is bundled only where a build asks for it (astrid-rules' `rules-repeating`).
+# No `serde` either, on purpose: every instant and day on the wire goes through
+# `astrid_rules::model::date`'s adapters, which write exactly what `chrono` wrote, and a field that
+# forgot its adapter should fail to compile instead of quietly writing jiff's spelling.
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+# The device's zone by name, which is what `jiff::tz::TimeZone::get` needs.
 iana-time-zone = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -64,7 +68,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # already, so a second copy cost the iOS binary and `libastrid_apple.a` megabytes for a library
 # the OS had. It is `astrid-core`'s `bundled-sqlite` feature instead, on by default (task
 # `f1210dd8`). What stays here is what every client wants either way.
-rusqlite = { version = "0.41", features = ["chrono", "serde_json", "backup"] }
+rusqlite = { version = "0.41", features = ["serde_json", "backup"] }
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 # Markdown, for task descriptions, comments and chat: the same GFM the web renders through
@@ -79,7 +83,7 @@ strum = { version = "0.27", default-features = false, features = ["derive"] }
 # The wire schema, derived from the types that ARE the wire rather than hand-written beside them.
 # Only ever compiled under the `schema` feature, which is off by default: a shipped client has no
 # use for it, and `astrid-rules-wasm` is a crate whose byte count is a product requirement.
-schemars = { version = "1", default-features = false, features = ["derive", "chrono04"] }
+schemars = { version = "1", default-features = false, features = ["derive"] }
 
 [profile.release]
 lto = "thin"

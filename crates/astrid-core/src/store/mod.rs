@@ -49,7 +49,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -84,8 +84,8 @@ pub struct TaskSummary {
     pub id: String,
     pub title: String,
     pub completed: bool,
-    pub completed_at: Option<DateTime<Utc>>,
-    pub due_date_time: Option<DateTime<Utc>>,
+    pub completed_at: Option<Timestamp>,
+    pub due_date_time: Option<Timestamp>,
     pub is_all_day: bool,
     pub priority: Priority,
     pub repeating: Option<String>,
@@ -99,8 +99,8 @@ pub struct TaskSummary {
     pub occurrence_count: Option<i64>,
     pub comment_count: i64,
     pub attachment_count: i64,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
+    pub updated_at: Option<Timestamp>,
 }
 
 impl TaskSummary {
@@ -330,7 +330,7 @@ impl Store {
     /// json` plus a full decode per row — which is task `71ddacb8`'s shape in the one read that
     /// grows with how long the app has been installed. Both columns are their own, and
     /// `updated_at` is indexed.
-    pub fn task_stamps(&self) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
+    pub fn task_stamps(&self) -> Result<Vec<(String, Option<Timestamp>)>> {
         self.read(|connection| {
             let mut statement = connection.prepare_cached("SELECT id, updated_at FROM tasks")?;
             let rows = statement.query_map([], read_stamp)?;
@@ -368,11 +368,7 @@ impl Store {
     /// Completed tasks are excluded here rather than afterwards because
     /// [`astrid_rules::reminders::due_now`] drops them anyway — the filter belongs wherever it can
     /// be applied before a row is decoded.
-    pub fn tasks_with_reminder_between(
-        &self,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<Task>> {
+    pub fn tasks_with_reminder_between(&self, from: Timestamp, to: Timestamp) -> Result<Vec<Task>> {
         self.read(|connection| {
             let mut statement = connection.prepare_cached(
                 "SELECT json FROM tasks
@@ -392,7 +388,7 @@ impl Store {
     /// a snooze and on what has already been shown — neither of which SQL can see — so a `LIMIT 1`
     /// here would answer with a row the caller then discards and no way to ask for the next.
     /// Bounding it to "has a future reminder" is what takes this off the size of the account.
-    pub fn tasks_with_reminder_after(&self, after: DateTime<Utc>) -> Result<Vec<Task>> {
+    pub fn tasks_with_reminder_after(&self, after: Timestamp) -> Result<Vec<Task>> {
         self.read(|connection| {
             let mut statement = connection.prepare_cached(
                 "SELECT json FROM tasks
@@ -562,7 +558,7 @@ impl Store {
     /// [`Store::task_stamps`]'s counterpart for the same scan, and virtual lists are left out
     /// here rather than filtered afterwards: a virtual list is this client's own — no server has
     /// one, so no server can confirm it gone.
-    pub fn real_list_stamps(&self) -> Result<Vec<(String, Option<DateTime<Utc>>)>> {
+    pub fn real_list_stamps(&self) -> Result<Vec<(String, Option<Timestamp>)>> {
         self.read(|connection| {
             let mut statement = connection
                 .prepare_cached("SELECT id, updated_at FROM lists WHERE is_virtual = 0")?;
@@ -786,12 +782,7 @@ impl Store {
     /// Kept after the Outbox entry that created it is gone: a deep link, a notification, or a
     /// queued edit written before the create was delivered can still be holding the temporary one,
     /// and resolving it late is the difference between an edit landing and an edit 404ing.
-    pub fn record_id_mapping(
-        &self,
-        temp_id: &str,
-        server_id: &str,
-        now: DateTime<Utc>,
-    ) -> Result<()> {
+    pub fn record_id_mapping(&self, temp_id: &str, server_id: &str, now: Timestamp) -> Result<()> {
         self.with(|connection| record_id_mapping_in(connection, temp_id, server_id, now))
     }
 
@@ -952,7 +943,7 @@ const SUMMARY_COLUMNS: &str = "t.id, t.title, t.completed, t.completed_at, t.due
 
 /// An `(id, updated_at)` pair, for the reads that want a row's identity and age and nothing else.
 /// See [`Store::task_stamps`].
-fn read_stamp(row: &rusqlite::Row<'_>) -> SqlResult<(String, Option<DateTime<Utc>>)> {
+fn read_stamp(row: &rusqlite::Row<'_>) -> SqlResult<(String, Option<Timestamp>)> {
     Ok((
         row.get(0)?,
         row.get::<_, Option<String>>(1)?
@@ -1047,7 +1038,7 @@ pub(crate) fn record_id_mapping_in(
     connection: &Connection,
     temp_id: &str,
     server_id: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<()> {
     connection
         .prepare_cached(
@@ -1266,7 +1257,7 @@ fn replace_echoed(
     owner: &str,
     id: &str,
     client_request_id: Option<&str>,
-    created_at: Option<DateTime<Utc>>,
+    created_at: Option<Timestamp>,
 ) -> Result<()> {
     let Some(request_id) = client_request_id else {
         return Ok(());
@@ -1294,7 +1285,7 @@ fn replace_echoed(
             rusqlite::params![
                 temp_id,
                 id,
-                date::format(created_at.unwrap_or_else(Utc::now))
+                date::format(created_at.unwrap_or_else(Timestamp::now))
             ],
         )?;
     }

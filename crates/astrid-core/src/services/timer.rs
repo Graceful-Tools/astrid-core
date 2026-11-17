@@ -17,7 +17,7 @@
 //! discarded. It is rounded up: somebody who started a timer, did a thing and stopped it should not
 //! be told they did nothing.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 
 /// What a task's timer is doing.
@@ -27,7 +27,8 @@ pub struct TimerState {
     pub is_running: bool,
     /// When the running session started, so the shell can count up from it rather than being told
     /// the elapsed time and having to keep it fresh itself.
-    pub started_at: Option<DateTime<Utc>>,
+    #[serde(with = "crate::model::date::exact_optional")]
+    pub started_at: Option<Timestamp>,
     /// Minutes recorded on the task before this session.
     pub logged_minutes: i64,
     /// What the last session recorded, if anything.
@@ -43,8 +44,8 @@ pub fn started_key(task_id: &str) -> String {
 ///
 /// Rounded up, and never zero for a session that actually happened: somebody who started a timer,
 /// did the thing and stopped it should not be told they did nothing.
-pub fn minutes_between(started: DateTime<Utc>, now: DateTime<Utc>) -> i64 {
-    let seconds = (now - started).num_seconds().max(0);
+pub fn minutes_between(started: Timestamp, now: Timestamp) -> i64 {
+    let seconds = now.duration_since(started).as_secs().max(0);
     if seconds == 0 {
         return 0;
     }
@@ -69,7 +70,7 @@ mod tests {
     use super::*;
     use crate::model::date;
 
-    fn at(text: &str) -> DateTime<Utc> {
+    fn at(text: &str) -> Timestamp {
         date::parse(text).expect("a date")
     }
 

@@ -2,7 +2,7 @@
 //!
 //! Ported from `astrid-ios/Astrid App/Models/User.swift`.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::date;
@@ -25,14 +25,14 @@ pub struct User {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     /// The account's own verification state, as `GET /users/me` merges it into the user (task
     /// 19fd9289): verified outright or through a sign-in provider, whether a change of address is
     /// waiting, and what it is. Only ever present on the signed-in user; absent on everyone else,
