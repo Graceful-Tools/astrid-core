@@ -216,6 +216,59 @@ async fn deleting_a_board_detaches_its_lists() {
     assert!(list.project_id.is_none());
 }
 
+/// ADEV-58: "cannot delete project". The boards were already gone from the server (deleted on
+/// another device, still cached here), so the delete answered 404 and the app showed
+/// "CoreFailure error 1". What the person asked for is already true: the board goes from the
+/// cache, its lists are detached as a delete would, and the delete succeeds.
+#[tokio::test]
+async fn adev_58_deleting_a_board_the_server_no_longer_has_succeeds() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        404,
+        json!({ "error": "Project not found" }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Gone" })).expect("a project"),
+        ])
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(json!({ "id": "l1", "name": "Work", "projectId": "p1" }))
+                .expect("a list"),
+        )
+        .expect("stores");
+
+    let deleted = call(&app, json!({ "kind": "deleteProject", "projectId": "p1" })).await;
+
+    assert_eq!(deleted["value"]["success"], true, "{deleted}");
+    assert!(app.store.projects().expect("reads").is_empty());
+    let list = app.store.list("l1").expect("reads").expect("kept");
+    assert!(list.project_id.is_none());
+}
+
+/// ADEV-58, the boundary: any other refusal is still a refusal, and the board stays.
+#[tokio::test]
+async fn adev_58_a_refused_delete_keeps_the_board() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        403,
+        json!({ "error": "Only the owner can delete" }),
+    );
+    let app = app_with(transport);
+    app.store
+        .upsert_projects(&[
+            serde_json::from_value(json!({ "id": "p1", "name": "Kept" })).expect("a project"),
+        ])
+        .expect("stores");
+
+    let deleted = call(&app, json!({ "kind": "deleteProject", "projectId": "p1" })).await;
+
+    assert!(deleted.get("error").is_some(), "{deleted}");
+    assert_eq!(app.store.projects().expect("reads").len(), 1);
+}
+
 /// A board deleted on the web goes on the next refresh; the set is whole.
 #[tokio::test]
 async fn a_board_deleted_elsewhere_goes_on_refresh() {
