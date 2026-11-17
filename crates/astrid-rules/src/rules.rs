@@ -275,20 +275,24 @@ pub enum Rule {
     HandBack { assignee_id: String },
     /// Q1 of [`crate::questions`]: record a question to a person and hand the task to them
     /// (AWTD-1687). Answers `{ question, handBack, notify }`; refused with a `QUESTION_*` code.
+    #[cfg(feature = "rules-waiting")]
     QuestionAsk(Box<crate::questions::AskInput>),
     /// Q2: close `question` with the answerer's `reply` and return the task to the asker.
     /// Answers `{ question, write, notify, resume? }`; refused with a `QUESTION_*` code.
+    #[cfg(feature = "rules-waiting")]
     QuestionAnswer {
         question: Box<crate::questions::Question>,
         reply: crate::questions::Reply,
     },
     /// Q4: the open questions `person_id` must answer, oldest first, across every list.
+    #[cfg(feature = "rules-waiting")]
     QuestionsWaitingOn {
         #[serde(default)]
         questions: Vec<crate::questions::Question>,
         person_id: String,
     },
     /// Q5: the mailbox a comment's `AGENT-HANDBACK:` line names, or `null`.
+    #[cfg(feature = "rules-waiting")]
     QuestionMarker { comment: String },
     /// O1 of [`crate::orchestration`]: the effective policy for a list — the default, then the
     /// project's stored override, then the list's (AWTD-1685). Either may be absent or `null`.
@@ -1149,20 +1153,24 @@ pub fn run(rule: Rule) -> Response {
         )),
         #[cfg(feature = "rules-waiting")]
         Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
+        #[cfg(feature = "rules-waiting")]
         Rule::QuestionAsk(input) => match crate::questions::ask(&input) {
             Ok(asked) => Response::ok(asked),
             Err(error) => Response::failed(Failure::question_refused(error)),
         },
+        #[cfg(feature = "rules-waiting")]
         Rule::QuestionAnswer { question, reply } => {
             match crate::questions::answer(&question, &reply) {
                 Ok(answered) => Response::ok(answered),
                 Err(error) => Response::failed(Failure::question_refused(error)),
             }
         }
+        #[cfg(feature = "rules-waiting")]
         Rule::QuestionsWaitingOn {
             questions,
             person_id,
         } => Response::ok(crate::questions::waiting_on(&questions, &person_id)),
+        #[cfg(feature = "rules-waiting")]
         Rule::QuestionMarker { comment } => {
             Response::ok(crate::questions::marker_mailbox(&comment))
         }
