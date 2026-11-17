@@ -303,7 +303,7 @@ async fn the_detail_screen_arrives_assembled() {
 
 /// Project mode has no assignee or priority row — both live behind the leading control.
 #[tokio::test]
-async fn project_mode_asks_for_a_shorter_detail_screen() {
+async fn adev_72_a_build_still_asking_for_project_mode_gets_the_one_detail_screen() {
     let app = app_with(StubTransport::new());
     let created = call(&app, json!({ "kind": "createTask", "title": "x" })).await;
     let task_id = created["value"]["id"].as_str().expect("an id").to_string();
@@ -313,7 +313,10 @@ async fn project_mode_asks_for_a_shorter_detail_screen() {
         json!({ "kind": "taskDetail", "taskId": task_id, "displayMode": "project" }),
     )
     .await;
-    assert_eq!(detail["value"]["fieldOrder"], json!(["when", "lists"]));
+    assert_eq!(
+        detail["value"]["fieldOrder"],
+        json!(["assignee", "when", "priority", "lists"])
+    );
 }
 
 #[tokio::test]
@@ -1027,20 +1030,6 @@ async fn the_detail_shows_the_board_state_of_a_board_task_in_both_modes_task_522
         "Done is the checkbox's job"
     );
     assert_eq!(state["chips"][2]["isCurrent"], true);
-
-    let compact = call(
-        &app,
-        json!({ "kind": "taskDetail", "taskId": "t1", "displayMode": "project" }),
-    )
-    .await;
-    // Both modes since AITD-555 (task `aa72f990`). This asserted null, on the argument that
-    // project mode already offers the state behind the leading control — which it does not: that
-    // control depicts who and priority, never the column, so the detail never said where the task
-    // was.
-    assert!(
-        !compact["value"]["boardState"].is_null(),
-        "AITD-555: compact detail shows the board state too"
-    );
 
     let plain = call(&app, json!({ "kind": "taskDetail", "taskId": "t2" })).await;
     assert!(

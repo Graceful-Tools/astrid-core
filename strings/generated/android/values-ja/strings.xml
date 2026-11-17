@@ -541,10 +541,6 @@
     <string name="share_link_failed">共有リンクを作成できませんでした。もう一度お試しください。</string>
     <string name="share_private_task_message">これはプライベートタスクです。このリストへのアクセス権を持つユーザーのみ閲覧できます。</string>
     <string name="share_share_task">タスクを共有</string>
-    <string name="smart_layout_list">リスト</string>
-    <string name="smart_layout_list_desc">チェックボックスでタスクを完了し、優先度と担当者はそれぞれ独立した行になります。</string>
-    <string name="smart_layout_project">プロジェクト</string>
-    <string name="smart_layout_project_desc">コンパクト。チェックボックスから優先度、担当者、状態、完了を開きます。</string>
     <string name="smart_offset_1_day">1日</string>
     <string name="smart_offset_1_week">1週間</string>
     <string name="smart_offset_3_days">3日</string>

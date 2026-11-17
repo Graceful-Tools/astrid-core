@@ -545,10 +545,6 @@
     <string name="share_link_failed">Não foi possível gerar o link de compartilhamento. Tente novamente.</string>
     <string name="share_private_task_message">Esta é uma tarefa privada. Apenas usuários com acesso a esta lista podem visualizá-la.</string>
     <string name="share_share_task">Compartilhar tarefa</string>
-    <string name="smart_layout_list">Lista</string>
-    <string name="smart_layout_list_desc">A caixa de seleção conclui a tarefa, e prioridade e responsável têm cada um a sua própria linha.</string>
-    <string name="smart_layout_project">Projeto</string>
-    <string name="smart_layout_project_desc">Compacto. A caixa abre prioridade, responsável, estado e concluir.</string>
     <string name="smart_offset_1_day">1 dia</string>
     <string name="smart_offset_1_week">1 semana</string>
     <string name="smart_offset_3_days">3 dias</string>

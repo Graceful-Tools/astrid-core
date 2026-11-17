@@ -1606,18 +1606,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>Поделиться задачей</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>Список</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>Флажок завершает задачу, а приоритет и исполнитель занимают отдельные строки.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>Проект</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>Компактно. Флажок открывает приоритет, исполнителя, состояние и завершение.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 день</value>
   </data>

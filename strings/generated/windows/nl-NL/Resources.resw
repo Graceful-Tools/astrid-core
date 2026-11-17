@@ -1618,18 +1618,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>Taak delen</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>Lijst</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>Het selectievakje voltooit de taak, en prioriteit en toegewezen persoon krijgen elk een eigen rij.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>Project</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>Compact. Het vakje opent prioriteit, toegewezene, status en voltooien.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 dag</value>
   </data>

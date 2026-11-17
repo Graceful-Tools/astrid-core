@@ -54,10 +54,7 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             Ok(None) => Response::failed(Failure::not_found("task", task_id)),
             Err(error) => Response::failed(error.into()),
         },
-        Command::TaskDetail {
-            task_id,
-            display_mode,
-        } => task_detail(app, &task_id, display_mode),
+        Command::TaskDetail { task_id } => task_detail(app, &task_id),
         Command::DueDateOptions { task_id, draft } => {
             due_date_options(app, task_id.as_deref(), draft)
         }
@@ -647,7 +644,7 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
 /// both Apple clients and here, and the order they appear in is a product decision written down
 /// once — see `crate::rows::detail`. A shell that laid them out itself would be the fifth place
 /// to get it wrong.
-pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>) -> Response {
+pub(super) fn task_detail(app: &App, task_id: &str) -> Response {
     let task = match app.context.tasks().task(task_id) {
         Ok(Some(task)) => task,
         Ok(None) => return Response::failed(Failure::not_found("task", task_id)),
@@ -656,7 +653,6 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
 
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
-    let mode = resolved_display_mode(app, display_mode.as_deref());
 
     let lists = app.store.lists().unwrap_or_default();
     let chips: Vec<serde_json::Value> = task
@@ -706,10 +702,9 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
     let is_copy_only = rows::copy_only(&task, &lists, me.as_deref());
 
     // The BOARD STATE row (task 5221e43f): the task's board's columns as chips, Done left out,
-    // only for a board task in list mode and never for a read-only viewer. The rule is shared
+    // only for a board task and never for a read-only viewer. The rule is shared
     // with the web and both Apple clients and asked here, not restated. `null` means no row.
     let board_state = rows::detail::shows_board_state(
-        mode,
         rows::detail::is_task_in_project(&task, &lists),
         is_copy_only,
     )
@@ -780,7 +775,7 @@ pub(super) fn task_detail(app: &App, task_id: &str, display_mode: Option<String>
             app.context.client.base_url(),
         ),
         "task": task,
-        "fieldOrder": rows::detail::field_order(mode)
+        "fieldOrder": rows::detail::field_order()
             .iter()
             .map(|field| field.name())
             .collect::<Vec<_>>(),
@@ -1162,7 +1157,6 @@ pub(super) fn search_tasks(
 
     let context = RowContext {
         current_user_id: current_user_id.as_deref(),
-        display_mode: rows::DisplayMode::List,
         surface: rows::Surface::ListRow,
         now,
         offset,
@@ -1546,11 +1540,8 @@ pub(super) fn quick_add_defaults(
         ..Default::default()
     });
 
-    let leading = crate::rows::LeadingControl::for_task(
-        draft.assignee_id.as_deref(),
-        me.as_deref(),
-        crate::rows::DisplayMode::List,
-    );
+    let leading =
+        crate::rows::LeadingControl::for_task(draft.assignee_id.as_deref(), me.as_deref());
 
     Response::ok(serde_json::json!({
         "priority": draft.priority.as_i64(),

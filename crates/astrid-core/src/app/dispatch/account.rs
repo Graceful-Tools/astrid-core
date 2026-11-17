@@ -588,14 +588,13 @@ pub(super) fn settings(app: &App) -> Response {
         // core was given, rather than a string the shell types.
         "timezone": app.clock.utc_offset().to_string(),
         "calendarFeedUrl": format!("{}{CALENDAR_FEED}", app.context.client.base_url()),
-        // The task defaults and the task-detail layout, shaped and defaulted in one place, with
+        // The task defaults, shaped and defaulted in one place, with
         // the choices each combo offers (task c0f3db19).
         "smartTasks": crate::smart_tasks::SmartTaskSettings::from_stored(
             &account.smart_task_settings().unwrap_or_default(),
         ),
         "dueOffsetChoices": crate::smart_tasks::offset_choices(),
         "dueTimeChoices": crate::smart_tasks::time_choices(),
-        "layoutChoices": crate::smart_tasks::layout_choices(),
         "subtaskChoices": crate::smart_tasks::subtask_choices(),
     }))
 }
@@ -617,16 +616,6 @@ pub(super) fn features(app: &App) -> Response {
         "googleTasks": flag("google_tasks"),
         "taskCost": flag("task_cost"),
     }))
-}
-
-/// The layout to draw with: what the shell asked for, else what the account chose (task c0f3db19).
-/// The preference lives on the server and is read from the cache, so a choice made on the web
-/// applies here after the next settings refresh, and one made here applies at once.
-pub(super) fn resolved_display_mode(app: &App, asked: Option<&str>) -> rows::DisplayMode {
-    match asked {
-        Some(value) => Command::display_mode(Some(value)),
-        None => app.context.account().display_mode(),
-    }
 }
 
 /// Merge changes into the stored reminder settings and write them back.

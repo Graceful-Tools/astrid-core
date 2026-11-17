@@ -355,7 +355,6 @@ fn draw_board(
     let current_user_id = app.context.account().current_user_id().ok().flatten();
     let context = RowContext {
         current_user_id: current_user_id.as_deref(),
-        display_mode: rows::DisplayMode::List,
         surface: rows::Surface::BoardCard,
         now,
         offset,

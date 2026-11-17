@@ -3989,14 +3989,6 @@
             "null"
           ]
         },
-        "displayMode": {
-          "default": null,
-          "description": "`list` or `project`; anything else reads as `list`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "idsOnly": {
           "default": false,
           "description": "Ids and counts only, no rows - what a caller that already holds the tasks wants.",
@@ -4277,14 +4269,6 @@
     {
       "description": "What a task's detail draws: its field order, and whether the board-state and blockers rows\nappear - [`crate::rows::detail`] (AWTD2-216; iOS's `TaskDetailFieldOrder`,\n`TaskDetailProjectStateRow.isVisible`, tasks c8a1ff51, AITD-327/332/555).\n\nAsked on its own because the Apple detail views do not read the App door's `taskDetail`.",
       "properties": {
-        "displayMode": {
-          "default": null,
-          "description": "`list` or `project`; anything else reads as `list`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "hasBlockers": {
           "default": false,
           "type": "boolean"
@@ -4319,14 +4303,6 @@
         },
         "currentUserId": {
           "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "displayMode": {
-          "default": null,
-          "description": "`list` or `project`; anything else reads as `list`.",
           "type": [
             "string",
             "null"
