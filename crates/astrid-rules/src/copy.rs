@@ -112,7 +112,6 @@ pub fn keys() -> Vec<String> {
         smart_tasks::offset_choices(),
         smart_tasks::time_choices(),
         smart_tasks::subtask_choices(),
-        smart_tasks::layout_choices(),
     ] {
         for choice in choices {
             keys.insert(choice.title_key);
@@ -198,7 +197,6 @@ mod tests {
             "defaults.all_day",
             "priority.none",
             "smart.offset.none",
-            "smart.layout.project_desc",
             "smart.time.17_00",
             "tasks.addTaskToList",
             "tasks.tradeoffRatings.veryGood",

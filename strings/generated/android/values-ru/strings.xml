@@ -541,10 +541,6 @@
     <string name="share_link_failed">Не удалось создать ссылку для общего доступа. Попробуйте ещё раз.</string>
     <string name="share_private_task_message">Это приватная задача. Только пользователи с доступом к этому списку могут её видеть.</string>
     <string name="share_share_task">Поделиться задачей</string>
-    <string name="smart_layout_list">Список</string>
-    <string name="smart_layout_list_desc">Флажок завершает задачу, а приоритет и исполнитель занимают отдельные строки.</string>
-    <string name="smart_layout_project">Проект</string>
-    <string name="smart_layout_project_desc">Компактно. Флажок открывает приоритет, исполнителя, состояние и завершение.</string>
     <string name="smart_offset_1_day">1 день</string>
     <string name="smart_offset_1_week">1 неделя</string>
     <string name="smart_offset_3_days">3 дня</string>

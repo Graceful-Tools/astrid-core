@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rows::{DisplayMode, Surface};
+use crate::rows::Surface;
 
 pub use astrid_rules::envelope::{Failure, FailureKind, Response};
 
@@ -101,8 +101,6 @@ pub enum Command {
     RowsForList {
         list_id: String,
         #[serde(default)]
-        display_mode: Option<String>,
-        #[serde(default)]
         surface: Option<String>,
         /// Where to start, for a virtualised list. Absent means the beginning.
         #[serde(default)]
@@ -167,8 +165,6 @@ pub enum Command {
     /// and a shell that assembled the screen itself would be the fifth place to get it wrong.
     TaskDetail {
         task_id: String,
-        #[serde(default)]
-        display_mode: Option<String>,
     },
     /// The quick date and time choices for a task, with the instant each one means and which
     /// one it is already set to.
@@ -1346,9 +1342,9 @@ pub enum Command {
     UpdateReminderSettings {
         changes: serde_json::Value,
     },
-    /// Change the account's task defaults or its task-detail layout (task c0f3db19). The fields
+    /// Change the account's task defaults (task c0f3db19). The fields
     /// are the server's — `emailToTaskEnabled`, `defaultTaskDueOffset`, `defaultDueTime`,
-    /// `taskDisplayMode`, `subtaskDisplay`, `smartTaskCreationEnabled` — merged into what is
+    /// `subtaskDisplay`, `smartTaskCreationEnabled` — merged into what is
     /// stored, and refused here when the server would refuse them. Answers with the account screen.
     UpdateSmartTaskSettings {
         changes: serde_json::Value,
@@ -1639,6 +1635,20 @@ pub enum Command {
         #[serde(default)]
         image_url: Option<String>,
     },
+    /// Edit a board's name, description and colour (ADEV-69; web `PATCH /api/v1/projects/{id}`,
+    /// the owner or a project admin). Only the fields named are sent and changed; an empty
+    /// `description` clears it. The cache takes the edit first and is put back if the server
+    /// refuses (403 `PROJECT_RENAME_FORBIDDEN`, 400 `PROJECT_COLOR_INVALID` /
+    /// `PROJECT_NAME_REQUIRED`). Online only. Answers the board as cached.
+    UpdateProject {
+        project_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+    },
     /// Turn a list into a board in one request. Online only.
     CreateBoardForList {
         list_id: String,
@@ -1720,11 +1730,6 @@ pub enum Command {
 }
 
 impl Command {
-    /// The display mode a row command asked for.
-    pub fn display_mode(stored: Option<&str>) -> DisplayMode {
-        DisplayMode::from_stored(stored)
-    }
-
     /// Which surface a row command is drawing.
     ///
     /// Unrecognised means a list row, the commonest surface — and the one whose behaviour is least

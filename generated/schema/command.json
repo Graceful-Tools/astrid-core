@@ -2104,13 +2104,6 @@
             "null"
           ]
         },
-        "displayMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "idsOnly": {
           "default": false,
           "description": "Answer with the ids in order (`ids`) instead of projected rows: for a shell that draws its\nown rows from tasks it already holds, the projection is work nobody reads.",
@@ -2333,13 +2326,6 @@
     {
       "description": "Everything one task's detail screen needs: the task, its comments, its subtasks, its list\nchips, and the order to lay the fields out in.\n\nOne command rather than five, because the field order is a cross-platform product decision\nand a shell that assembled the screen itself would be the fifth place to get it wrong.",
       "properties": {
-        "displayMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "kind": {
           "const": "taskDetail",
           "type": "string"
@@ -5954,7 +5940,7 @@
       "type": "object"
     },
     {
-      "description": "Change the account's task defaults or its task-detail layout (task c0f3db19). The fields\nare the server's — `emailToTaskEnabled`, `defaultTaskDueOffset`, `defaultDueTime`,\n`taskDisplayMode`, `subtaskDisplay`, `smartTaskCreationEnabled` — merged into what is\nstored, and refused here when the server would refuse them. Answers with the account screen.",
+      "description": "Change the account's task defaults (task c0f3db19). The fields\nare the server's — `emailToTaskEnabled`, `defaultTaskDueOffset`, `defaultDueTime`,\n`subtaskDisplay`, `smartTaskCreationEnabled` — merged into what is\nstored, and refused here when the server would refuse them. Answers with the account screen.",
       "properties": {
         "changes": true,
         "kind": {
@@ -6953,6 +6939,44 @@
       "required": [
         "kind",
         "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Edit a board's name, description and colour (ADEV-69; web `PATCH /api/v1/projects/{id}`,\nthe owner or a project admin). Only the fields named are sent and changed; an empty\n`description` clears it. The cache takes the edit first and is put back if the server\nrefuses (403 `PROJECT_RENAME_FORBIDDEN`, 400 `PROJECT_COLOR_INVALID` /\n`PROJECT_NAME_REQUIRED`). Online only. Answers the board as cached.",
+      "properties": {
+        "color": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "const": "updateProject",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
       ],
       "type": "object"
     },

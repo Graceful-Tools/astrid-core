@@ -548,10 +548,6 @@
     <string name="share_link_failed">Failed to generate share link. Please try again.</string>
     <string name="share_private_task_message">This is a private task. Only users with access to this list can view it.</string>
     <string name="share_share_task">Share Task</string>
-    <string name="smart_layout_list">List</string>
-    <string name="smart_layout_list_desc">The checkbox completes the task, and priority and assignee each get their own row.</string>
-    <string name="smart_layout_project">Project</string>
-    <string name="smart_layout_project_desc">Compact. The checkbox opens priority, assignee, state and complete.</string>
     <string name="smart_offset_1_day">1 day</string>
     <string name="smart_offset_1_week">1 week</string>
     <string name="smart_offset_3_days">3 days</string>

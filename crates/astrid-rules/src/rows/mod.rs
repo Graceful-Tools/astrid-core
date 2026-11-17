@@ -43,52 +43,6 @@ use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use crate::filters;
 use crate::model::{date, Priority, Task, TaskList, User};
 
-/// Which task-detail design the user has chosen.
-///
-/// Mirrors `astrid-web/lib/task-display-mode.ts`. **Reads normalise, writes reject** — anything
-/// unrecognised resolves to [`DisplayMode::List`] on the way in, because a row written before the
-/// column existed reads back null and a build meeting a newer mode must still draw a usable
-/// screen; but the server answers 400 to a write carrying anything but the two literals, so
-/// [`DisplayMode::wire_value`] only ever emits one of them. A coerced value must never be echoed
-/// back.
-///
-/// Not the `project_mode` feature flag, whose name is close enough to cause a real mistake: that
-/// is access — may this person use boards at all — and this is a preference they set.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DisplayMode {
-    /// The checkbox completes the task. Priority and assignee each get their own row in detail.
-    #[default]
-    List,
-    /// Detail is compact, and the leading control opens a popover rather than completing.
-    Project,
-}
-
-impl DisplayMode {
-    pub fn from_stored(stored: Option<&str>) -> Self {
-        match stored.map(|value| value.trim().to_lowercase()).as_deref() {
-            Some("project") => DisplayMode::Project,
-            _ => DisplayMode::List,
-        }
-    }
-
-    pub fn wire_value(self) -> &'static str {
-        match self {
-            DisplayMode::List => "list",
-            DisplayMode::Project => "project",
-        }
-    }
-
-    /// Whether the leading control completes the task, or opens the picker.
-    pub fn checkbox_completes_task(self) -> bool {
-        self == DisplayMode::List
-    }
-
-    /// Whether task detail uses the compact layout.
-    pub fn uses_compact_detail(self) -> bool {
-        self == DisplayMode::Project
-    }
-}
-
 /// Where a leading control is being drawn.
 ///
 /// A surface is something the call site knows and the mode never can. Asking only "which mode is
@@ -174,24 +128,14 @@ pub fn copy_only(task: &Task, lists: &[TaskList], current_user_id: Option<&str>)
 impl LeadingControl {
     /// Which control to draw.
     ///
-    /// `display_mode` is required rather than defaulted (task 132d7b3f). The two modes disagree
-    /// about exactly one case — a task assigned to *you* — and a default would let a new call site
-    /// pick the old answer silently, which is the bug the parameter exists to prevent.
-    ///
-    /// In **list** mode your own task is the checkbox, because there the checkbox is how you
-    /// complete it. In **project** mode your own task shows your photo, exactly as someone else's
-    /// shows theirs: the control opens the quick changer rather than completing, so it was never a
-    /// checkbox in the "click to finish" sense, and a board where every card you own is a bare box
-    /// and everyone else's is a face makes your own work the only thing you cannot see at a glance.
-    pub fn for_task(
-        assignee_id: Option<&str>,
-        current_user_id: Option<&str>,
-        display_mode: DisplayMode,
-    ) -> LeadingControl {
+    /// Your own task is the checkbox, because the checkbox is how you complete it; someone
+    /// else's shows their photo. The Project task layout, which showed your own photo too, was
+    /// removed from every client (ADEV-72), so there is one answer.
+    pub fn for_task(assignee_id: Option<&str>, current_user_id: Option<&str>) -> LeadingControl {
         let Some(assignee) = assignee_id.filter(|id| !id.is_empty()) else {
             return LeadingControl::Unassigned;
         };
-        if current_user_id == Some(assignee) && !display_mode.uses_compact_detail() {
+        if current_user_id == Some(assignee) {
             return LeadingControl::Checkbox;
         }
         LeadingControl::Avatar(assignee.to_string())
@@ -199,7 +143,7 @@ impl LeadingControl {
 
     /// Complete the task, or open the picker?
     ///
-    /// iOS's `TaskLeadingControl.action(surface:kind:displayMode:currentUserId:)`, which this
+    /// iOS's `TaskLeadingControl.action(surface:kind:currentUserId:)`, which this
     /// follows exactly (task `aa72f990`; Jon, 2026-10-03: on disagreement follow iOS).
     ///
     /// **Someone else's task opens the picker on every surface** (AITD-375), checked before the
@@ -207,20 +151,15 @@ impl LeadingControl {
     /// trapdoor: one stray tap finishes another person's work, with nothing on the row to say it
     /// did. A reader who is not signed in counts as someone else's, which is the safe direction.
     ///
-    /// A **board card** always opens the picker, in both modes: a board is where a task has a
+    /// A **board card** always opens the picker: a board is where a task has a
     /// status, so the control is how you set it, and completing outright from a card is the
     /// trapdoor described on [`Surface`].
     ///
-    /// A **list row and detail are one case**: complete only when project mode has not taken the
-    /// control over *and* the control actually **is** a checkbox (AITD-382). Detail always applied
+    /// A **list row and detail are one case**: complete only when the control actually **is** a
+    /// checkbox (AITD-382). Detail always applied
     /// the second condition (task 729a190e); the list row did not, so a row nobody owned completed
     /// on click instead of first asking whose it is.
-    pub fn action(
-        &self,
-        surface: Surface,
-        display_mode: DisplayMode,
-        current_user_id: Option<&str>,
-    ) -> LeadingAction {
+    pub fn action(&self, surface: Surface, current_user_id: Option<&str>) -> LeadingAction {
         // Copy is copy on every surface: a row, a card and the detail all say the same thing
         // about a task that can only be copied.
         if *self == LeadingControl::Copy {
@@ -235,7 +174,7 @@ impl LeadingControl {
         match surface {
             Surface::BoardCard => LeadingAction::OpenPicker,
             Surface::ListRow | Surface::Detail => {
-                if display_mode.checkbox_completes_task() && *self == LeadingControl::Checkbox {
+                if *self == LeadingControl::Checkbox {
                     LeadingAction::Complete
                 } else {
                     LeadingAction::OpenPicker
@@ -250,12 +189,8 @@ impl LeadingControl {
     /// order is written down once: compact detail has no room for a state row, a board card is
     /// where a column means something, and someone else's task is being *triaged* rather than
     /// worked, which is when its column matters most.
-    pub fn picker_shows_project_state(
-        display_mode: DisplayMode,
-        surface: Surface,
-        is_someone_elses: bool,
-    ) -> bool {
-        display_mode.uses_compact_detail() || surface == Surface::BoardCard || is_someone_elses
+    pub fn picker_shows_project_state(surface: Surface, is_someone_elses: bool) -> bool {
+        surface == Surface::BoardCard || is_someone_elses
     }
 
     /// Whether a task belongs to somebody other than the reader.
@@ -494,7 +429,6 @@ pub fn list_chips(
 /// What the row builder needs to resolve a task against.
 pub struct RowContext<'a> {
     pub current_user_id: Option<&'a str>,
-    pub display_mode: DisplayMode,
     pub surface: Surface,
     pub now: DateTime<Utc>,
     pub offset: FixedOffset,
@@ -515,8 +449,7 @@ impl TaskRow {
             .assignee_id
             .as_deref()
             .or(task.assignee.as_ref().map(|user| user.id.as_str()));
-        let mut leading =
-            LeadingControl::for_task(assignee_id, context.current_user_id, context.display_mode);
+        let mut leading = LeadingControl::for_task(assignee_id, context.current_user_id);
         // The mark has to be able to read as checked, and the unassigned mark cannot
         // (`astrid-web/docs/PRODUCT_CONTRACT.md` §4). Only this pair: someone else's photo still
         // reads as theirs.
@@ -528,16 +461,11 @@ impl TaskRow {
         if copy_only(task, context.lists, context.current_user_id) {
             leading = LeadingControl::Copy;
         }
-        let action = leading.action(
-            context.surface,
-            context.display_mode,
-            context.current_user_id,
-        );
-        // Answered here rather than left to the shell (task 3c0dfb73): the rule needs the surface
-        // and the display mode, which a row on the wire does not carry, so a client holding only
+        let action = leading.action(context.surface, context.current_user_id);
+        // Answered here rather than left to the shell (task 3c0dfb73): the rule needs the surface,
+        // which a row on the wire does not carry, so a client holding only
         // the row could not have worked it out — and the one client that tried would be deciding.
         let picker_shows_project_state = LeadingControl::picker_shows_project_state(
-            context.display_mode,
             context.surface,
             LeadingControl::is_someone_elses_task(assignee_id, context.current_user_id),
         );
@@ -722,7 +650,6 @@ mod tests {
     ) -> RowContext<'a> {
         RowContext {
             current_user_id: Some("me"),
-            display_mode: DisplayMode::List,
             surface: Surface::ListRow,
             now: at("2026-09-07T12:00:00Z"),
             offset: utc(),
@@ -733,26 +660,6 @@ mod tests {
         }
     }
 
-    // ── Display mode ─────────────────────────────────────────────────────────────────────────
-
-    /// Reads normalise, writes reject. A row written before the column existed reads back null,
-    /// and the server answers 400 to anything but the two literals — so a coerced value must never
-    /// be echoed back.
-    #[test]
-    fn an_unknown_display_mode_reads_as_list_and_is_never_written_back() {
-        for stored in [None, Some(""), Some("  "), Some("somethingLater")] {
-            assert_eq!(DisplayMode::from_stored(stored), DisplayMode::List);
-        }
-        assert_eq!(
-            DisplayMode::from_stored(Some("PROJECT")),
-            DisplayMode::Project
-        );
-        assert_eq!(
-            DisplayMode::from_stored(Some("somethingLater")).wire_value(),
-            "list"
-        );
-    }
-
     // ── The leading control ──────────────────────────────────────────────────────────────────
 
     /// Unassigned is its own state. Folding it in with "mine" made a task nobody owns look exactly
@@ -760,35 +667,29 @@ mod tests {
     #[test]
     fn nobodys_task_looks_like_nobodys() {
         assert_eq!(
-            LeadingControl::for_task(None, Some("me"), DisplayMode::List),
+            LeadingControl::for_task(None, Some("me")),
             LeadingControl::Unassigned
         );
         assert_eq!(
-            LeadingControl::for_task(Some(""), Some("me"), DisplayMode::List),
+            LeadingControl::for_task(Some(""), Some("me")),
             LeadingControl::Unassigned
         );
     }
 
     #[test]
-    fn someone_elses_task_shows_their_face_in_either_mode() {
-        for mode in [DisplayMode::List, DisplayMode::Project] {
-            assert_eq!(
-                LeadingControl::for_task(Some("them"), Some("me"), mode),
-                LeadingControl::Avatar("them".into())
-            );
-        }
+    fn someone_elses_task_shows_their_face() {
+        assert_eq!(
+            LeadingControl::for_task(Some("them"), Some("me")),
+            LeadingControl::Avatar("them".into())
+        );
     }
 
-    /// The one case the two modes disagree about, and the reason the mode is a required argument.
+    /// ADEV-72: the Project layout is gone, so your own task is always the checkbox.
     #[test]
-    fn your_own_task_is_a_checkbox_in_list_mode_and_your_face_in_project_mode() {
+    fn adev_72_your_own_task_is_always_a_checkbox() {
         assert_eq!(
-            LeadingControl::for_task(Some("me"), Some("me"), DisplayMode::List),
+            LeadingControl::for_task(Some("me"), Some("me")),
             LeadingControl::Checkbox
-        );
-        assert_eq!(
-            LeadingControl::for_task(Some("me"), Some("me"), DisplayMode::Project),
-            LeadingControl::Avatar("me".into())
         );
     }
 
@@ -832,11 +733,11 @@ mod tests {
             "a private list is not copied"
         );
         assert_eq!(
-            LeadingControl::Copy.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingControl::Copy.action(Surface::ListRow, Some("me")),
             LeadingAction::Copy
         );
         assert_eq!(
-            LeadingControl::Copy.action(Surface::Detail, DisplayMode::Project, Some("me")),
+            LeadingControl::Copy.action(Surface::Detail, Some("me")),
             LeadingAction::Copy
         );
     }
@@ -845,23 +746,17 @@ mod tests {
     /// this one" must not finish the task.
     #[test]
     fn a_board_card_never_completes_from_its_leading_control() {
-        for mode in [DisplayMode::List, DisplayMode::Project] {
-            assert_eq!(
-                LeadingControl::Checkbox.action(Surface::BoardCard, mode, Some("me")),
-                LeadingAction::OpenPicker
-            );
-        }
+        assert_eq!(
+            LeadingControl::Checkbox.action(Surface::BoardCard, Some("me")),
+            LeadingAction::OpenPicker
+        );
     }
 
     #[test]
-    fn a_list_row_completes_unless_project_mode_has_taken_that_over() {
+    fn a_list_row_completes_its_own_checkbox() {
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingControl::Checkbox.action(Surface::ListRow, Some("me")),
             LeadingAction::Complete
-        );
-        assert_eq!(
-            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::Project, Some("me")),
-            LeadingAction::OpenPicker
         );
     }
 
@@ -877,20 +772,17 @@ mod tests {
     fn aitd_375_someone_elses_task_opens_the_picker_on_every_surface() {
         let theirs = LeadingControl::Avatar("them".into());
         for surface in [Surface::ListRow, Surface::Detail, Surface::BoardCard] {
-            for mode in [DisplayMode::List, DisplayMode::Project] {
-                assert_eq!(
-                    theirs.action(surface, mode, Some("me")),
-                    LeadingAction::OpenPicker,
-                    "{surface:?} in {mode:?} completed someone else's task"
-                );
-            }
+            assert_eq!(
+                theirs.action(surface, Some("me")),
+                LeadingAction::OpenPicker,
+                "{surface:?} completed someone else's task"
+            );
         }
 
-        // My own avatar is not someone else's — project mode draws me as one, and the ordinary
-        // surface rules then apply.
+        // My own avatar is not someone else's, and the ordinary surface rules then apply.
         let mine = LeadingControl::Avatar("me".into());
         assert_eq!(
-            mine.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            mine.action(Surface::ListRow, Some("me")),
             LeadingAction::OpenPicker,
             "an avatar is not a checkbox, so AITD-382 still refuses"
         );
@@ -898,7 +790,7 @@ mod tests {
         // Nobody signed in counts as someone else's, which is the safe direction: refuse to
         // complete rather than complete the wrong person's task.
         assert_eq!(
-            theirs.action(Surface::ListRow, DisplayMode::List, None),
+            theirs.action(Surface::ListRow, None),
             LeadingAction::OpenPicker
         );
     }
@@ -907,25 +799,17 @@ mod tests {
     /// them in Swift (task `aa72f990`).
     #[test]
     fn aa72f990_the_picker_and_whose_task_it_is_are_the_cores_answers() {
-        // Compact detail has no room for a state row; a board card is where a column means
-        // something; someone else's task is being triaged rather than worked.
+        // A board card is where a column means something; someone else's task is being triaged
+        // rather than worked.
         assert!(LeadingControl::picker_shows_project_state(
-            DisplayMode::Project,
-            Surface::Detail,
-            false
-        ));
-        assert!(LeadingControl::picker_shows_project_state(
-            DisplayMode::List,
             Surface::BoardCard,
             false
         ));
         assert!(LeadingControl::picker_shows_project_state(
-            DisplayMode::List,
             Surface::ListRow,
             true
         ));
         assert!(!LeadingControl::picker_shows_project_state(
-            DisplayMode::List,
             Surface::ListRow,
             false
         ));
@@ -954,11 +838,11 @@ mod tests {
     #[test]
     fn aitd_382_a_list_row_completes_only_a_real_checkbox() {
         assert_eq!(
-            LeadingControl::Unassigned.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingControl::Unassigned.action(Surface::ListRow, Some("me")),
             LeadingAction::OpenPicker
         );
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::ListRow, DisplayMode::List, Some("me")),
+            LeadingControl::Checkbox.action(Surface::ListRow, Some("me")),
             LeadingAction::Complete
         );
     }
@@ -968,19 +852,15 @@ mod tests {
     #[test]
     fn detail_completes_only_when_the_control_really_is_a_checkbox() {
         assert_eq!(
-            LeadingControl::Checkbox.action(Surface::Detail, DisplayMode::List, Some("me")),
+            LeadingControl::Checkbox.action(Surface::Detail, Some("me")),
             LeadingAction::Complete
         );
         assert_eq!(
-            LeadingControl::Avatar("them".into()).action(
-                Surface::Detail,
-                DisplayMode::List,
-                Some("me")
-            ),
+            LeadingControl::Avatar("them".into()).action(Surface::Detail, Some("me")),
             LeadingAction::OpenPicker
         );
         assert_eq!(
-            LeadingControl::Unassigned.action(Surface::Detail, DisplayMode::List, Some("me")),
+            LeadingControl::Unassigned.action(Surface::Detail, Some("me")),
             LeadingAction::OpenPicker
         );
     }
