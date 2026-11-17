@@ -111,6 +111,7 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::RemoveBoardStatus { .. }
         | Command::Projects
         | Command::CreateProject { .. }
+        | Command::UpdateProject { .. }
         | Command::CreateBoardForList { .. }
         | Command::DeleteProject { .. }
         | Command::ProjectBoardRows { .. }

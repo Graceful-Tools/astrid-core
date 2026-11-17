@@ -116,6 +116,22 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 )
                 .await,
         ),
+        Command::UpdateProject {
+            project_id,
+            name,
+            description,
+            color,
+        } => answer(
+            app.context
+                .boards()
+                .update_project(
+                    &project_id,
+                    name.as_deref(),
+                    description.as_deref(),
+                    color.as_deref(),
+                )
+                .await,
+        ),
         Command::CreateBoardForList { list_id } => {
             answer(app.context.boards().create_board_for_list(&list_id).await)
         }
