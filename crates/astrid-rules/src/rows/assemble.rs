@@ -45,7 +45,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset, Utc};
 
-use super::{DisplayMode, RowContext, Surface, TaskRow};
+use super::{RowContext, Surface, TaskRow};
 use crate::filters;
 use crate::model::{Task, TaskList, User};
 
@@ -79,7 +79,6 @@ pub struct Inputs<'a> {
     pub current_user_id: Option<&'a str>,
     /// The account's half of the subtask rule — "inside parent task only" (task 6ac2639a).
     pub subtask_display: Option<&'a str>,
-    pub display_mode: DisplayMode,
     pub surface: Surface,
     pub now: DateTime<Utc>,
     pub offset: FixedOffset,
@@ -244,7 +243,6 @@ pub fn project(inputs: &Inputs<'_>, window: &[&Task]) -> Vec<TaskRow> {
     let counts = super::subtask_counts(inputs.subtasks);
     let context = RowContext {
         current_user_id: inputs.current_user_id,
-        display_mode: inputs.display_mode,
         surface: inputs.surface,
         now: inputs.now,
         offset: inputs.offset,

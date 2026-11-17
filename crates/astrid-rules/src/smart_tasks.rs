@@ -1,10 +1,12 @@
 //! The account's task defaults and its task-detail layout, as the server stores them
-//! (task c0f3db19): web's Task Settings page, and the layout switch on its Appearance page — both
-//! `GET` / `PATCH /api/v1/users/me/smart-tasks`.
+//! (task c0f3db19): web's Task Settings page and its Appearance page — both
+//! `GET` / `PATCH /api/v1/users/me/smart-tasks`. The task-layout setting is gone (ADEV-72): the
+//! server still stores and validates `taskDisplayMode` for builds already in the wild, but this
+//! client neither reads nor writes it.
 //!
-//! The defaults are the web's (`TasksSettings.tsx`: `?? true`, `|| "1_week"`, `|| "17:00"`;
-//! `lib/task-display-mode.ts`: everyone defaults to list), and the values a field may take are the
-//! server's (`VALID_OFFSETS`, `TIME_RE`, `VALID_SUBTASK_DISPLAY`, `isTaskDisplayMode`), checked
+//! The defaults are the web's (`TasksSettings.tsx`: `?? true`, `|| "1_week"`, `|| "17:00"`), and
+//! the values a field may take are the
+//! server's (`VALID_OFFSETS`, `TIME_RE`, `VALID_SUBTASK_DISPLAY`), checked
 //! here before a request goes — a write the server would refuse should be refused in the room, not
 //! by a 400 after the control has already moved.
 //!
@@ -12,7 +14,6 @@
 //! add does not read them, so neither does this client's — a default applied on one client and not
 //! the other is exactly the kind of divergence `docs/CONTRACTS.md` exists to prevent.
 
-use crate::rows::DisplayMode;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -30,8 +31,6 @@ pub struct SmartTaskSettings {
     pub email_to_task_enabled: bool,
     pub default_task_due_offset: String,
     pub default_due_time: String,
-    /// `list` or `project` — the wire value, normalised the way `DisplayMode::from_stored` does.
-    pub task_display_mode: String,
     pub subtask_display: String,
     pub smart_task_creation_enabled: bool,
     /// Whether list pictures are drawn, as chosen; `None` follows the `hide_list_images` test
@@ -57,11 +56,6 @@ impl SmartTaskSettings {
             email_to_task_enabled: flag("emailToTaskEnabled"),
             default_task_due_offset: text("defaultTaskDueOffset", "1_week"),
             default_due_time: text("defaultDueTime", "17:00"),
-            task_display_mode: DisplayMode::from_stored(
-                stored.get("taskDisplayMode").and_then(Value::as_str),
-            )
-            .wire_value()
-            .to_string(),
             subtask_display: if SUBTASK_DISPLAYS.contains(&subtask_display.as_str()) {
                 subtask_display
             } else {
@@ -75,11 +69,6 @@ impl SmartTaskSettings {
     /// iOS's ListImagesVisibility.shouldShow: the person's choice, else the flag's arm.
     pub fn shows_list_images(&self, hide_flag: bool) -> bool {
         self.show_list_images.unwrap_or(!hide_flag)
-    }
-
-    /// The layout rows and the detail draw with.
-    pub fn display_mode(&self) -> DisplayMode {
-        DisplayMode::from_stored(Some(&self.task_display_mode))
     }
 }
 
@@ -117,14 +106,6 @@ pub fn validate(changes: &Value) -> Result<(), String> {
                     .is_some_and(|v| SUBTASK_DISPLAYS.contains(&v))
                 {
                     return Err("Invalid subtaskDisplay value".to_string());
-                }
-            }
-            "taskDisplayMode" => {
-                if !value
-                    .as_str()
-                    .is_some_and(|v| v == "list" || v == "project")
-                {
-                    return Err("taskDisplayMode must be list or project".to_string());
                 }
             }
             "emailToTaskListId" => {
@@ -194,21 +175,6 @@ pub fn subtask_choices() -> Vec<Choice> {
         .collect()
 }
 
-/// The two task-detail layouts, each with the line the web shows under it.
-pub fn layout_choices() -> Vec<Choice> {
-    [DisplayMode::List, DisplayMode::Project]
-        .iter()
-        .map(|mode| {
-            let name = mode.wire_value();
-            Choice {
-                value: name.to_string(),
-                title_key: format!("smart.layout.{name}"),
-                description_key: Some(format!("smart.layout.{name}_desc")),
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -237,9 +203,7 @@ mod tests {
         assert!(defaults.email_to_task_enabled);
         assert_eq!(defaults.default_task_due_offset, "1_week");
         assert_eq!(defaults.default_due_time, "17:00");
-        assert_eq!(defaults.task_display_mode, "list");
         assert_eq!(defaults.subtask_display, "indented");
-        assert_eq!(defaults.display_mode(), DisplayMode::List);
 
         let stored = SmartTaskSettings::from_stored(&json!({
             "emailToTaskEnabled": false, "defaultTaskDueOffset": "3_days",
@@ -249,25 +213,22 @@ mod tests {
         assert_eq!(stored.default_task_due_offset, "3_days");
         assert_eq!(stored.default_due_time, "09:00");
         assert_eq!(
-            stored.task_display_mode, "project",
-            "normalised as the web normalises"
-        );
-        assert_eq!(
             stored.subtask_display, "indented",
             "an unknown layout is the safe one"
         );
-        assert_eq!(stored.display_mode(), DisplayMode::Project);
 
-        assert!(
-            validate(&json!({ "taskDisplayMode": "project", "defaultDueTime": "20:00" })).is_ok()
-        );
+        assert!(validate(&json!({ "defaultDueTime": "20:00" })).is_ok());
         assert_eq!(
             validate(&json!({ "defaultTaskDueOffset": "2_weeks" })),
             Err("Invalid defaultTaskDueOffset value".to_string())
         );
         assert!(validate(&json!({ "defaultDueTime": "25:00" })).is_err());
         assert!(validate(&json!({ "defaultDueTime": "9:00" })).is_err());
-        assert!(validate(&json!({ "taskDisplayMode": "board" })).is_err());
+        assert_eq!(
+            validate(&json!({ "taskDisplayMode": "project" })),
+            Err("taskDisplayMode is not a task setting".to_string()),
+            "ADEV-72: this client no longer writes the layout"
+        );
         assert!(validate(&json!({ "emailToTaskEnabled": "yes" })).is_err());
         assert!(validate(&json!({ "favouriteColour": "blue" })).is_err());
         assert!(validate(&json!("project")).is_err());
@@ -283,12 +244,6 @@ mod tests {
         assert_eq!(
             subtask_choices()[1].title_key,
             "smart.subtasks.under_parent"
-        );
-        let layouts = layout_choices();
-        assert_eq!(layouts[0].value, "list");
-        assert_eq!(
-            layouts[1].description_key.as_deref(),
-            Some("smart.layout.project_desc")
         );
     }
 }
