@@ -12,8 +12,8 @@
 //! and Who second before it was written down — the same wrong order twice, which is what happens
 //! when two views each decide for themselves.
 //!
-//! Project mode is deliberately absent. There, priority and assignee live behind the leading
-//! control and are not rows at all (task 729a190e), so there is no order to state.
+//! There is one layout. The Project layout, where priority and assignee lived behind the leading
+//! control, was removed from every client (ADEV-72).
 
 use crate::board::{BoardColumn, VIRTUAL_DONE_COLUMN_ID};
 use crate::model::{Priority, Task, TaskList};
@@ -49,14 +49,9 @@ pub const LIST_MODE: [DetailField; 4] = [
     DetailField::Lists,
 ];
 
-/// The order for a display mode.
-pub fn field_order(display_mode: super::DisplayMode) -> &'static [DetailField] {
-    match display_mode {
-        super::DisplayMode::List => &LIST_MODE,
-        // Project mode puts assignee and priority behind the leading control, so the rows that
-        // remain are the two that are still rows.
-        super::DisplayMode::Project => &[DetailField::When, DetailField::Lists],
-    }
+/// The order of the detail fields.
+pub fn field_order() -> &'static [DetailField] {
+    &LIST_MODE
 }
 
 /// Whether the detail shows a BOARD STATE row.
@@ -65,22 +60,12 @@ pub fn field_order(display_mode: super::DisplayMode) -> &'static [DetailField] {
 /// (AITD-327, AITD-332), and the web copied it as `showsTaskDetailProjectState` (task 5221e43f).
 /// Copied rather than redesigned, for the reason the field order above is written down once.
 ///
-/// - **In BOTH display modes** since AITD-555 (task `aa72f990`). This was list-mode-only, on the
-///   argument that project mode already shows the state behind the leading control — and it does
-///   not: that control depicts *who* and *priority*, never the column, so the detail of a task on
-///   a board simply never said where the task was. `display_mode` is kept as a parameter, as iOS
-///   keeps it, so that no call site can re-add the condition by passing something else.
 /// - **On a board only.** A board column is a project idea, and a row for one on a task that has
-///   no column would rebuild exactly the hybrid the display-mode setting exists to end. For a
-///   task that IS on a board, the column is real information the list layout was merely hiding.
+///   no column would be a row for a state the task cannot have. For a task that IS on a board,
+///   the column is real information.
 /// - **Not read-only.** The row is a mover, not a label: its chips write. So it follows Who and
 ///   Priority, which are hidden from a public-list viewer rather than drawn as dead controls.
-pub fn shows_board_state(
-    display_mode: super::DisplayMode,
-    is_in_project: bool,
-    is_read_only: bool,
-) -> bool {
-    let _ = display_mode;
+pub fn shows_board_state(is_in_project: bool, is_read_only: bool) -> bool {
     is_in_project && !is_read_only
 }
 
@@ -94,9 +79,6 @@ pub fn shows_board_state(
 /// - **A read-only viewer still sees it.** The board-state row hides from one because it is a
 ///   mover and would draw dead controls; a blocker is information, and a public-list reader
 ///   benefits from knowing that a task is held. They get chips without the ✕ or the picker.
-/// - **Display mode does not enter into it.** The state row hides in project mode because the
-///   leading control already offers the state. Nothing else says a task is blocked, in either
-///   mode, so there is nothing to say twice.
 ///
 /// With no blockers the row appears only for someone who could add one: an empty row on every
 /// task on every board is noise for a reader who cannot act on it.
@@ -187,27 +169,13 @@ pub const PRIORITY_ROW_ICON: &str = "!!!";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rows::DisplayMode;
 
     /// The order is the whole contract. Written as a literal so a change to it is a change
     /// somebody made on purpose, in a commit that can be mirrored to the other clients.
     #[test]
-    fn list_mode_is_who_date_priority_lists() {
-        let order: Vec<&str> = field_order(DisplayMode::List)
-            .iter()
-            .map(|field| field.name())
-            .collect();
+    fn the_order_is_who_date_priority_lists() {
+        let order: Vec<&str> = field_order().iter().map(|field| field.name()).collect();
         assert_eq!(order, vec!["assignee", "when", "priority", "lists"]);
-    }
-
-    /// Project mode has no assignee or priority row: both live behind the leading control.
-    #[test]
-    fn project_mode_drops_the_two_fields_that_are_not_rows_there() {
-        let order: Vec<&str> = field_order(DisplayMode::Project)
-            .iter()
-            .map(|field| field.name())
-            .collect();
-        assert_eq!(order, vec!["when", "lists"]);
     }
 
     fn list(id: &str, project_id: Option<&str>) -> TaskList {
@@ -226,39 +194,21 @@ mod tests {
 
     // ── The board-state row (task 5221e43f) ───────────────────────────────────────────────
 
-    /// The row appears for a board task in list mode, and list mode is what a viewer who never
-    /// touched the setting has.
     #[test]
-    fn a_board_task_in_list_mode_shows_the_row() {
-        assert!(shows_board_state(DisplayMode::List, true, false));
-        assert!(shows_board_state(
-            DisplayMode::from_stored(None),
-            true,
-            false
-        ));
+    fn a_board_task_shows_the_row() {
+        assert!(shows_board_state(true, false));
     }
 
-    /// In project mode the quick changer already offers the state; a row would say it twice.
-    #[test]
-    fn project_mode_hides_the_row() {
-        assert!(
-            shows_board_state(DisplayMode::Project, true, false),
-            "AITD-555: project mode's leading control depicts who and priority, never the column, \
-             so the detail never said where the task was"
-        );
-    }
-
-    /// A row for a state the task cannot have is the list/project hybrid the display-mode setting
-    /// exists to end.
+    /// A row for a state the task cannot have is noise.
     #[test]
     fn a_task_with_no_board_column_has_no_row() {
-        assert!(!shows_board_state(DisplayMode::List, false, false));
+        assert!(!shows_board_state(false, false));
     }
 
     /// The chips write, so a read-only viewer does not get them.
     #[test]
     fn a_read_only_viewer_does_not_get_the_row() {
-        assert!(!shows_board_state(DisplayMode::List, true, true));
+        assert!(!shows_board_state(true, true));
     }
 
     /// The project comes from the task's own memberships, never from the selected list, and a

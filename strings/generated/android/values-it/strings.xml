@@ -545,10 +545,6 @@
     <string name="share_link_failed">Impossibile generare il link di condivisione. Riprova.</string>
     <string name="share_private_task_message">Questa è un\'attività privata. Solo gli utenti con accesso a questa lista possono vederla.</string>
     <string name="share_share_task">Condividi attività</string>
-    <string name="smart_layout_list">Lista</string>
-    <string name="smart_layout_list_desc">La casella completa l\'attività, e priorità e assegnatario hanno ciascuno la propria riga.</string>
-    <string name="smart_layout_project">Progetto</string>
-    <string name="smart_layout_project_desc">Compatto. La casella apre priorità, assegnatario, stato e completa.</string>
     <string name="smart_offset_1_day">1 giorno</string>
     <string name="smart_offset_1_week">1 settimana</string>
     <string name="smart_offset_3_days">3 giorni</string>

@@ -353,7 +353,6 @@ mod tasks;
 // `reminders` are absent deliberately: once task 8a91c5b0 moved the arms into the domain modules,
 // nothing outside each of those four used anything in it, and the compiler said so. From `board`,
 // only the Waiting helpers: `setTaskStatusRole` and `updateTask` take the same rule as a move.
-use account::*;
 use attachments::*;
 use board::{resolve_waiting, write_status};
 use comments::*;

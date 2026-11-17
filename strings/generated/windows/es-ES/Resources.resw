@@ -1618,18 +1618,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>Compartir tarea</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>Lista</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>La casilla completa la tarea, y la prioridad y el responsable tienen cada uno su propia fila.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>Proyecto</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>Compacto. La casilla abre prioridad, responsable, estado y completar.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 día</value>
   </data>

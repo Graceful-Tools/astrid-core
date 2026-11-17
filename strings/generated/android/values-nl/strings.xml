@@ -545,10 +545,6 @@
     <string name="share_link_failed">Kan geen deellink maken. Probeer het opnieuw.</string>
     <string name="share_private_task_message">Dit is een privétaak. Alleen gebruikers met toegang tot deze lijst kunnen deze zien.</string>
     <string name="share_share_task">Taak delen</string>
-    <string name="smart_layout_list">Lijst</string>
-    <string name="smart_layout_list_desc">Het selectievakje voltooit de taak, en prioriteit en toegewezen persoon krijgen elk een eigen rij.</string>
-    <string name="smart_layout_project">Project</string>
-    <string name="smart_layout_project_desc">Compact. Het vakje opent prioriteit, toegewezene, status en voltooien.</string>
     <string name="smart_offset_1_day">1 dag</string>
     <string name="smart_offset_1_week">1 week</string>
     <string name="smart_offset_3_days">3 dagen</string>
