@@ -21,7 +21,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use astrid_rules::model::{date, Task};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/my-tasks.json");
@@ -32,7 +32,7 @@ struct Fixture {
 }
 
 /// The fixture pins no clock, because nothing it varies depends on one. Any instant will do.
-fn now() -> DateTime<Utc> {
+fn now() -> Timestamp {
     date::parse("2026-10-17T12:00:00Z").expect("an instant")
 }
 
@@ -58,7 +58,7 @@ fn load() -> Fixture {
 ///
 /// Through the stateless door (task `c2109ff8`): My Tasks is the view the app opens on, and until
 /// now the only client that could ask for it was one that links Rust.
-fn answer(f: &Fixture, case: &Value, now: DateTime<Utc>) -> bool {
+fn answer(f: &Fixture, case: &Value, now: Timestamp) -> bool {
     let table: Vec<&Task> = f.tasks.values().collect();
     let wanted = case["task"].as_str().expect("a task id");
     let answered = common::ask(serde_json::json!({

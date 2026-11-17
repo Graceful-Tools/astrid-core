@@ -9,8 +9,8 @@
 //! The date math is [`super`]'s; this module only chooses between the outcomes and says what each
 //! one changes.
 
-use chrono::{DateTime, Utc};
-use chrono_tz::Tz;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use serde::Serialize;
 
 use super::{
@@ -37,13 +37,13 @@ pub enum Completion {
     Toggle {
         completed: bool,
         #[serde(with = "date::optional")]
-        completed_at: Option<DateTime<Utc>>,
+        completed_at: Option<Timestamp>,
         clear_closed_reason: bool,
     },
     /// A repeating task rolls forward: it stays open, due next time round, one occurrence on.
     RollForward {
         #[serde(with = "date::required")]
-        due_date_time: DateTime<Utc>,
+        due_date_time: Timestamp,
         is_all_day: bool,
         occurrence_count: i32,
     },
@@ -51,7 +51,7 @@ pub enum Completion {
     /// showed a repeat chip after its last occurrence would look like it was coming back.
     SeriesEnded {
         #[serde(with = "date::required")]
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     },
 }
 
@@ -61,7 +61,7 @@ pub enum Completion {
 /// repeat first must pass its edited copy (rule 3 of the README), because the rollover anchors on
 /// those fields. `zone` is the person's own: a timed task steps on their wall clock, and an all-day
 /// task repeating from its completion anchors on their calendar day, not UTC's.
-pub fn completion(task: &Task, completed: bool, now: DateTime<Utc>, zone: Tz) -> Completion {
+pub fn completion(task: &Task, completed: bool, now: Timestamp, zone: &TimeZone) -> Completion {
     // Un-completing, completing something already completed, or a task that does not repeat: the
     // flag is the whole operation. An already-completed repeating task does not roll again.
     if !completed || task.completed || !task.is_repeating() {
@@ -90,14 +90,18 @@ pub fn completion(task: &Task, completed: bool, now: DateTime<Utc>, zone: Tz) ->
 /// the next selected day — rule 3 of the README exists because of it.
 ///
 /// An all-day task is stepped in UTC, where its date lives; a timed one in `zone`.
-pub fn next_occurrence(task: &Task, now: DateTime<Utc>, zone: Tz) -> NextOccurrence {
+pub fn next_occurrence(task: &Task, now: Timestamp, zone: &TimeZone) -> NextOccurrence {
     let repeat_from = match task.repeat_from.unwrap_or(RepeatFromMode::CompletionDate) {
         RepeatFromMode::DueDate => RepeatFrom::DueDate,
         RepeatFromMode::CompletionDate => RepeatFrom::CompletionDate,
     };
     let completion = effective_completion_date(task, repeat_from, now, zone);
     let occurrence_count = task.occurrence_count.unwrap_or(0) as i32;
-    let calendar = if task.is_all_day { Tz::UTC } else { zone };
+    let calendar = if task.is_all_day {
+        &TimeZone::UTC
+    } else {
+        zone
+    };
 
     if task.repeating == Some(WireRepeating::Custom) {
         if let Some(pattern) = &task.repeating_data {
@@ -150,9 +154,9 @@ pub fn next_occurrence(task: &Task, now: DateTime<Utc>, zone: Tz) -> NextOccurre
 fn effective_completion_date(
     task: &Task,
     repeat_from: RepeatFrom,
-    now: DateTime<Utc>,
-    zone: Tz,
-) -> DateTime<Utc> {
+    now: Timestamp,
+    zone: &TimeZone,
+) -> Timestamp {
     if task.is_all_day && repeat_from == RepeatFrom::CompletionDate {
         return date::all_day_today(now, offset_at(zone, now));
     }
@@ -163,12 +167,18 @@ fn effective_completion_date(
 mod tests {
     use super::*;
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> Tz {
-        Tz::UTC
+    static UTC: TimeZone = TimeZone::UTC;
+
+    fn utc() -> &'static TimeZone {
+        &UTC
+    }
+
+    fn zone(name: &str) -> TimeZone {
+        TimeZone::get(name).expect("a zone the bundled database knows")
     }
 
     fn task(json: serde_json::Value) -> Task {
@@ -259,9 +269,9 @@ mod tests {
             "id": "t1", "repeating": "daily", "repeatFrom": "COMPLETION_DATE",
             "dueDateTime": "2026-09-28T00:00:00Z", "isAllDay": true
         }));
-        let pacific = Tz::America__Los_Angeles;
+        let pacific = zone("America/Los_Angeles");
         assert_eq!(
-            completion(&all_day, true, at("2026-09-29T04:00:00Z"), pacific),
+            completion(&all_day, true, at("2026-09-29T04:00:00Z"), &pacific),
             Completion::RollForward {
                 due_date_time: at("2026-09-29T00:00:00Z"),
                 is_all_day: true,
@@ -286,7 +296,7 @@ mod tests {
             &monthly,
             true,
             at("2024-01-16T18:00:00Z"),
-            Tz::America__Los_Angeles,
+            &zone("America/Los_Angeles"),
         ) else {
             panic!("rolls forward");
         };
@@ -306,7 +316,7 @@ mod tests {
             &monthly,
             true,
             at("2024-02-15T23:00:00Z"),
-            Tz::America__Los_Angeles,
+            &zone("America/Los_Angeles"),
         ) else {
             panic!("rolls forward");
         };

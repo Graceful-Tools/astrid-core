@@ -26,7 +26,7 @@ pub use entry::{kind, Entry, Status};
 pub use journal::Stats;
 pub use runner::{Delivery, DrainReport, Runner};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 /// Mint an id for something that exists only on this device so far.
 ///
@@ -48,7 +48,7 @@ pub fn build(
     kind: &str,
     payload: serde_json::Value,
     client_request_id: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Entry {
     Entry::new(new_entry_id(), kind, payload, client_request_id, now)
 }

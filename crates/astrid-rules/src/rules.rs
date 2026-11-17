@@ -15,9 +15,10 @@
 //! crate's models already decode leniently. A shell that keeps its own models hands them over as
 //! it would to the server; nothing is mirrored field by field across the boundary.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
 #[cfg(feature = "rules-repeating")]
-use chrono_tz::Tz;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Failure, Response};
@@ -40,7 +41,7 @@ pub enum Rule {
         completed: bool,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's zone, by IANA name (`America/Los_Angeles`).
         time_zone: String,
     },
@@ -56,10 +57,10 @@ pub enum Rule {
         pattern: Option<serde_json::Value>,
         #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
         #[serde(default, with = "date::optional")]
-        current_due_date: Option<DateTime<Utc>>,
+        current_due_date: Option<Timestamp>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        completion: DateTime<Utc>,
+        completion: Timestamp,
         /// `DUE_DATE` or `COMPLETION_DATE`; the wire default is the latter.
         #[serde(default)]
         repeat_from: Option<String>,
@@ -92,7 +93,9 @@ pub enum Rule {
         /// The app's language (`en`, `pt-BR`, …): its keyword tables. English when unknown.
         #[serde(default)]
         locale: Option<String>,
-        today: chrono::NaiveDate,
+        #[cfg_attr(feature = "schema", schemars(with = "date::CalendarDate"))]
+        #[serde(with = "date::day")]
+        today: jiff::civil::Date,
     },
     /// What a search box asks for — `assignee:me priority:high overdue rollover` as a structured
     /// filter plus the free text — see [`crate::parse::search`]. Answers the parse in the web's
@@ -153,7 +156,7 @@ pub enum Rule {
         board_list_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes: where their day starts for Done's window.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -210,7 +213,7 @@ pub enum Rule {
         lists: Vec<crate::model::TaskList>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes: where their day starts for Done's window.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -243,7 +246,7 @@ pub enum Rule {
         return_assignee_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     /// R3: does a Waiting task leave by itself — [`crate::waiting::wake`]. Answers
     /// `{ "action": "stay" | "wakeToReady" | "resolveToInbox" }`.
@@ -254,7 +257,7 @@ pub enum Rule {
         blockers: Vec<crate::waiting::Blocker>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     /// R3 + R5: the lane a task belongs in now, and the write that puts it there —
     /// [`crate::waiting::settle`]. What the server's scheduled job runs per task.
@@ -268,7 +271,7 @@ pub enum Rule {
         return_assignee_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     /// R4: what handing a task back to a person writes — [`crate::waiting::hand_back`].
     #[cfg(feature = "rules-waiting")]
@@ -354,7 +357,7 @@ pub enum Rule {
         return_assignee_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     /// R7: the optional preset columns this board can still add — [`crate::board::available_presets`].
     BoardPresets {
@@ -521,7 +524,7 @@ pub enum Rule {
         user_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes: which calendar day "tomorrow" is.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -555,7 +558,7 @@ pub enum Rule {
         reminded_task_id: Option<String>,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes: which calendar day "today" is.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -608,7 +611,7 @@ pub enum Rule {
         ids_only: bool,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -627,7 +630,7 @@ pub enum Rule {
     ReminderSnooze {
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         minutes: i64,
     },
     /// The whole command palette for a query - [`crate::palette::search`]: commands, lists and
@@ -733,12 +736,12 @@ pub enum Rule {
     DayOffset {
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        date: DateTime<Utc>,
+        date: Timestamp,
         #[serde(default)]
         is_all_day: bool,
         #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
         #[serde(with = "date::required")]
-        now: DateTime<Utc>,
+        now: Timestamp,
         /// The person's offset from UTC now, in minutes.
         #[serde(default)]
         utc_offset_minutes: i32,
@@ -798,7 +801,7 @@ struct QuickAddDefaultsAnswer {
     priority: i64,
     assignee_id: Option<String>,
     #[serde(with = "date::optional")]
-    due_date_time: Option<DateTime<Utc>>,
+    due_date_time: Option<Timestamp>,
     is_all_day: bool,
     repeating: Option<crate::model::Repeating>,
     is_private: bool,
@@ -882,7 +885,7 @@ pub fn run(rule: Rule) -> Response {
             now,
             time_zone,
         } => match zone(&time_zone) {
-            Ok(zone) => Response::ok(crate::repeating::completion(&task, completed, now, zone)),
+            Ok(zone) => Response::ok(crate::repeating::completion(&task, completed, now, &zone)),
             Err(failure) => Response::failed(failure),
         },
         #[cfg(feature = "rules-repeating")]
@@ -917,7 +920,7 @@ pub fn run(rule: Rule) -> Response {
             );
             match task {
                 Ok(task) => {
-                    Response::ok(crate::repeating::next_occurrence(&task, completion, zone))
+                    Response::ok(crate::repeating::next_occurrence(&task, completion, &zone))
                 }
                 Err(error) => Response::failed(Failure::bad_request(error.to_string())),
             }
@@ -1292,13 +1295,9 @@ pub fn run(rule: Rule) -> Response {
             priority,
             assignee_id,
         } => {
-            let Some(zone) = utc_offset_minutes
-                .checked_mul(60)
-                .and_then(chrono::FixedOffset::east_opt)
-            else {
-                return Response::failed(Failure::bad_request(format!(
-                    "{utc_offset_minutes} minutes is not an offset from UTC"
-                )));
+            let zone = match utc_offset(utc_offset_minutes) {
+                Ok(zone) => zone,
+                Err(failure) => return Response::failed(failure),
             };
 
             // The draft `createTask` would make, read back — rather than a second copy of the same
@@ -1329,7 +1328,7 @@ pub fn run(rule: Rule) -> Response {
                         &list,
                         user_id.as_deref(),
                         now,
-                        zone,
+                        &jiff::tz::TimeZone::fixed(zone),
                     );
                 }
                 // A synthesised view — My Tasks — has no defaults to apply, and the creator is
@@ -1355,13 +1354,9 @@ pub fn run(rule: Rule) -> Response {
             now,
             utc_offset_minutes,
         } => {
-            let Some(zone) = utc_offset_minutes
-                .checked_mul(60)
-                .and_then(chrono::FixedOffset::east_opt)
-            else {
-                return Response::failed(Failure::bad_request(format!(
-                    "{utc_offset_minutes} minutes is not an offset from UTC"
-                )));
+            let zone = match utc_offset(utc_offset_minutes) {
+                Ok(zone) => zone,
+                Err(failure) => return Response::failed(failure),
             };
             // Nobody signed in is an empty deck, not everybody's: the question is what is due for
             // ME, and there is no me.
@@ -1475,13 +1470,9 @@ pub fn run(rule: Rule) -> Response {
             now,
             utc_offset_minutes,
         } => {
-            let Some(utc_offset) = utc_offset_minutes
-                .checked_mul(60)
-                .and_then(FixedOffset::east_opt)
-            else {
-                return Response::failed(Failure::bad_request(format!(
-                    "{utc_offset_minutes} minutes is not an offset from UTC"
-                )));
+            let utc_offset = match utc_offset(utc_offset_minutes) {
+                Ok(offset) => offset,
+                Err(failure) => return Response::failed(failure),
             };
             // A request with neither a list nor preferences is a list with no saved settings:
             // every filter unset, sorted auto. Refusing it would make the commonest call - "lay
@@ -1669,7 +1660,7 @@ struct BoardRowsAnswer {
 fn next_occurrence_task(
     repeating: String,
     pattern: Option<serde_json::Value>,
-    current_due_date: Option<chrono::DateTime<chrono::Utc>>,
+    current_due_date: Option<Timestamp>,
     is_all_day: bool,
     repeat_from: Option<String>,
     occurrence_count: i64,
@@ -1700,18 +1691,22 @@ fn next_occurrence_task(
 
 /// An offset from UTC in minutes, or a refusal: an offset no clock has is a bad request, not an
 /// overflow.
-fn utc_offset(minutes: i32) -> Result<FixedOffset, Failure> {
+///
+/// Strictly inside one day either way, which is every offset a clock has: `Offset` itself would
+/// take a little more, and an answer this door once refused must stay refused.
+fn utc_offset(minutes: i32) -> Result<Offset, Failure> {
     minutes
         .checked_mul(60)
-        .and_then(FixedOffset::east_opt)
+        .filter(|seconds| seconds.abs() < 86_400)
+        .and_then(|seconds| Offset::from_seconds(seconds).ok())
         .ok_or_else(|| Failure::bad_request(format!("{minutes} minutes is not an offset from UTC")))
 }
 
 /// A zone by its IANA name. An unknown name is refused rather than read as UTC: a person in Tokyo
 /// told their Tuesday task is due on Monday is a worse failure than an error in a log.
 #[cfg(feature = "rules-repeating")]
-fn zone(name: &str) -> Result<Tz, Failure> {
-    name.parse::<Tz>()
+fn zone(name: &str) -> Result<TimeZone, Failure> {
+    TimeZone::get(name)
         .map_err(|_| Failure::bad_request(format!("{name} is not a time zone this build knows")))
 }
 

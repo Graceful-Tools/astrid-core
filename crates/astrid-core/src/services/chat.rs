@@ -7,7 +7,7 @@
 //! moment it was written rather than from when it was delivered: a message that jumps to the
 //! bottom of a conversation when the network comes back reads as a different message.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::json;
 
 use super::{Context, Result};
@@ -179,7 +179,7 @@ impl ChatService {
     pub async fn load_messages(
         &self,
         channel_id: &str,
-        before: Option<DateTime<Utc>>,
+        before: Option<Timestamp>,
         limit: Option<u32>,
     ) -> Result<bool> {
         // Only what was held before asking can be missing from the answer because it was deleted.
@@ -276,11 +276,11 @@ impl ChatService {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Window {
     pub ids: std::collections::HashSet<String>,
-    pub oldest: Option<DateTime<Utc>>,
+    pub oldest: Option<Timestamp>,
     /// Both bounds matter: an older page sits entirely below what is cached, and a lower bound
     /// alone would let it prune everything above it — including a message the stream delivered
     /// mid-fetch.
-    pub newest: Option<DateTime<Utc>>,
+    pub newest: Option<Timestamp>,
     /// The first page with nothing behind it: the whole channel, where absence anywhere is
     /// evidence of deletion.
     pub covers_whole_channel: bool,
@@ -423,7 +423,7 @@ mod tests {
         );
 
         // A message that arrives from the server later, timestamped later, sorts after it.
-        fixture.clock.advance(chrono::Duration::minutes(5));
+        fixture.clock.advance(jiff::SignedDuration::from_mins(5));
         let arrived: ChatMessage = serde_json::from_value(json!({
             "id": "m2", "channelId": "c1", "content": "arrived second",
             "createdAt": "2026-09-07T12:05:00Z"

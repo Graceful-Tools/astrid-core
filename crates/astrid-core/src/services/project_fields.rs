@@ -30,7 +30,9 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use jiff::civil::{Date, Time};
+use jiff::tz::Offset;
+use jiff::{Span, Timestamp};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
@@ -156,14 +158,15 @@ pub fn visible(fields: &[ProjectField]) -> Vec<ProjectField> {
 /// still pointing at one must draw its title, not a bare id. An iteration runs `duration` days
 /// from `startDate` inclusive, so one ending today is current and is completed the day after —
 /// web `orderIterationChoices`, and measured in UTC as it is.
-pub fn order_iterations(iterations: &[FieldIteration], now: DateTime<Utc>) -> Vec<FieldIteration> {
+pub fn order_iterations(iterations: &[FieldIteration], now: Timestamp) -> Vec<FieldIteration> {
+    let now = Offset::UTC.to_datetime(now);
     let mut marked: Vec<FieldIteration> = iterations
         .iter()
         .map(|iteration| {
-            let completed = NaiveDate::parse_from_str(&iteration.start_date, "%Y-%m-%d")
+            let completed = Date::strptime("%Y-%m-%d", &iteration.start_date)
                 .ok()
-                .and_then(|day| day.and_hms_opt(0, 0, 0))
-                .map(|start| now.naive_utc() >= start + Duration::days(iteration.duration))
+                .and_then(|day| day.checked_add(Span::new().days(iteration.duration)).ok())
+                .map(|end| now >= end.to_datetime(Time::midnight()))
                 .unwrap_or(false);
             FieldIteration {
                 completed,

@@ -16,7 +16,7 @@
 //! Roles are NOT decided here. [`crate::permissions`] owns that, and it is the only place allowed
 //! to compare a role string.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::date;
@@ -73,14 +73,14 @@ pub struct ListMember {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<User>,
 }
@@ -112,7 +112,7 @@ pub struct ListInvite {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
@@ -371,14 +371,14 @@ pub struct TaskList {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -53,7 +53,8 @@ too, so there is no iOS-vs-core disagreement to resolve.
 **Settled 2026-09-28: all-day tasks on UTC's, timed tasks on the person's. Web adopted it
 2026-10-03 (AWTD-1063)**: the browser sends `timeZone` with a completion and the server steps a
 timed task on that calendar; without a zone (API clients, MCP), UTC's, the old answer. Every calendar step in
-`astrid_core::repeating` takes a zone (`chrono_tz::Tz`) and is done on that zone's wall clock.
+`astrid_core::repeating` takes a zone (`&jiff::tz::TimeZone`, since ADEV-80 — it was `chrono_tz::Tz`)
+and is done on that zone's wall clock.
 
 - **All-day tasks step in UTC.** An all-day date is stored as UTC midnight and names a day, so
   UTC is its calendar — exactly web's `setUTC*` arithmetic, and what every contract fixture checks.

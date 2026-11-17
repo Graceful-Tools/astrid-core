@@ -45,7 +45,7 @@ fn every_input_parses_as_web_parses_it() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("the fixture parses");
     assert!(fixture.cases.len() >= 100, "{} cases", fixture.cases.len());
     let today = fixture.now[..10]
-        .parse::<chrono::NaiveDate>()
+        .parse::<jiff::civil::Date>()
         .expect("the pinned clock is a date");
     let lists: Vec<TaskList> = fixture
         .lists

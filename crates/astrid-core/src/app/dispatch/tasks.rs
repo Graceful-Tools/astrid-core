@@ -612,7 +612,7 @@ pub(super) fn create_task(app: &App, new: NewTask) -> crate::services::Result<cr
             list,
             me.as_deref(),
             app.clock.now(),
-            app.clock.time_zone(),
+            &app.clock.time_zone(),
         );
     } else if apply_list_defaults && !given.assignee {
         // Added from a VIEW rather than a list, which on every client is where the app opens: My
@@ -944,7 +944,7 @@ pub(super) async fn task_blocker_candidates(
 /// Answers in the same shape a quick pick does, so the shell takes it down the path it already
 /// has rather than growing a second one.
 pub(super) fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
-    let Ok(day) = day.parse::<chrono::NaiveDate>() else {
+    let Ok(day) = day.parse::<jiff::civil::Date>() else {
         // 400: the caller sent something this command cannot mean, which is not a failure of the
         // account, the network or the cache.
         return Response::failed(Failure::refused(400, "day must be YYYY-MM-DD"));
@@ -967,7 +967,7 @@ pub(super) fn due_date_on_day(app: &App, task_id: &str, day: &str) -> Response {
         day,
         task.due_date_time,
         task.is_all_day,
-        app.clock.time_zone(),
+        &app.clock.time_zone(),
     );
     Response::ok(serde_json::json!({
         "dueDateTime": date::format(picked),
@@ -987,9 +987,9 @@ pub(super) fn due_date_at_time(app: &App, task_id: &str, hour: u32, minute: u32)
     // day's offset (AITD-561).
     let zone = app.clock.time_zone();
     let anchor =
-        rows::due_picks::time_anchor(task.due_date_time, task.is_all_day, app.clock.now(), zone);
+        rows::due_picks::time_anchor(task.due_date_time, task.is_all_day, app.clock.now(), &zone);
     Response::ok(serde_json::json!({
-        "dueDateTime": date::format(rows::due_picks::with_time(hour, minute, anchor, zone)),
+        "dueDateTime": date::format(rows::due_picks::with_time(hour, minute, anchor, &zone)),
         "isAllDay": false,
     }))
 }
@@ -1010,7 +1010,7 @@ pub(super) fn due_date_all_day(app: &App, task_id: &str) -> Response {
     // A task with no date has no day to keep.
     let kept = match task.due_date_time {
         Some(due) if !task.is_all_day => {
-            Some(rows::due_picks::to_all_day(due, app.clock.time_zone()))
+            Some(rows::due_picks::to_all_day(due, &app.clock.time_zone()))
         }
         other => other,
     };
@@ -1055,7 +1055,7 @@ pub(super) fn due_date_options(
             serde_json::json!({
                 "titleKey": option.title_key,
                 "daysFromToday": days,
-                "dueDateTime": date::format(rows::due_picks::all_day_pick(days, now, zone)),
+                "dueDateTime": date::format(rows::due_picks::all_day_pick(days, now, &zone)),
                 "isAllDay": true,
                 "isSelected": due.is_some_and(|due| {
                     rows::day_offset(due, is_all_day, now, offset) == days
@@ -1065,11 +1065,11 @@ pub(super) fn due_date_options(
         .collect();
 
     // The hour goes on the task's own day.
-    let day_anchor = rows::due_picks::time_anchor(due, is_all_day, now, zone);
+    let day_anchor = rows::due_picks::time_anchor(due, is_all_day, now, &zone);
     let times: Vec<serde_json::Value> = rows::due_picks::TIME_OPTIONS
         .iter()
         .map(|option| {
-            let picked = rows::due_picks::with_hour(option.hour, day_anchor, zone);
+            let picked = rows::due_picks::with_hour(option.hour, day_anchor, &zone);
             serde_json::json!({
                 "titleKey": option.title_key,
                 "hour": option.hour,
@@ -1077,8 +1077,7 @@ pub(super) fn due_date_options(
                 // An all-day task has no time, so nothing is selected until one is chosen.
                 "isSelected": !is_all_day
                     && due.is_some_and(|due| {
-                        due.with_timezone(&zone).format("%H").to_string()
-                            == format!("{:02}", option.hour)
+                        i64::from(zone.to_datetime(due).hour()) == i64::from(option.hour)
                     }),
             })
         })
@@ -1511,7 +1510,7 @@ pub(super) fn quick_add_defaults(
             list,
             me.as_deref(),
             app.clock.now(),
-            app.clock.time_zone(),
+            &app.clock.time_zone(),
         );
     } else if !given.assignee {
         // A pseudo-list — My Tasks — has no defaults to apply, and the web falls back to the

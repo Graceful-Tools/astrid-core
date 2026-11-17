@@ -21,10 +21,46 @@ use astrid_rules::repeating::{
     check_simple_pattern_end_condition, CustomRepeatingPattern, RepeatFrom, Repeating,
     SimplePatternEndCondition,
 };
-use chrono::{DateTime, Utc};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/repeating.json");
+
+/// How the fixture's instants are read: through the model's own reader, because `jiff` is built
+/// without its `serde` feature (a field that forgot its adapter must not compile).
+mod at {
+    use astrid_rules::model::date;
+    use jiff::Timestamp;
+    use serde::{de, Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Timestamp, D::Error> {
+        date::required::deserialize(deserializer)
+    }
+
+    pub mod option {
+        use super::*;
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<Timestamp>, D::Error> {
+            date::exact_optional::deserialize(deserializer)
+        }
+    }
+
+    pub mod many {
+        use super::*;
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Vec<Timestamp>, D::Error> {
+            Vec::<String>::deserialize(deserializer)?
+                .iter()
+                .map(|text| date::parse(text).ok_or_else(|| de::Error::custom("an instant")))
+                .collect()
+        }
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +84,8 @@ struct CompletionCase {
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Answer {
-    next_due_date: Option<DateTime<Utc>>,
+    #[serde(default, with = "at::option")]
+    next_due_date: Option<Timestamp>,
     should_terminate: bool,
     new_occurrence_count: i32,
 }
@@ -63,7 +100,8 @@ struct ZonedProgressionCase {
     time_zone: String,
     is_all_day: bool,
     steps: usize,
-    dates: Vec<DateTime<Utc>>,
+    #[serde(with = "at::many")]
+    dates: Vec<Timestamp>,
 }
 
 #[derive(Deserialize)]
@@ -71,17 +109,21 @@ struct ZonedProgressionCase {
 struct SimpleCase {
     name: String,
     repeating_type: Repeating,
-    current_due_date: Option<DateTime<Utc>>,
-    completion_date: DateTime<Utc>,
+    #[serde(default, with = "at::option")]
+    current_due_date: Option<Timestamp>,
+    #[serde(with = "at")]
+    completion_date: Timestamp,
     repeat_from: RepeatFrom,
-    next_due_date: Option<DateTime<Utc>>,
+    #[serde(default, with = "at::option")]
+    next_due_date: Option<Timestamp>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EndConditionCase {
     name: String,
-    next_due_date: DateTime<Utc>,
+    #[serde(with = "at")]
+    next_due_date: Timestamp,
     new_occurrence_count: i32,
     end_data: SimplePatternEndCondition,
     should_terminate: bool,
@@ -93,11 +135,14 @@ struct EndConditionCase {
 struct CustomCase {
     name: String,
     pattern: CustomRepeatingPattern,
-    current_due_date: DateTime<Utc>,
-    completion_date: DateTime<Utc>,
+    #[serde(with = "at")]
+    current_due_date: Timestamp,
+    #[serde(with = "at")]
+    completion_date: Timestamp,
     repeat_from: RepeatFrom,
     current_occurrence_count: i32,
-    next_due_date: Option<DateTime<Utc>>,
+    #[serde(default, with = "at::option")]
+    next_due_date: Option<Timestamp>,
     should_terminate: bool,
     new_occurrence_count: i32,
 }
@@ -107,10 +152,12 @@ struct CustomCase {
 struct ProgressionCase {
     name: String,
     pattern: CustomRepeatingPattern,
-    start: DateTime<Utc>,
+    #[serde(with = "at")]
+    start: Timestamp,
     repeat_from: RepeatFrom,
     steps: usize,
-    dates: Vec<DateTime<Utc>>,
+    #[serde(with = "at::many")]
+    dates: Vec<Timestamp>,
 }
 
 fn fixture() -> Fixture {
@@ -127,7 +174,7 @@ fn simple_patterns_match_web() {
             case.repeat_from,
             0,
             None,
-            chrono_tz::Tz::UTC,
+            &TimeZone::UTC,
         );
         assert_eq!(
             result.next_due_date, case.next_due_date,
@@ -144,7 +191,7 @@ fn simple_end_conditions_match_web() {
             case.next_due_date,
             case.new_occurrence_count,
             &case.end_data,
-            chrono_tz::Tz::UTC,
+            &TimeZone::UTC,
         );
         assert_eq!(
             should_terminate, case.should_terminate,
@@ -168,7 +215,7 @@ fn custom_patterns_match_web() {
             case.completion_date,
             case.repeat_from,
             case.current_occurrence_count,
-            chrono_tz::Tz::UTC,
+            &TimeZone::UTC,
         );
         assert_eq!(
             result.next_due_date, case.next_due_date,
@@ -203,7 +250,7 @@ fn custom_progressions_match_web() {
                 current,
                 case.repeat_from,
                 occurrences,
-                chrono_tz::Tz::UTC,
+                &TimeZone::UTC,
             );
             let Some(next) = result.next_due_date else {
                 break;
@@ -277,7 +324,7 @@ fn zoned_progressions_match_web() {
                 break;
             };
             dates.push(next);
-            current = next.to_rfc3339();
+            current = next.to_string();
             occurrences = answer.new_occurrence_count;
         }
         assert_eq!(

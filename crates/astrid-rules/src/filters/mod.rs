@@ -26,7 +26,9 @@ pub mod my_tasks;
 pub mod recently_completed;
 pub mod subtasks;
 
-use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
+use jiff::civil::{Date, Time};
+use jiff::tz::Offset;
+use jiff::{SignedDuration, Timestamp};
 
 use crate::model::{Privacy, Task, TaskList};
 
@@ -39,8 +41,8 @@ pub fn filter_refs<'a>(
     tasks: &'a [Task],
     list: &TaskList,
     current_user_id: Option<&str>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<&'a Task> {
     tasks
         .iter()
@@ -57,8 +59,8 @@ pub fn keeps(
     task: &Task,
     list: &TaskList,
     current_user_id: Option<&str>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> bool {
     // Completion first: it is the one that hides most of what it hides, and every other
     // filter is cheaper to skip than to run.
@@ -79,12 +81,7 @@ pub fn keeps(
 /// completion setting of the view they sit in and nothing else, so a subtask of a different
 /// priority, assignee or due date than the list's filters ask for still shows under a parent that
 /// passed them: the filters choose which tasks lead a row, not which of their parts are listed.
-pub fn shown_by_completion(
-    task: &Task,
-    list: &TaskList,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
-) -> bool {
+pub fn shown_by_completion(task: &Task, list: &TaskList, now: Timestamp, offset: Offset) -> bool {
     let completion = list.filter_completion.as_deref().unwrap_or("default");
     if task.completed {
         recently_completed::should_show_completed(
@@ -117,8 +114,8 @@ pub fn filter_for_list(
     tasks: &[Task],
     list: &TaskList,
     current_user_id: Option<&str>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<Task> {
     filter_refs(tasks, list, current_user_id, now, offset)
         .into_iter()
@@ -145,12 +142,7 @@ fn matches_priority(task: &Task, filter: Option<&str>) -> bool {
 ///
 /// Overdue incomplete tasks surface in every forward-looking bucket. A "today" list that hid what
 /// was due yesterday and never done is a list that helps you forget.
-pub fn matches_due_date(
-    task: &Task,
-    filter: Option<&str>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
-) -> bool {
+pub fn matches_due_date(task: &Task, filter: Option<&str>, now: Timestamp, offset: Offset) -> bool {
     let Some(filter) = filter.filter(|value| *value != "all") else {
         return true;
     };
@@ -166,8 +158,8 @@ pub fn matches_due_date(
 
     let (today, due_day) = if task.is_all_day {
         (
-            start_of_day_utc(now.with_timezone(&offset).date_naive()),
-            start_of_day_utc(due.date_naive()),
+            start_of_day_utc(local_day(now, offset)),
+            start_of_day_utc(crate::model::date::all_day_date(due)),
         )
     } else {
         (start_of_day_at(now, offset), start_of_day_at(due, offset))
@@ -178,10 +170,12 @@ pub fn matches_due_date(
         "overdue" => due_day < today && !task.completed,
         "today" => due_day == today || overdue_incomplete,
         "this_week" => {
-            (due_day >= today && due_day <= today + Duration::days(7)) || overdue_incomplete
+            (due_day >= today && due_day <= crate::model::date::plus(today, days(7)))
+                || overdue_incomplete
         }
         "this_month" => {
-            (due_day >= today && due_day <= today + Duration::days(30)) || overdue_incomplete
+            (due_day >= today && due_day <= crate::model::date::plus(today, days(30)))
+                || overdue_incomplete
         }
         _ => true,
     }
@@ -348,7 +342,7 @@ fn auto_order(a: &Task, b: &Task) -> std::cmp::Ordering {
 
 /// When a completed task was finished, for "Recently completed": `completedAt` is the real stamp
 /// (backdatable by sync), `updatedAt` the legacy fallback. `None` sorts before every stamp.
-fn completion_stamp(task: &Task) -> Option<DateTime<Utc>> {
+fn completion_stamp(task: &Task) -> Option<Timestamp> {
     task.completed_at.or(task.updated_at)
 }
 
@@ -366,34 +360,39 @@ fn due_date_order(a: &Task, b: &Task) -> std::cmp::Ordering {
     }
 }
 
-fn created_at_of(task: &Task) -> DateTime<Utc> {
-    task.created_at.unwrap_or(DateTime::<Utc>::MIN_UTC)
+fn created_at_of(task: &Task) -> Timestamp {
+    task.created_at.unwrap_or(Timestamp::MIN)
 }
 
-fn start_of_day_utc(date: chrono::NaiveDate) -> DateTime<Utc> {
-    Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).expect("midnight exists"))
+/// `count` whole days of elapsed time, which is what the buckets above add to a start of day.
+fn days(count: i64) -> SignedDuration {
+    SignedDuration::from_hours(24 * count)
 }
 
-fn start_of_day_at(instant: DateTime<Utc>, offset: FixedOffset) -> DateTime<Utc> {
-    let local = instant.with_timezone(&offset);
-    let midnight = local
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight exists");
+fn start_of_day_utc(date: Date) -> Timestamp {
+    Offset::UTC
+        .to_timestamp(date.to_datetime(Time::midnight()))
+        .unwrap_or(Timestamp::MIN)
+}
+
+fn start_of_day_at(instant: Timestamp, offset: Offset) -> Timestamp {
+    let midnight = offset
+        .to_datetime(instant)
+        .date()
+        .to_datetime(Time::midnight());
     offset
-        .from_local_datetime(&midnight)
-        .single()
-        .map(|at| at.with_timezone(&Utc))
-        .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
+        .to_timestamp(midnight)
+        .or_else(|_| Offset::UTC.to_timestamp(midnight))
+        .unwrap_or(Timestamp::MIN)
 }
 
 /// The day part of an instant as the reader sees it. Used by anything that groups by day.
-pub fn local_day(instant: DateTime<Utc>, offset: FixedOffset) -> chrono::NaiveDate {
-    instant.with_timezone(&offset).date_naive()
+pub fn local_day(instant: Timestamp, offset: Offset) -> Date {
+    offset.to_datetime(instant).date()
 }
 
 /// Whether a task is overdue for the reader right now.
-pub fn is_overdue(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> bool {
+pub fn is_overdue(task: &Task, now: Timestamp, offset: Offset) -> bool {
     if task.completed {
         return false;
     }
@@ -409,7 +408,7 @@ pub fn is_overdue(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> bool 
 }
 
 /// Is this task due on the reader's today?
-pub fn is_due_today(task: &Task, now: DateTime<Utc>, offset: FixedOffset) -> bool {
+pub fn is_due_today(task: &Task, now: Timestamp, offset: Offset) -> bool {
     let Some(due) = task.due_date_time else {
         return false;
     };
@@ -426,15 +425,15 @@ mod tests {
     use super::*;
     use crate::model::{date, Priority, Repeating};
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC")
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         at("2026-09-07T12:00:00Z")
     }
 
@@ -635,7 +634,7 @@ mod tests {
     /// UTC. The list has to agree with their calendar.
     #[test]
     fn a_timed_task_belongs_to_the_readers_day() {
-        let new_york = FixedOffset::east_opt(-5 * 3600).expect("an offset");
+        let new_york = Offset::from_seconds(-5 * 3600).expect("an offset");
         let mut tonight = task("tonight");
         // 23:00 on the 7th in New York is 04:00 on the 8th in UTC.
         tonight.is_all_day = false;
@@ -933,11 +932,11 @@ mod tests {
     /// would make it overdue at noon UTC, which is breakfast in California.
     #[test]
     fn an_all_day_task_is_overdue_by_the_readers_calendar() {
-        let california = FixedOffset::east_opt(-7 * 3600).expect("an offset");
+        let california = Offset::from_seconds(-7 * 3600).expect("an offset");
         let mut task = task("t1");
         task.is_all_day = true;
         task.due_date_time = Some(date::all_day_instant(
-            chrono::NaiveDate::from_ymd_opt(2026, 9, 7).expect("a real day"),
+            Date::new(2026, 9, 7).expect("a real day"),
         ));
 
         // 08:00 on the 7th in California: due today, not overdue, even though the anchor instant

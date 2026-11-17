@@ -4,7 +4,7 @@
 //! on, status changed, completed — and never written by a client. The wire shape is what
 //! `GET /api/v1/notifications` answers, with the task summary the route embeds.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::date;
@@ -32,14 +32,14 @@ pub struct Notification {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub read_at: Option<DateTime<Utc>>,
+    pub read_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     /// The task it is about, as the route summarises it. Absent when the task is gone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<NotificationTask>,
