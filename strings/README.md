@@ -220,3 +220,16 @@ Tranche 2 (AITD-660) added iOS as a source, which took the authored keys from 62
 **No client reads `generated/` yet.** This repository is the single source; switching each client
 over is its own task on its own board, because each means retiring that client's hand-maintained
 catalog and re-pointing its lookups — and web's half also retires `PRODUCT_CONTRACT.md` §2.
+
+**There are two ways in, and the cheaper one already works.**
+
+- **Read `generated/`.** The full switch: the client's lookups read this catalog's output and its
+  hand-maintained one is retired. Nobody has taken this path yet.
+- **Harvest the words and gate on the key list.** astrid-windows did this first (task `b63d8679`,
+  2026-11-14). It copied the words it was missing from `strings/` into its own `Strings.cs` and
+  `.resw`, and added `crates/astrid-ffi/tests/copy_catalog_contract.rs`, which holds that shell's
+  words against `astrid_core::copy_keys()`. A key the core starts to emit then fails that client's
+  build until somebody says what it says, or registers why the client does not draw it. It keeps
+  the client's own catalog and file format, ends the drawn-on-screen key at once (D60 is the
+  worked example), and costs one test. astrid-ios, astrid-android and astrid-web can take the same
+  path before, or instead of, the full switch.
