@@ -1496,3 +1496,123 @@ async fn a_lists_board_holds_only_that_lists_cards_adev_3() {
         "the project alone is the whole board"
     );
 }
+
+/// ADEV-69: a board's name, description and colour are edited from the project header menu. The
+/// cache takes the edit first, so the header redraws at once.
+#[tokio::test]
+async fn adev_69_updating_a_project_writes_the_cache_and_the_server() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        200,
+        json!({ "project": { "id": "p1", "name": "Plans" } }),
+    );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_projects(&[serde_json::from_value(
+            json!({ "id": "p1", "name": "Work", "description": "Old", "color": "#111111" }),
+        )
+        .expect("a project")])
+        .expect("stores");
+
+    let updated = call(
+        &app,
+        json!({
+            "kind": "updateProject", "projectId": "p1",
+            "name": "Plans", "description": "", "color": "#ff8800"
+        }),
+    )
+    .await;
+
+    assert!(updated.get("error").is_none(), "{updated}");
+    let cached = app.store.projects().expect("reads").remove(0);
+    assert_eq!(cached.name, "Plans");
+    assert_eq!(cached.description, None, "an empty description clears it");
+    assert_eq!(cached.color.as_deref(), Some("#ff8800"));
+    let sent = transport.requests();
+    let patch = sent
+        .iter()
+        .find(|r| r.method == crate::api::Method::Patch)
+        .expect("a PATCH");
+    assert_eq!(patch.method, crate::api::Method::Patch);
+    let body: serde_json::Value =
+        serde_json::from_slice(patch.body.as_deref().unwrap_or(b"{}")).expect("json body");
+    assert_eq!(
+        body,
+        json!({ "name": "Plans", "description": "", "color": "#ff8800" })
+    );
+}
+
+/// ADEV-69: only the fields named are sent, and only those change.
+#[tokio::test]
+async fn adev_69_an_edit_leaves_the_fields_it_does_not_name() {
+    let transport = StubTransport::new().push_json(
+        "/api/v1/projects/p1",
+        200,
+        json!({ "project": { "id": "p1" } }),
+    );
+    let (app, transport) = app_and_transport(transport);
+    app.store
+        .upsert_projects(&[serde_json::from_value(
+            json!({ "id": "p1", "name": "Work", "description": "Keep", "color": "#111111" }),
+        )
+        .expect("a project")])
+        .expect("stores");
+
+    call(
+        &app,
+        json!({ "kind": "updateProject", "projectId": "p1", "color": "#222222" }),
+    )
+    .await;
+
+    let cached = app.store.projects().expect("reads").remove(0);
+    assert_eq!(cached.name, "Work");
+    assert_eq!(cached.description.as_deref(), Some("Keep"));
+    assert_eq!(cached.color.as_deref(), Some("#222222"));
+    let sent = transport.requests();
+    let patch = sent
+        .iter()
+        .find(|r| r.method == crate::api::Method::Patch)
+        .expect("a PATCH");
+    let body: serde_json::Value =
+        serde_json::from_slice(patch.body.as_deref().unwrap_or(b"{}")).expect("json body");
+    assert_eq!(body, json!({ "color": "#222222" }));
+}
+
+/// ADEV-69: a refusal (403 PROJECT_RENAME_FORBIDDEN, 400 PROJECT_COLOR_INVALID /
+/// PROJECT_NAME_REQUIRED) puts the cached board back exactly as it was.
+#[tokio::test]
+async fn adev_69_a_refused_edit_rolls_the_cache_back() {
+    for (status, code) in [
+        (403, "PROJECT_RENAME_FORBIDDEN"),
+        (400, "PROJECT_COLOR_INVALID"),
+        (400, "PROJECT_NAME_REQUIRED"),
+    ] {
+        let transport = StubTransport::new().push_json(
+            "/api/v1/projects/p1",
+            status,
+            json!({ "error": "no", "code": code }),
+        );
+        let app = app_with(transport);
+        app.store
+            .upsert_projects(&[serde_json::from_value(
+                json!({ "id": "p1", "name": "Work", "description": "Old", "color": "#111111" }),
+            )
+            .expect("a project")])
+            .expect("stores");
+
+        let refused = call(
+            &app,
+            json!({
+                "kind": "updateProject", "projectId": "p1",
+                "name": "Plans", "description": "New", "color": "#zzzzzz"
+            }),
+        )
+        .await;
+
+        assert!(refused.get("error").is_some(), "{code}: {refused}");
+        let cached = app.store.projects().expect("reads").remove(0);
+        assert_eq!(cached.name, "Work", "{code}");
+        assert_eq!(cached.description.as_deref(), Some("Old"), "{code}");
+        assert_eq!(cached.color.as_deref(), Some("#111111"), "{code}");
+    }
+}

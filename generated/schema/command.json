@@ -6957,6 +6957,44 @@
       "type": "object"
     },
     {
+      "description": "Edit a board's name, description and colour (ADEV-69; web `PATCH /api/v1/projects/{id}`,\nthe owner or a project admin). Only the fields named are sent and changed; an empty\n`description` clears it. The cache takes the edit first and is put back if the server\nrefuses (403 `PROJECT_RENAME_FORBIDDEN`, 400 `PROJECT_COLOR_INVALID` /\n`PROJECT_NAME_REQUIRED`). Online only. Answers the board as cached.",
+      "properties": {
+        "color": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "const": "updateProject",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    {
       "description": "Turn a list into a board in one request. Online only.",
       "properties": {
         "kind": {
