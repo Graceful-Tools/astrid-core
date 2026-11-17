@@ -12,6 +12,10 @@
 //! request astrid-web's server sends since AWTD-1063) and carry the person's zone: web adopted this
 //! crate's answers for D1, D3 and D4 on 2026-10-03, so those cases are no longer disputed.
 
+// The two tests that go through the rules door need `rules-repeating`; without it (the browser
+// build) the fixture sections only they read are unused.
+#![cfg_attr(not(feature = "rules-repeating"), allow(dead_code))]
+
 use astrid_rules::repeating::{
     calculate_custom_next_occurrence, calculate_simple_next_occurrence,
     check_simple_pattern_end_condition, CustomRepeatingPattern, RepeatFrom, Repeating,
@@ -220,6 +224,7 @@ fn custom_progressions_match_web() {
 }
 
 /// Ask the rules door, as astrid-web's server does.
+#[cfg(feature = "rules-repeating")]
 fn next_occurrence(mut request: serde_json::Map<String, serde_json::Value>) -> Answer {
     request.insert("kind".into(), "nextOccurrence".into());
     let reply: serde_json::Value = serde_json::from_str(&astrid_rules::rules::run_json(
@@ -230,6 +235,7 @@ fn next_occurrence(mut request: serde_json::Map<String, serde_json::Value>) -> A
     serde_json::from_value(reply["value"].clone()).expect("a next occurrence")
 }
 
+#[cfg(feature = "rules-repeating")]
 #[test]
 fn completions_through_the_rules_door_match_web() {
     let cases = fixture().completions;
@@ -245,6 +251,7 @@ fn completions_through_the_rules_door_match_web() {
 }
 
 /// Several completions in a row on the person's calendar, through a daylight-saving change.
+#[cfg(feature = "rules-repeating")]
 #[test]
 fn zoned_progressions_match_web() {
     for case in fixture().zoned_progressions {

@@ -2,6 +2,9 @@
 //!
 //! A **core-first** fixture: generated here (`cargo xtask gen-core-contracts`) from
 //! `astrid_rules::questions`. astrid-web replays the same file against its Node package.
+//!
+//! The question rules are server-side writes, left out of the browser build (AWTD2-162).
+#![cfg(feature = "rules-waiting")]
 
 use serde::Deserialize;
 
