@@ -298,3 +298,107 @@ async fn a_bounded_palette_still_finds_a_task_by_its_identifier_3845b8a6() {
         "the identifier lookup was lost when the read was bounded: {ids:?}"
     );
 }
+
+/// `rowsForList` over a virtual list — My Tasks, the view the app opens on — filters and sorts on
+/// the indexed columns and decodes only the window it returns (task `a09a1e2c`, AWTD2-145).
+///
+/// Before, the pipeline took `&[Task]` all the way down, so a window of 20 cost one decode per
+/// task the account holds.
+#[tokio::test]
+async fn rows_for_a_virtual_list_decode_only_the_window_a09a1e2c() {
+    let app = app();
+    let list: astrid_core::model::TaskList =
+        serde_json::from_value(json!({ "id": "l1", "name": "Everything" })).expect("a list");
+    app.store().upsert_list(&list).expect("stores");
+    app.store()
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let tasks: Vec<Task> = (0..10_000)
+        .map(|index| Task {
+            list_ids: Some(vec!["l1".into()]),
+            assignee_id: Some("me".into()),
+            due_date_time: date::parse("2026-09-08T09:00:00Z"),
+            ..Task::new(format!("t{index}"), format!("Task number {index}"))
+        })
+        .collect();
+    app.store().upsert_tasks(&tasks).expect("stores");
+
+    decodes::reset();
+    let answer = run(
+        &app,
+        json!({ "kind": "rowsForList", "listId": "virtual:my-tasks", "offset": 0, "limit": 20 }),
+    )
+    .await;
+    let rows = answer["value"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 20);
+    assert_eq!(answer["value"]["total"], json!(10_000));
+    // The window, plus the one list the account holds (lists are decoded for the chips).
+    assert!(
+        decodes::count() <= 20 + 1,
+        "a window of 20 decoded {} rows",
+        decodes::count()
+    );
+}
+
+/// The bounded read must answer exactly as the one that decodes everything — the two selects have
+/// to agree (task `a09a1e2c`). The tasks are handed over whole in the second ask, which takes the
+/// decode-everything path, so the two answers are the same data through both pipelines.
+#[tokio::test]
+async fn the_bounded_answer_is_the_decoding_answer_a09a1e2c() {
+    let app = app();
+    app.store()
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    let list: astrid_core::model::TaskList = serde_json::from_value(
+        json!({ "id": "l1", "name": "Everything", "filterCompletion": "all" }),
+    )
+    .expect("a list");
+    app.store().upsert_list(&list).expect("stores");
+    let mut tasks: Vec<Task> = (0..40)
+        .map(|index| Task {
+            list_ids: (index % 5 != 0).then(|| vec!["l1".into()]),
+            assignee_id: (index % 3 != 0).then(|| "me".into()),
+            completed: index % 4 == 0,
+            priority: astrid_core::model::Priority::from_i64(index % 4),
+            due_date_time: (index % 6 != 0)
+                .then(|| date::parse(&format!("2026-09-{:02}T09:00:00Z", 1 + index % 20)))
+                .flatten(),
+            created_at: date::parse(&format!("2026-08-{:02}T09:00:00Z", 1 + index % 28)),
+            ..Task::new(format!("t{index}"), format!("Task number {index}"))
+        })
+        .collect();
+    for index in 0..10 {
+        tasks.push(Task {
+            list_ids: Some(vec!["l1".into()]),
+            parent_task_id: Some(format!("t{index}")),
+            created_at: date::parse(&format!("2026-08-{:02}T10:00:00Z", 1 + index)),
+            ..Task::new(format!("s{index}"), format!("Step {index}"))
+        });
+    }
+    app.store().upsert_tasks(&tasks).expect("stores");
+
+    for (list_id, sort) in [
+        ("l1", "auto"),
+        ("l1", "priority"),
+        ("l1", "when"),
+        ("virtual:my-tasks", "auto"),
+    ] {
+        let ask = |held: bool| {
+            let mut command = json!({
+                "kind": "rowsForList", "listId": list_id, "sortBy": sort,
+                "offset": 3, "limit": 12,
+            });
+            if held {
+                // What the cache would have read: a real list's members, or everything.
+                command["tasks"] = json!(tasks
+                    .iter()
+                    .filter(|task| list_id != "l1" || task.list_ids.is_some())
+                    .collect::<Vec<_>>());
+            }
+            command
+        };
+        let bounded = run(&app, ask(false)).await;
+        let decoding = run(&app, ask(true)).await;
+        assert_eq!(bounded, decoding, "{list_id} sorted by {sort}");
+    }
+}
