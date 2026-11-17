@@ -545,10 +545,6 @@
     <string name="share_link_failed">Freigabelink konnte nicht erstellt werden. Bitte erneut versuchen.</string>
     <string name="share_private_task_message">Dies ist eine private Aufgabe. Nur Benutzer mit Zugriff auf diese Liste können sie sehen.</string>
     <string name="share_share_task">Aufgabe teilen</string>
-    <string name="smart_layout_list">Liste</string>
-    <string name="smart_layout_list_desc">Das Kontrollkästchen schließt die Aufgabe ab; Priorität und zugewiesene Person haben je eine eigene Zeile.</string>
-    <string name="smart_layout_project">Projekt</string>
-    <string name="smart_layout_project_desc">Kompakt. Das Kontrollkästchen öffnet Priorität, zugewiesene Person, Status und Abschließen.</string>
     <string name="smart_offset_1_day">1 Tag</string>
     <string name="smart_offset_1_week">1 Woche</string>
     <string name="smart_offset_3_days">3 Tage</string>

@@ -1606,18 +1606,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>分享任務</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>列表</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>核取方塊用於完成任務，優先順序與負責人各佔一列。</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>專案</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>緊湊。核取方塊可開啟優先順序、負責人、狀態與完成。</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 天</value>
   </data>

@@ -393,12 +393,6 @@ impl AccountService {
         )
     }
 
-    /// The task-detail layout the account chose: what rows and the detail draw with when the shell
-    /// does not say otherwise.
-    pub fn display_mode(&self) -> crate::rows::DisplayMode {
-        self.smart_tasks().display_mode()
-    }
-
     // ─── Contacts ─────────────────────────────────────────────────────────────────────────────
 
     /// The contacts this account has imported, as the server lists them (task 438494c7): id,
@@ -1310,7 +1304,7 @@ mod tests {
             .update_settings(json!({ "reminderSettings": { "enablePushReminders": false } }))
             .expect("caches and journals");
         service
-            .update_smart_task_settings(json!({ "taskDisplayMode": "project" }))
+            .update_smart_task_settings(json!({ "subtaskDisplay": "under_parent" }))
             .expect("caches and journals");
         assert!(
             transport.requests().is_empty(),

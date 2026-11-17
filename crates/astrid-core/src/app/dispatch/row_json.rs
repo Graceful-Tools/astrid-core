@@ -14,7 +14,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
     match command {
         Command::RowsForList {
             list_id,
-            display_mode,
             surface,
             offset,
             limit,
@@ -23,7 +22,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             app,
             &list_id,
             RowsWindow {
-                display_mode,
                 surface,
                 offset,
                 limit,
@@ -55,7 +53,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
 
 /// Where the rows go and which of them: the projection's settings and the window.
 pub(super) struct RowsWindow {
-    pub display_mode: Option<String>,
     pub surface: Option<String>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
@@ -80,7 +77,6 @@ pub(super) fn rows_for_list(
     let now = app.clock.now();
     let offset_from_utc = app.clock.utc_offset();
     let RowsWindow {
-        display_mode,
         surface,
         offset,
         limit,
@@ -194,7 +190,6 @@ pub(super) fn rows_for_list(
         users: &users,
         current_user_id: current_user_id.as_deref(),
         subtask_display: Some(&subtask_display),
-        display_mode: resolved_display_mode(app, display_mode.as_deref()),
         surface: Command::surface(surface.as_deref()),
         now,
         offset: offset_from_utc,
@@ -414,7 +409,6 @@ pub(super) async fn featured_rows(
         app,
         list_id,
         RowsWindow {
-            display_mode: None,
             surface: None,
             offset: None,
             limit: None,
@@ -469,7 +463,6 @@ pub(super) async fn profile_rows(app: &App, user_id: Option<&str>) -> Response {
     let counts = std::collections::HashMap::new();
     let context = RowContext {
         current_user_id: me.as_deref(),
-        display_mode: resolved_display_mode(app, None),
         surface: Command::surface(None),
         now: app.clock.now(),
         offset: app.clock.utc_offset(),
@@ -520,7 +513,6 @@ pub(super) fn reminder_triage_deck(app: &App, reminded_task_id: Option<&str>) ->
     let counts = std::collections::HashMap::new();
     let context = RowContext {
         current_user_id: Some(me.as_str()),
-        display_mode: resolved_display_mode(app, None),
         surface: Command::surface(None),
         now,
         offset,

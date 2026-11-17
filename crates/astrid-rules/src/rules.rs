@@ -563,9 +563,6 @@ pub enum Rule {
         /// The account's half of the subtask rule - `insideParentOnly` and the rest.
         #[serde(default)]
         subtask_display: Option<String>,
-        /// `list` or `project`; anything else reads as `list`.
-        #[serde(default)]
-        display_mode: Option<String>,
         /// `listRow`, `boardCard` or `detail`; anything else reads as `listRow`.
         #[serde(default)]
         surface: Option<String>,
@@ -664,9 +661,6 @@ pub enum Rule {
     ///
     /// Asked on its own because the Apple detail views do not read the App door's `taskDetail`.
     DetailLayout {
-        /// `list` or `project`; anything else reads as `list`.
-        #[serde(default)]
-        display_mode: Option<String>,
         #[serde(default)]
         is_in_project: bool,
         #[serde(default)]
@@ -678,9 +672,6 @@ pub enum Rule {
     /// [`crate::rows::LeadingControl::picker_shows_project_state`] and
     /// [`crate::rows::LeadingControl::is_someone_elses_task`] (AWTD2-216; tasks AITD-375, 42013da7).
     LeadingPicker {
-        /// `list` or `project`; anything else reads as `list`.
-        #[serde(default)]
-        display_mode: Option<String>,
         /// `listRow`, `boardCard` or `detail`; anything else reads as `listRow`.
         #[serde(default)]
         surface: Option<String>,
@@ -1342,31 +1333,22 @@ pub fn run(rule: Rule) -> Response {
         }
         Rule::PaletteRank { query, titles } => Response::ok(crate::palette::rank(&query, &titles)),
         Rule::DetailLayout {
-            display_mode,
             is_in_project,
             is_read_only,
             has_blockers,
-        } => {
-            let mode = crate::rows::DisplayMode::from_stored(display_mode.as_deref());
-            Response::ok(DetailLayoutAnswer {
-                field_order: crate::rows::detail::field_order(mode)
-                    .iter()
-                    .map(|field| field.name())
-                    .collect(),
-                shows_board_state: crate::rows::detail::shows_board_state(
-                    mode,
-                    is_in_project,
-                    is_read_only,
-                ),
-                shows_task_blockers: crate::rows::detail::shows_task_blockers(
-                    is_in_project,
-                    is_read_only,
-                    has_blockers,
-                ),
-            })
-        }
+        } => Response::ok(DetailLayoutAnswer {
+            field_order: crate::rows::detail::field_order()
+                .iter()
+                .map(|field| field.name())
+                .collect(),
+            shows_board_state: crate::rows::detail::shows_board_state(is_in_project, is_read_only),
+            shows_task_blockers: crate::rows::detail::shows_task_blockers(
+                is_in_project,
+                is_read_only,
+                has_blockers,
+            ),
+        }),
         Rule::LeadingPicker {
-            display_mode,
             surface,
             assignee_id,
             current_user_id,
@@ -1377,7 +1359,6 @@ pub fn run(rule: Rule) -> Response {
             );
             Response::ok(LeadingPickerAnswer {
                 picker_shows_project_state: crate::rows::LeadingControl::picker_shows_project_state(
-                    crate::rows::DisplayMode::from_stored(display_mode.as_deref()),
                     crate::rows::Surface::from_wire(surface.as_deref()),
                     is_someone_elses,
                 ),
@@ -1413,7 +1394,6 @@ pub fn run(rule: Rule) -> Response {
             users,
             current_user_id,
             subtask_display,
-            display_mode,
             surface,
             offset,
             limit,
@@ -1442,7 +1422,6 @@ pub fn run(rule: Rule) -> Response {
                 users: &users,
                 current_user_id: current_user_id.as_deref(),
                 subtask_display: subtask_display.as_deref(),
-                display_mode: crate::rows::DisplayMode::from_stored(display_mode.as_deref()),
                 surface: crate::rows::Surface::from_wire(surface.as_deref()),
                 now,
                 offset: utc_offset,
@@ -2834,8 +2813,8 @@ mod tests {
                 "showsTaskBlockers": true,
             })
         );
-        // Project mode drops who and priority; a read-only viewer sees no state mover, but still
-        // sees a blocker that exists.
+        // ADEV-72: a build still sending `displayMode: "project"` gets the one layout. A read-only
+        // viewer sees no state mover, but still sees a blocker that exists.
         let project = answer(json!({
             "kind": "detailLayout", "displayMode": "project",
             "isInProject": true, "isReadOnly": true, "hasBlockers": true,
@@ -2844,7 +2823,7 @@ mod tests {
         assert_eq!(
             project,
             json!({
-                "fieldOrder": ["when", "lists"],
+                "fieldOrder": ["assignee", "when", "priority", "lists"],
                 "showsBoardState": false,
                 "showsTaskBlockers": true,
             })

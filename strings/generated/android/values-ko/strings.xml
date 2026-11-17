@@ -541,10 +541,6 @@
     <string name="share_link_failed">공유 링크를 만들지 못했습니다. 다시 시도해 주세요.</string>
     <string name="share_private_task_message">이것은 비공개 작업입니다. 이 목록에 접근 권한이 있는 사용자만 볼 수 있습니다.</string>
     <string name="share_share_task">작업 공유</string>
-    <string name="smart_layout_list">목록</string>
-    <string name="smart_layout_list_desc">체크박스로 작업을 완료하며, 우선순위와 담당자는 각각 별도의 행을 가집니다.</string>
-    <string name="smart_layout_project">프로젝트</string>
-    <string name="smart_layout_project_desc">간결함. 체크박스에서 우선순위, 담당자, 상태, 완료를 엽니다.</string>
     <string name="smart_offset_1_day">1일</string>
     <string name="smart_offset_1_week">1주</string>
     <string name="smart_offset_3_days">3일</string>
