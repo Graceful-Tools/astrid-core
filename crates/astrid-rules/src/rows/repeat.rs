@@ -250,7 +250,7 @@ fn custom_parts(pattern: &CustomRepeatingPattern) -> Vec<SummaryPart> {
         Some("until_date") => {
             if let Some(date) = pattern.end_until_date {
                 parts.push(SummaryPart {
-                    date: Some(date.to_rfc3339()),
+                    date: Some(crate::model::date::rfc3339_offset(date)),
                     ..SummaryPart::key("repeat.ends_on")
                 });
             }

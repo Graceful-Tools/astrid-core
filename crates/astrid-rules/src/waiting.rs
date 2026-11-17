@@ -53,7 +53,7 @@
 //! UTC (`model::date`), so an all-day task becomes due at the start of its day with no special case.
 //! A date counts as a wait condition exactly when the task is *not* due to start.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::board::{READY_STATUS_ROLE, WAITING_STATUS_ROLE};
@@ -97,8 +97,17 @@ pub struct StatusChange {
     #[serde(default, deserialize_with = "present")]
     pub status_role: Option<Option<String>>,
     /// A due date written in the same operation.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "Option<Option<crate::model::date::Timestamp>>",
+            // What the derive wrote for the `Option<Option<DateTime<Utc>>>` this field was: a
+            // missing key is `null`. A `with` type has no default to derive it from.
+            extend("default" = null)
+        )
+    )]
     #[serde(default, deserialize_with = "present_instant")]
-    pub due_date_time: Option<Option<DateTime<Utc>>>,
+    pub due_date_time: Option<Option<Timestamp>>,
     /// Blockers attached in the same operation.
     #[serde(default)]
     pub add_blockers: Vec<Blocker>,
@@ -174,16 +183,12 @@ impl WaitingError {
 }
 
 /// Whether a task may start: no date, or its date has come (`isDueToStart`).
-pub fn is_due_to_start(due: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+pub fn is_due_to_start(due: Option<Timestamp>, now: Timestamp) -> bool {
     due.is_none_or(|due| due <= now)
 }
 
 /// R1: whether a date and a set of blockers hold a task in Waiting at `now`.
-pub fn has_wait_condition(
-    due: Option<DateTime<Utc>>,
-    blockers: &[Blocker],
-    now: DateTime<Utc>,
-) -> bool {
+pub fn has_wait_condition(due: Option<Timestamp>, blockers: &[Blocker], now: Timestamp) -> bool {
     !is_due_to_start(due, now) || blockers.iter().any(|blocker| !blocker.completed)
 }
 
@@ -216,7 +221,7 @@ pub fn resolve_status_write(
     task: &Task,
     blockers: &[Blocker],
     change: &StatusChange,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<ResolvedStatus, WaitingError> {
     let was_waiting = is_waiting(task);
     let asked = match &change.status_role {
@@ -298,7 +303,7 @@ pub enum Wake {
 }
 
 /// R3: does a Waiting task leave by itself? `blockers` are its blockers now, with completion.
-pub fn wake(task: &Task, blockers: &[Blocker], now: DateTime<Utc>) -> Wake {
+pub fn wake(task: &Task, blockers: &[Blocker], now: Timestamp) -> Wake {
     if !is_waiting(task) || has_wait_condition(task.due_date_time, blockers, now) {
         return Wake::Stay;
     }
@@ -337,7 +342,7 @@ pub struct Settlement {
 }
 
 /// R3 and R5 in one: what a scheduled job (or a blocker's completion) does to one task.
-pub fn settle(task: &Task, blockers: &[Blocker], now: DateTime<Utc>) -> Settlement {
+pub fn settle(task: &Task, blockers: &[Blocker], now: Timestamp) -> Settlement {
     let stay = Settlement {
         action: SettleAction::Stay,
         status_role: task.status_role.clone(),
@@ -403,7 +408,7 @@ pub fn resolve_status_write_returning(
     blockers: &[Blocker],
     change: &StatusChange,
     return_to: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<ResolvedStatus, WaitingError> {
     let mut resolved = resolve_status_write(task, blockers, change, now)?;
     if matches!(resolved.transition, Transition::Wake | Transition::Inbox) {
@@ -421,7 +426,7 @@ pub fn settle_returning(
     task: &Task,
     blockers: &[Blocker],
     return_to: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Settlement {
     let mut settlement = settle(task, blockers, now);
     if matches!(
@@ -489,7 +494,7 @@ pub fn handoff(
     source: &Task,
     blockers: &[Blocker],
     held_return: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Handoff, HandoffError> {
     if source.completed {
         return Err(HandoffError::SourceDone);
@@ -558,7 +563,7 @@ where
 
 /// [`present`] for an instant. Unlike a model's dates, an unreadable date in a *write* is refused:
 /// read leniently it would be "clear the date", which is not what anybody sent.
-fn present_instant<'de, D>(deserializer: D) -> Result<Option<Option<DateTime<Utc>>>, D::Error>
+fn present_instant<'de, D>(deserializer: D) -> Result<Option<Option<Timestamp>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -575,7 +580,7 @@ where
 mod tests {
     use super::*;
 
-    fn at(text: &str) -> DateTime<Utc> {
+    fn at(text: &str) -> Timestamp {
         date::parse(text).expect("an instant")
     }
 

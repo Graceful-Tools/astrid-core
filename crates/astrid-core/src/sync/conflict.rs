@@ -108,9 +108,9 @@ pub fn merge_comments(
 mod tests {
     use super::*;
     use crate::model::{date, Comment, Priority};
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 

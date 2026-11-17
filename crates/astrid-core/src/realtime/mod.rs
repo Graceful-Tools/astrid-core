@@ -162,10 +162,7 @@ pub fn apply(store: &Store, event: &Event) -> Option<Change> {
 
 /// Whether `incoming` is strictly older than `cached`. Equal is not older: the server's copy of the
 /// same moment is the one to keep.
-fn is_older(
-    incoming: Option<chrono::DateTime<chrono::Utc>>,
-    cached: Option<chrono::DateTime<chrono::Utc>>,
-) -> bool {
+fn is_older(incoming: Option<jiff::Timestamp>, cached: Option<jiff::Timestamp>) -> bool {
     matches!((incoming, cached), (Some(incoming), Some(cached)) if incoming < cached)
 }
 
@@ -681,7 +678,7 @@ mod tests {
             crate::outbox::kind::UPDATE_LIST,
             json!({ "listId": "l1", "body": { "name": "Renamed here" } }),
             "temp_edit",
-            chrono::Utc::now(),
+            jiff::Timestamp::now(),
         );
         crate::outbox::journal::enqueue(&store, &entry).expect("journals");
         let newer = list_event(
@@ -701,7 +698,7 @@ mod tests {
             crate::outbox::kind::DELETE_LIST,
             json!({ "listId": "l2" }),
             "temp_delete",
-            chrono::Utc::now(),
+            jiff::Timestamp::now(),
         );
         crate::outbox::journal::enqueue(&store, &gone).expect("journals");
         let late = list_event(json!({ "id": "l2", "name": "Deleted here" }));

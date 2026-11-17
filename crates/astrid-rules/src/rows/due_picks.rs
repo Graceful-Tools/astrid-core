@@ -19,7 +19,14 @@
 //! Titles are keys, never words. The shell resolves them, the same way it resolves
 //! [`super::DueLabel`].
 
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use jiff::civil::{Date, DateTime, Time};
+use jiff::tz::{Offset, TimeZone};
+use jiff::Timestamp;
+
+/// `day` moved by whole calendar days, held at the edge of the calendar rather than failing.
+fn plus_days(day: Date, days: i64) -> Date {
+    crate::model::date::days_after_or_same(day, days)
+}
 
 /// A quick date choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,8 +89,8 @@ pub const TIME_OPTIONS: [TimeOption; 4] = [
 /// The reader's calendar day, `days` on, stored the way all-day dates are stored: midnight UTC.
 /// Adding days to the day rather than seconds to the instant is what keeps "Tomorrow" on the right
 /// date across a daylight-saving boundary, where a day is 23 or 25 hours.
-pub fn all_day_pick<Z: TimeZone + Copy>(days: i64, now: DateTime<Utc>, zone: Z) -> DateTime<Utc> {
-    let day = now.with_timezone(&zone).date_naive() + Duration::days(days);
+pub fn all_day_pick(days: i64, now: Timestamp, zone: &TimeZone) -> Timestamp {
+    let day = plus_days(zone.to_datetime(now).date(), days);
     crate::model::date::all_day_instant(day)
 }
 
@@ -92,9 +99,9 @@ pub fn all_day_pick<Z: TimeZone + Copy>(days: i64, now: DateTime<Utc>, zone: Z) 
 ///
 /// Picking a date must not silently discard a time the person already set — which is what
 /// replacing the whole instant would do.
-pub fn timed_pick<Z: TimeZone + Copy>(days: i64, current: DateTime<Utc>, zone: Z) -> DateTime<Utc> {
-    let local = current.with_timezone(&zone);
-    let day = local.date_naive() + Duration::days(days);
+pub fn timed_pick(days: i64, current: Timestamp, zone: &TimeZone) -> Timestamp {
+    let local = zone.to_datetime(current);
+    let day = plus_days(local.date(), days);
     to_utc(day, local.time(), zone)
 }
 
@@ -114,23 +121,23 @@ pub fn timed_pick<Z: TimeZone + Copy>(days: i64, current: DateTime<Utc>, zone: Z
 ///   the same mistake the quick picks already avoid.
 ///
 /// A timed task with no date yet has no time to keep, so it falls back to the day itself.
-pub fn on_day<Z: TimeZone + Copy>(
-    day: NaiveDate,
-    current: Option<DateTime<Utc>>,
+pub fn on_day(
+    day: Date,
+    current: Option<Timestamp>,
     is_all_day: bool,
-    zone: Z,
-) -> DateTime<Utc> {
+    zone: &TimeZone,
+) -> Timestamp {
     if is_all_day {
         return crate::model::date::all_day_instant(day);
     }
     let Some(current) = current else {
         return crate::model::date::all_day_instant(day);
     };
-    let time = current.with_timezone(&zone).time();
+    let time = zone.to_datetime(current).time();
     to_utc(day, time, zone)
 }
 
-pub fn with_hour<Z: TimeZone + Copy>(hour: u32, current: DateTime<Utc>, zone: Z) -> DateTime<Utc> {
+pub fn with_hour(hour: u32, current: Timestamp, zone: &TimeZone) -> Timestamp {
     with_time(hour, 0, current, zone)
 }
 
@@ -154,34 +161,35 @@ pub fn with_hour<Z: TimeZone + Copy>(hour: u32, current: DateTime<Utc>, zone: Z)
 /// of UTC, where UTC midnight reads as the previous afternoon; [`time_anchor`] is what turns an
 /// all-day task into a valid input, and the caller that has an `is_all_day` flag should simply
 /// leave such a task alone.
-pub fn to_all_day<Z: TimeZone + Copy>(due: DateTime<Utc>, zone: Z) -> DateTime<Utc> {
-    crate::model::date::all_day_instant(due.with_timezone(&zone).date_naive())
+pub fn to_all_day(due: Timestamp, zone: &TimeZone) -> Timestamp {
+    crate::model::date::all_day_instant(zone.to_datetime(due).date())
 }
 
 /// As [`with_hour`], keeping a minute too — what a time picker hands back (AATD-25).
-pub fn with_time<Z: TimeZone + Copy>(
-    hour: u32,
-    minute: u32,
-    current: DateTime<Utc>,
-    zone: Z,
-) -> DateTime<Utc> {
-    let local = current.with_timezone(&zone);
-    let time = NaiveTime::from_hms_opt(hour.min(23), minute.min(59), 0).expect("a valid time");
-    to_utc(local.date_naive(), time, zone)
+pub fn with_time(hour: u32, minute: u32, current: Timestamp, zone: &TimeZone) -> Timestamp {
+    let local = zone.to_datetime(current);
+    let time = clock(hour.min(23), minute.min(59));
+    to_utc(local.date(), time, zone)
+}
+
+/// A time of day, already within range: the callers clamp the hour and minute first.
+fn clock(hour: u32, minute: u32) -> Time {
+    let part = |value: u32| i8::try_from(value).unwrap_or(0);
+    Time::new(part(hour), part(minute), 0, 0).unwrap_or(Time::midnight())
 }
 
 /// The instant whose local day a chosen time goes on: an all-day task's calendar date (noon of
 /// it, so the local reading of its UTC midnight — the day before, west of UTC — never wins), a
 /// timed task's own instant, or now when there is no date.
-pub fn time_anchor<Z: TimeZone + Copy>(
-    due: Option<DateTime<Utc>>,
+pub fn time_anchor(
+    due: Option<Timestamp>,
     is_all_day: bool,
-    now: DateTime<Utc>,
-    zone: Z,
-) -> DateTime<Utc> {
+    now: Timestamp,
+    zone: &TimeZone,
+) -> Timestamp {
     match due {
         Some(due) if is_all_day => {
-            let noon = NaiveTime::from_hms_opt(12, 0, 0).expect("noon");
+            let noon = clock(12, 0);
             to_utc(crate::model::date::all_day_date(due), noon, zone)
         }
         Some(due) => due,
@@ -191,52 +199,58 @@ pub fn time_anchor<Z: TimeZone + Copy>(
 
 /// A local time on a calendar day, as an instant — with that day's offset in `zone` (AITD-561).
 /// For callers outside the picks that set a time on a day, such as a list's default due time.
-pub fn local_time_on<Z: TimeZone>(day: NaiveDate, time: NaiveTime, zone: Z) -> DateTime<Utc> {
+pub fn local_time_on(day: Date, time: Time, zone: &TimeZone) -> Timestamp {
     to_utc(day, time, zone)
 }
 
-fn to_utc<Z: TimeZone>(day: NaiveDate, time: NaiveTime, zone: Z) -> DateTime<Utc> {
-    let local = day.and_time(time);
-    resolve(local, &zone)
-        // Every zone chrono-tz knows has a reading within a few hours of any local time, so this
-        // is unreachable; it keeps the function total rather than panicking.
-        .unwrap_or_else(|| Utc.from_utc_datetime(&local))
+fn to_utc(day: Date, time: Time, zone: &TimeZone) -> Timestamp {
+    let local = day.to_datetime(time);
+    resolve(local, zone)
+        // Every zone the database knows has a reading within a few hours of any local time, so
+        // this is unreachable except at the very edge of the calendar; it keeps the function
+        // total rather than panicking.
+        .or_else(|| Offset::UTC.to_timestamp(local).ok())
+        .unwrap_or(Timestamp::MIN)
 }
 
 /// A local time on its own day, in a named zone (AITD-561).
 ///
 /// With **that day's** offset rather than today's: "09:00 on Sunday" read on the Tuesday before
 /// US clocks go back is 09:00 PST, and today's PDT would put it at 08:00. A zone, not a
-/// `FixedOffset`, is what knows the difference; a `FixedOffset` has no changes and reads as before.
+/// fixed offset, is what knows the difference; a fixed offset has no changes and reads as before.
 ///
 /// The hour a change repeats takes its first reading — the one the clock shows first. The hour
 /// it skips does not exist, so the time is read with the offset in force just before the gap,
 /// which moves it on by the gap's length (02:30 on a spring-forward night is 03:30), as
-/// Foundation and JavaScript's `Date` do, rather than the choice being dropped.
-fn resolve<Z: TimeZone>(local: NaiveDateTime, zone: &Z) -> Option<DateTime<Utc>> {
-    if let Some(at) = zone.from_local_datetime(&local).earliest() {
-        return Some(at.with_timezone(&Utc));
-    }
-    (1..=6)
-        .map(|half_hours| Duration::minutes(30 * half_hours))
-        .find_map(|back| {
-            let before = zone.from_local_datetime(&(local - back)).earliest()?;
-            Some(before.with_timezone(&Utc) + back)
-        })
+/// Foundation and JavaScript's `Date` do, rather than the choice being dropped. That is jiff's
+/// "compatible" resolution, so it is what `to_timestamp` does.
+fn resolve(local: DateTime, zone: &TimeZone) -> Option<Timestamp> {
+    zone.to_timestamp(local).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::date;
-    use chrono::FixedOffset;
-
-    fn california() -> FixedOffset {
-        FixedOffset::east_opt(-7 * 3600).expect("an offset")
+    fn fixed(hours: i32) -> TimeZone {
+        TimeZone::fixed(Offset::from_seconds(hours * 3600).expect("an offset"))
     }
 
-    fn day(year: i32, month: u32, d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, d).expect("a real day")
+    fn named(name: &str) -> TimeZone {
+        TimeZone::get(name).expect("a zone the bundled database knows")
+    }
+
+    fn california() -> TimeZone {
+        fixed(-7)
+    }
+
+    fn day(year: i16, month: i8, d: i8) -> Date {
+        Date::new(year, month, d).expect("a real day")
+    }
+
+    /// `at` as the reader's `format` ("2026-09-14 17:00") reads it in `zone`.
+    fn reading(at: Timestamp, zone: &TimeZone, format: &str) -> String {
+        at.to_zoned(zone.clone()).strftime(format).to_string()
     }
 
     /// AATD-25. A time picker hands back an hour AND a minute; both are kept.
@@ -244,7 +258,7 @@ mod tests {
     fn aatd_25_a_chosen_time_keeps_its_minutes_on_the_tasks_day() {
         // A timed task on the 14th at 17:00 California, moved to 08:45 — still the 14th.
         let current = date::parse("2026-12-15T01:00:00Z").expect("a date");
-        let picked = with_time(8, 45, current, california());
+        let picked = with_time(8, 45, current, &california());
         assert_eq!(date::format(picked), "2026-12-14T15:45:00Z");
     }
 
@@ -254,14 +268,14 @@ mod tests {
     fn aatd_25_the_time_goes_on_the_tasks_own_day() {
         let now = date::parse("2026-12-01T18:00:00Z").expect("a date");
         let christmas = date::all_day_instant(day(2026, 12, 25));
-        let anchor = time_anchor(Some(christmas), true, now, california());
+        let anchor = time_anchor(Some(christmas), true, now, &california());
         assert_eq!(
-            date::format(with_time(14, 30, anchor, california())),
+            date::format(with_time(14, 30, anchor, &california())),
             "2026-12-25T21:30:00Z"
         );
-        let anchor = time_anchor(None, false, now, california());
+        let anchor = time_anchor(None, false, now, &california());
         assert_eq!(
-            date::format(with_time(14, 30, anchor, california())),
+            date::format(with_time(14, 30, anchor, &california())),
             "2026-12-01T21:30:00Z"
         );
     }
@@ -270,7 +284,7 @@ mod tests {
     /// UTC — which is the whole reason `date::all_day_instant` exists.
     #[test]
     fn an_all_day_task_takes_the_day_itself() {
-        let picked = on_day(day(2026, 12, 25), None, true, california());
+        let picked = on_day(day(2026, 12, 25), None, true, &california());
         assert_eq!(date::all_day_date(picked), day(2026, 12, 25));
         assert_eq!(date::format(picked), "2026-12-25T00:00:00Z");
     }
@@ -281,13 +295,10 @@ mod tests {
     fn a_timed_task_keeps_its_time_of_day() {
         // 17:00 in California on the 7th.
         let current = date::parse("2026-09-08T00:00:00Z").expect("an instant");
-        let picked = on_day(day(2026, 9, 14), Some(current), false, california());
+        let picked = on_day(day(2026, 9, 14), Some(current), false, &california());
 
         assert_eq!(
-            picked
-                .with_timezone(&california())
-                .format("%Y-%m-%d %H:%M")
-                .to_string(),
+            reading(picked, &california(), "%Y-%m-%d %H:%M"),
             "2026-09-14 17:00",
         );
     }
@@ -296,7 +307,7 @@ mod tests {
     /// rather than midnight-in-some-zone.
     #[test]
     fn a_timed_task_with_no_date_takes_the_day() {
-        let picked = on_day(day(2026, 9, 14), None, false, california());
+        let picked = on_day(day(2026, 9, 14), None, false, &california());
         assert_eq!(date::all_day_date(picked), day(2026, 9, 14));
     }
 
@@ -309,11 +320,11 @@ mod tests {
         // 20:00 on the 14th in California is 03:00 on the 15th in UTC.
         let evening = at("2026-12-15T03:00:00Z");
         assert_eq!(
-            date::format(to_all_day(evening, california())),
+            date::format(to_all_day(evening, &california())),
             "2026-12-14T00:00:00Z"
         );
         assert_eq!(
-            date::all_day_date(to_all_day(evening, california())),
+            date::all_day_date(to_all_day(evening, &california())),
             day(2026, 12, 14),
             "and it reads back as the same day it was shown on"
         );
@@ -323,11 +334,11 @@ mod tests {
     /// keeping the raw instant would move it back a day.
     #[test]
     fn task_0616f2d1_clearing_a_time_east_of_utc_keeps_the_readers_day() {
-        let tokyo = FixedOffset::east_opt(9 * 3600).expect("an offset");
+        let tokyo = fixed(9);
         // 07:00 on the 15th in Tokyo is 22:00 on the 14th in UTC.
         let morning = at("2026-12-14T22:00:00Z");
         assert_eq!(
-            date::format(to_all_day(morning, tokyo)),
+            date::format(to_all_day(morning, &tokyo)),
             "2026-12-15T00:00:00Z"
         );
     }
@@ -340,7 +351,7 @@ mod tests {
     fn task_0616f2d1_an_all_day_instant_is_not_a_valid_input() {
         let christmas = date::all_day_instant(day(2026, 12, 25));
         assert_eq!(
-            date::all_day_date(to_all_day(christmas, california())),
+            date::all_day_date(to_all_day(christmas, &california())),
             day(2026, 12, 24),
             "which is why the caller must not pass one"
         );
@@ -349,10 +360,10 @@ mod tests {
             Some(christmas),
             true,
             at("2026-12-01T18:00:00Z"),
-            california(),
+            &california(),
         );
         assert_eq!(
-            date::format(to_all_day(anchor, california())),
+            date::format(to_all_day(anchor, &california())),
             "2026-12-25T00:00:00Z"
         );
     }
@@ -361,19 +372,16 @@ mod tests {
     #[test]
     fn the_time_is_kept_in_the_readers_zone() {
         let current = date::parse("2026-09-08T09:30:00Z").expect("an instant");
-        let picked = on_day(day(2026, 9, 20), Some(current), false, utc());
-        assert_eq!(
-            picked.with_timezone(&utc()).format("%H:%M").to_string(),
-            "09:30",
-        );
+        let picked = on_day(day(2026, 9, 20), Some(current), false, &utc());
+        assert_eq!(reading(picked, &utc(), "%H:%M"), "09:30");
     }
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC")
+    fn utc() -> TimeZone {
+        TimeZone::UTC
     }
 
     /// D26, resolved toward iOS (`DueDateQuickPicks.dateOptions`): four dates and no clearing
@@ -404,21 +412,21 @@ mod tests {
 
     #[test]
     fn an_all_day_pick_lands_on_the_readers_day_at_midnight_utc() {
-        let california = FixedOffset::east_opt(-7 * 3600).expect("an offset");
+        let california = fixed(-7);
         // 22:00 on the 7th in California is 05:00 on the 8th in UTC.
         let evening = at("2026-09-08T05:00:00Z");
 
         assert_eq!(
-            date::format(all_day_pick(0, evening, california)),
+            date::format(all_day_pick(0, evening, &california)),
             "2026-09-07T00:00:00Z",
             "today is the 7th where the person is"
         );
         assert_eq!(
-            date::format(all_day_pick(1, evening, california)),
+            date::format(all_day_pick(1, evening, &california)),
             "2026-09-08T00:00:00Z"
         );
         assert_eq!(
-            date::format(all_day_pick(7, evening, california)),
+            date::format(all_day_pick(7, evening, &california)),
             "2026-09-14T00:00:00Z"
         );
     }
@@ -428,7 +436,7 @@ mod tests {
     fn a_timed_pick_keeps_the_time_of_day() {
         let current = at("2026-09-07T14:30:00Z");
         assert_eq!(
-            date::format(timed_pick(1, current, utc())),
+            date::format(timed_pick(1, current, &utc())),
             "2026-09-08T14:30:00Z"
         );
     }
@@ -437,11 +445,11 @@ mod tests {
     /// at 09:00 UTC.
     #[test]
     fn a_time_pick_is_in_the_readers_zone_and_zeroes_the_minutes() {
-        let auckland = FixedOffset::east_opt(12 * 3600).expect("an offset");
+        let auckland = fixed(12);
         let current = at("2026-09-07T02:37:00Z"); // 14:37 on the 7th in Auckland
 
         assert_eq!(
-            date::format(with_hour(9, current, auckland)),
+            date::format(with_hour(9, current, &auckland)),
             "2026-09-06T21:00:00Z",
             "09:00 on the 7th in Auckland is 21:00 on the 6th in UTC"
         );
@@ -453,11 +461,11 @@ mod tests {
     #[test]
     fn adding_a_day_moves_the_calendar_day_not_a_fixed_number_of_seconds() {
         // The Sunday US clocks go forward in 2026.
-        let california = FixedOffset::east_opt(-8 * 3600).expect("an offset");
+        let california = fixed(-8);
         let before = at("2026-03-08T06:00:00Z"); // 22:00 on the 7th in California
         assert_eq!(
-            all_day_pick(1, before, california).date_naive(),
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 8).expect("a real day")
+            date::all_day_date(all_day_pick(1, before, &california)),
+            day(2026, 3, 8)
         );
     }
 
@@ -466,14 +474,14 @@ mod tests {
     /// 17:00Z. With today's −07:00 it was 16:00Z, 08:00 on the phone.
     #[test]
     fn aitd_561_morning_across_a_dst_change_is_nine_local() {
-        let la = chrono_tz::America::Los_Angeles;
+        let la = named("America/Los_Angeles");
         let current = at("2026-11-01T10:37:00Z"); // 03:37 PST on the 1st
         assert_eq!(
-            date::format(with_hour(9, current, la)),
+            date::format(with_hour(9, current, &la)),
             "2026-11-01T17:00:00Z"
         );
         assert_eq!(
-            date::format(with_time(18, 0, current, la)),
+            date::format(with_time(18, 0, current, &la)),
             "2026-11-02T02:00:00Z"
         );
     }
@@ -481,16 +489,16 @@ mod tests {
     /// AITD-561. "Tomorrow" on a timed task keeps the local time of day across the change.
     #[test]
     fn aitd_561_a_timed_pick_keeps_the_local_time_across_a_dst_change() {
-        let la = chrono_tz::America::Los_Angeles;
+        let la = named("America/Los_Angeles");
         let saturday_5pm_pdt = at("2026-11-01T00:00:00Z");
         assert_eq!(
-            date::format(timed_pick(1, saturday_5pm_pdt, la)),
+            date::format(timed_pick(1, saturday_5pm_pdt, &la)),
             "2026-11-02T01:00:00Z",
             "17:00 PST on Sunday"
         );
         // And a calendar day chosen across it.
         assert_eq!(
-            date::format(on_day(day(2026, 11, 2), Some(saturday_5pm_pdt), false, la)),
+            date::format(on_day(day(2026, 11, 2), Some(saturday_5pm_pdt), false, &la)),
             "2026-11-03T01:00:00Z"
         );
     }
@@ -499,16 +507,16 @@ mod tests {
     /// the first time that exists, rather than dropping the time.
     #[test]
     fn aitd_561_repeated_and_skipped_hours_still_give_a_time() {
-        let la = chrono_tz::America::Los_Angeles;
+        let la = named("America/Los_Angeles");
         let fall_back = at("2026-11-01T17:00:00Z");
         assert_eq!(
-            date::format(with_time(1, 30, fall_back, la)),
+            date::format(with_time(1, 30, fall_back, &la)),
             "2026-11-01T08:30:00Z",
             "01:30 PDT, the first of the two"
         );
         let spring_forward = at("2026-03-08T17:00:00Z");
         assert_eq!(
-            date::format(with_time(2, 30, spring_forward, la)),
+            date::format(with_time(2, 30, spring_forward, &la)),
             "2026-03-08T10:30:00Z",
             "02:30 does not exist; 03:30 PDT"
         );

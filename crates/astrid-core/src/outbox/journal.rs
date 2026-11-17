@@ -12,7 +12,7 @@
 //! human-meaningful field. Two entries enqueued in the same millisecond still have the order the
 //! person performed them in.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::entry::{Entry, Status};
@@ -95,7 +95,7 @@ pub fn enqueue(store: &Store, entry: &Entry) -> Result<Entry> {
 ///
 /// The compare-and-set on `status = 'pending'` is what makes two runners safe: the loser sees
 /// `false` and moves on rather than sending the same write twice.
-pub fn mark_running(store: &Store, id: &str, now: DateTime<Utc>) -> Result<bool> {
+pub fn mark_running(store: &Store, id: &str, now: Timestamp) -> Result<bool> {
     store.transaction(|connection| {
         let changed = connection.execute(
             "UPDATE outbox SET status = 'running', updated_at = ?2
@@ -111,7 +111,7 @@ pub fn mark_completed(
     store: &Store,
     id: &str,
     result: Option<&std::collections::BTreeMap<String, String>>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<()> {
     store.transaction(|connection| {
         connection.execute(
@@ -133,9 +133,9 @@ pub fn mark_retry(
     store: &Store,
     id: &str,
     attempts: i64,
-    next_attempt_at: DateTime<Utc>,
+    next_attempt_at: Timestamp,
     error: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<()> {
     store.transaction(|connection| {
         connection.execute(
@@ -156,7 +156,7 @@ pub fn mark_retry(
 
 /// Dead-letter an entry. It stays in the journal: a write that was refused is evidence the user
 /// may need, and deleting it is how "it just disappeared" happens.
-pub fn mark_dead(store: &Store, id: &str, error: &str, now: DateTime<Utc>) -> Result<()> {
+pub fn mark_dead(store: &Store, id: &str, error: &str, now: Timestamp) -> Result<()> {
     store.transaction(|connection| {
         connection.execute(
             "UPDATE outbox SET status = 'failedPermanent', last_error = ?2, updated_at = ?3
@@ -173,7 +173,7 @@ pub const OFFLINE_PREFIX: &str = "offline: ";
 
 /// The network is back: every write that was waiting for it may go now rather than at the end of
 /// its wait. Answers how many.
-pub fn wake_offline(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+pub fn wake_offline(store: &Store, now: Timestamp) -> Result<usize> {
     store.transaction(|connection| {
         let woken = connection.execute(
             "UPDATE outbox SET next_attempt_at = ?1
@@ -190,7 +190,7 @@ pub fn wake_offline(store: &Store, now: DateTime<Utc>) -> Result<usize> {
 ///
 /// An entry refused for a reason that has not changed is refused again and dead-lettered again,
 /// with the same evidence; nothing is lost by trying.
-pub fn revive_dead(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+pub fn revive_dead(store: &Store, now: Timestamp) -> Result<usize> {
     store.transaction(|connection| {
         let revived = connection.execute(
             &format!(
@@ -219,15 +219,18 @@ const REVIVABLE: &str = "status = 'failedPermanent'
 /// How far back a "retry failed writes" reaches.
 pub const REVIVE_WINDOW_DAYS: i64 = 7;
 
-fn revive_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
-    now - chrono::Duration::days(REVIVE_WINDOW_DAYS)
+fn revive_cutoff(now: Timestamp) -> Timestamp {
+    date::minus(
+        now,
+        jiff::SignedDuration::from_hours(24 * REVIVE_WINDOW_DAYS),
+    )
 }
 
 /// How many refused writes [`revive_dead`] would give another go — what a shell offers a retry
 /// for, as opposed to [`Stats::failed`], which is every write that was refused at all.
 ///
 /// A read, on the read connection: the shell asks after every sync pass.
-pub fn retryable_dead_count(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+pub fn retryable_dead_count(store: &Store, now: Timestamp) -> Result<usize> {
     store.reading(|connection| {
         let count: i64 = connection.query_row(
             &format!("SELECT COUNT(*) FROM outbox WHERE {REVIVABLE}"),
@@ -243,7 +246,7 @@ pub fn update_payload(
     store: &Store,
     id: &str,
     payload: &serde_json::Value,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<()> {
     store.transaction(|connection| {
         connection.execute(
@@ -255,7 +258,7 @@ pub fn update_payload(
 }
 
 /// Drop the completed entries nothing needs any more.
-pub fn prune(store: &Store, now: DateTime<Utc>) -> Result<usize> {
+pub fn prune(store: &Store, now: Timestamp) -> Result<usize> {
     store.transaction(|connection| {
         let entries = read_all(connection)?;
         let keep: std::collections::HashSet<String> = super::scheduler::pruned(&entries, now)
@@ -467,7 +470,7 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Entry>> {
             created_at: date::parse(&created_at).ok_or_else(|| {
                 StoreError::Corrupt(format!("unreadable created_at: {created_at}"))
             })?,
-            updated_at: date::parse(&updated_at).unwrap_or_else(Utc::now),
+            updated_at: date::parse(&updated_at).unwrap_or_else(Timestamp::now),
             sequence: row_int(row, 13)?,
         })
     })();
@@ -490,9 +493,9 @@ fn row_int(row: &rusqlite::Row<'_>, index: usize) -> Result<i64> {
 mod tests {
     use super::*;
     use crate::outbox::entry::kind;
-    use chrono::Duration;
+    use jiff::SignedDuration;
 
-    fn t0() -> DateTime<Utc> {
+    fn t0() -> Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 
@@ -610,7 +613,7 @@ mod tests {
             &store,
             "e1",
             1,
-            t0() + Duration::seconds(2),
+            t0() + SignedDuration::from_secs(2),
             "500 the server fell over",
             t0(),
         )
@@ -619,7 +622,7 @@ mod tests {
         let read = entry(&store, "e1").expect("reads").expect("present");
         assert_eq!(read.status, Status::Pending);
         assert_eq!(read.attempts, 1);
-        assert_eq!(read.next_attempt_at, t0() + Duration::seconds(2));
+        assert_eq!(read.next_attempt_at, t0() + SignedDuration::from_secs(2));
         assert!(read.last_error.expect("an error").contains("500"));
     }
 
@@ -640,10 +643,18 @@ mod tests {
         let store = Store::in_memory().expect("opens");
         enqueue(&store, &new_entry("e1")).expect("enqueues");
         enqueue(&store, &new_entry("e2")).expect("enqueues");
-        mark_retry(&store, "e1", 9, t0() + Duration::hours(1), "500", t0()).expect("records");
+        mark_retry(
+            &store,
+            "e1",
+            9,
+            t0() + SignedDuration::from_hours(1),
+            "500",
+            t0(),
+        )
+        .expect("records");
         mark_dead(&store, "e1", "403 not yours", t0()).expect("records");
 
-        let later = t0() + Duration::minutes(5);
+        let later = t0() + SignedDuration::from_mins(5);
         assert_eq!(revive_dead(&store, later).expect("revives"), 1);
         let read = entry(&store, "e1").expect("reads").expect("present");
         assert_eq!(read.status, Status::Pending);
@@ -663,9 +674,15 @@ mod tests {
         enqueue(&store, &new_entry("recent")).expect("enqueues");
         mark_dead(&store, "delete", "403", t0()).expect("records");
         mark_dead(&store, "old", "403", t0()).expect("records");
-        mark_dead(&store, "recent", "403", t0() + Duration::days(9)).expect("records");
+        mark_dead(
+            &store,
+            "recent",
+            "403",
+            t0() + SignedDuration::from_hours(24 * 9),
+        )
+        .expect("records");
 
-        let now = t0() + Duration::days(10);
+        let now = t0() + SignedDuration::from_hours(24 * 10);
         assert_eq!(revive_dead(&store, now).expect("revives"), 1);
         assert_eq!(
             entry(&store, "recent")
@@ -705,11 +722,23 @@ mod tests {
         enqueue(&store, &delete).expect("enqueues");
         enqueue(&store, &new_entry("old")).expect("enqueues");
         enqueue(&store, &new_entry("recent")).expect("enqueues");
-        mark_dead(&store, "delete", "403", t0() + Duration::days(9)).expect("records");
+        mark_dead(
+            &store,
+            "delete",
+            "403",
+            t0() + SignedDuration::from_hours(24 * 9),
+        )
+        .expect("records");
         mark_dead(&store, "old", "403", t0()).expect("records");
-        mark_dead(&store, "recent", "403", t0() + Duration::days(9)).expect("records");
+        mark_dead(
+            &store,
+            "recent",
+            "403",
+            t0() + SignedDuration::from_hours(24 * 9),
+        )
+        .expect("records");
 
-        let now = t0() + Duration::days(10);
+        let now = t0() + SignedDuration::from_hours(24 * 10);
         assert_eq!(
             stats(&store).expect("reads").failed,
             3,
@@ -776,7 +805,8 @@ mod tests {
         mark_completed(&store, "old", None, t0()).expect("records");
         mark_completed(&store, "referenced", None, t0()).expect("records");
 
-        let later = t0() + Duration::seconds(super::super::scheduler::COMPLETED_RETENTION_SECS * 2);
+        let later =
+            t0() + SignedDuration::from_secs(super::super::scheduler::COMPLETED_RETENTION_SECS * 2);
         assert_eq!(prune(&store, later).expect("prunes"), 1);
         assert!(entry(&store, "old").expect("reads").is_none());
         assert!(entry(&store, "referenced").expect("reads").is_some());

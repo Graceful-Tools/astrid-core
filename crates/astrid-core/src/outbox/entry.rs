@@ -7,7 +7,7 @@
 //! a retry never duplicates server-side, and explicit dependency edges, so a comment waits for its
 //! attachment upload *by construction* rather than by throwing, observing and trying again.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -125,11 +125,14 @@ pub struct Entry {
     pub status: Status,
     pub attempts: i64,
     /// The earliest this may run again.
-    pub next_attempt_at: DateTime<Utc>,
+    #[serde(with = "crate::model::date::exact")]
+    pub next_attempt_at: Timestamp,
     #[serde(default)]
     pub last_error: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    #[serde(with = "crate::model::date::exact")]
+    pub created_at: Timestamp,
+    #[serde(with = "crate::model::date::exact")]
+    pub updated_at: Timestamp,
     /// What the handler produced, for dependents to read — the real file id from an upload, the
     /// server id from a create.
     #[serde(default)]
@@ -147,7 +150,7 @@ impl Entry {
         kind: impl Into<String>,
         payload: serde_json::Value,
         client_request_id: impl Into<String>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Self {
         Entry {
             id: id.into(),
@@ -230,7 +233,7 @@ mod tests {
     use super::*;
     use crate::model::date;
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 

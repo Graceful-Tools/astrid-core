@@ -17,7 +17,8 @@
 //!   rename overrides it ([`columns_with_rows`]);
 //! - a **drop** writes the move and the card's new place in the manual order ([`reorder`]).
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use crate::board::{self, BoardColumn, ColumnKind, ColumnMove};
 use crate::model::{RecentlyCompletedWindow, Task, TaskList};
@@ -92,10 +93,10 @@ fn status_rows(lists: &[TaskList]) -> Vec<&TaskList> {
 /// by when it was last touched, never by `completedAt` — iOS hands its window no completion time.
 pub fn done_shows(
     filter: Option<&str>,
-    updated_at: Option<DateTime<Utc>>,
+    updated_at: Option<Timestamp>,
     window: Option<&RecentlyCompletedWindow>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> bool {
     match filter.unwrap_or("default") {
         "hide" => false,
@@ -145,8 +146,8 @@ pub fn column_cards<'a>(
     column: &BoardColumn,
     columns: &[BoardColumn],
     list: BoardList<'_>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<&'a Task> {
     let mut held: Vec<&Task> = cards
         .iter()
@@ -193,8 +194,8 @@ pub fn reorder(
     cards: &[&Task],
     lists: &[TaskList],
     list: BoardList<'_>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Reorder {
     let column_move = board::resolve_move(task, target, lists);
     let others: Vec<&Task> = cards
@@ -233,17 +234,14 @@ pub fn reorder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use serde_json::json;
 
-    fn now() -> DateTime<Utc> {
-        Utc.timestamp_opt(1_700_000_000, 0)
-            .single()
-            .expect("an instant")
+    fn now() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("an offset")
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
     fn list(value: serde_json::Value) -> TaskList {

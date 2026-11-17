@@ -16,7 +16,7 @@
 //! - **Said by nobody** is a message the server authored — "Dana joined the list". Drawing it as a
 //!   bubble from a person with no name is how those come to look like somebody's message.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 
 use crate::model::{is_temp_id, ChatMessage, User};
@@ -48,7 +48,12 @@ pub struct MessageRow {
     /// Written by the server rather than by a person.
     pub is_system: bool,
     pub reply_to_id: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "Option<crate::model::date::Timestamp>")
+    )]
+    #[serde(with = "crate::model::date::exact_optional")]
+    pub created_at: Option<Timestamp>,
 }
 
 /// Project a transcript.

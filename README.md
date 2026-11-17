@@ -134,6 +134,8 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
+| **after jiff** | 877,399 | | **187,191** | `chrono` and `chrono-tz` replaced by `jiff` (ADEV-80, both unmaintained: RUSTSEC-2026-0543 / -0555): **+23,111** brotli (+113,605 raw) over the build before it, measured on the same machine with a brotli-11 of the pre-`wasm-bindgen` artifact. The browser build carries no zone table (`rules-repeating` is off), so there was nothing to save on the table: the growth is jiff's own code, and ~87 KB of the raw bytes of it are `jiff`/`jiff_core` — mostly the `Debug`/`Display` of its error types, which any `jiff` call that can `expect` keeps. Wire text is written by this crate (`model::date`), not by `jiff`'s `strftime`, `FromStr` or `serde` (the feature is off), which is worth ~17 KB brotli by itself (204,694 → 187,166 while it was being written). Budget unchanged at 290,000: 102,809 spare, and a ratchet to this number is open to whoever owns the budget |
+| before jiff (`2ecf4ea`) | 763,794 | | 164,080 | The first measurement since the rule groups left the browser build; the "today" row below predates them |
 | **budget +20 KB** | | | 269,757 | Budget 270,000 → 290,000 (Jon, 2026-11-15: *"raise the budget by 20kb"*). It buys headroom: the budget sat 243 bytes above the build, so each new rule on the door turned main's `wasm` job red and every core PR inherited it (PR #58, PR #62). The ratchet still applies: lower it again after the next saving |
 | **today** | | | **269,757** | + the rules door's `waitingHandoff` and the returning holder on `waitingSettle` / `waitingWrite` (AWTD-1686: a handoff files the other half and the source wakes back to the agent that handed it off): **+1,744** (CI's measurement). Budget 269,000 → 270,000, 2026-11-16 |
 | before the handoff | 2,025,151 | 409,141 | 268,013 | no second `TaskList`/`Task` decoder: `TaskList::new` and `nextOccurrence` stopped building values with `serde_json::from_value` (AWTD2-162 step 2, slice 1; −11,091 on top of the sidebar). Budget 279,800 → 269,000 (260,034 before the sidebar merged), 2026-11-15 |
@@ -171,7 +173,9 @@ combination directly — nothing else in the workspace compiles it.
 
 **Where the bytes are now**, by `node scripts/wasm-size.mjs <file> --attribute` on a build with
 `--config 'profile.wasm.strip=false'` — the code section, 993,771 bytes over 4,610 functions,
-beside a 955,451-byte data section that is mostly chrono-tz's zone table:
+beside a 955,451-byte data section that was mostly chrono-tz's zone table (that was before the
+rule groups left the browser build and `chrono` left the workspace; ADEV-80's row above has the
+current numbers):
 
 | crate | | crate | |
 |---|---:|---|---:|
@@ -184,7 +188,8 @@ beside a 955,451-byte data section that is mostly chrono-tz's zone table:
 (An unstripped build is larger and keeps its name section; it is a different artifact from the one
 the budget measures, which is the point of the two commands being different.)
 
-**chrono-tz is the obvious suspect and it is not the obstacle.** Rebuilt with its zone table
+**The zone table is the obvious suspect and it is not the obstacle.** (Written about `chrono-tz`,
+before ADEV-80 moved the workspace to `jiff`.) Rebuilt with its zone table
 filtered down to UTC, the artifact loses 904,638 raw bytes (38%) but only **53,437 brotli bytes
 (15%)** — a timezone table compresses almost away. Dropping it costs a cross-crate API change
 (the caller would pass offsets from `Intl` instead of an IANA name) and still leaves ~300 KB —
@@ -216,8 +221,10 @@ per PR, with the budget ratcheted after each:
    size was not measured in the run that landed this (no `node` there): read it off the first
    CI run's *Size budget* step and ratchet the 290,000 budget down to it, with a row in the table
    above. The remaining gap to 150,000 is `rows` (§4.1 of the note).
-3. **Time zone offsets from `Intl` instead of `chrono-tz`.** ~53 KB, cross-crate API change.
-   Worth doing after 2, not instead of it.
+3. **Time zone offsets from `Intl` instead of the bundled zone table.** (`chrono-tz` until
+   ADEV-80, `jiff`'s `tzdb-bundle-always` now.) ~53 KB, cross-crate API change, and no longer an
+   issue for the browser build at all: it carries no zone table since step 2.
+   Worth doing only if the browser must run repeating rollover itself.
 
 ## Layout
 

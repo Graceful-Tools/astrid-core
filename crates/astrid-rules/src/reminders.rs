@@ -26,7 +26,7 @@
 //! task PUT ignores `reminderTime` anyway, so the old `reminderTime` snooze never reached the
 //! server; the due date does.)
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 
 use crate::model::Task;
@@ -35,7 +35,7 @@ use crate::model::Task;
 ///
 /// A laptop that was asleep for a week should not open onto forty banners for last Tuesday. An
 /// hour is long enough to cover a lunch break and short enough that what arrives is still news.
-pub const GRACE: Duration = Duration::hours(1);
+pub const GRACE: SignedDuration = SignedDuration::from_hours(1);
 
 /// The snooze choices, in minutes: 15 minutes, a day, a week — iOS's `ReminderView` (D24).
 pub const SNOOZE_CHOICES: [i64; 3] = [15, 1440, 10080];
@@ -50,13 +50,15 @@ pub struct Reminder {
     pub task_id: String,
     pub title: String,
     /// When the reminder was for, so the shell can say "was due at 09:00" rather than "now".
-    pub reminder_time: DateTime<Utc>,
-    pub due_date_time: Option<DateTime<Utc>>,
+    #[serde(with = "crate::model::date::exact")]
+    pub reminder_time: Timestamp,
+    #[serde(with = "crate::model::date::exact_optional")]
+    pub due_date_time: Option<Timestamp>,
 }
 
 /// When a task's reminder is next for: the later of its `reminderTime` and a snooze made on this
 /// device. Either alone will do.
-pub fn reminder_at(task: &Task, snoozed_until: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+pub fn reminder_at(task: &Task, snoozed_until: Option<Timestamp>) -> Option<Timestamp> {
     match (task.reminder_time, snoozed_until) {
         (Some(at), Some(snoozed)) => Some(at.max(snoozed)),
         (at, snoozed) => at.or(snoozed),
@@ -74,9 +76,9 @@ pub fn reminder_at(task: &Task, snoozed_until: Option<DateTime<Utc>>) -> Option<
 /// waiting longest is the one to answer first.
 pub fn due_now(
     tasks: &[Task],
-    now: DateTime<Utc>,
-    snoozed_until: impl Fn(&str) -> Option<DateTime<Utc>>,
-    shown: impl Fn(&str, DateTime<Utc>) -> bool,
+    now: Timestamp,
+    snoozed_until: impl Fn(&str) -> Option<Timestamp>,
+    shown: impl Fn(&str, Timestamp) -> bool,
 ) -> Vec<Reminder> {
     let mut due: Vec<Reminder> = tasks
         .iter()
@@ -84,7 +86,7 @@ pub fn due_now(
         .filter_map(|task| {
             let at = reminder_at(task, snoozed_until(task.id.as_str()))?;
             // Not yet, and not so long ago that it is history rather than a reminder.
-            if at > now || now - at > GRACE {
+            if at > now || now.duration_since(at) > GRACE {
                 return None;
             }
             if shown(task.id.as_str(), at) {
@@ -107,9 +109,9 @@ pub fn due_now(
 /// snooze made on this device, never a completed task, never one already shown for that time.
 pub fn next_after(
     tasks: &[Task],
-    now: DateTime<Utc>,
-    snoozed_until: impl Fn(&str) -> Option<DateTime<Utc>>,
-    shown: impl Fn(&str, DateTime<Utc>) -> bool,
+    now: Timestamp,
+    snoozed_until: impl Fn(&str) -> Option<Timestamp>,
+    shown: impl Fn(&str, Timestamp) -> bool,
 ) -> Option<Reminder> {
     tasks
         .iter()
@@ -127,9 +129,9 @@ pub fn next_after(
 }
 
 /// When a reminder snoozed now should come back.
-pub fn snooze_until(now: DateTime<Utc>, minutes: i64) -> DateTime<Utc> {
+pub fn snooze_until(now: Timestamp, minutes: i64) -> Timestamp {
     // A snooze of nothing is a reminder that fires again immediately; a minute is the floor.
-    now + Duration::minutes(minutes.max(1))
+    crate::model::date::plus(now, SignedDuration::from_mins(minutes.max(1)))
 }
 
 #[cfg(test)]
@@ -137,7 +139,7 @@ mod tests {
     use super::*;
     use crate::model::date;
 
-    fn at(text: &str) -> DateTime<Utc> {
+    fn at(text: &str) -> Timestamp {
         date::parse(text).expect("a date")
     }
 
@@ -148,11 +150,11 @@ mod tests {
         }
     }
 
-    fn none(_: &str, _: DateTime<Utc>) -> bool {
+    fn none(_: &str, _: Timestamp) -> bool {
         false
     }
 
-    fn unsnoozed(_: &str) -> Option<DateTime<Utc>> {
+    fn unsnoozed(_: &str) -> Option<Timestamp> {
         None
     }
 
@@ -185,7 +187,7 @@ mod tests {
         let next =
             next_after(&tasks, at("2026-09-07T09:00:00Z"), snoozed, none).expect("one to come");
         assert_eq!(next.task_id, "t2");
-        let shown = |id: &str, _: DateTime<Utc>| id == "t2";
+        let shown = |id: &str, _: Timestamp| id == "t2";
         let next =
             next_after(&tasks, at("2026-09-07T09:00:00Z"), snoozed, shown).expect("one to come");
         assert_eq!(next.task_id, "t1");

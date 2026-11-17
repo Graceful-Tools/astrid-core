@@ -18,7 +18,9 @@
 //! bug the task itself warns about ("an all-day default is `all_day_instant`, not a local
 //! midnight"), so this client stores the calendar day.
 
-use chrono::{DateTime, Duration, Months, NaiveDate, NaiveTime, TimeZone, Utc};
+use jiff::civil::{Date, Time};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 
 use crate::model::{Priority, Repeating, TaskDraft, TaskList};
 use crate::rows::due_picks;
@@ -37,13 +39,13 @@ pub struct Given {
 ///
 /// `me` is the signed-in user's id, which is the fallback assignee for a list that has named no
 /// default — see the assignee arm below. `None` when nobody is signed in yet.
-pub fn apply<Z: TimeZone + Copy>(
+pub fn apply(
     draft: &mut TaskDraft,
     given: Given,
     list: &TaskList,
     me: Option<&str>,
-    now: DateTime<Utc>,
-    zone: Z,
+    now: Timestamp,
+    zone: &TimeZone,
 ) {
     if !given.priority {
         if let Some(priority) = list.default_priority {
@@ -91,7 +93,7 @@ pub fn apply<Z: TimeZone + Copy>(
     }
 
     if !given.due {
-        let today = now.with_timezone(&zone).date_naive();
+        let today = zone.to_datetime(now).date();
         let days = days_for(list.default_due_date.as_deref(), today);
         let time = list.default_due_time.as_deref().and_then(parse_time);
         match (days, time) {
@@ -117,46 +119,49 @@ pub fn apply<Z: TimeZone + Copy>(
 ///
 /// `next_month` is the Apple apps' (AITD-646): their list settings offer it, the web's do not.
 /// It is the same day next month, or that month's last day when it is shorter.
-fn days_for(default_due_date: Option<&str>, today: NaiveDate) -> Option<i64> {
+fn days_for(default_due_date: Option<&str>, today: Date) -> Option<i64> {
     match default_due_date.map(|value| value.trim().to_ascii_lowercase()) {
         Some(value) if value == "today" => Some(0),
         Some(value) if value == "tomorrow" => Some(1),
         Some(value) if value == "next_week" || value == "next week" => Some(7),
         Some(value) if value == "next_month" || value == "next month" => today
-            .checked_add_months(Months::new(1))
-            .map(|day| (day - today).num_days()),
+            .checked_add(crate::model::date::span_months(1)?)
+            .ok()
+            .map(|day| i64::from((day - today).get_days())),
         _ => None,
     }
 }
 
 /// `HH:MM`, as the list stores its time default.
-fn parse_time(value: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(value.trim(), "%H:%M").ok()
+fn parse_time(value: &str) -> Option<Time> {
+    let (hour, minute) = value.trim().split_once(':')?;
+    let part = |text: &str| {
+        let digits = (1..=2).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_digit());
+        digits.then(|| text.parse::<i8>().ok()).flatten()
+    };
+    Time::new(part(hour)?, part(minute)?, 0, 0).ok()
 }
 
 /// The reader's calendar day `days` on, at `time` in the reader's zone.
 /// The time on its own day's offset, so a default of "in a week at 09:00" is 09:00 across a
 /// daylight-saving change too (AITD-561).
-fn at<Z: TimeZone + Copy>(
-    days: i64,
-    time: NaiveTime,
-    now: DateTime<Utc>,
-    zone: Z,
-) -> DateTime<Utc> {
-    let day = now.with_timezone(&zone).date_naive() + Duration::days(days);
+fn at(days: i64, time: Time, now: Timestamp, zone: &TimeZone) -> Timestamp {
+    let day = crate::model::date::days_after_or_same(zone.to_datetime(now).date(), days);
     due_picks::local_time_on(day, time, zone)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::FixedOffset;
+    use jiff::tz::Offset;
 
-    fn california() -> FixedOffset {
-        FixedOffset::west_opt(7 * 3600).expect("an offset")
+    static CALIFORNIA: TimeZone = TimeZone::fixed(Offset::constant(-7));
+
+    fn california() -> &'static TimeZone {
+        &CALIFORNIA
     }
 
-    fn noon_utc() -> DateTime<Utc> {
+    fn noon_utc() -> Timestamp {
         "2026-09-07T12:00:00Z".parse().expect("a time")
     }
 
@@ -190,7 +195,7 @@ mod tests {
         assert_eq!(draft.assignee_id.as_deref(), Some("dana"));
         // Tomorrow in California is Sep 8; 17:00 there is 00:00 UTC on the 9th.
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2026-09-09T00:00:00+00:00".into())
         );
         assert!(!draft.is_all_day);
@@ -249,7 +254,7 @@ mod tests {
         );
 
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2026-09-07T00:00:00+00:00".into())
         );
         assert!(draft.is_all_day);
@@ -272,7 +277,7 @@ mod tests {
         );
 
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2026-09-07T16:30:00+00:00".into())
         );
         assert!(!draft.is_all_day);
@@ -424,7 +429,7 @@ mod tests {
             california(),
         );
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2026-10-07T00:00:00+00:00".into())
         );
         assert!(draft.is_all_day);
@@ -442,7 +447,7 @@ mod tests {
         );
         // Feb 28 at 09:00 at UTC-7 is 16:00 UTC.
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2027-02-28T16:00:00+00:00".into())
         );
     }
@@ -461,7 +466,7 @@ mod tests {
             california(),
         );
         assert_eq!(
-            draft.due_date_time.map(|at| at.to_rfc3339()),
+            draft.due_date_time.map(crate::model::date::rfc3339_offset),
             Some("2026-09-14T00:00:00+00:00".into())
         );
 

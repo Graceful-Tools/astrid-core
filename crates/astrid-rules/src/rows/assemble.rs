@@ -43,7 +43,8 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use super::{RowContext, Surface, TaskRow};
 use crate::filters;
@@ -80,8 +81,8 @@ pub struct Inputs<'a> {
     /// The account's half of the subtask rule — "inside parent task only" (task 6ac2639a).
     pub subtask_display: Option<&'a str>,
     pub surface: Surface,
-    pub now: DateTime<Utc>,
-    pub offset: FixedOffset,
+    pub now: Timestamp,
+    pub offset: Offset,
     /// The window the caller asked for: where it starts, and how many rows.
     pub window_offset: usize,
     pub limit: Option<usize>,

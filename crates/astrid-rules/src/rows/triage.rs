@@ -4,7 +4,8 @@
 //! Mine, open, and due today or already overdue, soonest first — then the task the reminder
 //! actually fired for, floated to the front so the notification lands on what it was about.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use crate::filters;
 use crate::model::Task;
@@ -22,8 +23,8 @@ pub fn deck<'a>(
     tasks: &'a [Task],
     me: &str,
     reminded_task_id: Option<&str>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<&'a Task> {
     let due_now = |task: &Task| {
         task.due_date_time
@@ -54,24 +55,23 @@ pub fn deck<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 6, 15, 12, 0, 0).unwrap()
+    fn instant(text: &str) -> Timestamp {
+        text.parse().expect("an RFC 3339 date")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).unwrap()
+    fn now() -> Timestamp {
+        instant("2026-06-15T12:00:00Z")
+    }
+
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
     fn task(id: &str, assignee: Option<&str>, due: Option<&str>) -> Task {
         let mut task = Task::new(id, id);
         task.assignee_id = assignee.map(str::to_string);
-        task.due_date_time = due.map(|due| {
-            DateTime::parse_from_rfc3339(due)
-                .expect("an RFC 3339 date")
-                .with_timezone(&Utc)
-        });
+        task.due_date_time = due.map(instant);
         task.is_all_day = true;
         task
     }
@@ -169,14 +169,14 @@ mod tests {
     #[test]
     fn task_75a27f7f_due_today_is_the_readers_today() {
         let tasks = [task("tonight", Some("me"), Some("2026-06-16T00:00:00Z"))];
-        let behind = FixedOffset::east_opt(-8 * 3600).unwrap();
+        let behind = Offset::from_seconds(-8 * 3600).unwrap();
         assert!(deck(&tasks, "me", None, now(), behind).is_empty());
         assert_eq!(
             ids(&deck(
                 &tasks,
                 "me",
                 None,
-                Utc.with_ymd_and_hms(2026, 6, 16, 12, 0, 0).unwrap(),
+                instant("2026-06-16T12:00:00Z"),
                 behind,
             )),
             vec!["tonight"]

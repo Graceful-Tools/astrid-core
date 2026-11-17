@@ -8,9 +8,11 @@
 //! A list with no window falls back to 24 hours, the behaviour every list had before the setting
 //! existed.
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, TimeZone, Utc};
+use jiff::civil::{Date, Time};
+use jiff::tz::Offset;
+use jiff::{SignedDuration, Timestamp};
 
-use crate::model::{DurationUnit, RecentlyCompletedWindow};
+use crate::model::{date, DurationUnit, RecentlyCompletedWindow};
 
 /// The legacy default: completed within the last day.
 pub const DEFAULT_WINDOW_HOURS: i64 = 24;
@@ -22,11 +24,11 @@ pub const DEFAULT_WINDOW_HOURS: i64 = 24;
 /// enough east or west.
 pub fn cutoff(
     window: Option<&RecentlyCompletedWindow>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
-) -> DateTime<Utc> {
+    now: Timestamp,
+    offset: Offset,
+) -> Timestamp {
     let Some(window) = window else {
-        return now - Duration::hours(DEFAULT_WINDOW_HOURS);
+        return date::minus(now, SignedDuration::from_hours(DEFAULT_WINDOW_HOURS));
     };
 
     match window {
@@ -39,20 +41,26 @@ pub fn cutoff(
                 // thirty days there would put the two views a day or two apart every month.
                 DurationUnit::Month => 30 * 86_400,
             };
-            now - Duration::seconds(amount.saturating_mul(seconds))
+            date::minus(
+                now,
+                SignedDuration::from_secs(amount.saturating_mul(seconds)),
+            )
         }
         RecentlyCompletedWindow::SinceWeekday { weekday } => {
             // 0 = Sunday, matching web.
-            let local = now.with_timezone(&offset);
-            let today = local.weekday().num_days_from_sunday() as i64;
+            let local = offset.to_datetime(now);
+            let today = i64::from(local.weekday().to_sunday_zero_offset());
             let target = weekday.rem_euclid(7);
             let back = (today - target).rem_euclid(7);
-            midnight_local(local.date_naive(), offset) - Duration::days(back)
+            date::minus(
+                midnight_local(local.date(), offset),
+                SignedDuration::from_hours(24 * back),
+            )
         }
         RecentlyCompletedWindow::SinceDayOfMonth { day } => {
-            let local = now.with_timezone(&offset);
-            let day = (*day).clamp(1, 31) as u32;
-            let (year, month) = if (local.day() as i64) < day as i64 {
+            let local = offset.to_datetime(now);
+            let day = (*day).clamp(1, 31) as i8;
+            let (year, month) = if local.day() < day {
                 // Before that day this month: the most recent occurrence was last month.
                 previous_month(local.year(), local.month())
             } else {
@@ -60,19 +68,21 @@ pub fn cutoff(
             };
             // A day the month does not have clamps to its last, so "the 31st" still means
             // something in February rather than nothing at all.
-            let day = day.min(days_in_month(year, month));
-            match chrono::NaiveDate::from_ymd_opt(year, month, day) {
+            let date = Date::new(year, month, 1)
+                .ok()
+                .and_then(|first| Date::new(year, month, day.min(first.days_in_month())).ok());
+            match date {
                 Some(date) => midnight_local(date, offset),
                 None => now,
             }
         }
         RecentlyCompletedWindow::SinceDate { date } => {
-            match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-                Ok(date) => midnight_local(date, offset),
+            match date::parse_day(date) {
+                Some(date) => midnight_local(date, offset),
                 // A date nobody can read is not a reason to hide everything, nor to show
                 // everything: fall back to "now", which hides only what was completed before this
                 // moment and is the least surprising of the three.
-                Err(_) => now,
+                None => now,
             }
         }
     }
@@ -84,11 +94,11 @@ pub fn cutoff(
 /// existed have only the one timestamp, and treating them as never-recently-completed would empty
 /// the section for anybody with an old account.
 pub fn is_recently_completed(
-    completed_at: Option<DateTime<Utc>>,
-    updated_at: Option<DateTime<Utc>>,
+    completed_at: Option<Timestamp>,
+    updated_at: Option<Timestamp>,
     window: Option<&RecentlyCompletedWindow>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> bool {
     match completed_at.or(updated_at) {
         Some(at) => at >= cutoff(window, now, offset),
@@ -106,11 +116,11 @@ pub fn is_recently_completed(
 /// list: open tasks and recent completions stay.
 pub fn should_show_completed(
     filter_mode: Option<&str>,
-    completed_at: Option<DateTime<Utc>>,
-    updated_at: Option<DateTime<Utc>>,
+    completed_at: Option<Timestamp>,
+    updated_at: Option<Timestamp>,
     window: Option<&RecentlyCompletedWindow>,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> bool {
     match filter_mode {
         Some("all") | Some("completed") => true,
@@ -125,18 +135,17 @@ pub fn should_show_open(filter_mode: Option<&str>) -> bool {
     filter_mode != Some("completed")
 }
 
-fn midnight_local(date: chrono::NaiveDate, offset: FixedOffset) -> DateTime<Utc> {
-    let midnight = date.and_hms_opt(0, 0, 0).expect("midnight is a valid time");
+fn midnight_local(date: Date, offset: Offset) -> Timestamp {
+    let midnight = date.to_datetime(Time::midnight());
     offset
-        .from_local_datetime(&midnight)
-        .single()
-        // A fixed offset has no gaps, so `single` always resolves; the fallback keeps the function
+        .to_timestamp(midnight)
+        // A fixed offset has no gaps, so this always resolves; the fallback keeps the function
         // total rather than panicking on an impossible branch.
-        .map(|at| at.with_timezone(&Utc))
-        .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
+        .or_else(|_| Offset::UTC.to_timestamp(midnight))
+        .unwrap_or(Timestamp::MIN)
 }
 
-fn previous_month(year: i32, month: u32) -> (i32, u32) {
+fn previous_month(year: i16, month: i8) -> (i16, i8) {
     if month == 1 {
         (year - 1, 12)
     } else {
@@ -144,31 +153,16 @@ fn previous_month(year: i32, month: u32) -> (i32, u32) {
     }
 }
 
-fn days_in_month(year: i32, month: u32) -> u32 {
-    let (next_year, next_month) = if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    };
-    let first_of_next =
-        chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("a real month");
-    first_of_next
-        .pred_opt()
-        .expect("every month has a last day")
-        .day()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::date;
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC")
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
     /// Every list had this behaviour before the setting existed, and most still have no setting.
@@ -222,7 +216,7 @@ mod tests {
     #[test]
     fn day_boundaries_are_the_readers_own() {
         let now = at("2026-09-07T20:00:00Z"); // 08:00 on the 8th in UTC+12
-        let auckland = FixedOffset::east_opt(12 * 3600).expect("an offset");
+        let auckland = Offset::from_seconds(12 * 3600).expect("an offset");
         let window = RecentlyCompletedWindow::SinceDayOfMonth { day: 8 };
         assert_eq!(
             cutoff(Some(&window), now, auckland),

@@ -18,7 +18,8 @@
 //! - **Absence only means "deleted" for a record the server has acknowledged.** Anything created
 //!   offline is absent from every response by definition.
 
-use chrono::{DateTime, Utc};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 
 /// What a pulled remote item means for the local twin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +131,7 @@ pub fn local_deletions<'a>(
 pub fn should_adopt_remote_completion(
     remote_completed: bool,
     local_completed: bool,
-    local_completed_at: Option<DateTime<Utc>>,
+    local_completed_at: Option<Timestamp>,
     local_unchanged: bool,
     is_repeating: bool,
 ) -> bool {
@@ -197,10 +198,10 @@ pub fn remote_already_gone(status: u16) -> bool {
 /// push comes back as a date, and adopting it turned a 3pm task into an all-day one after one round
 /// trip. An unchanged date is no change. (Apple `GoogleDueMapping.adoptedDue`.)
 pub fn adopted_due(
-    remote_due: Option<chrono::DateTime<chrono::Utc>>,
-    local_due: Option<chrono::DateTime<chrono::Utc>>,
+    remote_due: Option<Timestamp>,
+    local_due: Option<Timestamp>,
     local_is_all_day: bool,
-) -> Option<chrono::DateTime<chrono::Utc>> {
+) -> Option<Timestamp> {
     let remote_due = remote_due?;
     if !(local_is_all_day || local_due.is_none()) || local_due == Some(remote_due) {
         return None;
@@ -213,20 +214,13 @@ pub fn adopted_due(
 /// An all-day due is stored at UTC midnight, so its UTC day is the day. A timed due is an instant,
 /// and the person's own day is the day — an 8pm due west of UTC is tomorrow in UTC and must not
 /// move a day in Google. (Apple `GoogleDueMapping.pushDueString`.)
-pub fn push_due(
-    due: chrono::DateTime<chrono::Utc>,
-    is_all_day: bool,
-    zone: chrono_tz::Tz,
-) -> String {
-    use chrono::TimeZone;
+pub fn push_due(due: Timestamp, is_all_day: bool, zone: &TimeZone) -> String {
     let day = if is_all_day {
-        due.date_naive()
+        crate::model::date::all_day_date(due)
     } else {
-        due.with_timezone(&zone).date_naive()
+        zone.to_datetime(due).date()
     };
-    let midnight =
-        chrono::Utc.from_utc_datetime(&day.and_hms_opt(0, 0, 0).expect("midnight exists"));
-    crate::model::date::format(midnight)
+    crate::model::date::format(crate::model::date::all_day_instant(day))
 }
 
 // ── Watermarks: echo suppression and last-write-wins ───────────────────────────────────────────
@@ -240,15 +234,15 @@ pub fn push_due(
 // server has lost the sub-millisecond part of the instant this machine wrote, and a nanosecond
 // comparison would read every task as changed since its own watermark — a push on every pass.
 
-fn millis(at: DateTime<Utc>) -> i64 {
-    at.timestamp_millis()
+fn millis(at: Timestamp) -> i64 {
+    at.as_millisecond()
 }
 
 /// PULL: apply a remote change only if it is strictly newer than the remote watermark written at
 /// the last push or pull. A missing stamp on either side cannot prove an echo — apply.
 pub fn should_apply_remote(
-    remote_updated_at: Option<DateTime<Utc>>,
-    watermark: Option<DateTime<Utc>>,
+    remote_updated_at: Option<Timestamp>,
+    watermark: Option<Timestamp>,
 ) -> bool {
     match (remote_updated_at, watermark) {
         (Some(remote), Some(watermark)) => millis(remote) > millis(watermark),
@@ -261,8 +255,8 @@ pub fn should_apply_remote(
 /// newer than the local task. An unprovable remote stamp never clobbers local state, and a tie
 /// keeps local.
 pub fn remote_wins(
-    remote_updated_at: Option<DateTime<Utc>>,
-    local_updated_at: Option<DateTime<Utc>>,
+    remote_updated_at: Option<Timestamp>,
+    local_updated_at: Option<Timestamp>,
 ) -> bool {
     match (remote_updated_at, local_updated_at) {
         (None, _) => false,
@@ -275,8 +269,8 @@ pub fn remote_wins(
 /// the task was last pushed or pulled. Its negation is "unchanged since the last pass", which is
 /// what [`should_adopt_remote_completion`] and the pull's last-write-wins both need.
 pub fn should_push_local(
-    local_updated_at: Option<DateTime<Utc>>,
-    watermark: Option<DateTime<Utc>>,
+    local_updated_at: Option<Timestamp>,
+    watermark: Option<Timestamp>,
 ) -> bool {
     match (local_updated_at, watermark) {
         (Some(local), Some(watermark)) => millis(local) > millis(watermark),
@@ -332,8 +326,8 @@ pub const FULL_PULL_INTERVAL_SECS: i64 = 300;
 
 /// Whether the throttled complete listing is due. Only a successful, complete listing moves the
 /// stamp, at the call site.
-pub fn full_pull_due(last_success: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-    last_success.is_none_or(|last| (now - last).num_seconds() >= FULL_PULL_INTERVAL_SECS)
+pub fn full_pull_due(last_success: Option<Timestamp>, now: Timestamp) -> bool {
+    last_success.is_none_or(|last| now.duration_since(last).as_secs() >= FULL_PULL_INTERVAL_SECS)
 }
 
 /// How many completed remote items one pass imports. Completed history trickles in; it must never
@@ -409,7 +403,7 @@ mod tests {
 
     // ── AWTD2-56: the watermark rules, ported with Apple's `SyncProviderLogicTests` ──────────
 
-    fn at(text: &str) -> Option<DateTime<Utc>> {
+    fn at(text: &str) -> Option<Timestamp> {
         date::parse(text)
     }
 
@@ -445,7 +439,10 @@ mod tests {
     #[test]
     fn awtd2_56_watermarks_compare_at_the_precision_the_wire_carries() {
         let written = at("2026-09-07T12:00:00.123Z")
-            .map(|at| at + chrono::Duration::nanoseconds(456_789))
+            .and_then(|at| {
+                at.checked_add(jiff::SignedDuration::from_nanos(456_789))
+                    .ok()
+            })
             .expect("an instant");
         let read_back = date::parse(&date::format(written));
         assert!(!should_push_local(Some(written), read_back));
@@ -501,10 +498,13 @@ mod tests {
     fn awtd2_56_the_complete_listing_is_throttled() {
         let t0 = at("2026-09-07T12:00:00Z").expect("an instant");
         assert!(full_pull_due(None, t0));
-        assert!(full_pull_due(Some(t0), t0 + chrono::Duration::seconds(300)));
+        assert!(full_pull_due(
+            Some(t0),
+            t0 + jiff::SignedDuration::from_secs(300)
+        ));
         assert!(!full_pull_due(
             Some(t0),
-            t0 + chrono::Duration::seconds(299)
+            t0 + jiff::SignedDuration::from_secs(299)
         ));
     }
 
@@ -732,13 +732,14 @@ mod tests {
     fn google_is_sent_the_persons_own_day() {
         let evening = crate::model::date::parse("2026-09-08T03:00:00Z").expect("an instant");
         // 8pm on the 7th in Los Angeles is the 8th in UTC; Google hears the 7th.
+        let los_angeles = TimeZone::get("America/Los_Angeles").expect("a bundled zone");
         assert_eq!(
-            push_due(evening, false, chrono_tz::America::Los_Angeles),
+            push_due(evening, false, &los_angeles),
             "2026-09-07T00:00:00Z"
         );
         let all_day = crate::model::date::parse("2026-09-08T00:00:00Z").expect("an instant");
         assert_eq!(
-            push_due(all_day, true, chrono_tz::America::Los_Angeles),
+            push_due(all_day, true, &los_angeles),
             "2026-09-08T00:00:00Z"
         );
     }

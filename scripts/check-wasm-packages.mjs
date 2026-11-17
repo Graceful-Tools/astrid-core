@@ -67,7 +67,7 @@ const nodeCompletion = ask('node', nodePkg, completion)
 expect(nodeCompletion.ok === true, `node/ must answer completion (astrid-web's server calls it): ${JSON.stringify(nodeCompletion)}`)
 const webCompletion = ask('web', webPkg, completion)
 expect(webCompletion.ok === false && /unknown variant `completion`/.test(webCompletion.error?.message ?? ''),
-  `web/ must not carry the repeating rules (they keep chrono-tz's zone table): ${JSON.stringify(webCompletion)}`)
+  `web/ must not carry the repeating rules (they keep jiff's bundled zone table): ${JSON.stringify(webCompletion)}`)
 
 if (failures.length) {
   for (const f of failures) console.error(`check-wasm-packages: ${f}`)

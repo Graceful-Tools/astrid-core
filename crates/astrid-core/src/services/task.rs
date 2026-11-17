@@ -21,7 +21,7 @@
 //! that turns out to be. A service that awaited a response before returning would be a service
 //! that fails when a train enters a tunnel.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::json;
 
 use super::{Context, Result, ServiceError};
@@ -48,13 +48,13 @@ pub struct TaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
     pub priority: Option<Priority>,
-    pub due_date_time: Option<Option<DateTime<Utc>>>,
+    pub due_date_time: Option<Option<Timestamp>>,
     /// When to be reminded. `Some(None)` clears it, which is how a reminder is turned off rather
     /// than left in the past.
-    pub reminder_time: Option<Option<DateTime<Utc>>>,
+    pub reminder_time: Option<Option<Timestamp>>,
     pub is_all_day: Option<bool>,
     pub completed: Option<bool>,
-    pub completed_at: Option<Option<DateTime<Utc>>>,
+    pub completed_at: Option<Option<Timestamp>>,
     pub assignee_id: Option<Option<String>>,
     /// Everyone assigned, primary first — the whole list, replaced (AITD-491). The server reads
     /// `assigneeIds` the same way and keeps `assigneeId` equal to its first entry, so this is
@@ -447,7 +447,7 @@ impl TaskService {
         }
 
         // The rule is `repeating::completion`'s; this only applies it.
-        match repeating::completion(&current, completed, now, self.context.clock.time_zone()) {
+        match repeating::completion(&current, completed, now, &self.context.clock.time_zone()) {
             repeating::Completion::Toggle {
                 completed,
                 completed_at,
@@ -643,7 +643,7 @@ impl TaskService {
 #[derive(Debug, Clone, Default)]
 pub struct Origin {
     /// When it was completed, if not now.
-    pub at: Option<DateTime<Utc>>,
+    pub at: Option<Timestamp>,
     /// `astrid`, `google`, `github` or `apple`.
     pub source: Option<String>,
 }
@@ -676,7 +676,7 @@ mod tests {
     use crate::store::Store;
     use std::sync::Arc;
 
-    fn at(instant: &str) -> DateTime<Utc> {
+    fn at(instant: &str) -> Timestamp {
         date::parse(instant).expect("an instant")
     }
 
