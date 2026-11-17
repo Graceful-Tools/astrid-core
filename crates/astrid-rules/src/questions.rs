@@ -37,7 +37,7 @@
 //! [`marker_mailbox`] reads `AGENT-HANDBACK: <mailbox>` from a comment, so a server can keep
 //! accepting a question asked the old way while it moves to the recorded one.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::board::{DOING_STATUS_ROLE, READY_STATUS_ROLE};
@@ -123,7 +123,7 @@ pub struct Question {
     pub resume_status_role: String,
     #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
     #[serde(with = "date::required")]
-    pub asked_at: DateTime<Utc>,
+    pub asked_at: Timestamp,
     pub state: QuestionState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_comment_id: Option<String>,
@@ -133,7 +133,7 @@ pub struct Question {
         skip_serializing_if = "Option::is_none",
         with = "date::optional"
     )]
-    pub answered_at: Option<DateTime<Utc>>,
+    pub answered_at: Option<Timestamp>,
 }
 
 /// What asking writes: the question to store, the hand-back, and who to notify.
@@ -154,7 +154,7 @@ pub struct Reply {
     pub author_id: String,
     #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
     #[serde(with = "date::required")]
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
 }
 
 /// The task's write when its question is answered: back to the asker, open, in the role it
@@ -209,7 +209,7 @@ pub struct AskInput {
     pub resume_status_role: String,
     #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
     #[serde(with = "date::required")]
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Q1: record a question and hand the task to the person asked.
@@ -306,7 +306,7 @@ pub fn marker_mailbox(comment: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
-    fn at(text: &str) -> DateTime<Utc> {
+    fn at(text: &str) -> Timestamp {
         date::parse(text).expect("an instant")
     }
 

@@ -298,8 +298,8 @@ struct Drawn<'a> {
     /// Every task the cards came from, for the subtask counts a card shows.
     tasks: &'a [crate::model::Task],
     /// The instant and offset the cards were chosen at, so a card's due label reads the same.
-    now: chrono::DateTime<chrono::Utc>,
-    offset: chrono::FixedOffset,
+    now: jiff::Timestamp,
+    offset: jiff::tz::Offset,
 }
 
 /// A board's answer, from its columns and their cards: each column's ids when `ids_only`, rows
@@ -916,9 +916,7 @@ pub(super) fn cached_blockers(
 }
 
 /// The date a command's [`WaitOptions`] carry, or a bad request for one that is not a date.
-pub(super) fn parse_wait_due(
-    wait: &WaitOptions,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, Failure> {
+pub(super) fn parse_wait_due(wait: &WaitOptions) -> Result<Option<jiff::Timestamp>, Failure> {
     match wait.due_date_time.as_deref() {
         None | Some("") => Ok(None),
         Some(text) => date::parse(text)
@@ -933,7 +931,7 @@ pub(super) fn resolve_waiting(
     app: &App,
     task: &crate::model::Task,
     status_role: Option<Option<String>>,
-    due: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    due: Option<Option<jiff::Timestamp>>,
     wait: &WaitOptions,
 ) -> Result<astrid_rules::waiting::ResolvedStatus, Failure> {
     let change = astrid_rules::waiting::StatusChange {
@@ -988,7 +986,7 @@ pub(super) async fn attach_wait_blocker(
 /// assignee cleared when entering Waiting cleared it.
 pub(super) fn waiting_changes(
     resolved: &astrid_rules::waiting::ResolvedStatus,
-    due: Option<chrono::DateTime<chrono::Utc>>,
+    due: Option<jiff::Timestamp>,
     wait: &WaitOptions,
 ) -> crate::services::TaskChanges {
     crate::services::TaskChanges {

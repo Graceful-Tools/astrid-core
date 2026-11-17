@@ -15,7 +15,8 @@
 //! so here means nobody has to read the implementation to find out that "buy milk" will not find
 //! "milk, buy".
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 
 use crate::model::{Task, TaskList, User};
 use crate::parse::search::{self as query, SearchQuery};
@@ -143,8 +144,8 @@ pub struct SearchContext<'a> {
     pub lists: &'a [TaskList],
     pub users: &'a [User],
     pub current_user_id: Option<&'a str>,
-    pub now: DateTime<Utc>,
-    pub offset: FixedOffset,
+    pub now: Timestamp,
+    pub offset: Offset,
 }
 
 /// Match `query` against `tasks` — the text as a substring, the rest as the web's search grammar
@@ -441,7 +442,7 @@ mod tests {
             users: &[],
             current_user_id: None,
             now: date::parse("2026-09-07T12:00:00Z").expect("an instant"),
-            offset: FixedOffset::east_opt(0).expect("UTC"),
+            offset: Offset::UTC,
         };
         let found = search(&tasks, "raman", &SearchScope::everywhere(), &context);
         assert_eq!(found.len(), 1);
@@ -468,7 +469,7 @@ mod tests {
             users: &[],
             current_user_id: None,
             now: date::parse(now).expect("an instant"),
-            offset: FixedOffset::east_opt(0).expect("UTC"),
+            offset: Offset::UTC,
         }
     }
 

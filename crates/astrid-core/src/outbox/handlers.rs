@@ -163,7 +163,7 @@ async fn create_task(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
                 let _ = store.record_id_mapping(
                     temp_id,
                     &created.id,
-                    created.updated_at.unwrap_or_else(chrono::Utc::now),
+                    created.updated_at.unwrap_or_else(jiff::Timestamp::now),
                 );
                 if temp_id != &created.id {
                     let _ = store.delete_task(temp_id);
@@ -458,7 +458,7 @@ async fn send_chat_message(client: &ApiClient, store: &Store, entry: &Entry) -> 
             if let Some(temp_id) = &entry.temp_id {
                 if temp_id != &sent.id {
                     let _ = store.delete_message(temp_id);
-                    let _ = store.record_id_mapping(temp_id, &sent.id, chrono::Utc::now());
+                    let _ = store.record_id_mapping(temp_id, &sent.id, jiff::Timestamp::now());
                 }
             }
             Outcome::producing("messageId", &sent.id)
@@ -625,7 +625,7 @@ async fn upload_attachment(client: &ApiClient, store: &Store, entry: &Entry) -> 
                 return Outcome::Retry("the upload answered without a file id".into());
             };
             if let Some(temp_id) = &entry.temp_id {
-                let _ = store.record_id_mapping(temp_id, file_id, chrono::Utc::now());
+                let _ = store.record_id_mapping(temp_id, file_id, jiff::Timestamp::now());
             }
             match text("cacheDir") {
                 Some(cache_dir) => {
@@ -669,7 +669,7 @@ async fn create_list(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
                     }
                 };
             if let Some(temp_id) = &entry.temp_id {
-                let _ = store.record_id_mapping(temp_id, &created.id, chrono::Utc::now());
+                let _ = store.record_id_mapping(temp_id, &created.id, jiff::Timestamp::now());
                 if temp_id != &created.id {
                     let _ = store.delete_list(temp_id);
                 }
@@ -834,7 +834,7 @@ mod tests {
     use crate::platform::MemorySecureStore;
     use std::sync::Arc;
 
-    fn t0() -> chrono::DateTime<chrono::Utc> {
+    fn t0() -> jiff::Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 

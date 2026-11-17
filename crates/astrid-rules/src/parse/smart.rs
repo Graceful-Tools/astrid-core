@@ -24,7 +24,12 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use chrono::{Datelike, Duration, NaiveDate, Weekday};
+use jiff::civil::{Date, Weekday};
+
+/// `today` moved by whole calendar days, held at the edge of the calendar rather than failing.
+fn plus_days(today: Date, days: i64) -> Date {
+    crate::model::date::days_after_or_same(today, days)
+}
 use serde::Deserialize;
 
 use crate::model::TaskList;
@@ -82,13 +87,13 @@ impl Keywords {
 }
 
 const DAY_NAMES: [(&str, Weekday); 7] = [
-    ("monday", Weekday::Mon),
-    ("tuesday", Weekday::Tue),
-    ("wednesday", Weekday::Wed),
-    ("thursday", Weekday::Thu),
-    ("friday", Weekday::Fri),
-    ("saturday", Weekday::Sat),
-    ("sunday", Weekday::Sun),
+    ("monday", Weekday::Monday),
+    ("tuesday", Weekday::Tuesday),
+    ("wednesday", Weekday::Wednesday),
+    ("thursday", Weekday::Thursday),
+    ("friday", Weekday::Friday),
+    ("saturday", Weekday::Saturday),
+    ("sunday", Weekday::Sunday),
 ];
 
 /// What the sentence said. Only what was said: list defaults are somebody else's business.
@@ -100,7 +105,8 @@ pub struct Parsed {
     /// The lists the `#tags` named, in order.
     pub list_ids: Vec<String>,
     /// The calendar day a date word meant. See CONTRACTS.md D12 for why a day and not an instant.
-    pub due_day: Option<NaiveDate>,
+    #[serde(serialize_with = "crate::model::date::day_optional::serialize")]
+    pub due_day: Option<Date>,
     /// 1–3. Never 0: see the module note.
     pub priority: Option<i64>,
     /// `daily` | `weekly` | `monthly` | `yearly` | `custom`.
@@ -110,7 +116,7 @@ pub struct Parsed {
 }
 
 /// Read the sentence, with `today` as the reader's calendar day.
-pub fn parse(input: &str, lists: &[TaskList], keywords: &Keywords, today: NaiveDate) -> Parsed {
+pub fn parse(input: &str, lists: &[TaskList], keywords: &Keywords, today: Date) -> Parsed {
     let mut parsed = Parsed::default();
     let (mut title, list_ids) = super::quick_add::extract_lists(input.trim(), lists);
     parsed.list_ids = list_ids;
@@ -182,13 +188,13 @@ pub fn parse(input: &str, lists: &[TaskList], keywords: &Keywords, today: NaiveD
             parsed.due_day = if is("today") {
                 Some(today)
             } else if is("tomorrow") {
-                Some(today + Duration::days(1))
+                Some(plus_days(today, 1))
             } else if is("nextWeek") {
-                Some(today + Duration::days(7))
+                Some(plus_days(today, 7))
             } else if is("thisWeek") {
                 // Friday of this week — today, when today is Friday.
-                let until_friday = (5 + 7 - i64::from(today.weekday().num_days_from_sunday())) % 7;
-                Some(today + Duration::days(until_friday))
+                let until_friday = (5 + 7 - i64::from(today.weekday().to_sunday_zero_offset())) % 7;
+                Some(plus_days(today, until_friday))
             } else {
                 localized_day(&word, keywords).map(|(_, day)| next_weekday(today, day))
             };
@@ -217,14 +223,14 @@ pub fn parse(input: &str, lists: &[TaskList], keywords: &Keywords, today: NaiveD
 }
 
 /// The next `day` strictly after `today` — a week away when today is that day.
-fn next_weekday(today: NaiveDate, day: Weekday) -> NaiveDate {
-    let target = i64::from(day.num_days_from_sunday());
-    let current = i64::from(today.weekday().num_days_from_sunday());
+fn next_weekday(today: Date, day: Weekday) -> Date {
+    let target = i64::from(day.to_sunday_zero_offset());
+    let current = i64::from(today.weekday().to_sunday_zero_offset());
     let mut ahead = target - current;
     if ahead <= 0 {
         ahead += 7;
     }
-    today + Duration::days(ahead)
+    plus_days(today, ahead)
 }
 
 /// Which day a word names, in any locale.
@@ -426,8 +432,8 @@ mod tests {
         Keywords::for_locale("en-US")
     }
 
-    fn wednesday() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 9, 9).expect("a date")
+    fn wednesday() -> Date {
+        Date::new(2026, 9, 9).expect("a date")
     }
 
     /// Regression for astrid-windows task `4d05306d`: this module used to `include_str!` the whole
@@ -488,7 +494,7 @@ mod tests {
         let parsed = parse("Ship it tomorrow urgent #health", &lists, en(), wednesday());
         assert_eq!(parsed.title, "Ship it");
         assert_eq!(parsed.list_ids, vec!["h".to_string()]);
-        assert_eq!(parsed.due_day, NaiveDate::from_ymd_opt(2026, 9, 10));
+        assert_eq!(parsed.due_day, Date::new(2026, 9, 10).ok());
         assert_eq!(parsed.priority, Some(3));
         assert_eq!(parsed.repeating, None);
     }
@@ -499,11 +505,7 @@ mod tests {
         assert_eq!(parsed.title, "Standup");
         assert_eq!(parsed.repeating.as_deref(), Some("custom"));
         assert_eq!(parsed.weekdays, vec!["monday", "wednesday"]);
-        assert_eq!(
-            parsed.due_day,
-            NaiveDate::from_ymd_opt(2026, 9, 14),
-            "next Monday"
-        );
+        assert_eq!(parsed.due_day, Date::new(2026, 9, 14).ok(), "next Monday");
     }
 
     /// The web reads `0 || undefined`: "low priority" leaves the title and sets nothing.

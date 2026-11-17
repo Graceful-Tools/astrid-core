@@ -112,21 +112,21 @@ const COMPLETION_MARKER: &str = "marked this as complete";
 const MINIMUM_RUN: usize = 3;
 
 /// Runs of completion notes among the rows, in the order the rows are drawn.
-pub fn streaks(rows: &[CommentRow], offset: chrono::FixedOffset) -> Vec<Streak> {
+pub fn streaks(rows: &[CommentRow], offset: jiff::tz::Offset) -> Vec<Streak> {
     let is_completion =
         |row: &CommentRow| row.is_system && row.content.to_lowercase().contains(COMPLETION_MARKER);
     let mut out = Vec::new();
     let mut run: Vec<&CommentRow> = Vec::new();
     let mut flush = |run: &mut Vec<&CommentRow>| {
         if run.len() >= MINIMUM_RUN {
-            let days: Vec<chrono::NaiveDate> = run
+            let days: Vec<jiff::civil::Date> = run
                 .iter()
                 .filter_map(|row| row.created_at.as_deref())
                 .filter_map(crate::model::date::parse)
-                .map(|at| at.with_timezone(&offset).date_naive())
+                .map(|at| offset.to_datetime(at).date())
                 .collect();
             let span_days = match (days.iter().min(), days.iter().max()) {
-                (Some(first), Some(last)) => Some((*last - *first).num_days().max(1)),
+                (Some(first), Some(last)) => Some(i64::from((*last - *first).get_days()).max(1)),
                 _ => None,
             };
             out.push(Streak {
@@ -351,7 +351,7 @@ mod tests {
             note("d", "2026-10-09T09:00:00Z"),
         ];
         let rows = rows(&comments, Some("me"));
-        let streaks = streaks(&rows, chrono::FixedOffset::east_opt(0).expect("utc"));
+        let streaks = streaks(&rows, jiff::tz::Offset::UTC);
         assert_eq!(streaks.len(), 1, "a lone completion stays a note");
         assert_eq!(streaks[0].ids, vec!["a", "b", "c"]);
         assert_eq!(streaks[0].count, 3);
@@ -382,7 +382,7 @@ mod tests {
         assert!(!rows[0].is_mine);
         assert_eq!(rows[0].author_name.as_deref(), Some("@octocat"));
         assert_eq!(rows[0].author_initials.as_deref(), Some("O"));
-        let utc = chrono::FixedOffset::east_opt(0).expect("utc");
+        let utc = jiff::tz::Offset::UTC;
         assert!(
             streaks(&rows, utc).is_empty(),
             "a person's words never fold"

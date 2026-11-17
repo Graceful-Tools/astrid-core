@@ -6,7 +6,7 @@
 //! position in the transcript — until the Outbox delivers it and the server's id replaces it. The
 //! `client_request_id` it carries is what stops a retried send from posting twice.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::date;
@@ -40,14 +40,14 @@ pub struct ChatChannel {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -87,14 +87,14 @@ pub struct ChatMessage {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
 }
 
 impl ChatMessage {

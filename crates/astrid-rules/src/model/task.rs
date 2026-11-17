@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::date;
@@ -130,7 +130,7 @@ pub struct CustomRepeatingPattern {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub end_until_date: Option<DateTime<Utc>>,
+    pub end_until_date: Option<Timestamp>,
     /// Weekly patterns: `["monday", "wednesday"]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekdays: Option<Vec<String>>,
@@ -176,7 +176,7 @@ pub struct Attachment {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
 }
@@ -262,14 +262,14 @@ pub struct Comment {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -320,7 +320,7 @@ pub struct TaskDraft {
     pub description: String,
     pub list_ids: Vec<String>,
     pub priority: Priority,
-    pub due_date_time: Option<DateTime<Utc>>,
+    pub due_date_time: Option<Timestamp>,
     pub is_all_day: bool,
     pub assignee_id: Option<String>,
     pub repeating: Option<Repeating>,
@@ -347,7 +347,7 @@ impl TaskDraft {
         self
     }
 
-    pub fn due(mut self, at: DateTime<Utc>, all_day: bool) -> Self {
+    pub fn due(mut self, at: Timestamp, all_day: bool) -> Self {
         self.due_date_time = Some(at);
         self.is_all_day = all_day;
         self
@@ -398,7 +398,7 @@ pub struct Task {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub due_date_time: Option<DateTime<Utc>>,
+    pub due_date_time: Option<Timestamp>,
     /// Defaults to **true**, matching the Swift memberwise init: a task created with a date and no
     /// stated time is an all-day task.
     #[serde(default = "default_true")]
@@ -409,7 +409,7 @@ pub struct Task {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub reminder_time: Option<DateTime<Utc>>,
+    pub reminder_time: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reminder_sent: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -491,7 +491,7 @@ pub struct Task {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub completed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<Timestamp>,
     /// `astrid` | `google` | `github` | `apple`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_source: Option<String>,
@@ -538,14 +538,14 @@ pub struct Task {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     /// Copy lineage - the task this one was copied from. NOT the subtask relation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_task_id: Option<String>,

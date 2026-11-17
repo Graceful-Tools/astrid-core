@@ -17,8 +17,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
+use jiff::Timestamp;
 
 use crate::api::ApiClient;
 use crate::platform::Clock;
@@ -271,7 +271,7 @@ impl Runner {
     }
 
     /// When the runner should wake itself next, if nothing is runnable now.
-    pub fn next_wakeup(&self) -> Result<Option<DateTime<Utc>>> {
+    pub fn next_wakeup(&self) -> Result<Option<Timestamp>> {
         let entries = journal::all(&self.store)?;
         Ok(scheduler::next_wakeup(
             &entries,
@@ -282,7 +282,7 @@ impl Runner {
 
     /// Send one entry and record what became of it. Answers its own report, which the pass folds
     /// in — the batch runs concurrently, so there is no shared one to write into.
-    async fn run_one(&self, entry: Entry, now: DateTime<Utc>) -> Result<DrainReport> {
+    async fn run_one(&self, entry: Entry, now: Timestamp) -> Result<DrainReport> {
         let mut report = DrainReport::default();
         // Claim it. Losing the race means another runner has it; there is nothing to do and
         // nothing to report.
@@ -350,7 +350,7 @@ impl Runner {
     fn dead_letter_stranded(
         &self,
         entries: &[Entry],
-        now: DateTime<Utc>,
+        now: Timestamp,
         report: &mut DrainReport,
     ) -> Result<HashSet<String>> {
         let mut doomed = scheduler::stranded(entries);
@@ -377,7 +377,7 @@ impl Runner {
     /// or in a `parentTaskId`, and a per-field list is a list that will be missing the next field
     /// somebody adds. The rewrite is persisted, so a later attempt does not have to redo it — and
     /// so an entry whose ids resolved is legible in the journal.
-    fn resolve_temp_ids(&self, mut entry: Entry, now: DateTime<Utc>) -> Result<Entry> {
+    fn resolve_temp_ids(&self, mut entry: Entry, now: Timestamp) -> Result<Entry> {
         let mut changed = false;
         rewrite_ids(
             &mut entry.payload,
@@ -429,9 +429,9 @@ mod tests {
     use crate::outbox::entry::kind;
     use crate::platform::{FixedClock, MemorySecureStore};
     use async_trait::async_trait;
-    use chrono::Duration;
+    use jiff::SignedDuration;
 
-    fn t0() -> DateTime<Utc> {
+    fn t0() -> Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 
@@ -660,7 +660,7 @@ mod tests {
         enqueue(&fixture.store, create_task("e1", "temp_1"));
         for _ in 0..50 {
             fixture.runner.drain().await.expect("drains");
-            fixture.clock.advance(Duration::minutes(30));
+            fixture.clock.advance(SignedDuration::from_mins(30));
         }
         let entry = journal::entry(&fixture.store, "e1")
             .expect("reads")
@@ -684,7 +684,7 @@ mod tests {
             "a second drain inside the backoff must send nothing"
         );
 
-        fixture.clock.advance(Duration::seconds(60));
+        fixture.clock.advance(SignedDuration::from_secs(60));
         fixture.runner.drain().await.expect("drains");
         assert!(fixture.transport.requests().len() > sent_after_first);
     }
@@ -749,7 +749,7 @@ mod tests {
 
         for _ in 0..scheduler::MAX_ATTEMPTS {
             fixture.runner.drain().await.expect("drains");
-            fixture.clock.advance(Duration::seconds(600));
+            fixture.clock.advance(SignedDuration::from_secs(600));
         }
 
         let entry = journal::entry(&fixture.store, "e1")
@@ -866,7 +866,7 @@ mod tests {
         enqueue(&fixture.store, create_task("e1", "temp_1"));
         for _ in 0..20 {
             fixture.runner.drain().await.expect("drains");
-            fixture.clock.advance(Duration::minutes(10));
+            fixture.clock.advance(SignedDuration::from_mins(10));
         }
         let entry = journal::entry(&fixture.store, "e1")
             .expect("reads")

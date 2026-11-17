@@ -101,10 +101,7 @@ pub fn splice_refs<'a>(
     // [`super::display_order`]) the same way, and a tie broken differently is a row that swaps
     // places between the phone and the desktop (AITD-460).
     for children in by_parent.values_mut() {
-        children.sort_by_key(|task| {
-            task.created_at
-                .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC)
-        });
+        children.sort_by_key(|task| task.created_at.unwrap_or(jiff::Timestamp::MIN));
     }
 
     let mut out = Vec::with_capacity(top.len());

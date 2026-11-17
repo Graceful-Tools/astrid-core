@@ -7,7 +7,7 @@
 //! one per board column. Inbox and Done stay virtual columns derived from task state and are never
 //! stored.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::date;
@@ -55,14 +55,14 @@ pub struct Project {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
 }
 
 impl Project {
@@ -102,14 +102,14 @@ pub struct ProjectMember {
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<Timestamp>,
     #[cfg_attr(feature = "schema", schemars(with = "Option<date::Timestamp>"))]
     #[serde(
         default,
         with = "date::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<User>,
 }

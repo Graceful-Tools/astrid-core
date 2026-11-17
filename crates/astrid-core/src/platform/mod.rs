@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset, Offset, TimeZone, Utc};
-use chrono_tz::Tz;
+use jiff::tz::{Offset, TimeZone};
+use jiff::{SignedDuration, Timestamp};
 
 /// The key the session `Cookie` header is stored under. One name, used by the client and by
 /// sign-in, so a rename cannot sign everyone out.
@@ -120,7 +120,7 @@ impl SecureStore for MemorySecureStore {
 /// a task is overdue — reads it from here. A test that has to sleep to observe a scheduler is a
 /// test that will be flaky on a loaded CI machine, and one that cannot reach a leap day at all.
 pub trait Clock: Send + Sync {
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> Timestamp;
 
     /// The device's current offset from UTC.
     ///
@@ -131,8 +131,8 @@ pub trait Clock: Send + Sync {
     /// and the list they are reading has to agree with their own calendar.
     ///
     /// Defaults to UTC so an implementation that has no opinion is at least consistent.
-    fn utc_offset(&self) -> FixedOffset {
-        FixedOffset::east_opt(0).expect("UTC is a valid offset")
+    fn utc_offset(&self) -> Offset {
+        Offset::UTC
     }
 
     /// The device's zone, by name — for calendar arithmetic that must survive a daylight-saving
@@ -140,8 +140,8 @@ pub trait Clock: Send + Sync {
     /// in February.
     ///
     /// Defaults to UTC, for the same reason as [`Clock::utc_offset`].
-    fn time_zone(&self) -> Tz {
-        Tz::UTC
+    fn time_zone(&self) -> TimeZone {
+        TimeZone::UTC
     }
 }
 
@@ -149,66 +149,66 @@ pub trait Clock: Send + Sync {
 pub struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 
-    fn utc_offset(&self) -> FixedOffset {
-        *chrono::Local::now().offset()
+    /// The offset in force in the device's zone right now, so it moves with daylight saving.
+    fn utc_offset(&self) -> Offset {
+        self.time_zone().to_offset(Timestamp::now())
     }
 
     /// Read from the system each time, so a person who flies to another zone gets their new
     /// calendar without restarting. A zone the database does not know reads as UTC.
-    fn time_zone(&self) -> Tz {
+    fn time_zone(&self) -> TimeZone {
         iana_time_zone::get_timezone()
             .ok()
-            .and_then(|name| name.parse().ok())
-            .unwrap_or(Tz::UTC)
+            .and_then(|name| TimeZone::get(&name).ok())
+            .unwrap_or(TimeZone::UTC)
     }
 }
 
 /// A clock a test moves by hand.
 #[derive(Debug)]
 pub struct FixedClock {
-    now: Mutex<DateTime<Utc>>,
-    offset: Mutex<FixedOffset>,
-    zone: Mutex<Tz>,
+    now: Mutex<Timestamp>,
+    offset: Mutex<Offset>,
+    zone: Mutex<TimeZone>,
 }
 
 impl FixedClock {
-    pub fn at(now: DateTime<Utc>) -> Self {
+    pub fn at(now: Timestamp) -> Self {
         FixedClock {
             now: Mutex::new(now),
-            offset: Mutex::new(FixedOffset::east_opt(0).expect("UTC is a valid offset")),
-            zone: Mutex::new(Tz::UTC),
+            offset: Mutex::new(Offset::UTC),
+            zone: Mutex::new(TimeZone::UTC),
         }
     }
 
     /// Put the test somewhere else in the world. `hours` may be negative.
     ///
-    /// The zone is the fixed `Etc/GMT` one for that offset, with no daylight saving; use
+    /// The zone is the fixed one for that offset, with no daylight saving; use
     /// [`FixedClock::in_named_zone`] for a real place.
     pub fn in_zone(self, hours: i32) -> Self {
-        *self.offset.lock().expect("clock lock") =
-            FixedOffset::east_opt(hours * 3600).expect("a real offset");
-        // POSIX names the Etc zones with the sign inverted: Etc/GMT+7 is seven hours WEST.
-        let name = match hours {
-            0 => "Etc/GMT".to_string(),
-            east if east > 0 => format!("Etc/GMT-{east}"),
-            west => format!("Etc/GMT+{}", -west),
-        };
-        *self.zone.lock().expect("clock lock") = name.parse().expect("an Etc zone");
+        let offset = Offset::from_seconds(hours * 3600).expect("a real offset");
+        *self.offset.lock().expect("clock lock") = offset;
+        *self.zone.lock().expect("clock lock") = TimeZone::fixed(offset);
         self
     }
 
     /// Put the test in a real place, daylight saving and all. The offset follows the zone at the
     /// clock's current instant.
-    pub fn in_named_zone(self, zone: Tz) -> Self {
+    pub fn in_named_zone(self, zone: TimeZone) -> Self {
         let now = *self.now.lock().expect("clock lock");
-        *self.offset.lock().expect("clock lock") =
-            zone.offset_from_utc_datetime(&now.naive_utc()).fix();
+        *self.offset.lock().expect("clock lock") = zone.to_offset(now);
         *self.zone.lock().expect("clock lock") = zone;
         self
+    }
+
+    /// A real place by its IANA name, for the tests that want one: `in_named_zone` of the zone the
+    /// bundled database has under that name.
+    pub fn in_zone_named(self, name: &str) -> Self {
+        self.in_named_zone(TimeZone::get(name).expect("a zone the bundled database knows"))
     }
 
     /// Parse-or-panic, for the many tests that want a readable literal.
@@ -216,27 +216,27 @@ impl FixedClock {
         Self::at(crate::model::date::parse(instant).expect("a valid instant in a test"))
     }
 
-    pub fn advance(&self, by: chrono::Duration) {
+    pub fn advance(&self, by: SignedDuration) {
         let mut now = self.now.lock().expect("clock lock");
-        *now += by;
+        *now = crate::model::date::plus(*now, by);
     }
 
-    pub fn set(&self, to: DateTime<Utc>) {
+    pub fn set(&self, to: Timestamp) {
         *self.now.lock().expect("clock lock") = to;
     }
 }
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         *self.now.lock().expect("clock lock")
     }
 
-    fn utc_offset(&self) -> FixedOffset {
+    fn utc_offset(&self) -> Offset {
         *self.offset.lock().expect("clock lock")
     }
 
-    fn time_zone(&self) -> Tz {
-        *self.zone.lock().expect("clock lock")
+    fn time_zone(&self) -> TimeZone {
+        self.zone.lock().expect("clock lock").clone()
     }
 }
 
@@ -273,7 +273,7 @@ mod tests {
         let clock = FixedClock::parsed("2026-09-07T12:00:00Z");
         let before = clock.now();
         assert_eq!(clock.now(), before);
-        clock.advance(chrono::Duration::hours(2));
+        clock.advance(SignedDuration::from_hours(2));
         assert_eq!(
             crate::model::date::format(clock.now()),
             "2026-09-07T14:00:00Z"

@@ -61,10 +61,13 @@ experiment with `#[cfg(any())]` on the variant and its arm) gives:
 | all but `completion` and `nextOccurrence` | 198,214 | 1,013,917 |
 | a 20-rule browser set (§4, candidate A) | **169,050** | 796,092 |
 | the 12 of those that take no `Task` | 126,212 | 551,856 |
-| `smartParse` alone (the floor: serde_json, chrono, the keyword tables) | 104,543 | 424,715 |
+| `smartParse` alone (the floor: serde_json, the date library, the keyword tables) | 104,543 | 424,715 |
+
+(Measured with `chrono`/`chrono-tz`, which ADEV-80 replaced with `jiff`; the zone table is now
+jiff's bundled tzdb, and the same two rules are what keep it.)
 
 `completion` and `nextOccurrence` are the only rules that parse an IANA zone name
-(`rules::zone`). Leaving them out lets the linker drop chrono-tz's zone table, 900 KB raw, with
+(`rules::zone`). Leaving them out lets the linker drop the zone table, 900 KB raw, with
 **no API change**. That bears directly on step 3 (§5).
 
 Marginal cost of each rule in candidate A, in brotli bytes removed when it alone is dropped:
@@ -120,7 +123,7 @@ markdown, permission affordances, filters and sort) and "Adopt the core's rows d
 Left out, and why that seems safe (each one is a question for web, not a fact):
 
 - **`completion`, `nextOccurrence`, `repeatSummary`**: web completes a repeating task on the
-  server. Leaving these out also takes chrono-tz out (§2).
+  server. Leaving these out also takes the zone table out (§2).
 - **`waitingWrite`, `waitingWake`, `waitingSettle`, `handBack`**: server-side writes.
 - **Shell presentation rules**: `shortcut`, `calloutPlacement`, `detailLayout`, `leadingPicker`,
   `listChips`, `dayOffset`, `quickAddDefaults`, `reminderTriage`, `mentionTrigger`,
@@ -142,9 +145,9 @@ exists for. Ways to close the gap, cheapest first:
 3. Accept a browser target in **gzip**, which is how AWTD-1586 states its acceptance
    ("≤150 KB gzipped"), rather than brotli. That is Jon's call, not this note's.
 
-## 5. What this does to step 3 (Intl offsets instead of chrono-tz)
+## 5. What this does to step 3 (Intl offsets instead of a bundled zone table)
 
-If the browser does not answer `completion` and `nextOccurrence`, chrono-tz's zone table is
+If the browser does not answer `completion` and `nextOccurrence`, the zone table is
 already out of the browser build, and step 3's API change (the caller passes offsets from `Intl`)
 buys the browser nothing. Step 3 is then only needed if the browser must run repeating rollover
 itself. **Recommendation: decide §4 first. Do step 3 only if the answer puts repeating rules in

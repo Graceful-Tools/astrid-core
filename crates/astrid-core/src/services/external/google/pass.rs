@@ -77,7 +77,7 @@ impl RemoteItem {
             .or_else(|| Some(self.meta("parent")).filter(|parent| !parent.is_empty()))
     }
 
-    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+    fn updated_at(&self) -> Option<jiff::Timestamp> {
         self.remote_updated_at.as_deref().and_then(date::parse)
     }
 }
@@ -970,7 +970,7 @@ impl ExternalSyncService {
         for task in &held {
             let due = task
                 .due_date_time
-                .map(|due| decisions::push_due(due, task.is_all_day, zone));
+                .map(|due| decisions::push_due(due, task.is_all_day, &zone));
             if let Some(link) = links.for_task(&task.id).cloned() {
                 // A link filed under another container is that container's pass's to push.
                 if !decisions::may_push(&link.container_id, container) {
@@ -1583,7 +1583,7 @@ impl ExternalSyncService {
         task_id: &str,
         item: &RemoteItem,
         container_id: &str,
-        astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+        astrid_updated_at: Option<jiff::Timestamp>,
     ) -> bool {
         let task_id = self
             .context
@@ -1621,7 +1621,7 @@ impl ExternalSyncService {
         task_id: &str,
         remote_id: &str,
         container_id: &str,
-        astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+        astrid_updated_at: Option<jiff::Timestamp>,
         remote_updated_at: Option<&str>,
         metadata: Option<&serde_json::Value>,
     ) -> bool {
@@ -1734,8 +1734,8 @@ struct TaskLink {
     task_id: String,
     remote_id: String,
     container_id: String,
-    astrid_updated_at: Option<chrono::DateTime<chrono::Utc>>,
-    remote_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    astrid_updated_at: Option<jiff::Timestamp>,
+    remote_updated_at: Option<jiff::Timestamp>,
 }
 
 /// The pass's view of the links, kept current as it writes new ones.

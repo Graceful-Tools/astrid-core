@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::{SignedDuration, Timestamp};
 
 use crate::api::endpoints::envelope::unwrap as unwrap_envelope;
 use crate::api::{endpoints, ApiClient, ApiError};
@@ -61,8 +61,8 @@ pub(crate) const LAST_SYNC_SERVER_KEY: &str = "sync.last-completed.server";
 /// clock a machine that can still sign in is likely to have — which is the whole weakness of it,
 /// and why a server-issued stamp needs no margin at all: a clock two hours fast skipped two hours
 /// of other people's edits, silently, with nothing to raise (task 86109567).
-fn delta_overlap() -> chrono::Duration {
-    chrono::Duration::minutes(5)
+fn delta_overlap() -> SignedDuration {
+    SignedDuration::from_mins(5)
 }
 
 /// How old the stamp may be before a pass stops asking for a delta and pulls everything.
@@ -73,8 +73,8 @@ fn delta_overlap() -> chrono::Duration {
 /// the server has already forgotten, and the rows would stay on screen with nothing raising
 /// anything. The web's own incremental paths cap their cursor at the same twenty-four hours, so
 /// a machine that was shut for a long weekend comes back with a full pull, as a browser does.
-fn max_delta_age() -> chrono::Duration {
-    chrono::Duration::hours(24)
+fn max_delta_age() -> SignedDuration {
+    SignedDuration::from_hours(24)
 }
 
 /// How often a person's pass looks again for the slot while a timer pass holds it.
@@ -201,7 +201,7 @@ impl SyncManager {
     }
 
     /// When the last pass finished, if one ever has.
-    pub fn last_sync(&self) -> Option<DateTime<Utc>> {
+    pub fn last_sync(&self) -> Option<Timestamp> {
         self.store
             .metadata(LAST_SYNC_KEY)
             .ok()
@@ -310,11 +310,11 @@ impl SyncManager {
         // local clock minus [`delta_overlap`].
         let within_delta_age = self
             .last_sync()
-            .is_some_and(|stamp| started_at - stamp <= max_delta_age());
+            .is_some_and(|stamp| started_at.duration_since(stamp) <= max_delta_age());
         let since = if within_delta_age {
             self.last_sync_server().or_else(|| {
                 self.last_sync()
-                    .map(|stamp| date::format(stamp - delta_overlap()))
+                    .map(|stamp| date::format(date::minus(stamp, delta_overlap())))
             })
         } else {
             None
@@ -364,7 +364,7 @@ impl SyncManager {
     async fn fetch_and_apply(
         &self,
         since_param: Option<String>,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
     ) -> Result<(SyncReport, Option<String>), ServiceError> {
         use crate::outbox::{journal, kind};
         let mut report = SyncReport::default();
@@ -588,8 +588,8 @@ impl SyncManager {
         if since.is_none() {
             let unsent_tasks = journal::ids_named(&self.store, None, "taskId", false)?;
             let unsent_lists = journal::ids_named(&self.store, None, "listId", false)?;
-            let fresh = |updated_at: Option<DateTime<Utc>>| {
-                updated_at.is_some_and(|at| at > started_at - delta_overlap())
+            let fresh = |updated_at: Option<Timestamp>| {
+                updated_at.is_some_and(|at| at > date::minus(started_at, delta_overlap()))
             };
             // A row that would not decode is still on the server; with one, the listing cannot say
             // what is missing, so nothing is taken on its word this pass.
@@ -726,7 +726,7 @@ const PROJECTS_VALIDATOR: &str = "projects.adev57";
 ///
 /// One function for the whole module, including [`conflict`], which had a byte-identical private
 /// copy of it until 2026-11-02.
-pub(super) fn is_newer(incoming: Option<DateTime<Utc>>, cached: Option<DateTime<Utc>>) -> bool {
+pub(super) fn is_newer(incoming: Option<Timestamp>, cached: Option<Timestamp>) -> bool {
     match (incoming, cached) {
         (Some(incoming), Some(cached)) => incoming > cached,
         (Some(_), None) => true,

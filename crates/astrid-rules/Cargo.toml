@@ -10,7 +10,7 @@ repository.workspace = true
 # Nothing here may read a clock, a disk, a socket or the OS's entropy: whatever a rule depends on
 # arrives as an argument. That is what lets the web run these rules as WebAssembly, and it is
 # checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
-# getrandom, uuid or iana-time-zone — and chrono without `clock`.
+# getrandom, uuid or iana-time-zone — and jiff without `tz-system`, `js` or a clock.
 [features]
 default = [
     "markdown",
@@ -28,8 +28,9 @@ default = [
 # off, and `kinds()` says which of them a build kept.
 #
 # `completion`, `nextOccurrence`: the only rules that parse an IANA zone name, so they are what
-# keeps chrono-tz's zone table (900 KB raw) in the binary.
-rules-repeating = []
+# keeps jiff's bundled zone table in the binary (`tzdb-bundle-always`: wasm and Windows have no
+# zoneinfo directory to read, and a build must answer the same on every host).
+rules-repeating = ["jiff/tzdb-bundle-always"]
 # `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`, and the recorded
 # questions `questionAsk`, `questionAnswer`, `questionsWaitingOn`, `questionMarker` (AWTD-1687):
 # server-side writes.
@@ -69,8 +70,7 @@ require-base-url = []
 schema = ["dep:schemars"]
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
-chrono-tz = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 pulldown-cmark = { workspace = true, optional = true }
@@ -83,3 +83,9 @@ schemars = { workspace = true, optional = true }
 # and it is a crate the lockfile already carries.
 [build-dependencies]
 serde_json = { workspace = true }
+
+# The tests that name a zone (`America/Los_Angeles`) need the zone table whichever rule groups the
+# build under test has. `rules-repeating` is what bundles it for a shipped build; a dev-dependency's
+# features reach only test builds (resolver 2), so the browser artifact is unaffected.
+[dev-dependencies]
+jiff = { workspace = true, features = ["tzdb-bundle-always"] }

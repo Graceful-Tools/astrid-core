@@ -28,7 +28,7 @@ mod common;
 use std::collections::BTreeSet;
 
 use astrid_rules::model::{Task, TaskList};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -153,7 +153,7 @@ fn round_trip<T: serde::de::DeserializeOwned + Serialize>(
 ///    `None` carries both, so nothing is lost. What IS a finding, and still fails below, is a
 ///    non-null value becoming absent.
 /// 2. **An RFC 3339 instant re-serialised without its milliseconds.** `"…T09:00:00.000Z"` decodes
-///    to a `DateTime<Utc>` and comes back `"…T09:00:00Z"`. The same instant, so compared as
+///    to a `Timestamp` and comes back `"…T09:00:00Z"`. The same instant, so compared as
 ///    instants. A timestamp that moves fails.
 fn equivalent(wire: &Value, ours: &Value) -> bool {
     if wire == ours {
@@ -168,10 +168,8 @@ fn equivalent(wire: &Value, ours: &Value) -> bool {
     }
 }
 
-fn instant(text: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(text)
-        .ok()
-        .map(|parsed| parsed.with_timezone(&Utc))
+fn instant(text: &str) -> Option<Timestamp> {
+    text.parse::<Timestamp>().ok()
 }
 
 /// Walk the wire value and the round-tripped value together, reporting by path.

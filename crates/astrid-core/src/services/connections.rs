@@ -44,7 +44,7 @@
 
 use std::collections::BTreeSet;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -355,13 +355,13 @@ pub fn rows(answer: &Value) -> Vec<Connection> {
 
 // ── The review ───────────────────────────────────────────────────────────────────────────────
 
-fn whole_days_since(value: Option<&str>, now: DateTime<Utc>) -> Option<i64> {
+fn whole_days_since(value: Option<&str>, now: Timestamp) -> Option<i64> {
     let then = date::parse(value?)?;
-    Some((now - then).num_days())
+    Some(now.duration_since(then).as_secs() / 86_400)
 }
 
 /// Why one row looks unused, if it does (web `reviewConnections`).
-pub fn review(connection: &Connection, now: DateTime<Utc>) -> Option<ConnectionReview> {
+pub fn review(connection: &Connection, now: Timestamp) -> Option<ConnectionReview> {
     if !connection.revocable || !connection.kind.tracks_usage() {
         return None;
     }
@@ -380,7 +380,7 @@ pub fn review(connection: &Connection, now: DateTime<Utc>) -> Option<ConnectionR
 
 /// Stamp every row with its review, so the count at the top and the line under a row come from
 /// one judgement.
-pub fn with_reviews(mut connections: Vec<Connection>, now: DateTime<Utc>) -> Vec<Connection> {
+pub fn with_reviews(mut connections: Vec<Connection>, now: Timestamp) -> Vec<Connection> {
     for connection in &mut connections {
         connection.review = review(connection, now);
     }
@@ -472,7 +472,7 @@ pub struct ConnectionsPanel {
     pub review_count: usize,
 }
 
-pub fn panel(answer: &Value, now: DateTime<Utc>) -> ConnectionsPanel {
+pub fn panel(answer: &Value, now: Timestamp) -> ConnectionsPanel {
     let connections = with_reviews(rows(answer), now);
     let sections = sections(&connections);
     let review_count = connections
@@ -1051,7 +1051,7 @@ mod tests {
         rows(&serde_json::from_str(FACETS).expect("json"))
     }
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         date::parse("2026-09-25T12:00:00Z").expect("an instant")
     }
 

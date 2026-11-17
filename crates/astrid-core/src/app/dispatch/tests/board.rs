@@ -700,7 +700,7 @@ async fn a_card_typed_into_done_is_completed_through_the_service_task_95c7a68f()
     assert_eq!(
         due,
         crate::model::date::format(crate::model::date::all_day_instant(
-            today + chrono::Duration::days(1)
+            today.saturating_add(jiff::Span::new().days(1))
         )),
         "rolled to tomorrow, which only the completion service does"
     );

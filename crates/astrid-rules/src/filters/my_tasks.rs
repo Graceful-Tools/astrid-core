@@ -18,7 +18,8 @@
 //! unassigned tasks; iOS never did. For the same reason `filter_assignee` is carried for the
 //! round trip but never narrows anything: iOS does not read it.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::tz::Offset;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::model::Task;
@@ -88,8 +89,8 @@ pub fn filter<'a>(
     tasks: &'a [Task],
     current_user_id: Option<&str>,
     preferences: &Preferences,
-    now: DateTime<Utc>,
-    offset: FixedOffset,
+    now: Timestamp,
+    offset: Offset,
 ) -> Vec<&'a Task> {
     let shape = shape(preferences);
     super::filter_refs(tasks, &shape, current_user_id, now, offset)
@@ -153,12 +154,12 @@ mod tests {
     use super::*;
     use crate::model::{date, Priority};
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         date::parse("2026-09-07T12:00:00Z").expect("an instant")
     }
 
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).expect("a zone")
+    fn utc() -> Offset {
+        Offset::UTC
     }
 
     fn task(id: &str, assignee: Option<&str>) -> Task {
