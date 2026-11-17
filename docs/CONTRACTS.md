@@ -1453,6 +1453,13 @@ The guard against a third spelling is that
 `strings/` carries one spelling now, and `check-strings` fails on a catalog key the core no longer
 emits, which is how the five were found and pruned.
 
+Windows was safe because it gates on the key list. `crates/astrid-ffi/tests/copy_catalog_contract.rs`
+holds its words against `astrid_core::copy_keys()`, so a key the core adds fails its build until it
+has a word. That is the first adoption of `strings/` by any client, and it never reads
+`generated/`: it harvested the words and gated on the keys, the cheaper path `strings/README.md`
+§Adoption now describes. A client that does the same cannot draw a key as text, whichever
+spelling a future divergence settles on.
+
 ### D61 — the `public_lists` filter reads the nested lists, and that is the spec
 
 **Settled against widening** (task `a09a1e2c`, 2026-11-14). Closes the open question left by item 4
