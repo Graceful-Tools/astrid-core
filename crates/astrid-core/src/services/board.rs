@@ -271,12 +271,23 @@ impl BoardService {
 
     /// Delete a board (owner only), and mirror the server's cascade: its lists are detached, kept.
     /// Status lists are the account's, shared by every board, and are not touched.
+    ///
+    /// A 404 is a delete that already happened — on the web or another device, before this cache
+    /// heard (ADEV-58): the board goes here too and the delete succeeds, rather than refusing to
+    /// remove something that no longer exists.
     pub async fn delete_project(&self, project_id: &str) -> Result<serde_json::Value> {
-        let answer = self
+        let answer = match self
             .context
             .client
             .send(self.context.client.delete(endpoints::project(project_id)))
-            .await?;
+            .await
+        {
+            Ok(answer) => answer,
+            Err(crate::api::ApiError::Http { status: 404, .. }) => {
+                serde_json::json!({ "success": true, "alreadyDeleted": true })
+            }
+            Err(error) => return Err(error.into()),
+        };
         self.context.store.delete_project(project_id)?;
         for mut list in self.context.store.lists()? {
             if list.project_id.as_deref() == Some(project_id) {
