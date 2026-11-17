@@ -321,6 +321,67 @@ impl Consumer {
     }
 }
 
+/// A pin may only move forward (ACTD-2): each row's revision must descend from the revision the
+/// same row had in `base` (the table as `main` has it). Git already rejects two agents bumping one
+/// pin at once; what nothing caught was an agent whose core checkout was stale pinning a
+/// consumer to a commit that predates one already landed *and* pinned — the consumer quietly loses
+/// it while every repository looks healthy.
+///
+/// A deliberate rollback is allowed when the table carries a marker naming the row —
+/// `<!-- pin-rollback: <key> — <why> -->` — so backing out a regression is a reviewed decision in
+/// the file, not an accident, and CI needs no flag. Returns the failures, and a note per accepted
+/// rollback. Rows absent from either table are not this check's concern (the row checks own that).
+fn pins_moved_backwards(
+    base: &str,
+    table: &str,
+    keys: &[&str],
+    descends: impl Fn(&str, &str) -> bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut failed = Vec::new();
+    let mut rolled_back = Vec::new();
+    for key in keys {
+        let (Some(before), Some(after)) = (consumer_row(base, key), consumer_row(table, key))
+        else {
+            continue;
+        };
+        if before.revision == after.revision || descends(&before.revision, &after.revision) {
+            continue;
+        }
+        if rollback_marked(table, key) {
+            rolled_back.push(format!(
+                "{key} moved back from {} to {} — a deliberate rollback (pin-rollback marker).",
+                before.revision, after.revision
+            ));
+        } else {
+            failed.push(format!(
+                "{key} moved from {} to {}, which does not descend from it: the consumer would lose \
+                 what the old pin had. A pin only moves forward; to back out a regression on purpose, \
+                 add `<!-- pin-rollback: {key} — <why> -->` to CONSUMERS.md.",
+                before.revision, after.revision
+            ));
+        }
+    }
+    (failed, rolled_back)
+}
+
+/// Whether `table` carries a `<!-- pin-rollback: <key> ... -->` marker for `key`.
+fn rollback_marked(table: &str, key: &str) -> bool {
+    table.lines().any(|line| {
+        let line = line.trim();
+        line.starts_with("<!--")
+            && line
+                .trim_start_matches("<!--")
+                .trim()
+                .strip_prefix("pin-rollback:")
+                .is_some_and(|rest| {
+                    let rest = rest.trim();
+                    rest == key
+                        || rest.starts_with(&format!("{key} "))
+                        || rest.starts_with(&format!("{key}\u{2014}"))
+                })
+    })
+}
+
 /// Checks `CONSUMERS.md` against this repository's history.
 ///
 /// Three questions, and only the third can fail for a reason outside this repo:
@@ -348,7 +409,17 @@ fn check_pins() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let checkouts = consumer_checkouts(&root);
-    let report = evaluate_pins(&root, main, &table, CONSUMERS, &checkouts);
+    let mut report = evaluate_pins(&root, main, &table, CONSUMERS, &checkouts);
+    // ACTD-2: against the table as main has it, no row may move to a revision that does not
+    // descend from its old one. On main itself the two tables are the same, and this is silent.
+    let mut rollbacks = Vec::new();
+    if let Some(base) = git(&root, &["show", &format!("{main}:CONSUMERS.md")]) {
+        let (failed, accepted) = pins_moved_backwards(&base, &table, CONSUMERS, |old, new| {
+            git(&root, &["merge-base", "--is-ancestor", old, new]).is_some()
+        });
+        report.failed.extend(failed);
+        rollbacks = accepted;
+    }
 
     println!("Consumer pins, against {main}:\n");
     for line in &report.lines {
@@ -382,6 +453,10 @@ fn check_pins() -> ExitCode {
         println!("checkout found beside this one is a working copy that may just be behind. A");
         println!("row behind its consumer is a client that bumped along main before the table");
         println!("did. A consumer's toolchain is another repository's file, reported and no more.");
+    }
+
+    for rollback in &rollbacks {
+        println!("\nROLLBACK  {rollback}");
     }
 
     if report.failed.is_empty() {
@@ -1085,9 +1160,50 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        consumer_row, days_between, is_full_sha, manifest_paths, manifest_revision, read_manifest,
-        repositories, same_fixture, toolchain_channel, Manifest, CONSUMERS,
+        consumer_row, days_between, is_full_sha, manifest_paths, manifest_revision,
+        pins_moved_backwards, read_manifest, repositories, same_fixture, toolchain_channel,
+        Manifest, CONSUMERS,
     };
+
+    /// A pin only moves forward; backwards is a failure unless the table marks it (ACTD-2).
+    #[test]
+    fn a_pin_that_moves_backwards_fails_unless_marked_actd_2() {
+        const OLD: &str = "3677cfb631d6fe415db5a77403e2c79f4e0b8c2b";
+        const NEWER: &str = "1111111111111111111111111111111111111111";
+        const OLDER: &str = "0000000000000000000000000000000000000000";
+        // OLD's descendants are NEWER; OLDER predates it.
+        let descends = |old: &str, new: &str| old == OLD && new == NEWER;
+        let keys = ["astrid-ios/core"];
+
+        let forward = TABLE.replace(OLD, NEWER);
+        assert_eq!(
+            pins_moved_backwards(TABLE, &forward, &keys, descends),
+            (vec![], vec![])
+        );
+        assert_eq!(
+            pins_moved_backwards(TABLE, TABLE, &keys, descends),
+            (vec![], vec![])
+        );
+
+        let backward = TABLE.replace(OLD, OLDER);
+        let (failed, rolled) = pins_moved_backwards(TABLE, &backward, &keys, descends);
+        assert_eq!(failed.len(), 1, "{failed:?}");
+        assert!(failed[0].contains("astrid-ios/core") && failed[0].contains("pin-rollback"));
+        assert!(rolled.is_empty());
+
+        let marked = format!("{backward}\n<!-- pin-rollback: astrid-ios/core \u{2014} backing out 3677cfb's crash -->\n");
+        let (failed, rolled) = pins_moved_backwards(TABLE, &marked, &keys, descends);
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(rolled.len(), 1);
+
+        // A marker for another row does not excuse this one.
+        let other =
+            format!("{backward}\n<!-- pin-rollback: astrid-ios/design \u{2014} not this one -->\n");
+        assert_eq!(
+            pins_moved_backwards(TABLE, &other, &keys, descends).0.len(),
+            1
+        );
+    }
 
     const TABLE: &str = "\
 | Consumer | Repository | Takes | Pinned in | Revision |

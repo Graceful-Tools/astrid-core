@@ -29,6 +29,13 @@ by `<checkout>/<copy>`, not by its repository.
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `3dcc880a391dee13cce3aa7c0b09544a7b647ca2` |
 | `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `765e38e3499546ba84d7666bdddbf63a326ec5e2` |
 
+**A pin only moves forward** (ACTD-2). `check-pins` compares each row with the same row in the
+table as `main` has it, and fails a move to a revision that does not descend from the old one: an
+agent with a stale core checkout can otherwise pin a consumer *behind* a change already landed and
+pinned, and nothing else notices. To back out a regression on purpose, say so in this file:
+`<!-- pin-rollback: <consumer> — <why> -->`. The check then reports the move as a deliberate
+rollback instead of failing it.
+
 **Full forty-character shas, never short ones.** A short sha is ambiguous as the history grows,
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
 that reads like a bad pin.
