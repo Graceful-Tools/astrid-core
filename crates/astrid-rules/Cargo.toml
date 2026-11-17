@@ -30,7 +30,9 @@ default = [
 # `completion`, `nextOccurrence`: the only rules that parse an IANA zone name, so they are what
 # keeps chrono-tz's zone table (900 KB raw) in the binary.
 rules-repeating = []
-# `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`: server-side writes.
+# `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`, and the recorded
+# questions `questionAsk`, `questionAnswer`, `questionsWaitingOn`, `questionMarker` (AWTD-1687):
+# server-side writes.
 rules-waiting = []
 # `decision`, `tradeoffGrid`, `ratingKey`: read by the comment views that draw a Decision card.
 rules-decisions = []
