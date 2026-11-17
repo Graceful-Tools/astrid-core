@@ -7,6 +7,9 @@
 //! file. The xtask's own test fails when the file is stale; this one fails when the door answers a
 //! recorded case differently, whatever the generator says.
 
+// Replaying cases needs `rules-waiting`; the browser build leaves them unread.
+#![cfg_attr(not(feature = "rules-waiting"), allow(dead_code))]
+
 use serde::Deserialize;
 
 const FIXTURE: &str = include_str!("../../../contracts/fixtures/waiting.json");
@@ -23,6 +26,7 @@ struct Case {
     answer: serde_json::Value,
 }
 
+#[cfg(feature = "rules-waiting")]
 #[test]
 fn every_waiting_case_answers_as_recorded() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("the fixture parses");

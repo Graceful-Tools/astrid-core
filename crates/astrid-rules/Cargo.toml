@@ -12,7 +12,36 @@ repository.workspace = true
 # checked in CI by building this crate for wasm32-unknown-unknown. So no rusqlite, reqwest, tokio,
 # getrandom, uuid or iana-time-zone — and chrono without `clock`.
 [features]
-default = ["markdown", "orchestration"]
+default = [
+    "markdown",
+    "orchestration",
+    "rules-repeating",
+    "rules-waiting",
+    "rules-decisions",
+    "rules-shell",
+]
+# Rule groups for the door (AWTD2-162 step 2, docs/BROWSER_DOOR.md). Each gates the `Rule` variants
+# named, and their arms in `rules::run`, so a build without one refuses the kind by name
+# (`unknown variant`) instead of carrying code nothing in that build calls. ALL ON by default, so
+# every native client and astrid-web's Node package answer exactly what they always did, and
+# `generated/schema/rule.json` does not move. Only `astrid-rules-wasm`'s browser build turns them
+# off, and `kinds()` says which of them a build kept.
+#
+# `completion`, `nextOccurrence`: the only rules that parse an IANA zone name, so they are what
+# keeps chrono-tz's zone table (900 KB raw) in the binary.
+rules-repeating = []
+# `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`, and the recorded
+# questions `questionAsk`, `questionAnswer`, `questionsWaitingOn`, `questionMarker` (AWTD-1687):
+# server-side writes.
+rules-waiting = []
+# `decision`, `tradeoffGrid`, `ratingKey`: read by the comment views that draw a Decision card.
+rules-decisions = []
+# The native shells' presentation rules: `repeatSummary`, `customAgentName`, `brandColors`,
+# `listProjectMoves`, `sidebar`, `listDefaultPicks`, `nesting`, `mentionTrigger`, `mentionInsert`,
+# `copyOnly`, `commentVisibility`, `capabilities`, `paletteRank`, `shortcut`, `quickAddDefaults`,
+# `reminderTriage`, `pluralCategory`, `calloutPlacement`, `detailLayout`, `leadingPicker`,
+# `listChips`, `dayOffset`. Web has its own component for each.
+rules-shell = []
 # The markdown renderer, and everything that can only be answered by running it: `renderMarkdown`,
 # the chat transcript, and a comment row's `blocks`. ON by default — every shell draws comments —
 # and turned OFF by `astrid-rules-wasm`, because the browser has its own renderer and `renderMarkdown`
@@ -45,6 +74,8 @@ chrono-tz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 pulldown-cmark = { workspace = true, optional = true }
+# `rules::kinds()`: the compiler writes the list of compiled variants (a derive, nothing at runtime).
+strum = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 # `build.rs` narrows `contracts/fixtures/smart.json` to its `keywords` before they are embedded
