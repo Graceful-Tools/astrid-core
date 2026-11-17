@@ -681,7 +681,7 @@ impl SyncManager {
         let fresh = crate::services::conditional::get_conditional(
             &self.client,
             &self.store,
-            endpoints::envelope::PROJECTS,
+            PROJECTS_VALIDATOR,
             self.client.get(endpoints::PROJECTS),
         )
         .await?;
@@ -693,11 +693,30 @@ impl SyncManager {
         let projects =
             crate::model::lenient::<Project>(unwrap_envelope(body, endpoints::envelope::PROJECTS));
         report_skips("projects", &projects.skipped);
+        // The answer is the whole set, so a cached board it leaves out was deleted — on the web
+        // or another device — and goes (ADEV-57). Not when a row was skipped: an answer with a
+        // hole in it says nothing about the board that fell through it.
+        let complete = projects.skipped.is_empty();
         let items = projects.into_items();
+        if complete {
+            let fetched: std::collections::HashSet<&str> =
+                items.iter().map(|project| project.id.as_str()).collect();
+            for cached in self.store.projects()? {
+                if !fetched.contains(cached.id.as_str()) {
+                    self.store.delete_project(&cached.id)?;
+                }
+            }
+        }
         self.store.upsert_projects(&items)?;
         Ok(items.len())
     }
 }
+
+/// The name the boards' validator is kept under. Not the envelope key it was until ADEV-57: before
+/// that, a pass upserted the boards without pruning, so a device could hold a board deleted
+/// elsewhere AND a tag for the set without it — and every pass since answered 304. A fresh name
+/// makes each device read the whole set once, unconditionally, and prune what it no longer holds.
+const PROJECTS_VALIDATOR: &str = "projects.adev57";
 
 /// Whether one version of a row is worth applying over another.
 ///
@@ -1836,6 +1855,128 @@ mod tests {
             1,
             "a 304 is `nothing changed`, not `nothing` — the boards must survive it"
         );
+    }
+
+    /// ADEV-57: four boards deleted on the web on 2026-11-15 were still headers in the iPad's
+    /// sidebar the next day. The pass read the whole set of boards and only upserted it, so a
+    /// board the set no longer held stayed cached for good — only `refresh_projects`, run after a
+    /// status write, pruned. The answer is the whole set: what it leaves out was deleted.
+    #[tokio::test]
+    async fn adev_57_a_board_deleted_elsewhere_goes_on_the_next_pass() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json(
+                    "/api/v1/projects",
+                    200,
+                    json!({ "projects": [{ "id": "p2", "name": "Kept" }] }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Gone" })).expect("a project"),
+                serde_json::from_value(json!({ "id": "p2", "name": "Kept" })).expect("a project"),
+            ])
+            .expect("stores");
+
+        fixture.sync.sync().await;
+
+        let ids: Vec<String> = fixture
+            .store
+            .projects()
+            .expect("reads")
+            .into_iter()
+            .map(|project| project.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["p2"],
+            "a board the server no longer lists must go"
+        );
+    }
+
+    /// ADEV-57, the other half: a row that would not decode is not a deletion. Pruning on a
+    /// partial answer would drop a board the reader still has.
+    #[tokio::test]
+    async fn adev_57_a_board_that_would_not_decode_is_not_deleted() {
+        let fixture = fixture(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json(
+                    "/api/v1/projects",
+                    200,
+                    json!({ "projects": [{ "id": "p2", "name": "Kept" }, { "name": 7 }] }),
+                ),
+        );
+        fixture
+            .store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Maybe" })).expect("a project"),
+            ])
+            .expect("stores");
+
+        fixture.sync.sync().await;
+
+        let mut ids: Vec<String> = fixture
+            .store
+            .projects()
+            .expect("reads")
+            .into_iter()
+            .map(|project| project.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec!["p1", "p2"], "a partial answer must not prune");
+    }
+
+    /// ADEV-57: a device that already held a tag for the post-deletion set, from a pass that did
+    /// not prune, would be answered 304 forever and keep the deleted boards. The first pass after
+    /// the fix asks without the old tag, so it reads the whole set and prunes.
+    #[tokio::test]
+    async fn adev_57_a_tag_from_before_pruning_is_not_quoted_back() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+                .push_json(
+                    "/api/v1/projects",
+                    200,
+                    json!({ "projects": [{ "id": "p2", "name": "Kept" }] }),
+                ),
+        );
+        fixture
+            .store
+            .set_metadata(
+                &crate::services::conditional::etag_key(endpoints::envelope::PROJECTS),
+                "W/\"boards-old\"",
+            )
+            .expect("stores");
+        fixture
+            .store
+            .upsert_projects(&[
+                serde_json::from_value(json!({ "id": "p1", "name": "Gone" })).expect("a project"),
+            ])
+            .expect("stores");
+
+        fixture.sync.sync().await;
+
+        let quoted = transport
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("/api/v1/projects"))
+            .filter_map(|request| request.header("if-none-match").map(str::to_string))
+            .collect::<Vec<_>>();
+        assert!(quoted.is_empty(), "the old tag was quoted back: {quoted:?}");
+        let ids: Vec<String> = fixture
+            .store
+            .projects()
+            .expect("reads")
+            .into_iter()
+            .map(|project| project.id)
+            .collect();
+        assert_eq!(ids, vec!["p2"]);
     }
 
     fn requests_to(transport: &StubTransport, path: &str) -> Vec<String> {
