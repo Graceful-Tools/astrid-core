@@ -257,6 +257,72 @@ impl BoardService {
         Ok(project)
     }
 
+    /// Edit a board's name, description and colour (ADEV-69). Only the fields given are sent. The
+    /// cache is written first so the header redraws at once, and restored if the server refuses —
+    /// 403 `PROJECT_RENAME_FORBIDDEN`, 400 `PROJECT_COLOR_INVALID` or `PROJECT_NAME_REQUIRED` — or
+    /// cannot be reached. An empty `description` clears it, here and on the server.
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        color: Option<&str>,
+    ) -> Result<Project> {
+        let before = self
+            .context
+            .store
+            .projects()?
+            .into_iter()
+            .find(|project| project.id == project_id);
+        let mut body = serde_json::Map::new();
+        for (field, value) in [
+            ("name", name),
+            ("description", description),
+            ("color", color),
+        ] {
+            if let Some(value) = value {
+                body.insert(field.into(), json!(value));
+            }
+        }
+        let mut edited = before.clone();
+        if let Some(project) = edited.as_mut() {
+            if let Some(name) = name {
+                project.name = name.trim().to_string();
+            }
+            if let Some(description) = description {
+                let description = description.trim();
+                project.description = (!description.is_empty()).then(|| description.to_string());
+            }
+            if let Some(color) = color {
+                project.color = Some(color.to_string());
+            }
+            self.context
+                .store
+                .upsert_projects(std::slice::from_ref(project))?;
+        }
+        let request = self
+            .context
+            .client
+            .patch(endpoints::project(project_id))
+            .value(serde_json::Value::Object(body));
+        if let Err(error) = self.context.client.send(request).await {
+            if let Some(before) = before {
+                self.context
+                    .store
+                    .upsert_projects(std::slice::from_ref(&before))?;
+            }
+            return Err(error.into());
+        }
+        // Best effort, as after a status write: the cache already says what the server will say.
+        let _ = self.refresh_projects().await;
+        self.context
+            .store
+            .projects()?
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| crate::api::ApiError::Decode("project not cached".into()).into())
+    }
+
     /// Turn `list_id` into a board, in one request.
     pub async fn create_board_for_list(&self, list_id: &str) -> Result<Project> {
         let request = self
@@ -271,12 +337,23 @@ impl BoardService {
 
     /// Delete a board (owner only), and mirror the server's cascade: its lists are detached, kept.
     /// Status lists are the account's, shared by every board, and are not touched.
+    ///
+    /// A 404 is a delete that already happened — on the web or another device, before this cache
+    /// heard (ADEV-58): the board goes here too and the delete succeeds, rather than refusing to
+    /// remove something that no longer exists.
     pub async fn delete_project(&self, project_id: &str) -> Result<serde_json::Value> {
-        let answer = self
+        let answer = match self
             .context
             .client
             .send(self.context.client.delete(endpoints::project(project_id)))
-            .await?;
+            .await
+        {
+            Ok(answer) => answer,
+            Err(crate::api::ApiError::Http { status: 404, .. }) => {
+                serde_json::json!({ "success": true, "alreadyDeleted": true })
+            }
+            Err(error) => return Err(error.into()),
+        };
         self.context.store.delete_project(project_id)?;
         for mut list in self.context.store.lists()? {
             if list.project_id.as_deref() == Some(project_id) {

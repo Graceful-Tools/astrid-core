@@ -1621,18 +1621,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>Partager la tâche</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>Liste</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>La case à cocher termine la tâche, et la priorité et l'assigné ont chacun leur propre ligne.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>Projet</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>Compact. La case ouvre priorité, responsable, état et terminer.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 jour</value>
   </data>

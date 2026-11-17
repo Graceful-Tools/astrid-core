@@ -1606,18 +1606,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>작업 공유</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>목록</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>체크박스로 작업을 완료하며, 우선순위와 담당자는 각각 별도의 행을 가집니다.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>프로젝트</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>간결함. 체크박스에서 우선순위, 담당자, 상태, 완료를 엽니다.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1일</value>
   </data>

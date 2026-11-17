@@ -14,7 +14,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
     match command {
         Command::RowsForList {
             list_id,
-            display_mode,
             surface,
             offset,
             limit,
@@ -23,7 +22,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             app,
             &list_id,
             RowsWindow {
-                display_mode,
                 surface,
                 offset,
                 limit,
@@ -55,7 +53,6 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
 
 /// Where the rows go and which of them: the projection's settings and the window.
 pub(super) struct RowsWindow {
-    pub display_mode: Option<String>,
     pub surface: Option<String>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
@@ -80,7 +77,6 @@ pub(super) fn rows_for_list(
     let now = app.clock.now();
     let offset_from_utc = app.clock.utc_offset();
     let RowsWindow {
-        display_mode,
         surface,
         offset,
         limit,
@@ -121,6 +117,27 @@ pub(super) fn rows_for_list(
     }
     // A list that has never been given a sort stays unset here: `filters::sort_by_setting` and
     // the answer's `sortBy` both read the absence as auto, as web does (CONTRACTS D40).
+
+    // From the cache, the candidates are read as columns and only the window is decoded (task
+    // `a09a1e2c`). Not when the caller handed the tasks over, and not for `public_lists`, which
+    // reads the nested lists a column does not keep (`filters::matches_in_lists`, D61).
+    if inputs.tasks.is_none() && list.filter_in_lists.as_deref() != Some("public_lists") {
+        return bounded_rows_for_list(
+            app,
+            &list,
+            preferences.as_ref(),
+            RowsWindow {
+                surface,
+                offset,
+                limit,
+            },
+            BoundedInputs {
+                current_user_id: inputs.current_user_id,
+                subtask_display: inputs.subtask_display,
+                ids_only: inputs.ids_only,
+            },
+        );
+    }
 
     // A VIRTUAL list has no membership: it is a saved set of filters over everything the account
     // has — "Today", "Not in a List", "I've Assigned". Sourcing it from membership, the way a real
@@ -194,7 +211,6 @@ pub(super) fn rows_for_list(
         users: &users,
         current_user_id: current_user_id.as_deref(),
         subtask_display: Some(&subtask_display),
-        display_mode: resolved_display_mode(app, display_mode.as_deref()),
         surface: Command::surface(surface.as_deref()),
         now,
         offset: offset_from_utc,
@@ -203,6 +219,130 @@ pub(super) fn rows_for_list(
         ids_only: inputs.ids_only,
     });
     Response::ok(rows::json::answer(&assembled, inputs.ids_only))
+}
+
+/// What [`bounded_rows_for_list`] still needs of the command's inputs.
+struct BoundedInputs {
+    current_user_id: Option<String>,
+    subtask_display: Option<String>,
+    ids_only: bool,
+}
+
+/// [`rows_for_list`] from the cache without decoding the account (task `a09a1e2c`).
+///
+/// The same pipeline, in the same order, by the same rules: `astrid_rules::rows::assemble::select`
+/// runs over tasks rebuilt from the indexed columns ([`crate::store::TaskSummary::skeleton`]),
+/// which carry everything filtering, sorting and the parent chain read, and `project` is handed
+/// only the window — the one part that is decoded. A list of ten thousand decodes the rows on
+/// screen, not the ten thousand.
+fn bounded_rows_for_list(
+    app: &App,
+    list: &crate::model::TaskList,
+    preferences: Option<&crate::filters::my_tasks::Preferences>,
+    window: RowsWindow,
+    inputs: BoundedInputs,
+) -> Response {
+    let now = app.clock.now();
+    let offset_from_utc = app.clock.utc_offset();
+    let RowsWindow {
+        surface,
+        offset,
+        limit,
+    } = window;
+
+    let current_user_id = match inputs.current_user_id {
+        Some(held) => Some(held),
+        None => match app.context.account().current_user_id() {
+            Ok(user) => user,
+            Err(error) => return Response::failed(error.into()),
+        },
+    };
+    let subtask_display = inputs
+        .subtask_display
+        .unwrap_or_else(|| app.context.account().smart_tasks().subtask_display);
+    let indented = filters::subtasks::should_splice(list.show_subtasks, Some(&subtask_display));
+
+    let summaries = match list.is_virtual.unwrap_or(false) {
+        true => app.store.summaries(),
+        false => app.store.summaries_in_list(&list.id),
+    };
+    let filed = app.store.filed_task_ids();
+    let subtask_summaries = match indented || !inputs.ids_only {
+        true => app.store.subtask_summaries(),
+        false => Ok(Vec::new()),
+    };
+    let (summaries, filed, subtask_summaries) = match (summaries, filed, subtask_summaries) {
+        (Ok(summaries), Ok(filed), Ok(subtasks)) => (summaries, filed, subtasks),
+        (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
+            return Response::failed(error.into())
+        }
+    };
+    let skeletons: Vec<crate::model::Task> = summaries
+        .iter()
+        .map(|summary| summary.skeleton(filed.contains(&summary.id)))
+        .collect();
+    let subtask_skeletons: Vec<crate::model::Task> = subtask_summaries
+        .iter()
+        .map(|summary| summary.skeleton(filed.contains(&summary.id)))
+        .collect();
+
+    let mut lists = Vec::new();
+    if !inputs.ids_only {
+        lists = match app.store.lists() {
+            Ok(lists) => lists,
+            Err(error) => return Response::failed(error.into()),
+        };
+        if !lists.iter().any(|held| held.id == list.id) {
+            lists.push(list.clone());
+        }
+    }
+
+    // Everything above is a fetch of columns. Selecting is the shared pipeline.
+    let mut pipeline = rows::assemble::Inputs {
+        list,
+        my_tasks: preferences,
+        tasks: &skeletons,
+        subtasks: &subtask_skeletons,
+        lists: &lists,
+        users: &[],
+        current_user_id: current_user_id.as_deref(),
+        subtask_display: Some(&subtask_display),
+        surface: Command::surface(surface.as_deref()),
+        now,
+        offset: offset_from_utc,
+        window_offset: offset.unwrap_or(0),
+        limit,
+        ids_only: inputs.ids_only,
+    };
+    let selected = rows::assemble::select(&pipeline);
+    if inputs.ids_only {
+        let assembled = rows::assemble::finish(selected, Vec::new());
+        return Response::ok(rows::json::answer(&assembled, true));
+    }
+
+    // The window, decoded — in the order selected, which the store's answer is not in. A task
+    // deleted between the two reads is simply not there.
+    let ids: Vec<String> = selected.window.iter().map(|task| task.id.clone()).collect();
+    let mut decoded: std::collections::HashMap<String, crate::model::Task> =
+        match app.store.tasks_with_ids(&ids) {
+            Ok(tasks) => tasks
+                .into_iter()
+                .map(|task| (task.id.clone(), task))
+                .collect(),
+            Err(error) => return Response::failed(error.into()),
+        };
+    let window: Vec<crate::model::Task> = ids.iter().filter_map(|id| decoded.remove(id)).collect();
+    // Only the people the window names.
+    let users = window
+        .iter()
+        .filter_map(|task| task.assignee_id.as_deref())
+        .filter_map(|id| app.store.user(id).ok().flatten())
+        .collect::<Vec<_>>();
+    pipeline.users = &users;
+    let refs: Vec<&crate::model::Task> = window.iter().collect();
+    let rows = rows::assemble::project(&pipeline, &refs);
+    let assembled = rows::assemble::finish(selected, rows);
+    Response::ok(rows::json::answer(&assembled, false))
 }
 
 /// How many tasks each list's saved filters keep (`Command::ListCounts`, AITD-460).
@@ -414,7 +554,6 @@ pub(super) async fn featured_rows(
         app,
         list_id,
         RowsWindow {
-            display_mode: None,
             surface: None,
             offset: None,
             limit: None,
@@ -469,7 +608,6 @@ pub(super) async fn profile_rows(app: &App, user_id: Option<&str>) -> Response {
     let counts = std::collections::HashMap::new();
     let context = RowContext {
         current_user_id: me.as_deref(),
-        display_mode: resolved_display_mode(app, None),
         surface: Command::surface(None),
         now: app.clock.now(),
         offset: app.clock.utc_offset(),
@@ -520,7 +658,6 @@ pub(super) fn reminder_triage_deck(app: &App, reminded_task_id: Option<&str>) ->
     let counts = std::collections::HashMap::new();
     let context = RowContext {
         current_user_id: Some(me.as_str()),
-        display_mode: resolved_display_mode(app, None),
         surface: Command::surface(None),
         now,
         offset,

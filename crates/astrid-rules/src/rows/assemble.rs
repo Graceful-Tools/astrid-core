@@ -32,7 +32,9 @@
 //! - **project** — [`super::TaskRow::build_all`]: the window plus its context into rows. Shared,
 //!   untouched by that task.
 //!
-//! `a09a1e2c` replaces *select* on the App side only. The stateless door cannot use summaries:
+//! `a09a1e2c` replaces *select*'s input on the App side only: the same [`select`] runs there over
+//! tasks rebuilt from the indexed columns, so the rules are not written twice, and [`project`] is
+//! handed the decoded window. The stateless door cannot use summaries:
 //! web and the extension hold wire-shape tasks in memory, and synthesising a storage projection
 //! in order to filter them would be pure overhead plus a storage type shipped to wasm. The cost
 //! of the seam is that afterwards two selects must agree — which is what `filters.json`,
@@ -43,7 +45,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset, Utc};
 
-use super::{DisplayMode, RowContext, Surface, TaskRow};
+use super::{RowContext, Surface, TaskRow};
 use crate::filters;
 use crate::model::{Task, TaskList, User};
 
@@ -77,7 +79,6 @@ pub struct Inputs<'a> {
     pub current_user_id: Option<&'a str>,
     /// The account's half of the subtask rule — "inside parent task only" (task 6ac2639a).
     pub subtask_display: Option<&'a str>,
-    pub display_mode: DisplayMode,
     pub surface: Surface,
     pub now: DateTime<Utc>,
     pub offset: FixedOffset,
@@ -207,54 +208,59 @@ pub struct Selection<'a> {
 /// [`select`], then project the window into rows.
 pub fn assemble(inputs: &Inputs<'_>) -> Assembled {
     let selected = select(inputs);
-    let ids = selected
-        .window
-        .iter()
-        .map(|task| task.id.clone())
-        .collect::<Vec<_>>();
-
     let rows = match inputs.ids_only {
         true => Vec::new(),
-        false => {
-            // Every task a row's parent chain can pass through: the candidates and the subtasks,
-            // each once (a subtask filed in the list is in both).
-            let depths_index: HashMap<String, Task> = inputs
-                .tasks
-                .iter()
-                .chain(inputs.subtasks.iter())
-                .map(|task| (task.id.clone(), task.clone()))
-                .collect();
-            let depths = selected
-                .window
-                .iter()
-                .map(|task| {
-                    (
-                        task.id.clone(),
-                        filters::subtasks::depth_of(task, &depths_index),
-                    )
-                })
-                .collect();
-            let counts = super::subtask_counts(inputs.subtasks);
-            let context = RowContext {
-                current_user_id: inputs.current_user_id,
-                display_mode: inputs.display_mode,
-                surface: inputs.surface,
-                now: inputs.now,
-                offset: inputs.offset,
-                lists: inputs.lists,
-                users: inputs.users,
-                depths: &depths,
-                subtask_counts: &counts,
-            };
-            TaskRow::build_all(&selected.window, &context)
-        }
+        false => project(inputs, &selected.window),
     };
+    finish(selected, rows)
+}
 
+/// Project `window` into rows — the *project* half of the seam, callable on its own.
+///
+/// `window` may be richer than what `inputs` holds. The App door selects over tasks rebuilt from
+/// the indexed columns (`inputs.tasks` and `inputs.subtasks` then carry only what filtering,
+/// sorting and the parent chain read) and decodes just the window's tasks, which are what it hands
+/// here (task `a09a1e2c`). What a row says about the rest of the account — its depth, its subtask
+/// count — is read from `inputs`, which needs ids and parents and nothing more.
+pub fn project(inputs: &Inputs<'_>, window: &[&Task]) -> Vec<TaskRow> {
+    // Every task a row's parent chain can pass through: the candidates and the subtasks,
+    // each once (a subtask filed in the list is in both).
+    let depths_index: HashMap<String, Task> = inputs
+        .tasks
+        .iter()
+        .chain(inputs.subtasks.iter())
+        .map(|task| (task.id.clone(), task.clone()))
+        .collect();
+    let depths = window
+        .iter()
+        .map(|task| {
+            (
+                task.id.clone(),
+                filters::subtasks::depth_of(task, &depths_index),
+            )
+        })
+        .collect();
+    let counts = super::subtask_counts(inputs.subtasks);
+    let context = RowContext {
+        current_user_id: inputs.current_user_id,
+        surface: inputs.surface,
+        now: inputs.now,
+        offset: inputs.offset,
+        lists: inputs.lists,
+        users: inputs.users,
+        depths: &depths,
+        subtask_counts: &counts,
+    };
+    TaskRow::build_all(window, &context)
+}
+
+/// The answer, from a selection and the rows projected from its window.
+pub fn finish(selected: Selection<'_>, rows: Vec<TaskRow>) -> Assembled {
     Assembled {
         total: selected.total,
         offset: selected.offset,
         matched: selected.matched,
-        ids,
+        ids: selected.window.iter().map(|task| task.id.clone()).collect(),
         rows,
         sort_by: selected.sort_by,
         can_add_tasks: selected.can_add_tasks,

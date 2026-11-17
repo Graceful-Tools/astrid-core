@@ -1123,7 +1123,7 @@ mod tests {
             &store,
             &entry(
                 kind::UPDATE_SMART_TASKS,
-                serde_json::json!({ "body": { "taskDisplayMode": "project" } }),
+                serde_json::json!({ "body": { "subtaskDisplay": "under_parent" } }),
             ),
         )
         .await;

@@ -1618,18 +1618,6 @@
   <data name="share_share_task" xml:space="preserve">
     <value>Condividi attività</value>
   </data>
-  <data name="smart_layout_list" xml:space="preserve">
-    <value>Lista</value>
-  </data>
-  <data name="smart_layout_list_desc" xml:space="preserve">
-    <value>La casella completa l'attività, e priorità e assegnatario hanno ciascuno la propria riga.</value>
-  </data>
-  <data name="smart_layout_project" xml:space="preserve">
-    <value>Progetto</value>
-  </data>
-  <data name="smart_layout_project_desc" xml:space="preserve">
-    <value>Compatto. La casella apre priorità, assegnatario, stato e completa.</value>
-  </data>
   <data name="smart_offset_1_day" xml:space="preserve">
     <value>1 giorno</value>
   </data>

@@ -904,10 +904,10 @@ async fn the_account_page_edits_the_profile_resends_verification_and_deletes_the
 
 /// The Task Settings page (task c0f3db19): the defaults come shaped from the cache, the server's
 /// answer replaces them on refresh, one field is written with a PATCH — refused before any
-/// request when the server would refuse it — and the layout the account chose is what the rows
-/// draw with, at once.
+/// request when the server would refuse it. ADEV-72: the task layout is no longer among them, so a
+/// stored `taskDisplayMode` is neither echoed nor acted on, and the rows always complete.
 #[tokio::test]
-async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19() {
+async fn task_settings_are_read_and_written_task_c0f3db19() {
     let account = json!({ "user": { "id": "me", "name": "Jon" }, "settings": {} });
     let (app, transport) = app_and_transport(
         StubTransport::new()
@@ -920,7 +920,7 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
                     "subtaskDisplay": "under_parent", "meta": { "apiVersion": "v1" }
                 }),
             )
-            .push_json("smart-tasks", 200, json!({ "taskDisplayMode": "list" }))
+            .push_json("smart-tasks", 200, json!({ "subtaskDisplay": "indented" }))
             // The user and the settings: enough for a refresh to be a refresh.
             .fallback(Ok(crate::api::transport::HttpResponse {
                 status: 200,
@@ -937,19 +937,15 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
         "1_week"
     );
     assert_eq!(cached["value"]["smartTasks"]["defaultDueTime"], "17:00");
-    assert_eq!(cached["value"]["smartTasks"]["taskDisplayMode"], "list");
+    assert!(cached["value"]["smartTasks"]
+        .get("taskDisplayMode")
+        .is_none());
     assert_eq!(cached["value"]["dueOffsetChoices"][0]["value"], "none");
     assert_eq!(
         cached["value"]["dueTimeChoices"][2]["titleKey"],
         "smart.time.17_00"
     );
-    assert_eq!(
-        cached["value"]["layoutChoices"]
-            .as_array()
-            .expect("layouts")
-            .len(),
-        2
-    );
+    assert!(cached["value"].get("layoutChoices").is_none());
 
     // The server's answer replaces them, without its envelope.
     let fresh = call(&app, json!({ "kind": "refreshSettings" })).await;
@@ -960,14 +956,20 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
         "3_days"
     );
     assert_eq!(fresh["value"]["smartTasks"]["defaultDueTime"], "09:00");
-    assert_eq!(fresh["value"]["smartTasks"]["taskDisplayMode"], "project");
+    assert!(
+        fresh["value"]["smartTasks"]
+            .get("taskDisplayMode")
+            .is_none(),
+        "the server still sends it; this client does not read it"
+    );
     assert_eq!(
         fresh["value"]["smartTasks"]["subtaskDisplay"],
         "under_parent"
     );
     assert!(fresh["value"]["smartTasks"].get("meta").is_none());
 
-    // Project layout, chosen on the server: a list row's checkbox opens the picker.
+    // Project layout, still stored on the server by an old build: ADEV-72, a list row's checkbox
+    // completes anyway.
     call(&app, json!({ "kind": "createList", "name": "Work" })).await;
     let list_id = list_id_named(&app, "Work").await;
     call(
@@ -976,7 +978,15 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
     )
     .await;
     let rows = call(&app, json!({ "kind": "rowsForList", "listId": list_id })).await;
-    assert_eq!(rows["value"]["rows"][0]["action"], "openPicker");
+    assert_eq!(rows["value"]["rows"][0]["action"], "complete");
+
+    // The layout is no longer a setting this client writes.
+    let layout = call(
+        &app,
+        json!({ "kind": "updateSmartTaskSettings", "changes": { "taskDisplayMode": "project" } }),
+    )
+    .await;
+    assert_eq!(layout["ok"], false);
 
     // A value the server would refuse sends nothing.
     let refused = call(
@@ -993,14 +1003,14 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
         .iter()
         .any(|request| request.method.as_str() == "PATCH"));
 
-    // Back to the list layout: one PATCH carrying just that field, and the rows follow at once.
+    // One PATCH carrying just the changed field.
     let written = call(
         &app,
-        json!({ "kind": "updateSmartTaskSettings", "changes": { "taskDisplayMode": "list" } }),
+        json!({ "kind": "updateSmartTaskSettings", "changes": { "subtaskDisplay": "indented" } }),
     )
     .await;
     assert_eq!(written["ok"], true, "{written}");
-    assert_eq!(written["value"]["smartTasks"]["taskDisplayMode"], "list");
+    assert_eq!(written["value"]["smartTasks"]["subtaskDisplay"], "indented");
     assert_eq!(
         written["value"]["smartTasks"]["defaultDueTime"], "09:00",
         "the rest is kept"
@@ -1019,9 +1029,7 @@ async fn task_settings_are_read_written_and_drive_the_rows_layout_task_c0f3db19(
     );
     let body: serde_json::Value =
         serde_json::from_slice(patch.body.as_deref().expect("a body")).expect("json");
-    assert_eq!(body, json!({ "taskDisplayMode": "list" }));
-    let rows = call(&app, json!({ "kind": "rowsForList", "listId": list_id })).await;
-    assert_eq!(rows["value"]["rows"][0]["action"], "complete");
+    assert_eq!(body, json!({ "subtaskDisplay": "indented" }));
 }
 
 /// Appearance's two rules (task 6ac2639a): with smart parsing on, the quick-add box's `#list`

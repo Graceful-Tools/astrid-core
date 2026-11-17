@@ -103,6 +103,40 @@ pub struct TaskSummary {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+impl TaskSummary {
+    /// A [`Task`] carrying exactly what the list's filters, sorts and parent chain read, rebuilt
+    /// from the indexed columns (task `a09a1e2c`).
+    ///
+    /// Not a decode and not a faithful task: everything else is empty. It exists so the one set of
+    /// rules in `astrid_rules::filters` runs over columns rather than being written a second time
+    /// for a second type. Each column is written from the same expression those rules read
+    /// ([`upsert_task_in`]) — `assignee_id` already falls back to the nested assignee and
+    /// `creator_id` to the nested creator — so the rules answer as they would over the whole task.
+    /// `filed` stands for "is in some list" (`effective_list_ids` is non-empty); which list is not
+    /// kept, so a view whose filters read the nested lists must not be answered from this.
+    pub fn skeleton(&self, filed: bool) -> Task {
+        let mut task = Task::new(self.id.clone(), self.title.clone());
+        task.completed = self.completed;
+        task.completed_at = self.completed_at;
+        task.due_date_time = self.due_date_time;
+        task.is_all_day = self.is_all_day;
+        task.priority = self.priority;
+        task.repeating = self
+            .repeating
+            .as_deref()
+            .and_then(|value| serde_json::from_value(serde_json::Value::from(value)).ok());
+        task.parent_task_id = self.parent_task_id.clone();
+        task.assignee_id = self.assignee_id.clone();
+        task.creator_id = self.creator_id.clone();
+        task.created_at = self.created_at;
+        task.updated_at = self.updated_at;
+        if filed {
+            task.list_ids = Some(vec![String::new()]);
+        }
+        task
+    }
+}
+
 pub struct Store {
     /// Every write and every transaction. One at a time, by the mutex.
     connection: Mutex<Connection>,
@@ -457,6 +491,28 @@ impl Store {
                 connection.prepare(&format!("SELECT {SUMMARY_COLUMNS} FROM tasks t"))?;
             let rows = statement.query_map([], read_summary)?;
             Ok(rows.collect::<SqlResult<Vec<_>>>()?)
+        })
+    }
+
+    /// [`Store::subtasks`], as columns: every cached task that has a parent, with no JSON read.
+    pub fn subtask_summaries(&self) -> Result<Vec<TaskSummary>> {
+        self.read(|connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT {SUMMARY_COLUMNS} FROM tasks t WHERE t.parent_task_id IS NOT NULL"
+            ))?;
+            let rows = statement.query_map([], read_summary)?;
+            Ok(rows.collect::<SqlResult<Vec<_>>>()?)
+        })
+    }
+
+    /// The ids of every task filed in at least one list — what the `in_list` / `not_in_list`
+    /// filters ask, answered from membership without reading a row's JSON.
+    pub fn filed_task_ids(&self) -> Result<std::collections::HashSet<String>> {
+        self.read(|connection| {
+            let mut statement =
+                connection.prepare("SELECT DISTINCT task_id FROM task_lists_membership")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            Ok(rows.collect::<SqlResult<std::collections::HashSet<_>>>()?)
         })
     }
 
