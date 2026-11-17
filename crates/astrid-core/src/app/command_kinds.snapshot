@@ -213,6 +213,7 @@ unlinkList
 updateList
 updateOAuthClient
 updateProfile
+updateProject
 updateReminderSettings
 updateSmartTaskSettings
 updateTask
