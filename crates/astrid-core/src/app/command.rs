@@ -1639,6 +1639,20 @@ pub enum Command {
         #[serde(default)]
         image_url: Option<String>,
     },
+    /// Edit a board's name, description and colour (ADEV-69; web `PATCH /api/v1/projects/{id}`,
+    /// the owner or a project admin). Only the fields named are sent and changed; an empty
+    /// `description` clears it. The cache takes the edit first and is put back if the server
+    /// refuses (403 `PROJECT_RENAME_FORBIDDEN`, 400 `PROJECT_COLOR_INVALID` /
+    /// `PROJECT_NAME_REQUIRED`). Online only. Answers the board as cached.
+    UpdateProject {
+        project_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+    },
     /// Turn a list into a board in one request. Online only.
     CreateBoardForList {
         list_id: String,
