@@ -125,7 +125,7 @@ nothing.
 ## The web binding's size is a budget
 
 The browser has to **load** `astrid-rules-wasm`, so its compressed size is a product requirement.
-CI's `wasm` job holds it to **290,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
+CI's `wasm` job holds it to **200,000 brotli bytes** (`scripts/wasm-size.mjs`), measured on the
 pre-`wasm-bindgen` `wasm`-profile artifact, which is what that job already builds. **The budget
 ratchets down after each saving.** Raising it is allowed; doing either without saying what it
 bought is not.
@@ -134,7 +134,8 @@ Measured on that artifact (task `4d05306d`):
 
 | | raw | gzip | brotli | |
 |---|---:|---:|---:|---|
-| **after jiff** | 877,399 | | **187,191** | `chrono` and `chrono-tz` replaced by `jiff` (ADEV-80, both unmaintained: RUSTSEC-2026-0543 / -0555): **+23,111** brotli (+113,605 raw) over the build before it, measured on the same machine with a brotli-11 of the pre-`wasm-bindgen` artifact. The browser build carries no zone table (`rules-repeating` is off), so there was nothing to save on the table: the growth is jiff's own code, and ~87 KB of the raw bytes of it are `jiff`/`jiff_core` — mostly the `Debug`/`Display` of its error types, which any `jiff` call that can `expect` keeps. Wire text is written by this crate (`model::date`), not by `jiff`'s `strftime`, `FromStr` or `serde` (the feature is off), which is worth ~17 KB brotli by itself (204,694 → 187,166 while it was being written). Budget unchanged at 290,000: 102,809 spare, and a ratchet to this number is open to whoever owns the budget |
+| **after jiff** | 877,399 | | **187,191** | `chrono` and `chrono-tz` replaced by `jiff` (ADEV-80, both unmaintained: RUSTSEC-2026-0543 / -0555): **+23,111** brotli (+113,605 raw) over the build before it, measured on the same machine with a brotli-11 of the pre-`wasm-bindgen` artifact. The browser build carries no zone table (`rules-repeating` is off), so there was nothing to save on the table: the growth is jiff's own code, and ~87 KB of the raw bytes of it are `jiff`/`jiff_core` — mostly the `Debug`/`Display` of its error types, which any `jiff` call that can `expect` keeps. Wire text is written by this crate (`model::date`), not by `jiff`'s `strftime`, `FromStr` or `serde` (the feature is off), which is worth ~17 KB brotli by itself (204,694 → 187,166 while it was being written). Budget unchanged at 290,000 when it landed |
+| **budget ratchet** | 876,479 | 242,001 | **187,040** | Measured on core `main` `8e03eb6` (task `4d05306d`, 2026-11-17). Budget **290,000 → 200,000**: 12,960 spare, enough that one new door rule doesn't turn every core PR red (see *budget +20 KB* below). Jon accepted this size as the browser build's target on 2026-11-17 (below) |
 | before jiff (`2ecf4ea`) | 763,794 | | 164,080 | The first measurement since the rule groups left the browser build; the "today" row below predates them |
 | **budget +20 KB** | | | 269,757 | Budget 270,000 → 290,000 (Jon, 2026-11-15: *"raise the budget by 20kb"*). It buys headroom: the budget sat 243 bytes above the build, so each new rule on the door turned main's `wasm` job red and every core PR inherited it (PR #58, PR #62). The ratchet still applies: lower it again after the next saving |
 | **today** | | | **269,757** | + the rules door's `waitingHandoff` and the returning holder on `waitingSettle` / `waitingWrite` (AWTD-1686: a handoff files the other half and the source wakes back to the agent that handed it off): **+1,744** (CI's measurement). Budget 269,000 → 270,000, 2026-11-16 |
@@ -203,8 +204,14 @@ internally tagged enum and serde buffers those. That is the door's wire format, 
 
 So a materially smaller browser build means compiling **less of the door**, not optimising it
 harder — which is what the markdown feature does and what the rest of the plan does. The target
-is **150,000 brotli bytes**, and the agreed order (Jon, 2026-11-15, task `4d05306d`) is one step
-per PR, with the budget ratcheted after each:
+was **150,000 brotli bytes**, and the agreed order (Jon, 2026-11-15, task `4d05306d`) was one step
+per PR, with the budget ratcheted after each.
+
+**The target is now the size the plan reached: ~187 KB brotli, held by the 200,000 budget (Jon,
+2026-11-17).** The last ~37 KB to 150,000 would have come from dropping `rows` from the browser
+build, and `rows` is the rule web's list pipeline needs in the browser (astrid-web "Adopt the
+core's rows door"). The module loads after first paint, so it is off the critical path. Trimming
+`jiff`'s error formatting further is welcome but optional, and any saving ratchets the budget.
 
 1. ~~Drop markdown rendering from the browser build.~~ **Done** — 324,175 → 261,258.
 2. **Feature-gate the door down to the rules the browser calls.** Design note:
@@ -218,9 +225,8 @@ per PR, with the budget ratcheted after each:
    web's client-side code calls (the decision recorded in `docs/BROWSER_DOOR.md` §4); the Node
    package is built with `--features full` and answers all of them. The browser artifact is
    **756,284 bytes raw** (was 1,973,556 + the sidebar, row rules and handoff since). Its brotli
-   size was not measured in the run that landed this (no `node` there): read it off the first
-   CI run's *Size budget* step and ratchet the 290,000 budget down to it, with a row in the table
-   above. The remaining gap to 150,000 is `rows` (§4.1 of the note).
+   size is the *budget ratchet* row in the table above (187,040 after jiff). The remaining gap to
+   the old 150,000 target was `rows` (§4.1 of the note), which stays (see above).
 3. **Time zone offsets from `Intl` instead of the bundled zone table.** (`chrono-tz` until
    ADEV-80, `jiff`'s `tzdb-bundle-always` now.) ~53 KB, cross-crate API change, and no longer an
    issue for the browser build at all: it carries no zone table since step 2.

@@ -4,7 +4,7 @@
 rules the browser calls; write up the `Rule` split first, since three clients read that door").
 Status: slices 1–3 have landed (§6). The browser answers the rule set decided in §4 (the agent's
 decision of 2026-11-15, Jon can override): four feature groups, all on by default, all off for
-`web/`. Remaining: close the gap to 150,000 (`rows`, §4.1).*
+`web/`. Target accepted at the size reached, ~187 KB brotli (Jon, 2026-11-17): `rows` stays in the browser build.*
 
 **What shipped, in the note's own terms.** The groups are `rules-repeating` (`completion`,
 `nextOccurrence`), `rules-waiting` (the five waiting rules), `rules-decisions` (`decision`,
@@ -160,4 +160,4 @@ the browser.**
 2. ~~The feature groups and `kinds()` (§3).~~ **Done** (AWTD2-162, same PR as 3).
 3. ~~Turn the browser's set down to what §4 decides.~~ **Done**; the budget ratchet waits on
    CI's brotli number (the raw artifact is 756,284 bytes).
-4. `rows` (§4.1), then whatever else the 150,000 still needs.
+4. ~~`rows` (§4.1), then whatever else the 150,000 still needs.~~ Not taken: Jon accepted ~187 KB on 2026-11-17 so `rows` stays for web's list pipeline.
