@@ -1023,7 +1023,7 @@ async fn the_detail_shows_the_board_state_of_a_board_task_in_both_modes_task_522
         .collect();
     assert_eq!(
         names,
-        ["Waiting", "Ideas", "Ready", "Doing"],
+        ["Waiting", "Ideas/Inbox", "Ready", "Doing"],
         "Done is the checkbox's job"
     );
     assert_eq!(state["chips"][3]["isCurrent"], true);
@@ -1102,7 +1102,7 @@ async fn the_action_menu_closes_as_wont_do_and_sets_status_like_the_board_task_0
         .map(|column| column["name"].as_str().expect("a name"))
         .collect();
     // Never Done: the menu sits beside Complete, which is what finishing is (AITD-461, D46).
-    assert_eq!(names, ["Waiting", "Ideas", "Ready", "Doing"]);
+    assert_eq!(names, ["Waiting", "Ideas/Inbox", "Ready", "Doing"]);
     assert_eq!(options["value"]["current"], "__virtual_inbox__");
     assert_eq!(options["value"]["columns"][1]["isCurrent"], true);
 

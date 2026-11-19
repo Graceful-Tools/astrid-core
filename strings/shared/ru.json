@@ -45,7 +45,7 @@
   "auth.sign_in_short": "Войти",
   "board.status.doing": "В работе",
   "board.status.done": "Сделано",
-  "board.status.inbox": "Идеи",
+  "board.status.inbox": "Идеи/Входящие",
   "board.status.ready": "Готово к работе",
   "board.status.waiting": "Ожидание",
   "cancel": "Отмена",

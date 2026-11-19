@@ -149,7 +149,7 @@
     <value>已完成</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>點子</value>
+    <value>點子/收件匣</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>就緒</value>
