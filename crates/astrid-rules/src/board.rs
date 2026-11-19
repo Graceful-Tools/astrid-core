@@ -241,7 +241,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
             kind: ColumnKind::Status,
         }
     };
-    // Waiting first, then the inbox column (called "Ideas"), then Ready and Doing (ADEV-128,
+    // Waiting first, then the inbox column (called "Ideas/Inbox"), then Ready and Doing (ADEV-128,
     // web's ADEV-132): what is parked sits to the left of what is new. A phone still opens on
     // the inbox column; Waiting is what you swipe back to.
     let mut all: Vec<BoardColumn> = DEFAULT_STATES
@@ -251,7 +251,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
         .collect();
     all.push(BoardColumn {
         id: VIRTUAL_INBOX_COLUMN_ID.to_string(),
-        name: "Ideas".into(),
+        name: "Ideas/Inbox".into(),
         description: "Move them to \"Ready\" when they are... ready!".into(),
         kind: ColumnKind::Inbox,
     });

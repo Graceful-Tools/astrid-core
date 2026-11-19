@@ -149,7 +149,7 @@
     <value>Erledigt</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Ideen</value>
+    <value>Ideen/Posteingang</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Bereit</value>

@@ -45,7 +45,7 @@
   "auth.sign_in_short": "Iniciar sesión",
   "board.status.doing": "En curso",
   "board.status.done": "Hecho",
-  "board.status.inbox": "Ideas",
+  "board.status.inbox": "Ideas/Bandeja de entrada",
   "board.status.ready": "Listo",
   "board.status.waiting": "En espera",
   "cancel": "Cancelar",

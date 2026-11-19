@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Anmelden</string>
     <string name="board_status_doing">In Arbeit</string>
     <string name="board_status_done">Erledigt</string>
-    <string name="board_status_inbox">Ideen</string>
+    <string name="board_status_inbox">Ideen/Posteingang</string>
     <string name="board_status_ready">Bereit</string>
     <string name="board_status_waiting">Wartet</string>
     <string name="cancel">Abbrechen</string>
