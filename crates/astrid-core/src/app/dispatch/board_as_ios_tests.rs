@@ -191,7 +191,7 @@ async fn aitd461_a_cached_status_row_names_its_default_column() {
     )
     .await;
     let answer = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
-    let doing = &answer["value"]["columns"][2];
+    let doing = &answer["value"]["columns"][3];
     assert_eq!(
         doing["id"], "doing",
         "the id is the role whatever is cached"
@@ -346,6 +346,6 @@ async fn aitd461_the_status_menu_has_no_done() {
         .iter()
         .map(|column| column["id"].as_str().expect("an id"))
         .collect();
-    assert_eq!(ids, ["__virtual_inbox__", "ready", "doing", "waiting"]);
+    assert_eq!(ids, ["waiting", "__virtual_inbox__", "ready", "doing"]);
     assert_eq!(options["value"]["current"], "__virtual_done__");
 }

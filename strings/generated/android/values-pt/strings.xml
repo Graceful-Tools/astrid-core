@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Entrar</string>
     <string name="board_status_doing">Fazendo</string>
     <string name="board_status_done">Concluído</string>
-    <string name="board_status_inbox">Caixa de entrada</string>
+    <string name="board_status_inbox">Ideias</string>
     <string name="board_status_ready">Pronto</string>
     <string name="board_status_waiting">Aguardando</string>
     <string name="cancel">Cancelar</string>

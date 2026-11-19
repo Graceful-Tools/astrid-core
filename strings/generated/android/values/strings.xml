@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Sign In</string>
     <string name="board_status_doing">Doing</string>
     <string name="board_status_done">Done</string>
-    <string name="board_status_inbox">Inbox</string>
+    <string name="board_status_inbox">Ideas</string>
     <string name="board_status_ready">Ready</string>
     <string name="board_status_waiting">Waiting</string>
     <string name="cancel">Cancel</string>

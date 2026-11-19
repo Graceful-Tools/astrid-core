@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Accedi</string>
     <string name="board_status_doing">In corso</string>
     <string name="board_status_done">Fatto</string>
-    <string name="board_status_inbox">In arrivo</string>
+    <string name="board_status_inbox">Idee</string>
     <string name="board_status_ready">Pronto</string>
     <string name="board_status_waiting">In attesa</string>
     <string name="cancel">Annulla</string>

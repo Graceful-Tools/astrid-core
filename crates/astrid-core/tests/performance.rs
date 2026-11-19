@@ -206,7 +206,7 @@ async fn a_board_of_ten_thousand_cards_is_fast() {
         json!({ "kind": "board", "listId": "l1", "idsOnly": true }),
     )
     .await;
-    let inbox = answer["value"]["columns"][0]["ids"]
+    let inbox = answer["value"]["columns"][1]["ids"]
         .as_array()
         .expect("ids");
     assert_eq!(inbox.first().and_then(|id| id.as_str()), Some("t9999"));

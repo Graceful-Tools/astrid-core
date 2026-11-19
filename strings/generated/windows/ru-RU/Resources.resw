@@ -149,7 +149,7 @@
     <value>Сделано</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Входящие</value>
+    <value>Идеи</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Готово к работе</value>

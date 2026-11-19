@@ -149,7 +149,7 @@
     <value>Concluído</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Caixa de entrada</value>
+    <value>Ideias</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Pronto</value>
