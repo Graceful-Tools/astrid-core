@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Войти</string>
     <string name="board_status_doing">В работе</string>
     <string name="board_status_done">Сделано</string>
-    <string name="board_status_inbox">Входящие</string>
+    <string name="board_status_inbox">Идеи</string>
     <string name="board_status_ready">Готово к работе</string>
     <string name="board_status_waiting">Ожидание</string>
     <string name="cancel">Отмена</string>

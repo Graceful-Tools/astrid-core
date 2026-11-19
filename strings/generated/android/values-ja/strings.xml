@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">サインイン</string>
     <string name="board_status_doing">作業中</string>
     <string name="board_status_done">完了</string>
-    <string name="board_status_inbox">受信箱</string>
+    <string name="board_status_inbox">アイデア</string>
     <string name="board_status_ready">準備完了</string>
     <string name="board_status_waiting">待機中</string>
     <string name="cancel">キャンセル</string>

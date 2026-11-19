@@ -45,7 +45,7 @@
   "auth.sign_in_short": "로그인",
   "board.status.doing": "진행 중",
   "board.status.done": "완료",
-  "board.status.inbox": "받은 편지함",
+  "board.status.inbox": "아이디어",
   "board.status.ready": "준비됨",
   "board.status.waiting": "대기 중",
   "cancel": "취소",

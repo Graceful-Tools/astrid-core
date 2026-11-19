@@ -149,7 +149,7 @@
     <value>완료</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>받은 편지함</value>
+    <value>아이디어</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>준비됨</value>
