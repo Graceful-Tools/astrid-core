@@ -1080,6 +1080,15 @@ ask by `projectId`. Tests: `aitd461_cards_are_top_level_in_the_manual_order_and_
 `aitd461_done_holds_what_the_window_lets_through`, `aitd461_a_board_can_be_asked_for_by_project`,
 `board_cards::tests`.
 
+**Done is newest first, and says when** (Jon, 2026-11-19: "always ordered with the most recently
+completed on top… consistent on all platforms"). Done no longer takes the manual order: its cards
+sort by `completedAt`, else `updatedAt`, latest on top, ties in store order. Every row carries
+`completedOn` (`YYYY-MM-DD`, the reader's local day of that same stamp; null while open), which
+each client draws as a date pill under a Done card's title in its own locale's short date. A
+drop inside Done still writes the manual order, but Done does not read it. Tests:
+`done_is_newest_first_by_completion_whatever_the_manual_order`,
+`a_finished_row_carries_the_day_it_was_finished`.
+
 A drop is `dropBoardCard`: the move, then the card's new place in the opened list's manual order
 (just above the card it was dropped on, or after the column's last card) with the list's sort set
 to manual — what iOS's drop wrote (`resolveBoardReorder` + `updateListOnServer`). Unlike a move, a
