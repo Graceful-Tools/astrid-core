@@ -299,6 +299,10 @@ pub struct TaskRow {
     /// on rows that do not draw it.
     pub offers_copy_identifier: bool,
     pub completed: bool,
+    /// The day a finished task was finished, where the reader is — `completedAt`, else
+    /// `updatedAt` for a task finished before the stamp existed. `None` while it is open. The Done
+    /// column's date pill (Jon, 2026-11-19); the shell owns how the day is written.
+    pub completed_on: Option<jiff::civil::Date>,
     pub priority: Priority,
     pub due: DueLabel,
     /// For a timed task, its date and time where the reader is; `None` for an all-day one or none.
@@ -483,6 +487,11 @@ impl TaskRow {
             shows_identifier,
             offers_copy_identifier: identifier::offers_copy_identifier(has_identifier),
             completed: task.completed,
+            completed_on: task
+                .completed
+                .then(|| task.completed_at.or(task.updated_at))
+                .flatten()
+                .map(|at| filters::local_day(at, context.offset)),
             priority: task.priority,
             due: DueLabel::for_due(
                 task.due_date_time,
@@ -625,6 +634,51 @@ mod tests {
         assert_eq!(
             row.remote_chip.as_ref().map(|chip| chip.0.as_str()),
             Some("o/r#7")
+        );
+    }
+
+    /// A finished card says the day it was finished, where the reader is — `completedAt`, else
+    /// `updatedAt` — for the date pill under a Done card's title (Jon, 2026-11-19). An open task
+    /// has none.
+    #[test]
+    fn a_finished_row_carries_the_day_it_was_finished() {
+        let lists = Vec::new();
+        let users = Vec::new();
+        let depths = HashMap::new();
+        let counts = HashMap::new();
+        let mut reader = context(&lists, &users, &depths, &counts);
+        reader.offset = jiff::tz::offset(-8);
+        let finished: Task = serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": "Ship it", "completed": true,
+            "completedAt": "2026-11-19T03:00:00Z", "updatedAt": "2026-11-20T03:00:00Z"
+        }))
+        .expect("decodes");
+        let row = TaskRow::build(&finished, &reader);
+        // 03:00 UTC on the 19th is the evening of the 18th in UTC-8.
+        assert_eq!(row.completed_on, Some(jiff::civil::date(2026, 11, 18)));
+        assert_eq!(
+            super::json::rows(std::slice::from_ref(&row))[0]["completedOn"],
+            serde_json::json!("2026-11-18")
+        );
+
+        let legacy: Task = serde_json::from_value(serde_json::json!({
+            "id": "t2", "title": "Old", "completed": true, "updatedAt": "2026-11-10T12:00:00Z"
+        }))
+        .expect("decodes");
+        assert_eq!(
+            TaskRow::build(&legacy, &reader).completed_on,
+            Some(jiff::civil::date(2026, 11, 10))
+        );
+
+        let open: Task = serde_json::from_value(serde_json::json!({
+            "id": "t3", "title": "Open", "completedAt": "2026-11-10T12:00:00Z"
+        }))
+        .expect("decodes");
+        let row = TaskRow::build(&open, &reader);
+        assert_eq!(row.completed_on, None);
+        assert_eq!(
+            super::json::rows(std::slice::from_ref(&row))[0]["completedOn"],
+            serde_json::Value::Null
         );
     }
 

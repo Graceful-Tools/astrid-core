@@ -11,7 +11,8 @@
 //! - a column's cards are in the board list's **manual order**, cards the order does not name
 //!   last, in iOS's store order ([`crate::filters::display_order`]);
 //! - **Done shows recent work only**: the board list's completion filter and recently-completed
-//!   window, read the way iOS's board reads them ([`done_shows`]);
+//!   window, read the way iOS's board reads them ([`done_shows`]) — newest first by completion,
+//!   not in the manual order;
 //! - **subtasks are not cards** — they draw inside their parent;
 //! - a default column takes its **name and description from a cached status row** when no
 //!   rename overrides it ([`columns_with_rows`]);
@@ -138,9 +139,10 @@ pub fn cards<'a>(tasks: &'a [Task], lists: &[TaskList], project_id: &str) -> Vec
 
 /// One column's cards, in the order the board shows them (`boardColumnTasksSorted`).
 ///
-/// `cards` is [`cards`]' answer. Done keeps what [`done_shows`] lets through. The manual order
-/// then arranges the column; a card it does not name goes after every card it does, keeping its
-/// place among the others.
+/// `cards` is [`cards`]' answer. Done keeps what [`done_shows`] lets through, newest first by when
+/// each card was finished (`completedAt`, else `updatedAt`). The manual order arranges every other
+/// column; a card it does not name goes after every card it does, keeping its place among the
+/// others.
 pub fn column_cards<'a>(
     cards: &[&'a Task],
     column: &BoardColumn,
@@ -158,6 +160,12 @@ pub fn column_cards<'a>(
                 || done_shows(list.filter, card.updated_at, list.window, now, offset)
         })
         .collect();
+    if column.kind == ColumnKind::Done {
+        // Done is the board's history, newest first by when each card was finished, whatever the
+        // manual order says (Jon, 2026-11-19). Stable, so a tie keeps its store order.
+        held.sort_by_key(|card| std::cmp::Reverse(card.completed_at.or(card.updated_at)));
+        return held;
+    }
     if let Some(order) = list.manual_order.filter(|order| !order.is_empty()) {
         // The first mention wins, as a dictionary built in order would keep it.
         let mut place: std::collections::HashMap<&str, usize> =
@@ -338,6 +346,49 @@ mod tests {
             utc(),
         );
         assert_eq!(ids(&drawn), ["c", "a", "b"]);
+    }
+
+    /// Done is newest first by when each card was finished — `completedAt`, else `updatedAt` —
+    /// whatever the manual order says: the board's history reads from the top (Jon, 2026-11-19).
+    #[test]
+    fn done_is_newest_first_by_completion_whatever_the_manual_order() {
+        let lists = vec![domain()];
+        let tasks = vec![
+            task(
+                json!({ "id": "oldest", "title": "oldest", "completed": true,
+                         "completedAt": "2023-11-10T09:00:00Z", "updatedAt": "2023-11-14T09:00:00Z" }),
+            ),
+            task(
+                json!({ "id": "newest", "title": "newest", "completed": true,
+                         "completedAt": "2023-11-14T08:00:00Z" }),
+            ),
+            // No completion stamp: timed by when it was last touched.
+            task(
+                json!({ "id": "legacy", "title": "legacy", "completed": true,
+                         "updatedAt": "2023-11-12T09:00:00Z" }),
+            ),
+            task(json!({ "id": "open", "title": "open" })),
+        ];
+        let columns = columns_with_rows(None, &lists);
+        let done = column(&columns, board::VIRTUAL_DONE_COLUMN_ID);
+        let order = vec![
+            "oldest".to_string(),
+            "legacy".to_string(),
+            "newest".to_string(),
+        ];
+        let drawn = column_cards(
+            &cards(&tasks, &lists, "p1"),
+            &done,
+            &columns,
+            BoardList {
+                manual_order: Some(&order),
+                filter: Some("show"),
+                window: None,
+            },
+            now(),
+            utc(),
+        );
+        assert_eq!(ids(&drawn), ["newest", "legacy", "oldest"]);
     }
 
     /// AITD-461: subtasks draw inside their parent, never as cards.
