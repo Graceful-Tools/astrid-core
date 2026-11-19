@@ -149,7 +149,7 @@
     <value>Gedaan</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Ideeën</value>
+    <value>Ideeën/Inbox</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Klaar</value>

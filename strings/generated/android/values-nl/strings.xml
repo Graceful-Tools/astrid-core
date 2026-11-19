@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">Inloggen</string>
     <string name="board_status_doing">Bezig</string>
     <string name="board_status_done">Gedaan</string>
-    <string name="board_status_inbox">Ideeën</string>
+    <string name="board_status_inbox">Ideeën/Inbox</string>
     <string name="board_status_ready">Klaar</string>
     <string name="board_status_waiting">Wachten</string>
     <string name="cancel">Annuleren</string>

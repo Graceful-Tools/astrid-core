@@ -1097,9 +1097,9 @@ without the board's custom states and with subtasks counted; the slot it was giv
 board drew, so this places it against the drawn column. Test:
 `aitd461_a_drop_writes_the_move_and_the_manual_order`.
 
-**Waiting leads, and the inbox column is "Ideas"** (ADEV-128; web's ADEV-132, astrid-web PR #911).
+**Waiting leads, and the inbox column is "Ideas/Inbox"** (ADEV-128; web's ADEV-132, astrid-web PR #911).
 A board's columns are Waiting, the inbox column, Ready, Doing, the board's own columns, Done:
-what is parked sits left of what is new. The inbox column's default name is "Ideas"
+what is parked sits left of what is new. The inbox column's default name is "Ideas/Inbox" (ADEV-137/138; it read "Ideas" for a day)
 (`board.status.inbox` in the shared strings, every language). Its id stays `__virtual_inbox__`
 and its kind `inbox`, and nothing else called Inbox (notifications) changes. A board's rename
 of `waiting` still renames it in place. A phone opens on the inbox column, not the first one,

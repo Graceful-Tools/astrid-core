@@ -47,7 +47,7 @@
     <string name="auth_sign_in_short">登录</string>
     <string name="board_status_doing">进行中</string>
     <string name="board_status_done">已完成</string>
-    <string name="board_status_inbox">创意</string>
+    <string name="board_status_inbox">创意/收件箱</string>
     <string name="board_status_ready">就绪</string>
     <string name="board_status_waiting">等待中</string>
     <string name="cancel">取消</string>

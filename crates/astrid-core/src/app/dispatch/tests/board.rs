@@ -46,7 +46,7 @@ async fn board_columns_are_managed_through_the_door_task_e5214fba() {
         .collect();
     assert_eq!(
         names,
-        vec!["Waiting", "Ideas", "Ready", "Doing", "Review", "Done"]
+        vec!["Waiting", "Ideas/Inbox", "Ready", "Doing", "Review", "Done"]
     );
 
     // Refused before any round trip, in the web's words.
