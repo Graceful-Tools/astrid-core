@@ -149,7 +149,7 @@
     <value>Hecho</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Bandeja</value>
+    <value>Ideas</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Listo</value>

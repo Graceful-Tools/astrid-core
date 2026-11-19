@@ -230,24 +230,37 @@ pub fn is_default_role(role: &str) -> bool {
 /// concatenated with the customs.
 pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
     let states = parse_custom_states(custom_states);
-    let mut all = vec![BoardColumn {
-        id: VIRTUAL_INBOX_COLUMN_ID.to_string(),
-        name: "Inbox".into(),
-        description: "Move them to \"Ready\" when they are... ready!".into(),
-        kind: ColumnKind::Inbox,
-    }];
-
-    for (role, name, description) in DEFAULT_STATES {
+    let default = |(role, name, description): (&str, &str, &str)| {
         let renamed = states.iter().find(|state| state.role == role);
-        all.push(BoardColumn {
+        BoardColumn {
             id: role.to_string(),
             name: renamed
                 .map(|state| state.name.clone())
                 .unwrap_or(name.into()),
             description: description.to_string(),
             kind: ColumnKind::Status,
-        });
-    }
+        }
+    };
+    // Waiting first, then the inbox column (called "Ideas"), then Ready and Doing (ADEV-128,
+    // web's ADEV-132): what is parked sits to the left of what is new. A phone still opens on
+    // the inbox column; Waiting is what you swipe back to.
+    let mut all: Vec<BoardColumn> = DEFAULT_STATES
+        .into_iter()
+        .filter(|(role, _, _)| *role == WAITING_STATUS_ROLE)
+        .map(default)
+        .collect();
+    all.push(BoardColumn {
+        id: VIRTUAL_INBOX_COLUMN_ID.to_string(),
+        name: "Ideas".into(),
+        description: "Move them to \"Ready\" when they are... ready!".into(),
+        kind: ColumnKind::Inbox,
+    });
+    all.extend(
+        DEFAULT_STATES
+            .into_iter()
+            .filter(|(role, _, _)| *role != WAITING_STATUS_ROLE)
+            .map(default),
+    );
 
     for state in states.iter().filter(|state| !is_default_role(&state.role)) {
         all.push(BoardColumn {
@@ -766,14 +779,14 @@ mod tests {
     }
 
     #[test]
-    fn a_board_is_inbox_the_three_defaults_and_done() {
+    fn a_board_is_waiting_ideas_ready_doing_and_done_adev_128() {
         assert_eq!(
             ids(&columns(None)),
             vec![
+                "waiting",
                 VIRTUAL_INBOX_COLUMN_ID,
                 "ready",
                 "doing",
-                "waiting",
                 VIRTUAL_DONE_COLUMN_ID
             ]
         );
@@ -790,15 +803,15 @@ mod tests {
         assert_eq!(
             ids(&built),
             vec![
+                "waiting",
                 VIRTUAL_INBOX_COLUMN_ID,
                 "ready",
                 "doing",
-                "waiting",
                 "review",
                 VIRTUAL_DONE_COLUMN_ID
             ]
         );
-        assert_eq!(built[2].name, "In progress");
+        assert_eq!(built[3].name, "In progress");
     }
 
     /// A board configured by a newer web must still draw. Unusable entries are dropped rather than
@@ -816,10 +829,10 @@ mod tests {
         assert_eq!(
             ids(&built),
             vec![
+                "waiting",
                 VIRTUAL_INBOX_COLUMN_ID,
                 "ready",
                 "doing",
-                "waiting",
                 "review",
                 VIRTUAL_DONE_COLUMN_ID
             ]
@@ -865,7 +878,7 @@ mod tests {
     fn moving_to_a_status_column_sets_the_role_and_touches_no_membership() {
         let built = columns(None);
         let lists = vec![TaskList::new("domain-1", "Work")];
-        let moved = resolve_move(&card("t1", false, None, &["domain-1"]), &built[1], &lists);
+        let moved = resolve_move(&card("t1", false, None, &["domain-1"]), &built[2], &lists);
         assert_eq!(moved.status_role.as_deref(), Some("ready"));
         assert_eq!(moved.list_ids, vec!["domain-1"]);
         assert!(!moved.completed);
@@ -886,7 +899,7 @@ mod tests {
     #[test]
     fn moving_to_inbox_clears_the_role_without_completing() {
         let built = columns(None);
-        let moved = resolve_move(&card("t1", false, Some("ready"), &[]), &built[0], &[]);
+        let moved = resolve_move(&card("t1", false, Some("ready"), &[]), &built[1], &[]);
         assert!(!moved.completed);
         assert_eq!(moved.status_role, None);
     }
@@ -914,13 +927,13 @@ mod tests {
     #[test]
     fn a_create_with_no_domain_list_leaves_the_memberships_out_entirely() {
         let built = columns(None);
-        assert_eq!(resolve_create(&built[1], None).list_ids, None);
+        assert_eq!(resolve_create(&built[2], None).list_ids, None);
         assert_eq!(
-            resolve_create(&built[1], Some("domain-1")).list_ids,
+            resolve_create(&built[2], Some("domain-1")).list_ids,
             Some(vec!["domain-1".to_string()])
         );
         assert_eq!(
-            resolve_create(&built[0], Some("domain-1")).status_role,
+            resolve_create(&built[1], Some("domain-1")).status_role,
             None
         );
     }

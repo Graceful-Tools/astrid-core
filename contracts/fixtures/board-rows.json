@@ -317,10 +317,17 @@
         "ok": true,
         "value": [
           {
+            "description": "Paused until the circumstances are right.",
+            "id": "waiting",
+            "kind": "status",
+            "name": "Waiting",
+            "taskIds": []
+          },
+          {
             "description": "Move them to \"Ready\" when they are... ready!",
             "id": "__virtual_inbox__",
             "kind": "inbox",
-            "name": "Inbox",
+            "name": "Ideas",
             "taskIds": [
               "c"
             ]
@@ -342,13 +349,6 @@
             "taskIds": [
               "a"
             ]
-          },
-          {
-            "description": "Paused until the circumstances are right.",
-            "id": "waiting",
-            "kind": "status",
-            "name": "Waiting",
-            "taskIds": []
           },
           {
             "description": "",
@@ -477,10 +477,17 @@
         "ok": true,
         "value": [
           {
+            "description": "Paused until the circumstances are right.",
+            "id": "waiting",
+            "kind": "status",
+            "name": "Waiting",
+            "taskIds": []
+          },
+          {
             "description": "Move them to \"Ready\" when they are... ready!",
             "id": "__virtual_inbox__",
             "kind": "inbox",
-            "name": "Inbox",
+            "name": "Ideas",
             "taskIds": []
           },
           {
@@ -497,13 +504,6 @@
             "id": "doing",
             "kind": "status",
             "name": "Doing",
-            "taskIds": []
-          },
-          {
-            "description": "Paused until the circumstances are right.",
-            "id": "waiting",
-            "kind": "status",
-            "name": "Waiting",
             "taskIds": []
           },
           {
@@ -637,10 +637,17 @@
         "ok": true,
         "value": [
           {
+            "description": "Paused until the circumstances are right.",
+            "id": "waiting",
+            "kind": "status",
+            "name": "Waiting",
+            "taskIds": []
+          },
+          {
             "description": "Move them to \"Ready\" when they are... ready!",
             "id": "__virtual_inbox__",
             "kind": "inbox",
-            "name": "Inbox",
+            "name": "Ideas",
             "taskIds": [
               "foreign"
             ]
@@ -659,13 +666,6 @@
             "id": "doing",
             "kind": "status",
             "name": "Doing",
-            "taskIds": []
-          },
-          {
-            "description": "Paused until the circumstances are right.",
-            "id": "waiting",
-            "kind": "status",
-            "name": "Waiting",
             "taskIds": []
           },
           {
@@ -795,10 +795,17 @@
         "ok": true,
         "value": [
           {
+            "description": "Paused until the circumstances are right.",
+            "id": "waiting",
+            "kind": "status",
+            "name": "Waiting",
+            "taskIds": []
+          },
+          {
             "description": "Move them to \"Ready\" when they are... ready!",
             "id": "__virtual_inbox__",
             "kind": "inbox",
-            "name": "Inbox",
+            "name": "Ideas",
             "taskIds": [
               "c"
             ]
@@ -820,13 +827,6 @@
             "taskIds": [
               "a"
             ]
-          },
-          {
-            "description": "Paused until the circumstances are right.",
-            "id": "waiting",
-            "kind": "status",
-            "name": "Waiting",
-            "taskIds": []
           },
           {
             "description": "",
