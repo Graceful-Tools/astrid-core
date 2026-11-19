@@ -54,6 +54,8 @@ pub fn rows(rows: &[TaskRow]) -> Vec<serde_json::Value> {
                 "showsIdentifier": row.shows_identifier,
                 "offersCopyIdentifier": row.offers_copy_identifier,
                 "completed": row.completed,
+                // `2026-11-19`, the day a finished task was finished; null while open.
+                "completedOn": row.completed_on.map(crate::model::date::format_day),
                 "priority": row.priority.as_i64(),
                 "due": due(&row.due),
                 "dueAt": row.due_at.map(|at| serde_json::json!({
