@@ -45,7 +45,7 @@
   "auth.sign_in_short": "登入",
   "board.status.doing": "進行中",
   "board.status.done": "已完成",
-  "board.status.inbox": "點子",
+  "board.status.inbox": "點子/收件匣",
   "board.status.ready": "就緒",
   "board.status.waiting": "等待中",
   "cancel": "取消",
