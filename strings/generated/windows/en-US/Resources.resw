@@ -149,7 +149,7 @@
     <value>Done</value>
   </data>
   <data name="board_status_inbox" xml:space="preserve">
-    <value>Inbox</value>
+    <value>Ideas</value>
   </data>
   <data name="board_status_ready" xml:space="preserve">
     <value>Ready</value>

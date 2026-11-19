@@ -46,7 +46,7 @@ async fn board_columns_are_managed_through_the_door_task_e5214fba() {
         .collect();
     assert_eq!(
         names,
-        vec!["Inbox", "Ready", "Doing", "Waiting", "Review", "Done"]
+        vec!["Waiting", "Ideas", "Ready", "Doing", "Review", "Done"]
     );
 
     // Refused before any round trip, in the web's words.
@@ -100,7 +100,7 @@ async fn board_columns_are_managed_through_the_door_task_e5214fba() {
     assert_eq!(settings["value"]["projectId"], "p1");
     let statuses = settings["value"]["statuses"].as_array().expect("statuses");
     assert_eq!(statuses.len(), 3);
-    assert_eq!(statuses[0]["id"], "ready");
+    assert_eq!(statuses[0]["id"], "waiting");
     assert_eq!(statuses[0]["isDefault"], true);
 
     // Every write went to the board's versioned statuses route.
@@ -415,12 +415,13 @@ async fn a_board_answers_with_its_columns_and_their_cards() {
 
     let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
     let columns = board["value"]["columns"].as_array().expect("columns");
-    assert_eq!(columns[0]["id"], "__virtual_inbox__");
+    // Waiting leads, then the inbox column (ADEV-128).
+    assert_eq!(columns[1]["id"], "__virtual_inbox__");
     assert_eq!(columns.last().expect("done")["id"], "__virtual_done__");
     // A new card with no role is in the Inbox, and it arrives as a row.
-    assert_eq!(columns[0]["total"], 1);
-    assert_eq!(columns[0]["cards"][0]["title"], "Write it down");
-    assert!(columns[0]["cards"][0]["leading"].is_object());
+    assert_eq!(columns[1]["total"], 1);
+    assert_eq!(columns[1]["cards"][0]["title"], "Write it down");
+    assert!(columns[1]["cards"][0]["leading"].is_object());
 
     // Moving it carries the role, and the card lands in that column.
     call(
@@ -1407,15 +1408,15 @@ async fn a_board_row_is_its_list_under_the_projects_columns_awtd_1676() {
     assert_eq!(
         ids,
         [
+            "waiting",
             "__virtual_inbox__",
             "ready",
             "doing",
-            "waiting",
             "review",
             "__virtual_done__"
         ]
     );
-    assert_eq!(columns[0]["ids"], json!(["h2", "h1"]));
+    assert_eq!(columns[1]["ids"], json!(["h2", "h1"]));
     assert_eq!(columns[4]["ids"], json!(["h3"]));
     assert_eq!(columns[4]["total"], 1);
 

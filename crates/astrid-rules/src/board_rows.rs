@@ -305,10 +305,10 @@ mod tests {
             by_column,
             vec![
                 // A role this project has no column for waits in the Inbox, beside the card with none.
+                ("waiting".to_string(), vec![]),
                 (board::VIRTUAL_INBOX_COLUMN_ID.to_string(), vec!["b", "d"]),
                 ("ready".to_string(), vec![]),
                 ("doing".to_string(), vec!["a"]),
-                ("waiting".to_string(), vec![]),
                 ("review".to_string(), vec!["c"]),
                 (board::VIRTUAL_DONE_COLUMN_ID.to_string(), vec![]),
             ]

@@ -1834,17 +1834,17 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "waiting",
                 "__virtual_inbox__",
                 "ready",
                 "doing",
-                "waiting",
                 "review",
                 "__virtual_done__"
             ]
         );
-        assert_eq!(columns[2]["name"], "In progress");
+        assert_eq!(columns[3]["name"], "In progress");
         // An unknown role falls to Inbox; the manual order arranges it; no subtask, no other project's task.
-        assert_eq!(columns[0]["taskIds"], serde_json::json!(["b2", "b1"]));
+        assert_eq!(columns[1]["taskIds"], serde_json::json!(["b2", "b1"]));
         assert_eq!(columns[4]["taskIds"], serde_json::json!(["a"]));
         assert_eq!(columns[5]["taskIds"], serde_json::json!(["c"]));
 
@@ -1907,8 +1907,8 @@ mod tests {
         .unwrap();
         let columns = answer["value"].as_array().expect("columns");
         assert_eq!(columns.len(), 6);
-        assert_eq!(columns[0]["id"], "__virtual_inbox__");
-        assert_eq!(columns[0]["taskIds"], serde_json::json!(["b", "a"]));
+        assert_eq!(columns[1]["id"], "__virtual_inbox__");
+        assert_eq!(columns[1]["taskIds"], serde_json::json!(["b", "a"]));
         assert_eq!(columns[4]["id"], "review");
         assert_eq!(columns[4]["taskIds"], serde_json::json!(["c"]));
     }
