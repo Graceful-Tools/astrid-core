@@ -38,14 +38,15 @@ platform's own kind of resource, the client vendors the file, and its toolkit do
 | `android/drawable/checkbox_*.xml` | astrid-android: the three layers as vector drawables; `box` and `repeat` are white, for a tint | `app/src/main/res/drawable/` |
 | `windows/AstridCheckbox.xaml` | astrid-windows: a resource dictionary with one `ContentControl` style per layer; `box` and `repeat` take the control's `Foreground` | merged into `App.xaml` |
 
-The Windows token dictionary carries a few names that are not tokens, so that adopting it deletes
-the shell's hand-written brushes rather than renaming their call sites (ADEV-1). `AstridSurface` is
-the card (DS9): `bg-hover` on light and `bg-secondary` on dark, and `AstridSurfaceHover` is
-`bg-tertiary`. `AccentFillColorDefaultBrush`, `AccentFillColorSecondaryBrush` and
+`AstridSurface` and `AstridSurfaceHover` are the `surface` and `surface-hover` tokens themselves
+(DS9, ADEV-160); they were aliases of `bg-hover`/`bg-secondary` and `bg-tertiary` until the surfaces
+were named. The Windows token dictionary carries a few more names that are not tokens, so that
+adopting it deletes the shell's hand-written brushes rather than renaming their call sites (ADEV-1).
+`AccentFillColorDefaultBrush`, `AccentFillColorSecondaryBrush` and
 `TextOnAccentFillColorPrimaryBrush` are WinUI's own keys, set to `accent`, `accent-hover` and
 `accent-text` because DS26 wants one accent fill in every theme where WinUI would derive a pale one;
 they are left out of `HighContrast`, where WinUI's system-colour brushes should win. Both lists are
-in `crates/xtask/src/design.rs` (`XAML_ALIASES`, `XAML_WINUI_KEYS`). WinUI's `SystemAccentColor`
+in `crates/xtask/src/design.rs` (`XAML_WINUI_KEYS`). WinUI's `SystemAccentColor`
 ramp (`Light1..3`, `Dark1..3`) stays written out in the shell: its six steps are shades the register
 does not hold, and the generator does not derive one colour from another (AWTD2-159).
 
@@ -208,7 +209,7 @@ Where the clients differ from the tokens today. An entry leaves when the client 
 | DS6 | Repeat frame around a photo or the unassigned mark | The control's own size (`repeat-frame-scale` 1.0), and the photo or "U" fills it (`repeat-frame-inner-scale` 1.0): the arrows are the photo's border, in place of the priority outline (Jon, 2026-11-11, AITD-612 reopened: "The same size as the default profile photo"; was 0.625, and 1.25 before that) | iOS and Mac draw it by hand until they re-vendor at this revision. Web draws it as iOS does, the frame and the photo both at 1.0 from the tokens (AWTD-1579) | closed on web; Apple vendoring only |
 | DS7 | Task details panel: opens out of the selected row over `motion.panel`, wearing the selection outline, with an arrow to the row. Wherever the list and the details share the screen: Mac, desktop web, iPad, Windows, and two-pane Android (tablets, foldables, dual-screen). Not a phone's single pane (Jon, 2026-11-10): a phone pushes the details instead (DS30) | Mac and web | iPad conforms (AITD-607 for rows; AITD-679 for board cards, DS32). Android and Windows have neither | open on Android and Windows |
 | DS8 | iOS resolves themes per view (fixed light values, a ternary at each use) | one palette per theme, as the Mac resolves them | iOS: the ternaries are gone (AITD-611; its ratchet holds `darkSchemeTernaries` at 0), but 142 reads still pick one theme's value by name (`fixedThemePicks` in `scripts/design-metrics.budget.json`, 2026-11-20) | partly open on iOS: the fixed picks move to `ThemePalette` one view at a time |
-| DS9 | Web-only surfaces (sidebar, panel, pill, count badge, card glass) | not tokens yet | Web names each once in its theme stylesheets as a variable that reads a token, so none is a colour written out. Two directional shadows are still written out there (one upward, one to the left): `shadow` has no direction | closed as far as web can go; open: name the surfaces and a directional shadow here, with the component specs |
+| DS9 | Surfaces (card, sidebar, panel, comment, pill, count badge) and the details panel's shadow | tokens (ADEV-160) | `surface`, `surface-hover`, `surface-border`, `sidebar-bg`, `panel-bg`, `comment-bg`, `pill-bg`, `count-bg` are theme colours with web's per-theme choices as values. `shadow` gained a signed `x` (absent is 0; negative falls to the left), and `shadow.panel` is the Mac popout's `radius 16, x 2, y 4` (Decided, agent, 2026-11-20: the Mac's, the source of the panel design; its alpha is the iPad's 0.18, the one native opacity on record; a client on the panel's other edge mirrors `x`). | web's pin and its `--theme-*` definitions follow; card glass stays web's own until a component spec names it |
 | DS10 | VS Code takes the editor's colours | product meanings only (priority order, overdue, glyphs) | astrid-vscode, by design | permanent |
 | DS11 | Detail field icon column: field content starts under the title | 62 comfortable (16 + 34 + 12), 29 compact (19 + 10) | Nobody: web's field rows and title row share `layout.row-gap`, so content starts at 62 (AWTD-1617) | closed on web |
 | DS12 | Subtask indent per depth, at most four deep | 16 | Nobody: web indents `layout.subtask-indent` per depth, four deep at most (AWTD-1617) | closed on web |
