@@ -1318,10 +1318,10 @@ mod tests {
             .builds_the_core());
     }
 
-    /// Nine copies, six repositories, in order and without repeats — so naming `../astrid-web` once
+    /// Ten copies, six repositories, in order and without repeats — so naming `../astrid-web` once
     /// serves both of that repository's rows.
     #[test]
-    fn nine_copies_live_in_six_repositories_97285677() {
+    fn ten_copies_live_in_six_repositories_97285677() {
         let repos: Vec<String> = repositories().collect();
         assert_eq!(
             repos,
@@ -1334,7 +1334,7 @@ mod tests {
                 "astrid-code"
             ]
         );
-        assert_eq!(CONSUMERS.len(), 9);
+        assert_eq!(CONSUMERS.len(), 10);
     }
 
     /// The lookup is exact, but a key that CONTAINED another would still be a trap for anyone

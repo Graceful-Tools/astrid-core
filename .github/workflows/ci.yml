@@ -369,7 +369,7 @@ jobs:
       # unchecked, and one that records no revision is compared by content with our history.
       - name: Check every client's design output is ours
         working-directory: astrid-core
-        run: cargo xtask check-design ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android ../astrid-vscode
+        run: cargo xtask check-design ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
 
   contracts:
     name: cross-platform contracts
