@@ -349,3 +349,66 @@ async fn aitd461_the_status_menu_has_no_done() {
     assert_eq!(ids, ["waiting", "__virtual_inbox__", "ready", "doing"]);
     assert_eq!(options["value"]["current"], "__virtual_done__");
 }
+
+/// ADEV-140 (after ADEV-131): the board's "Done · 15 ✓ This week" header names a period, so Done
+/// holds every card finished since it — by `completedAt`, else `updatedAt` — not the list's
+/// recently-completed window, which defaults to a day and capped every period at it. A pull to
+/// refresh brought the server's completions in and the count still could not show them.
+/// `doneSince: "all"` is All time. The clock is 2026-09-07T12:00Z.
+#[tokio::test]
+async fn adev140_done_since_overrides_the_window() {
+    let finished = json!([
+        card(
+            "today",
+            json!({ "completed": true, "completedAt": "2026-09-07T10:00:00Z",
+                    "updatedAt": "2026-09-07T10:00:00Z" })
+        ),
+        card(
+            "this-week",
+            json!({ "completed": true, "completedAt": "2026-09-03T10:00:00Z",
+                    "updatedAt": "2026-09-03T10:00:00Z" })
+        ),
+        card(
+            "touched-lately",
+            json!({ "completed": true, "completedAt": "2026-08-20T10:00:00Z",
+                    "updatedAt": "2026-09-07T11:00:00Z" })
+        ),
+        card(
+            "no-stamp",
+            json!({ "completed": true, "updatedAt": "2026-09-02T10:00:00Z" })
+        ),
+        card("open", json!({ "completed": false })),
+    ]);
+    let app = board_with(json!({ "filterCompletion": "hide" }), finished, json!([])).await;
+
+    let drawn = columns(
+        &app,
+        json!({ "listId": "l1", "doneSince": "2026-09-01T00:00:00Z" }),
+    )
+    .await;
+    assert_eq!(
+        column(&drawn, "__virtual_done__"),
+        ["today", "this-week", "no-stamp"],
+        "every card finished since the period, newest first; a hidden filter does not apply"
+    );
+
+    let drawn = columns(&app, json!({ "listId": "l1", "doneSince": "all" })).await;
+    assert_eq!(
+        column(&drawn, "__virtual_done__"),
+        ["today", "this-week", "no-stamp", "touched-lately"],
+        "All time is every finished card, newest first by when it was finished"
+    );
+
+    let drawn = columns(&app, json!({ "listId": "l1" })).await;
+    assert!(
+        column(&drawn, "__virtual_done__").is_empty(),
+        "without doneSince the list's own filter still decides"
+    );
+
+    let refused = call(
+        &app,
+        json!({ "kind": "board", "listId": "l1", "doneSince": "last tuesday" }),
+    )
+    .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+}

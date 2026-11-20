@@ -2643,6 +2643,14 @@
     {
       "description": "The board a list belongs to: its columns, and the cards in each.\n\nAnswers with rows, so a card draws like a row — see [`crate::board`] for why a column id is\na role rather than a list id.\n\nThe cards are iOS's (AITD-461, `docs/CONTRACTS.md` D43): top-level tasks only, in the\nopened list's manual order, with Done holding recent work as that list's completion filter\nand window say. Every card comes back unless `limit` asks for a window.",
       "properties": {
+        "doneSince": {
+          "default": null,
+          "description": "How far back Done reaches, when the board's header names a period: an RFC 3339\ninstant, or `\"all\"`. Done then holds every card finished since it, in place of the\nopened list's completion filter and window (ADEV-140).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idsOnly": {
           "default": false,
           "description": "Each column's card ids rather than rows — for a shell that draws its own copies.",
@@ -7075,6 +7083,14 @@
     {
       "description": "One row of a project's multi-list board: `listId`'s cards under the PROJECT's columns, in\n[`Command::Board`]'s shape (AWTD-1676, D67). The row list's manual order and Done window\narrange it; a role the project has no column for is Inbox.",
       "properties": {
+        "doneSince": {
+          "default": null,
+          "description": "How far back Done reaches, when the board's header names a period: an RFC 3339\ninstant, or `\"all\"`. Done then holds every card finished since it, in place of the\nopened list's completion filter and window (ADEV-140).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idsOnly": {
           "default": false,
           "description": "Each column's card ids rather than rows.",

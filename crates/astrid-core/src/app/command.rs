@@ -315,6 +315,11 @@ pub enum Command {
         /// Each column's card ids rather than rows — for a shell that draws its own copies.
         #[serde(default)]
         ids_only: bool,
+        /// How far back Done reaches, when the board's header names a period: an RFC 3339
+        /// instant, or `"all"`. Done then holds every card finished since it, in place of the
+        /// opened list's completion filter and window (ADEV-140).
+        #[serde(default)]
+        done_since: Option<String>,
     },
     /// Drop a card at a slot in a column (AITD-461): the move a drag makes, plus the card's new
     /// place in the opened list's manual order — what iOS's board drop writes.
@@ -1692,6 +1697,11 @@ pub enum Command {
         /// Each column's card ids rather than rows.
         #[serde(default)]
         ids_only: bool,
+        /// How far back Done reaches, when the board's header names a period: an RFC 3339
+        /// instant, or `"all"`. Done then holds every card finished since it, in place of the
+        /// opened list's completion filter and window (ADEV-140).
+        #[serde(default)]
+        done_since: Option<String>,
     },
     /// Fetch what the deployment supports.
     RefreshCapabilities,

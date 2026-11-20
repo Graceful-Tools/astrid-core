@@ -169,8 +169,21 @@ pub fn row_columns<'a>(
     now: Timestamp,
     offset: Offset,
 ) -> Vec<Vec<&'a Task>> {
+    row_columns_since(row, row_list_id, tasks, columns, None, now, offset)
+}
+
+/// [`row_columns`], with Done reaching back to the period the board's header names (ADEV-140).
+pub fn row_columns_since<'a>(
+    row: Option<&TaskList>,
+    row_list_id: &str,
+    tasks: &'a [Task],
+    columns: &[BoardColumn],
+    done_since: Option<board_cards::DoneSince>,
+    now: Timestamp,
+    offset: Offset,
+) -> Vec<Vec<&'a Task>> {
     let cards = row_cards(tasks, row_list_id);
-    let arrangement = BoardList::of(row);
+    let arrangement = BoardList::of(row).with_done_since(done_since);
     columns
         .iter()
         .map(|column| board_cards::column_cards(&cards, column, columns, arrangement, now, offset))
