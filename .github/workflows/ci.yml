@@ -364,11 +364,12 @@ jobs:
 
       # The design tokens are pinned the same way: astrid-web vendors design/generated at the
       # revision in its packages/astrid-design/REVISION. Here because the comparison reads that
-      # revision out of this repository's history, which only this job fetches whole. Before web
-      # has vendored a copy the row is reported unchecked.
-      - name: Check astrid-web's design tokens are ours
+      # revision out of this repository's history, which only this job fetches whole. Every client
+      # that vendors tokens is named (ADEV-162); one whose checkout is not here is reported
+      # unchecked, and one that records no revision is compared by content with our history.
+      - name: Check every client's design output is ours
         working-directory: astrid-core
-        run: cargo xtask check-design ../astrid-web
+        run: cargo xtask check-design ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
 
   contracts:
     name: cross-platform contracts
