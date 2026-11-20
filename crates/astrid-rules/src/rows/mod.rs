@@ -143,6 +143,29 @@ impl LeadingControl {
         LeadingControl::Avatar(assignee.to_string())
     }
 
+    /// Which control a row draws, given whether the task is completed (ADEV-147).
+    ///
+    /// **A completed task is the checked checkbox, whoever holds it.** The mark has to be able to
+    /// read as checked, and neither the unassigned mark nor someone else's photo can — so a
+    /// finished task assigned to somebody else looked unfinished on every client (Jon,
+    /// 2026-11-20: a checkmark "even when assignment is to another user"). Until then only
+    /// completed + unassigned fell back to the checkbox.
+    ///
+    /// Only the MARK changes. Someone else's task still opens the picker on a tap rather than
+    /// reopening it: [`TaskRow::build`] decides the action from the assignee, not from this mark.
+    /// `contracts/fixtures/leading-control.json` is astrid-web's `taskLeadingControlKind` run over
+    /// the same table.
+    pub fn for_row(
+        assignee_id: Option<&str>,
+        current_user_id: Option<&str>,
+        completed: bool,
+    ) -> LeadingControl {
+        if completed {
+            return LeadingControl::Checkbox;
+        }
+        LeadingControl::for_task(assignee_id, current_user_id)
+    }
+
     /// Complete the task, or open the picker?
     ///
     /// iOS's `TaskLeadingControl.action(surface:kind:currentUserId:)`, which this
@@ -450,19 +473,27 @@ impl TaskRow {
             .assignee_id
             .as_deref()
             .or(task.assignee.as_ref().map(|user| user.id.as_str()));
-        let mut leading = LeadingControl::for_task(assignee_id, context.current_user_id);
-        // The mark has to be able to read as checked, and the unassigned mark cannot
-        // (`astrid-web/docs/PRODUCT_CONTRACT.md` §4). Only this pair: someone else's photo still
-        // reads as theirs.
-        if task.completed && leading == LeadingControl::Unassigned {
-            leading = LeadingControl::Checkbox;
-        }
+        // The mark has to be able to read as checked (ADEV-147): a completed task is the
+        // checkbox whoever holds it.
+        let mut leading =
+            LeadingControl::for_row(assignee_id, context.current_user_id, task.completed);
         // A task in a public list the reader cannot edit is copied, not completed (task
         // f6bc59e8): the web swaps the checkbox for its copy control on such rows.
         if copy_only(task, context.lists, context.current_user_id) {
             leading = LeadingControl::Copy;
         }
-        let action = leading.action(context.surface, context.current_user_id);
+        // The action is decided from the ASSIGNEE, not from the mark: a completed task of someone
+        // else's wears the checkbox now, and a tap on it must still open the picker rather than
+        // reopen their work (AITD-375). `for_task` is the mark that rule was written against.
+        let action = match &leading {
+            LeadingControl::Checkbox
+                if LeadingControl::is_someone_elses_task(assignee_id, context.current_user_id) =>
+            {
+                LeadingControl::for_task(assignee_id, context.current_user_id)
+                    .action(context.surface, context.current_user_id)
+            }
+            _ => leading.action(context.surface, context.current_user_id),
+        };
         // Answered here rather than left to the shell (task 3c0dfb73): the rule needs the surface,
         // which a row on the wire does not carry, so a client holding only
         // the row could not have worked it out — and the one client that tried would be deciding.
