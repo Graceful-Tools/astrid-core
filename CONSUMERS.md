@@ -1,6 +1,6 @@
 # Who pins this core, and at which revision
 
-**Nine copies of this core exist, in six repositories**, each taken by **git revision** rather than
+**Ten copies of this core exist, in six repositories**, each taken by **git revision** rather than
 by a published version. That is deliberate — there is no crates.io release and the fixtures move
 with the code — but it means the core has nine live versions in the world at any moment, and until
 2026-11-02 nothing anywhere said what they were. The Windows pin was read as 96 commits behind in
@@ -21,6 +21,7 @@ by `<checkout>/<copy>`, not by its repository.
 |---|---|---|---|---|
 | `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `a718622ea1e110f3f0d0e28eefa4315fc7ff8e53` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
+| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `00d05b1a364a14d4f606a1b9e428ebf29ebc36e9` |
 | `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
 | `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `4b7df692d1cac2e0cff150c23314079accdc3598` |
@@ -56,7 +57,34 @@ that bump is a client release decision.
 recording a tenth copy is a row here and nothing in `crates/xtask`. What the code still holds is
 which rows must *exist*, so a row cannot be deleted by a bad merge and go unnoticed.
 
-### `astrid-ios/design` is recorded but cannot be checked
+**`astrid-web/strings` is the only strings copy** (ADEV-162): web vendors the catalog's output, the
+other clients harvest words or gate on the key list (strings/README.md → *Adoption*), so they hold
+no copy to pin. A client that starts vendoring `strings/generated` adds its row in the same change.
+
+**`astrid-android/design` and `astrid-vscode/design` have no row yet.** Both vendor generated design
+output, and neither records the revision it came from, so a row would have to be a guess. They are
+nevertheless checked: `cargo xtask check-design` compares each client's vendored files by content
+(see below), which needs no row. The rows follow when each client keeps a `REVISION` beside its
+copy.
+
+### `cargo xtask check-design` checks every client's copy (ADEV-162)
+
+`check-design [client checkouts…]` compares what each of astrid-web, astrid-windows, astrid-ios,
+astrid-android and astrid-vscode vendors with this repository's generated files, by content. The
+client list is `CLIENTS` in `crates/xtask/src/design.rs`. How the revision is found, in order:
+
+1. the client's `REVISION` file (web, Windows);
+2. an `astrid-core-revision:` line in the first lines of a vendored file. Core's own generated
+   files cannot carry it, because a file cannot name the commit that contains it, so it is written
+   by whoever vendors the copy;
+3. none recorded (iOS, Android, VS Code today): each vendored file must equal this repository's at
+   **some commit on `main`**. That catches a hand-edited copy and one generated on an unmerged
+   branch, and it prints the commit the copy equals.
+
+A client named on the command line that differs fails the check; one found beside this repository
+is reported only, and a missing checkout is *unchecked*.
+
+### `astrid-ios/design` is recorded but cannot be checked by `check-pins`
 
 `AstridTokens.swift`'s header carries what generated it and a `body-sha256` of its contents — and a
 content hash is not a revision. It answers *has this copy been edited?*, not *which commit was it
