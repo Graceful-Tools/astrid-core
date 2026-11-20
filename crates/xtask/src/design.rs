@@ -99,8 +99,8 @@ const SURFACE_INVERSE: &str = "surface-inverse";
 /// a notice or a badge whose label is the ink. The web's `--theme-wash-opacity`.
 const INK_WASH: f64 = 0.12;
 
-/// The surfaces an ink is drawn on: `bg-secondary`, and the card. The tokens do not name the card
-/// yet (register DS9); it is the web's `--theme-surface`: `bg-hover` (the white) on a light theme,
+/// The surfaces an ink is drawn on: `bg-secondary`, and the card (the `surface` token, DS9). Here
+/// the card is written by the background it equals: `bg-hover` (the white) on a light theme,
 /// `bg-secondary` on a dark one. The page (`bg-primary`) is not held to this, because a theme's
 /// page may be a colour (Ocean's cyan), where a status colour is not drawn straight onto it.
 fn ink_surfaces(appearance: &str) -> &'static [&'static str] {
@@ -682,7 +682,8 @@ fn web_css(tokens: &Tokens) -> String {
     }
     for (name, shadow) in object(&tokens.raw, "shadow") {
         css.push_str(&format!(
-            "  --astrid-shadow-{name}: 0 {}px {}px rgba(0, 0, 0, {});\n",
+            "  --astrid-shadow-{name}: {} {}px {}px rgba(0, 0, 0, {});\n",
+            shadow_x_css(&shadow),
             number(&shadow["y"]),
             number(&shadow["blur"]),
             number(&shadow["alpha"])
@@ -855,10 +856,11 @@ fn apple_swift(tokens: &Tokens) -> String {
     swift.push_str("    }\n\n    enum Shadow {\n");
     for (name, shadow) in object(&tokens.raw, "shadow") {
         swift.push_str(&format!(
-            "        static let {}: (color: Color, radius: CGFloat, x: CGFloat, y: CGFloat) = (Color.black.opacity({}), {}, 0, {})\n",
+            "        static let {}: (color: Color, radius: CGFloat, x: CGFloat, y: CGFloat) = (Color.black.opacity({}), {}, {}, {})\n",
             camel(&name),
             number(&shadow["alpha"]),
             number(&shadow["blur"]),
+            shadow_x(&shadow),
             number(&shadow["y"])
         ));
     }
@@ -1021,7 +1023,7 @@ fn compose_kotlin(tokens: &Tokens) -> String {
     }
     kt.push_str(")\n\n");
 
-    kt.push_str("/** A shadow as its three parts: Compose draws one per component. */\ndata class AstridShadow(val y: Dp, val blur: Dp, val alpha: Float)\n\n");
+    kt.push_str("/** A shadow as its parts: Compose draws one per component. `x` is signed; negative falls to the left. */\ndata class AstridShadow(val y: Dp, val blur: Dp, val alpha: Float, val x: Dp = 0.dp)\n\n");
     kt.push_str("/** A text style's measurements. The family stays the platform's. */\ndata class AstridTextStyle(val size: TextUnit, val weight: FontWeight)\n\n");
 
     // `palette.` rather than the bare property: Material's slot names and Astrid's token names
@@ -1075,8 +1077,9 @@ fn compose_kotlin(tokens: &Tokens) -> String {
     kt.push_str("    }\n\n    object Shadow {\n");
     for (name, shadow) in object(&tokens.raw, "shadow") {
         kt.push_str(&format!(
-            "        val {}: AstridShadow = AstridShadow(y = {}.dp, blur = {}.dp, alpha = {}f)\n",
+            "        val {}: AstridShadow = AstridShadow({}y = {}.dp, blur = {}.dp, alpha = {}f)\n",
             camel(&name),
+            shadow_x_kotlin(&shadow),
             number(&shadow["y"]),
             number(&shadow["blur"]),
             number(&shadow["alpha"])
@@ -1149,6 +1152,25 @@ fn compose_kotlin(tokens: &Tokens) -> String {
     kt
 }
 
+/// A shadow's horizontal offset, signed: absent is 0, so the vertical-only shadows stay as they were.
+fn shadow_x(shadow: &Value) -> String {
+    shadow.get("x").map_or_else(|| "0".to_string(), number)
+}
+
+fn shadow_x_css(shadow: &Value) -> String {
+    match shadow_x(shadow).as_str() {
+        "0" => "0".to_string(),
+        x => format!("{x}px"),
+    }
+}
+
+fn shadow_x_kotlin(shadow: &Value) -> String {
+    match shadow_x(shadow).as_str() {
+        "0" => String::new(),
+        x => format!("x = {x}.dp, "),
+    }
+}
+
 fn kotlin_type(key: &str) -> &'static str {
     if unit(key).is_empty() {
         "Float"
@@ -1156,16 +1178,6 @@ fn kotlin_type(key: &str) -> &'static str {
         "Dp"
     }
 }
-
-/// The names the Windows shell already gives a few brushes, so adopting the generated file is a
-/// deletion of the hand copies rather than a rename of every call site: (brush, light token, dark
-/// token). A brush can be a different token in each appearance: the shell's surface is the card,
-/// `bg-hover` on light and `bg-secondary` on dark (DS9, ADEV-1). The shell's other names
-/// (`AstridBorder`, `AstridTextMuted`) are already the tokens' own brush names, so they need no row.
-const XAML_ALIASES: &[(&str, &str, &str)] = &[
-    ("AstridSurface", "bg-hover", "bg-secondary"),
-    ("AstridSurfaceHover", "bg-tertiary", "bg-tertiary"),
-];
 
 /// WinUI's own brush keys, overridden because DS26 wants one accent fill in every theme where WinUI
 /// would derive a pale one from `SystemAccentColor`: (WinUI key, token). Emitted in the Default,
@@ -1195,7 +1207,10 @@ fn high_contrast_colour(key: &str) -> &'static str {
         "SystemColorHighlightColor"
     } else if key == "accent-text" {
         "SystemColorHighlightTextColor"
-    } else if key.starts_with("bg-") || key.ends_with("-bg") || key == "surface-inverse" {
+    } else if key.starts_with("bg-")
+        || key.ends_with("-bg")
+        || matches!(key, "surface" | "surface-hover" | "surface-inverse")
+    {
         "SystemColorWindowColor"
     } else if key.contains("disabled") {
         "SystemColorGrayTextColor"
@@ -1255,13 +1270,6 @@ fn windows_xaml(tokens: &Tokens) -> String {
         for key in &keys {
             if let Some(colour) = colour(key) {
                 xaml.push_str(&brush(&xaml_name(key), &colour));
-            }
-        }
-        let dark = theme.is_some_and(|(_, theme)| theme.appearance == "dark");
-        for (alias, light_token, dark_token) in XAML_ALIASES {
-            let token = if dark { dark_token } else { light_token };
-            if let Some(colour) = colour(token) {
-                xaml.push_str(&brush(alias, &colour));
             }
         }
         if theme.is_some() {
@@ -2291,7 +2299,8 @@ mod tests {
 
     /// ADEV-1, gaps 2 and 3: the five names astrid-windows' `GeneratedNames` table maps by hand
     /// (`DesignTokenTests.cs`), each the token that table names in that theme. `AstridSurface` is
-    /// the card (DS9): `bg-hover` on light, `bg-secondary` on dark.
+    /// the card (DS9, ADEV-160): the `surface` token itself, no longer an alias of `bg-hover` on
+    /// light and `bg-secondary` on dark.
     #[test]
     fn xaml_emits_the_shells_surface_and_winui_accent_names_adev_1() {
         let xaml = committed_xaml();
@@ -2355,8 +2364,33 @@ mod tests {
         }
     }
 
-    /// ADEV-1: an alias that is also a token's own brush name would be a duplicate key, which is
-    /// not valid XAML. Every key in a dictionary is unique.
+    /// ADEV-160 (DS9): the surfaces are tokens, and the panel shadow carries its direction into
+    /// every client's file.
+    #[test]
+    fn surfaces_and_the_directional_panel_shadow_are_tokens_adev_160() {
+        let xaml = committed_xaml();
+        for (dictionary, surface, panel) in [
+            ("Light", "#FFFFFF", "#FFFFFF"),
+            ("Dark", "#1F2937", "#1F2937"),
+        ] {
+            let brushes = xaml_brushes(&xaml, dictionary);
+            assert!(brushes.contains(&("AstridSurface".into(), surface.into())));
+            assert!(brushes.contains(&("AstridPanelBg".into(), panel.into())));
+            for name in ["AstridSurfaceBorder", "AstridSidebarBg", "AstridCommentBg"] {
+                assert!(brushes.iter().any(|(key, _)| key == name), "{name}");
+            }
+        }
+        let root = crate::repo_root();
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).expect(path);
+        assert!(read("design/generated/web/astrid-tokens.css")
+            .contains("--astrid-shadow-panel: -2px 4px 16px rgba(0, 0, 0, 0.18);"));
+        assert!(read("design/generated/android/AstridTokens.kt")
+            .contains("AstridShadow(x = -2.dp, y = 4.dp, blur = 16.dp, alpha = 0.18f)"));
+        assert!(read("design/generated/apple/AstridTokens.swift")
+            .contains("(Color.black.opacity(0.18), 16, -2, 4)"));
+    }
+
+    /// ADEV-1: a duplicate key is not valid XAML. Every key in a dictionary is unique.
     #[test]
     fn xaml_keys_are_unique_in_every_dictionary_adev_1() {
         let xaml = committed_xaml();
@@ -2367,10 +2401,6 @@ mod tests {
             keys.sort();
             keys.dedup();
             assert_eq!(keys.len(), all, "duplicate key in {dictionary}");
-        }
-        for (alias, light, dark) in XAML_ALIASES {
-            assert_ne!(*alias, xaml_name(light), "{alias} is a token's own name");
-            assert_ne!(*alias, xaml_name(dark), "{alias} is a token's own name");
         }
     }
 
