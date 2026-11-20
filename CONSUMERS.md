@@ -24,7 +24,7 @@ by `<checkout>/<copy>`, not by its repository.
 | `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
 | `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `4b7df692d1cac2e0cff150c23314079accdc3598` |
-| `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `a503a62039fca9a19ce7802a2d9f6d38ae5f89d8` |
+| `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
 | `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
 | `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
@@ -60,8 +60,11 @@ which rows must *exist*, so a row cannot be deleted by a bad merge and go unnoti
 
 `AstridTokens.swift`'s header carries what generated it and a `body-sha256` of its contents — and a
 content hash is not a revision. It answers *has this copy been edited?*, not *which commit was it
-generated from*, so the revision above is the one the 2026-11-11 review read and **nothing in
-astrid-ios can confirm it**. `check-pins` reports the row as *unchecked* rather than comparing a
+generated from*, so **nothing in
+astrid-ios can confirm the revision above**. It was `a503a62`, the one the 2026-11-11 review read, until
+2026-11-20, when the copy on astrid-ios `main` was hashed against `design/generated/apple/AstridTokens.swift`
+at each candidate: it differs from `a503a62`'s and is byte-identical to `2acba94`'s, which is also
+what `main` generates today (ADEV-155). That is a reading by hand, not a check. `check-pins` reports the row as *unchecked* rather than comparing a
 sha256 against a git sha.
 
 Two ways to close it, either of which this check already understands: astrid-ios keeps a `REVISION`
