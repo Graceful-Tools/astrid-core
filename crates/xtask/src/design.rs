@@ -99,6 +99,18 @@ const SURFACE_INVERSE: &str = "surface-inverse";
 /// a notice or a badge whose label is the ink. The web's `--theme-wash-opacity`.
 const INK_WASH: f64 = 0.12;
 
+/// A pill (ADEV-153): the meaning's base colour at `pill.fill-opacity` over the card, with the
+/// meaning's ink as the label. iOS's wash is 15%, not the general `INK_WASH`; a label is checked
+/// on the pill's own wash, so the stronger tint cannot take it under 4.5:1.
+const PILL_TEXT_INK: &str = "ink";
+
+/// The radius a pill takes: half its height, so the ends are semicircles. Not a number, because
+/// the height is the type step plus the padding and differs per platform.
+const PILL_CAPSULE: &str = "capsule";
+
+/// A capsule radius written as a length: far more than any pill is tall.
+const CAPSULE_LENGTH: u32 = 9999;
+
 /// The surfaces an ink is drawn on: `bg-secondary`, and the card (the `surface` token, DS9). Here
 /// the card is written by the background it equals: `bg-hover` (the white) on a light theme,
 /// `bg-secondary` on a dark one. The page (`bg-primary`) is not held to this, because a theme's
@@ -298,6 +310,8 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
         }
     }
 
+    problems.extend(check_pill(&raw, &themes, &brand));
+
     for (name, theme) in &themes {
         for (ink_name, surface) in INK_ON_OWN_SURFACE {
             let (Some(ink), Some(on)) = (literal(theme, ink_name), literal(theme, surface)) else {
@@ -445,6 +459,102 @@ pub fn parse(source: &str, theme_names: &[&str]) -> Result<Tokens, Vec<String>> 
     } else {
         Err(problems)
     }
+}
+
+/// The pill group is well formed, names only meanings that have an ink, and its label (the ink)
+/// reads on the pill's own wash over the card in every theme (ADEV-153).
+fn check_pill(
+    raw: &Map<String, Value>,
+    themes: &[(String, Theme)],
+    brand: &BTreeMap<String, (u8, u8, u8)>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    let pill = object(raw, "pill");
+    // Absent is the committed file's problem (`the_pill_is_ios_s_capsule_...` reads it), so a
+    // test's small fixture need not carry a pill; the emitters read it from the committed source.
+    if pill.is_empty() {
+        return problems;
+    }
+    let fill = pill.get("fill-opacity").and_then(Value::as_f64);
+    for key in ["fill-opacity", "stroke-opacity"] {
+        match pill.get(key).and_then(Value::as_f64) {
+            Some(opacity) if opacity > 0.0 && opacity <= 1.0 => {}
+            _ => problems.push(format!("pill.{key} must be a number above 0 and at most 1")),
+        }
+    }
+    for key in ["stroke-width", "padding-x", "padding-y"] {
+        if !pill
+            .get(key)
+            .and_then(Value::as_f64)
+            .is_some_and(|n| n >= 0.0)
+        {
+            problems.push(format!("pill.{key} must be a length, 0 or more"));
+        }
+    }
+    if pill.get("radius").and_then(Value::as_str) != Some(PILL_CAPSULE) {
+        problems.push(format!("pill.radius must be \"{PILL_CAPSULE}\""));
+    }
+    if pill.get("text").and_then(Value::as_str) != Some(PILL_TEXT_INK) {
+        problems.push(format!(
+            "pill.text must be \"{PILL_TEXT_INK}\": text on a surface is the ink (DS25)"
+        ));
+    }
+    let step = pill.get("type").and_then(Value::as_str).unwrap_or_default();
+    if !object(raw, "type")
+        .get("comfortable")
+        .is_some_and(|styles| styles.get(step).is_some())
+    {
+        problems.push(format!("pill.type {step:?} is not a type.comfortable step"));
+    }
+    let states = pill_states(&pill);
+    if states.is_empty() {
+        problems.push("pill.states must map each board state to a meaning".to_string());
+    }
+    for (state, meaning) in &states {
+        if !INK_MEANINGS.contains(&meaning.as_str()) {
+            problems.push(format!(
+                "pill.states.{state} is {meaning:?}, which has no ink; use one of {INK_MEANINGS:?}"
+            ));
+            continue;
+        }
+        let Some(fill) = fill else { continue };
+        for (name, theme) in themes {
+            let literal = |key: &str| match theme.colours.get(key)? {
+                Colour::Hex(r, g, b) => Some((*r, *g, *b)),
+                Colour::Brand(reference) => brand.get(reference).copied(),
+            };
+            let (Some(base), Some(ink), Some(card)) = (
+                literal(meaning),
+                literal(&format!("{meaning}-ink")),
+                literal(ink_card(&theme.appearance)),
+            ) else {
+                continue;
+            };
+            let ratio = contrast(ink, over(base, card, fill));
+            if ratio < AA_BODY {
+                problems.push(format!(
+                    "themes.{name}: {meaning}-ink on the {state} pill's wash is {ratio:.2}:1, \
+                     under {AA_BODY}:1"
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// The board state to meaning pairs.
+fn pill_states(pill: &Map<String, Value>) -> Vec<(String, String)> {
+    pill.get("states")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(state, meaning)| {
+            (
+                state.clone(),
+                meaning.as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
 }
 
 fn object(raw: &Map<String, Value>, key: &str) -> Map<String, Value> {
@@ -735,6 +845,7 @@ fn web_css(tokens: &Tokens) -> String {
             }
         }
     }
+    css.push_str(&web_pill(tokens));
     for (name, value) in object(&tokens.raw, "state") {
         css.push_str(&format!("  --astrid-state-{name}: {};\n", number(&value)));
     }
@@ -756,6 +867,38 @@ fn web_css(tokens: &Tokens) -> String {
             css.push_str(&format!("  --astrid-{key}: {value};\n"));
         }
         css.push_str("}\n");
+    }
+    css
+}
+
+/// The pill's numbers, its type step resolved, and each board state's meaning as the two colours
+/// it draws, so `rgb(var(--astrid-pill-ready-fill))` follows the theme.
+fn web_pill(tokens: &Tokens) -> String {
+    let pill = object(&tokens.raw, "pill");
+    let mut css = String::new();
+    if pill.is_empty() {
+        return css;
+    }
+    for key in ["fill-opacity", "stroke-opacity"] {
+        css.push_str(&format!("  --astrid-pill-{key}: {};\n", number(&pill[key])));
+    }
+    for key in ["stroke-width", "padding-x", "padding-y"] {
+        css.push_str(&format!(
+            "  --astrid-pill-{key}: {}px;\n",
+            number(&pill[key])
+        ));
+    }
+    css.push_str(&format!("  --astrid-pill-radius: {CAPSULE_LENGTH}px;\n"));
+    let style = &tokens.raw["type"]["comfortable"][pill["type"].as_str().unwrap_or_default()];
+    css.push_str(&format!(
+        "  --astrid-pill-type-size: {}px;\n  --astrid-pill-type-weight: {};\n",
+        number(&style["size"]),
+        number(&style["weight"])
+    ));
+    for (state, meaning) in pill_states(&pill) {
+        css.push_str(&format!(
+            "  --astrid-pill-{state}-fill: var(--astrid-{meaning});\n  --astrid-pill-{state}-ink: var(--astrid-{meaning}-ink);\n"
+        ));
     }
     css
 }
@@ -916,6 +1059,25 @@ fn apple_swift(tokens: &Tokens) -> String {
             }
         }
         swift.push_str("    }\n");
+    }
+    let pill = object(&tokens.raw, "pill");
+    if !pill.is_empty() {
+        let style = &tokens.raw["type"]["comfortable"][pill["type"].as_str().unwrap_or_default()];
+        swift.push_str(&format!(
+        "\n    /// A capsule: the meaning's colour at `fillOpacity` behind, `strokeOpacity` round it, the\n    /// meaning's ink as the label. `states` names the palette colour each board state draws.\n    enum Pill {{\n        static let fillOpacity: Double = {}\n        static let strokeOpacity: Double = {}\n        static let strokeWidth: CGFloat = {}\n        static let paddingX: CGFloat = {}\n        static let paddingY: CGFloat = {}\n        static let type: (size: CGFloat, weight: Int) = ({}, {})\n        static let states: [String: String] = [{}]\n    }}\n",
+        number(&pill["fill-opacity"]),
+        number(&pill["stroke-opacity"]),
+        number(&pill["stroke-width"]),
+        number(&pill["padding-x"]),
+        number(&pill["padding-y"]),
+        number(&style["size"]),
+        number(&style["weight"]),
+        pill_states(&pill)
+            .iter()
+            .map(|(state, meaning)| format!("\"{state}\": \"{meaning}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
     }
     swift.push_str("\n    enum State {\n");
     for (name, value) in object(&tokens.raw, "state") {
@@ -1140,6 +1302,25 @@ fn compose_kotlin(tokens: &Tokens) -> String {
         }
         kt.push_str("    }\n");
     }
+    let pill = object(&tokens.raw, "pill");
+    if !pill.is_empty() {
+        let style = &tokens.raw["type"]["comfortable"][pill["type"].as_str().unwrap_or_default()];
+        kt.push_str(&format!(
+        "\n    /** A capsule: the meaning's colour at `fillOpacity` behind, `strokeOpacity` round it, the meaning's ink as the label. `states` names the palette colour each board state draws. */\n    object Pill {{\n        val fillOpacity: Float = {}f\n        val strokeOpacity: Float = {}f\n        val strokeWidth: Dp = {}.dp\n        val paddingX: Dp = {}.dp\n        val paddingY: Dp = {}.dp\n        val type: AstridTextStyle = AstridTextStyle(size = {}.sp, weight = FontWeight({}))\n        val states: Map<String, String> = mapOf({})\n    }}\n",
+        number(&pill["fill-opacity"]),
+        number(&pill["stroke-opacity"]),
+        number(&pill["stroke-width"]),
+        number(&pill["padding-x"]),
+        number(&pill["padding-y"]),
+        number(&style["size"]),
+        number(&style["weight"]),
+        pill_states(&pill)
+            .iter()
+            .map(|(state, meaning)| format!("\"{state}\" to \"{meaning}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    }
     kt.push_str("\n    object State {\n");
     for (name, value) in object(&tokens.raw, "state") {
         kt.push_str(&format!(
@@ -1321,11 +1502,43 @@ fn windows_xaml(tokens: &Tokens) -> String {
             ));
         }
     }
+    let pill = object(&tokens.raw, "pill");
+    let style = &tokens.raw["type"]["comfortable"]
+        [pill.get("type").and_then(Value::as_str).unwrap_or_default()];
+    for (key, value) in pill_sizes(&pill, style) {
+        xaml.push_str(&xaml_size(key, value));
+    }
+    // The brush a state draws is the meaning's own (`AstridSuccess`, `AstridSuccessInk`).
+    for (state, meaning) in pill_states(&pill) {
+        xaml.push_str(&format!(
+            "    <x:String x:Key=\"AstridPill{}Meaning\">{meaning}</x:String>\n",
+            capitalised(&state)
+        ));
+    }
     for (name, value) in object(&tokens.raw, "state") {
         xaml.push_str(&xaml_size(&name, &value));
     }
     xaml.push_str("</ResourceDictionary>\n");
     xaml
+}
+
+/// The pill's lengths and ratios as XAML names, none if the source has no pill.
+fn pill_sizes<'a>(
+    pill: &'a Map<String, Value>,
+    style: &'a Value,
+) -> Vec<(&'static str, &'a Value)> {
+    if pill.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        ("pill-fill-opacity", &pill["fill-opacity"]),
+        ("pill-stroke-opacity", &pill["stroke-opacity"]),
+        ("pill-stroke-width", &pill["stroke-width"]),
+        ("pill-padding-x", &pill["padding-x"]),
+        ("pill-padding-y", &pill["padding-y"]),
+        ("pill-type-size", &style["size"]),
+        ("pill-type-weight", &style["weight"]),
+    ]
 }
 
 /// VS Code's workbench colours: (theme key, token). Without this the extension has no colour
@@ -2588,6 +2801,57 @@ mod tests {
                 "{relative} is stale; run cargo xtask gen-design"
             );
         }
+    }
+
+    /// ADEV-153: a pill's wash is iOS's 15%, its label is the ink, and each board state names a
+    /// meaning (inbox error, waiting warning, ready success, doing info, done accent).
+    #[test]
+    fn the_pill_is_ios_s_capsule_with_the_board_state_meanings() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        let pill = object(&tokens.raw, "pill");
+        assert_eq!(pill["fill-opacity"].as_f64(), Some(0.15));
+        assert_eq!(pill["stroke-opacity"].as_f64(), Some(0.4));
+        assert_eq!(pill["text"].as_str(), Some("ink"));
+        let states: Vec<(String, String)> = pill_states(&pill);
+        for (state, meaning) in [
+            ("inbox", "error"),
+            ("waiting", "warning"),
+            ("ready", "success"),
+            ("doing", "info"),
+            ("done", "accent"),
+        ] {
+            assert!(
+                states.contains(&(state.to_string(), meaning.to_string())),
+                "{state} should be {meaning}"
+            );
+        }
+        let css = web_css(&tokens);
+        assert!(css.contains("  --astrid-pill-fill-opacity: 0.15;"), "{css}");
+        assert!(
+            css.contains("  --astrid-pill-ready-ink: var(--astrid-success-ink);"),
+            "{css}"
+        );
+    }
+
+    /// ADEV-153: a pill naming a meaning with no ink, or a label the wash would swallow, is refused.
+    #[test]
+    fn a_pill_with_an_unreadable_label_or_an_unknown_meaning_is_refused() {
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let unknown = source.replace("\"inbox\": \"error\"", "\"inbox\": \"nope\"");
+        let problems = parse(&unknown, &core_theme_names()).expect_err("an unknown meaning");
+        assert!(
+            problems.iter().any(|p| p.contains("pill.states.inbox")),
+            "{problems:?}"
+        );
+        let heavy = source.replace("\"fill-opacity\": 0.15", "\"fill-opacity\": 1");
+        let problems = parse(&heavy, &core_theme_names()).expect_err("an opaque wash");
+        assert!(
+            problems.iter().any(|p| p.contains("pill's wash")),
+            "{problems:?}"
+        );
     }
 
     /// astrid-web AWTD-1625 (register DS24): Markdown headings are type tokens, so web stops
