@@ -21,7 +21,7 @@ by `<checkout>/<copy>`, not by its repository.
 |---|---|---|---|---|
 | `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `a718622ea1e110f3f0d0e28eefa4315fc7ff8e53` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `00d05b1a364a14d4f606a1b9e428ebf29ebc36e9` |
+| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `a24ae98eb58c5c29f43411c1303731d4e3d9b5df` |
 | `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
 | `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
 | `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `4b7df692d1cac2e0cff150c23314079accdc3598` |
@@ -61,23 +61,24 @@ which rows must *exist*, so a row cannot be deleted by a bad merge and go unnoti
 other clients harvest words or gate on the key list (strings/README.md → *Adoption*), so they hold
 no copy to pin. A client that starts vendoring `strings/generated` adds its row in the same change.
 
-**`astrid-android/design` and `astrid-vscode/design` have no row yet.** Both vendor generated design
-output, and neither records the revision it came from, so a row would have to be a guess. They are
-nevertheless checked: `cargo xtask check-design` compares each client's vendored files by content
-(see below), which needs no row. The rows follow when each client keeps a `REVISION` beside its
-copy.
+**`astrid-android/design` has no row yet.** It vendors `AstridTokens.kt` and does not record the
+revision it came from, so a row would have to be a guess. It is nevertheless checked:
+`cargo xtask check-design` compares the vendored file by content (see below), which needs no row.
+The row follows when the client keeps a `REVISION` beside its copy. astrid-vscode vendors no
+design output today (its webviews take the editor's colours, DS10), so it has nothing to check;
+when it ships the generated themes it joins `CLIENTS`.
 
 ### `cargo xtask check-design` checks every client's copy (ADEV-162)
 
-`check-design [client checkouts…]` compares what each of astrid-web, astrid-windows, astrid-ios,
-astrid-android and astrid-vscode vendors with this repository's generated files, by content. The
+`check-design [client checkouts…]` compares what each of astrid-web, astrid-windows, astrid-ios
+and astrid-android vendors with this repository's generated files, by content. The
 client list is `CLIENTS` in `crates/xtask/src/design.rs`. How the revision is found, in order:
 
 1. the client's `REVISION` file (web, Windows);
 2. an `astrid-core-revision:` line in the first lines of a vendored file. Core's own generated
    files cannot carry it, because a file cannot name the commit that contains it, so it is written
    by whoever vendors the copy;
-3. none recorded (iOS, Android, VS Code today): each vendored file must equal this repository's at
+3. none recorded (iOS, Android today): each vendored file must equal this repository's at
    **some commit on `main`**. That catches a hand-edited copy and one generated on an unmerged
    branch, and it prints the commit the copy equals.
 

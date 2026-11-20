@@ -1542,25 +1542,6 @@ const CLIENTS: &[Client] = &[
         )],
         assets: None,
     },
-    Client {
-        name: "astrid-vscode",
-        revision_file: None,
-        files: &[
-            (
-                "vscode/astrid-light-color-theme.json",
-                "themes/astrid-light-color-theme.json",
-            ),
-            (
-                "vscode/astrid-dark-color-theme.json",
-                "themes/astrid-dark-color-theme.json",
-            ),
-            (
-                "vscode/astrid-ocean-color-theme.json",
-                "themes/astrid-ocean-color-theme.json",
-            ),
-        ],
-        assets: None,
-    },
 ];
 
 /// `cargo xtask check-design [client checkouts…]`: the generated files are what the source
@@ -1743,7 +1724,7 @@ fn compare_at(root: &Path, client: &Client, checkout: &Path, revision: &str) -> 
     }
 }
 
-/// A client that records no revision (astrid-ios, astrid-android, astrid-vscode today): each
+/// A client that records no revision (astrid-ios, astrid-android today): each
 /// vendored file must be byte-identical to this repository's at **some commit on `main`**. That
 /// still catches a hand-edited copy and one generated on an unmerged branch, which is what the
 /// client's own hash gate cannot say, and it names the commit a copy equals (ADEV-162).
@@ -2675,7 +2656,6 @@ mod tests {
             "astrid-windows",
             "astrid-ios",
             "astrid-android",
-            "astrid-vscode",
         ] {
             assert!(names.contains(&expected), "{expected} is not checked");
         }
