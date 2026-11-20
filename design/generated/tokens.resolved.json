@@ -110,6 +110,23 @@
       "#FFFFFF"
     ]
   },
+  "pill": {
+    "fill-opacity": 0.15,
+    "padding-x": 8,
+    "padding-y": 2,
+    "radius": "capsule",
+    "states": {
+      "doing": "info",
+      "done": "accent",
+      "inbox": "error",
+      "ready": "success",
+      "waiting": "warning"
+    },
+    "stroke-opacity": 0.4,
+    "stroke-width": 1,
+    "text": "ink",
+    "type": "caption1"
+  },
   "radius": {
     "lg": 12,
     "md": 8,
@@ -300,7 +317,7 @@
         "priority-medium": "#FBBF24",
         "priority-none": "#6B7280",
         "success": "#22C55E",
-        "success-ink": "#15803D",
+        "success-ink": "#166534",
         "surface-inverse": "#111827",
         "text-inverted": "#FFFFFF",
         "text-muted": "#6B7280",
@@ -308,7 +325,7 @@
         "text-secondary": "#4B5563",
         "text-selected": "#111827",
         "warning": "#F59E0B",
-        "warning-ink": "#B45309"
+        "warning-ink": "#92400E"
       }
     },
     "ocean": {
@@ -367,7 +384,7 @@
         "priority-medium": "#FBBF24",
         "priority-none": "#6B7280",
         "success": "#22C55E",
-        "success-ink": "#15803D",
+        "success-ink": "#166534",
         "surface-inverse": "#111827",
         "text-inverted": "#FFFFFF",
         "text-muted": "#4B5563",
@@ -375,7 +392,7 @@
         "text-secondary": "#374151",
         "text-selected": "#000000",
         "warning": "#F59E0B",
-        "warning-ink": "#B45309"
+        "warning-ink": "#92400E"
       }
     }
   },
