@@ -217,14 +217,18 @@ Tranche 2 (AITD-660) added iOS as a source, which took the authored keys from 62
 
 ## Adoption
 
-**No client reads `generated/` yet.** This repository is the single source; switching each client
+**One client vendors `generated/`: astrid-web** (AWTD-1649). `scripts/sync-core-strings.mjs` copies
+the web output at a pinned revision (`lib/i18n/core-strings/REVISION`) and writes the core's values
+into web's own keys, with `divergent.json` listing where web still says something else. The other
+clients do not read it yet. This repository is the single source; switching each client
 over is its own task on its own board, because each means retiring that client's hand-maintained
 catalog and re-pointing its lookups — and web's half also retires `PRODUCT_CONTRACT.md` §2.
 
 **There are two ways in, and the cheaper one already works.**
 
 - **Read `generated/`.** The full switch: the client's lookups read this catalog's output and its
-  hand-maintained one is retired. Nobody has taken this path yet.
+  hand-maintained one is retired. astrid-web is part of the way down it (above): it vendors the
+output but keeps its own key names.
 - **Harvest the words and gate on the key list.** astrid-windows did this first (task `b63d8679`,
   2026-11-14). It copied the words it was missing from `strings/` into its own `Strings.cs` and
   `.resw`, and added `crates/astrid-ffi/tests/copy_catalog_contract.rs`, which holds that shell's
