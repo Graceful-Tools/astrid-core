@@ -17,13 +17,18 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             project_id,
             limit,
             ids_only,
-        } => board(
-            app,
-            list_id.as_deref(),
-            project_id.as_deref(),
-            limit,
-            ids_only,
-        ),
+            done_since,
+        } => match parse_done_since(done_since.as_deref()) {
+            Ok(done_since) => board(
+                app,
+                list_id.as_deref(),
+                project_id.as_deref(),
+                limit,
+                ids_only,
+                done_since,
+            ),
+            Err(failure) => Response::failed(failure),
+        },
         Command::DropBoardCard {
             task_id,
             column_id,
@@ -160,7 +165,11 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             list_id,
             limit,
             ids_only,
-        } => board_row(app, &project_id, &list_id, limit, ids_only),
+            done_since,
+        } => match parse_done_since(done_since.as_deref()) {
+            Ok(done_since) => board_row(app, &project_id, &list_id, limit, ids_only, done_since),
+            Err(failure) => Response::failed(failure),
+        },
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("board"),
@@ -170,6 +179,21 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
 /// How many cards a column carries as rows unless the shell asks for more. The count comes back
 /// whole, and an `idsOnly` answer carries every id: a window is a transport choice for a shell
 /// that draws the core's rows (Windows), never a limit on what the board holds (D43).
+/// A board command's `doneSince`: absent is the list's own window, `"all"` or an RFC 3339 instant
+/// a period (ADEV-140), anything else refused rather than guessed at.
+fn parse_done_since(value: Option<&str>) -> Result<Option<crate::board_cards::DoneSince>, Failure> {
+    match value {
+        None => Ok(None),
+        Some(value) => crate::board_cards::DoneSince::parse(value)
+            .map(Some)
+            .ok_or_else(|| {
+                Failure::bad_request(format!(
+                    "doneSince must be \"all\" or an RFC 3339 instant, not {value:?}"
+                ))
+            }),
+    }
+}
+
 pub(super) const BOARD_COLUMN_LIMIT: usize = 50;
 
 /// The tasks a board can draw: the ones in the project's own lists, and no others.
@@ -224,6 +248,7 @@ pub(super) fn board(
     project_id: Option<&str>,
     limit: Option<usize>,
     ids_only: bool,
+    done_since: Option<crate::board_cards::DoneSince>,
 ) -> Response {
     let lists = app.store.lists().unwrap_or_default();
     let opened = match list_id {
@@ -263,7 +288,7 @@ pub(super) fn board(
     // Borrowed, like the row pipeline: a board of ten thousand cards has no use for a second copy
     // of itself every time somebody moves one.
     let cards = crate::board_cards::cards(&tasks, &lists, &project_id);
-    let arrangement = crate::board_cards::BoardList::of(opened);
+    let arrangement = crate::board_cards::BoardList::of(opened).with_done_since(done_since);
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
     let held: Vec<Vec<&crate::model::Task>> = columns
@@ -398,6 +423,7 @@ fn board_row(
     list_id: &str,
     limit: Option<usize>,
     ids_only: bool,
+    done_since: Option<crate::board_cards::DoneSince>,
 ) -> Response {
     let lists = app.store.lists().unwrap_or_default();
     let Some(row) = lists.iter().find(|list| list.id == list_id) else {
@@ -410,7 +436,15 @@ fn board_row(
         .unwrap_or_default();
     let now = app.clock.now();
     let offset = app.clock.utc_offset();
-    let held = crate::board_rows::row_columns(Some(row), list_id, &tasks, &columns, now, offset);
+    let held = crate::board_rows::row_columns_since(
+        Some(row),
+        list_id,
+        &tasks,
+        &columns,
+        done_since,
+        now,
+        offset,
+    );
     draw_board(
         app,
         project_id,
