@@ -115,6 +115,43 @@ pub struct BoardList<'a> {
     pub manual_order: Option<&'a [String]>,
     pub filter: Option<&'a str>,
     pub window: Option<&'a RecentlyCompletedWindow>,
+    /// The period the board's Done header names, when it names one (ADEV-140). It decides Done
+    /// in place of `filter` and `window`.
+    pub done_since: Option<DoneSince>,
+}
+
+/// How far back Done reaches when the board's header names a period — "15 ✓ This week" (ADEV-131,
+/// ADEV-140). The shell works out when the period starts (its calendar, its first weekday) and
+/// the core holds every card finished since then, timed as Done is sorted: `completedAt`, else
+/// `updatedAt`. The list's recently-completed window does not apply — it defaults to a day, and
+/// capped every period at it, so a week's count read as the last day's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoneSince {
+    /// All time: every finished card.
+    All,
+    /// Every card finished at or after this instant.
+    Since(Timestamp),
+}
+
+impl DoneSince {
+    /// `"all"`, or an RFC 3339 instant; `None` for anything else.
+    pub fn parse(value: &str) -> Option<Self> {
+        if value == "all" {
+            return Some(DoneSince::All);
+        }
+        value.parse::<Timestamp>().ok().map(DoneSince::Since)
+    }
+
+    /// Whether a finished card falls in the period.
+    pub fn holds(self, card: &Task) -> bool {
+        match self {
+            DoneSince::All => true,
+            DoneSince::Since(start) => card
+                .completed_at
+                .or(card.updated_at)
+                .is_some_and(|finished| finished >= start),
+        }
+    }
 }
 
 impl<'a> BoardList<'a> {
@@ -123,6 +160,15 @@ impl<'a> BoardList<'a> {
             manual_order: list.and_then(|list| list.manual_sort_order.as_deref()),
             filter: list.and_then(|list| list.filter_completion.as_deref()),
             window: list.and_then(|list| list.recently_completed_window.as_ref()),
+            done_since: None,
+        }
+    }
+
+    /// The same arrangement with Done reaching back to `since` (ADEV-140).
+    pub fn with_done_since(self, since: Option<DoneSince>) -> Self {
+        BoardList {
+            done_since: since,
+            ..self
         }
     }
 }
@@ -157,7 +203,10 @@ pub fn column_cards<'a>(
         .filter(|card| board::column_for(card, columns) == column.id)
         .filter(|card| {
             column.kind != ColumnKind::Done
-                || done_shows(list.filter, card.updated_at, list.window, now, offset)
+                || match list.done_since {
+                    Some(since) => since.holds(card),
+                    None => done_shows(list.filter, card.updated_at, list.window, now, offset),
+                }
         })
         .collect();
     if column.kind == ColumnKind::Done {
@@ -308,6 +357,7 @@ mod tests {
                     manual_order: None,
                     filter,
                     window: Some(&window),
+                    done_since: None,
                 },
                 now(),
                 utc(),
@@ -341,6 +391,7 @@ mod tests {
                 manual_order: Some(&order),
                 filter: None,
                 window: None,
+                done_since: None,
             },
             now(),
             utc(),
@@ -384,6 +435,7 @@ mod tests {
                 manual_order: Some(&order),
                 filter: Some("show"),
                 window: None,
+                done_since: None,
             },
             now(),
             utc(),
@@ -446,6 +498,7 @@ mod tests {
             manual_order: Some(&order),
             filter: None,
             window: None,
+            done_since: None,
         };
         let drop = |id: &str, index: usize| {
             let dragged = tasks.iter().find(|task| task.id == id).expect("a task");

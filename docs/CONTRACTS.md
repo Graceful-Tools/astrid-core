@@ -1106,6 +1106,14 @@ of `waiting` still renames it in place. A phone opens on the inbox column, not t
 so Waiting is a swipe back. Fixture: `contracts/fixtures/board.json` from web; test:
 `a_board_is_waiting_ideas_ready_doing_and_done_adev_128`.
 
+**A header's period replaces the window** (ADEV-140). `board` and `projectBoardRow` take an
+optional `doneSince`: `"all"`, or an RFC 3339 instant the shell works out from its own calendar
+("This week" starts Monday). Given, Done holds every card finished since it — timed by
+`completedAt`, else `updatedAt`, the stamp Done sorts by — in place of the list's completion filter
+and window. Without it, the window still decides: it defaults to a day, which is why a
+"15 ✓ This week" header that counted inside it read as the last day's work whatever the server
+held. A value that is neither is refused. Test: `adev140_done_since_overrides_the_window`.
+
 ### D44 — a cached status row names its default column
 
 iOS (`getProjectBoardColumns`) named a default column by a rename stored on the board, else by a
