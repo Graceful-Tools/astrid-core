@@ -65,7 +65,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "check-design",
-        "verify design/generated is current, and astrid-web's vendored copy [path, default ../astrid-web]",
+        "verify design/generated is current, and every client's vendored copy [checkouts, default ../<client>]",
     ),
     (
         "gen-schema",
@@ -114,7 +114,10 @@ fn main() -> ExitCode {
         "check-schema" => schema::check(&repo_root()),
         "check-design" => design::check(
             &repo_root(),
-            std::env::args().nth(2).map(std::path::PathBuf::from),
+            std::env::args()
+                .skip(2)
+                .map(std::path::PathBuf::from)
+                .collect(),
         ),
         other => {
             eprintln!("unknown command: {other}\n");
@@ -283,6 +286,7 @@ fn lf_endings(bytes: &[u8]) -> Vec<u8> {
 const CONSUMERS: &[&str] = &[
     "astrid-web/astrid-rules",
     "astrid-web/astrid-design",
+    "astrid-web/strings",
     "astrid-windows/core",
     "astrid-windows/design",
     "astrid-ios/core",

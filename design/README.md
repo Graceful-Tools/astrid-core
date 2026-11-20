@@ -12,7 +12,7 @@ except where the register below records that another client was right.
 
 ```bash
 cargo xtask gen-design                   # write design/generated from tokens.json and assets/
-cargo xtask check-design [../astrid-web] # fail if generated is stale, or web's copy is not ours
+cargo xtask check-design [../astrid-web …] # fail if generated is stale, or a named client's copy is not ours (CONSUMERS.md)
 ```
 
 `cargo test` runs the same staleness check, so a change to `tokens.json` that was not regenerated
