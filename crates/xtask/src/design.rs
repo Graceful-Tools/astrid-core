@@ -1708,9 +1708,64 @@ pub fn generate(root: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `cargo xtask check-design [astrid-web checkout]`: the generated files are what the source
-/// produces, and a consumer's vendored copies are this repository's at the revision it names.
-pub fn check(root: &Path, web: Option<PathBuf>) -> ExitCode {
+/// A client that vendors generated design output, and how to find what it took (ADEV-162).
+struct Client {
+    /// The checkout directory name, which is also what the command line is matched on.
+    name: &'static str,
+    /// Where the client records the revision it vendored at, relative to its checkout. A client
+    /// with none is compared against this repository's history instead (see
+    /// [`compare_anywhere_on_main`]).
+    revision_file: Option<&'static str>,
+    /// (file under `GENERATED`, path in the client). The files the client vendors.
+    files: &'static [(&'static str, &'static str)],
+    /// Where the client vendors `design/assets`, if it does.
+    assets: Option<&'static str>,
+}
+
+/// Every client that vendors design output. A client is a row here and nothing else: the check
+/// reads the rest from the client's checkout and this repository's history.
+const CLIENTS: &[Client] = &[
+    Client {
+        name: "astrid-web",
+        revision_file: Some(WEB_REVISION),
+        files: WEB_VENDORED,
+        assets: Some(WEB_ASSETS),
+    },
+    Client {
+        name: "astrid-windows",
+        revision_file: Some("design/REVISION"),
+        files: &[("windows/AstridTokens.xaml", "design/AstridTokens.xaml")],
+        assets: None,
+    },
+    Client {
+        name: "astrid-ios",
+        revision_file: None,
+        files: &[(
+            "apple/AstridTokens.swift",
+            "Astrid App/Utilities/AstridTokens.swift",
+        )],
+        assets: None,
+    },
+    Client {
+        name: "astrid-android",
+        revision_file: None,
+        files: &[(
+            "android/AstridTokens.kt",
+            "app/src/main/java/com/astrid/design/AstridTokens.kt",
+        )],
+        assets: None,
+    },
+];
+
+/// `cargo xtask check-design [client checkouts…]`: the generated files are what the source
+/// produces, and every client's vendored copies are this repository's at the revision they name.
+///
+/// A client is matched to a path by the checkout's directory name, so `../astrid-web` serves
+/// astrid-web whatever else is named. Named on the command line: a difference is real. Found
+/// beside this repository: a working copy there is routinely behind its own remote, so a difference
+/// is printed and not failed — the same rule `check-pins` follows. A client with no checkout is
+/// reported unchecked, never failed.
+pub fn check(root: &Path, named: Vec<PathBuf>) -> ExitCode {
     let files = match all_outputs(root) {
         Ok(files) => files,
         Err(code) => return code,
@@ -1740,92 +1795,135 @@ pub fn check(root: &Path, web: Option<PathBuf>) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // Named on the command line: a difference is real. Found beside this repository: a working
-    // copy there is routinely behind its own remote, so a difference is printed and not failed —
-    // the same rule `check-pins` follows.
-    let named = web.is_some();
-    let web = web.unwrap_or_else(|| root.join("../astrid-web"));
-    match vendored_differences(root, &web) {
-        Vendored::NotAdopted => println!(
-            "\nastrid-web: no {WEB_REVISION} at {}; unchecked",
-            web.display()
-        ),
-        Vendored::Unavailable(why) => println!("\nastrid-web: {why}; unchecked"),
-        Vendored::Compared(differences) if differences.is_empty() => {
-            println!("\nastrid-web: vendored copies match its pinned revision");
-        }
-        Vendored::Compared(differences) => {
-            for difference in &differences {
-                println!("\nastrid-web: {difference}");
+    let mut failed = Vec::new();
+    for client in CLIENTS {
+        let given = named
+            .iter()
+            .find(|path| path.file_name().is_some_and(|dir| dir == client.name));
+        let is_named = given.is_some();
+        let checkout = given
+            .cloned()
+            .unwrap_or_else(|| root.join("..").join(client.name));
+        match vendored_differences(root, client, &checkout) {
+            Vendored::Unavailable(why) => println!("\n{}: {why}; unchecked", client.name),
+            Vendored::Compared { at, differences } if differences.is_empty() => {
+                println!("\n{}: vendored copies match {at}", client.name);
             }
-            if named {
-                eprintln!("\nastrid-web's vendored design tokens are not this repository's at its REVISION.");
-                return ExitCode::FAILURE;
+            Vendored::Compared { at, differences } => {
+                for difference in &differences {
+                    println!("\n{}: {difference} ({at})", client.name);
+                }
+                if is_named {
+                    failed.push(client.name);
+                } else {
+                    println!(
+                        "(found beside this repository rather than named; it may just need a pull)"
+                    );
+                }
             }
-            println!("(found beside this repository rather than named; it may just need a pull)");
         }
+    }
+    if !failed.is_empty() {
+        eprintln!(
+            "\n{}: vendored design output is not this repository's at the revision it names.",
+            failed.join(", ")
+        );
+        return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
 }
 
 enum Vendored {
-    NotAdopted,
+    /// No checkout, no recorded revision file, or a revision this history does not hold.
     Unavailable(String),
-    Compared(Vec<String>),
+    /// What the copies were compared with (a revision, or a commit found by content), and how
+    /// they differ.
+    Compared {
+        at: String,
+        differences: Vec<String>,
+    },
 }
 
-fn vendored_differences(root: &Path, web: &Path) -> Vendored {
-    let Ok(revision) = std::fs::read_to_string(web.join(WEB_REVISION)) else {
-        return Vendored::NotAdopted;
-    };
-    let revision = revision.trim();
-    let show = |path: &str| -> Option<String> {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["show", &format!("{revision}:{path}")])
-            .output()
-            .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).to_string())
-    };
-    let known = std::process::Command::new("git")
+fn git_output(root: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["cat-file", "-e", &format!("{revision}^{{commit}}")])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-    if !known {
+        .args(args)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// The revision a client's copy says it was generated from: its `REVISION` file, else an
+/// `astrid-core-revision:` line in the first lines of a vendored file. A revision cannot be written
+/// into this repository's own generated files — the file would have to name the commit that
+/// contains it — so it is written where the copy is vendored, by whoever vendors it.
+fn revision_of(client: &Client, checkout: &Path) -> Option<String> {
+    if let Some(file) = client.revision_file {
+        if let Ok(text) = std::fs::read_to_string(checkout.join(file)) {
+            return Some(text.trim().to_string());
+        }
+    }
+    client.files.iter().find_map(|(_, vendored)| {
+        std::fs::read_to_string(checkout.join(vendored))
+            .ok()?
+            .lines()
+            .take(5)
+            .find_map(|line| {
+                line.split_once("astrid-core-revision:")
+                    .map(|(_, rest)| rest.trim().trim_end_matches("-->").trim().to_string())
+            })
+    })
+}
+
+fn vendored_differences(root: &Path, client: &Client, checkout: &Path) -> Vendored {
+    if !checkout.is_dir() {
+        return Vendored::Unavailable(format!("no checkout at {}", checkout.display()));
+    }
+    match (revision_of(client, checkout), client.revision_file) {
+        (Some(revision), _) => compare_at(root, client, checkout, &revision),
+        (None, Some(file)) => Vendored::Unavailable(format!("no {file} in {}", checkout.display())),
+        (None, None) => compare_anywhere_on_main(root, client, checkout),
+    }
+}
+
+/// The client's files against this repository's at `revision`.
+fn compare_at(root: &Path, client: &Client, checkout: &Path, revision: &str) -> Vendored {
+    let show = |path: &str| git_output(root, &["show", &format!("{revision}:{path}")]);
+    if git_output(root, &["cat-file", "-e", &format!("{revision}^{{commit}}")]).is_none() {
         return Vendored::Unavailable(format!("{revision} is not in this checkout's history"));
     }
 
-    // Each file the web vendors, and where. A file this revision does not have and the web does
-    // not either is one the web has not adopted yet (the art arrived after the tokens).
-    let mut pairs: Vec<(String, String)> = WEB_VENDORED
+    // Each file the client vendors, and where. A file this revision does not have and the client
+    // does not either is one the client has not adopted yet (the art arrived after the tokens).
+    let mut pairs: Vec<(String, String)> = client
+        .files
         .iter()
         .map(|(generated, vendored)| (format!("{GENERATED}/{generated}"), vendored.to_string()))
         .collect();
-    let manifest = format!("{}/{}", assets::ASSETS, assets::MANIFEST);
-    pairs.push((
-        manifest.clone(),
-        format!("{WEB_ASSETS}/{}", assets::MANIFEST),
-    ));
-    if let Some(entries) = show(&manifest).and_then(|text| assets::parse_manifest(&text).ok()) {
-        for entry in entries {
-            pairs.push((
-                format!("{}/{}", assets::ASSETS, entry.file),
-                format!("{WEB_ASSETS}/{}", entry.file),
-            ));
+    if let Some(dir) = client.assets {
+        let manifest = format!("{}/{}", assets::ASSETS, assets::MANIFEST);
+        pairs.push((manifest.clone(), format!("{dir}/{}", assets::MANIFEST)));
+        if let Some(entries) = show(&manifest).and_then(|text| assets::parse_manifest(&text).ok()) {
+            for entry in entries {
+                pairs.push((
+                    format!("{}/{}", assets::ASSETS, entry.file),
+                    format!("{dir}/{}", entry.file),
+                ));
+            }
         }
     }
 
     let mut differences = Vec::new();
     for (ours, vendored) in pairs {
         let spec = format!("{revision}:{ours}");
-        match (show(&ours), std::fs::read_to_string(web.join(&vendored))) {
+        match (
+            show(&ours),
+            std::fs::read_to_string(checkout.join(&vendored)),
+        ) {
             (None, Err(_)) => {}
             (None, Ok(_)) => differences.push(format!("{vendored} is not in {spec}")),
             (Some(_), Err(_)) => differences.push(format!("{vendored} is missing")),
@@ -1833,7 +1931,46 @@ fn vendored_differences(root: &Path, web: &Path) -> Vendored {
             (Some(_), Ok(_)) => differences.push(format!("{vendored} differs from {spec}")),
         }
     }
-    Vendored::Compared(differences)
+    Vendored::Compared {
+        at: revision.to_string(),
+        differences,
+    }
+}
+
+/// A client that records no revision (astrid-ios, astrid-android today): each
+/// vendored file must be byte-identical to this repository's at **some commit on `main`**. That
+/// still catches a hand-edited copy and one generated on an unmerged branch, which is what the
+/// client's own hash gate cannot say, and it names the commit a copy equals (ADEV-162).
+fn compare_anywhere_on_main(root: &Path, client: &Client, checkout: &Path) -> Vendored {
+    let mut differences = Vec::new();
+    let mut matched: Vec<String> = Vec::new();
+    for (generated, vendored) in client.files {
+        let ours = format!("{GENERATED}/{generated}");
+        let Ok(theirs) = std::fs::read_to_string(checkout.join(vendored)) else {
+            differences.push(format!("{vendored} is missing"));
+            continue;
+        };
+        let theirs = lf(&theirs);
+        let commits = ["origin/main", "main", "HEAD"]
+            .iter()
+            .find_map(|branch| git_output(root, &["log", "--format=%H", branch, "--", &ours]))
+            .unwrap_or_default();
+        let found = commits.lines().find(|commit| {
+            git_output(root, &["show", &format!("{commit}:{ours}")])
+                .is_some_and(|text| lf(&text) == theirs)
+        });
+        match found {
+            Some(commit) => matched.push(commit.to_string()),
+            None => differences.push(format!(
+                "{vendored} equals {ours} at no commit on main: edited by hand, or generated from an unmerged branch"
+            )),
+        }
+    }
+    let at = match matched.first() {
+        Some(commit) => format!("{commit}, found by content: no revision is recorded"),
+        None => "no revision is recorded".to_string(),
+    };
+    Vendored::Compared { at, differences }
 }
 
 fn lf(text: &str) -> String {
@@ -2755,6 +2892,78 @@ mod tests {
         assert!(
             css.contains("  --astrid-type-comfortable-markdown-h1-size: 28px;"),
             "{css}"
+        );
+    }
+
+    /// A scratch checkout of a client holding `contents` at `path`, for the ADEV-162 tests.
+    fn scratch_client(label: &str, path: &str, contents: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("adev-162-{label}-{}", std::process::id()));
+        let file = dir.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, contents).unwrap();
+        dir
+    }
+
+    fn ios() -> &'static Client {
+        CLIENTS
+            .iter()
+            .find(|client| client.name == "astrid-ios")
+            .expect("astrid-ios vendors design output")
+    }
+
+    /// ADEV-162: every client that vendors design output is checked, not only web's.
+    #[test]
+    fn every_client_that_vendors_design_output_is_checked_adev_162() {
+        let names: Vec<&str> = CLIENTS.iter().map(|client| client.name).collect();
+        for expected in [
+            "astrid-web",
+            "astrid-windows",
+            "astrid-ios",
+            "astrid-android",
+        ] {
+            assert!(names.contains(&expected), "{expected} is not checked");
+        }
+    }
+
+    /// ADEV-162: a client with no recorded revision (astrid-ios) was unchecked entirely. A copy
+    /// that is exactly a generated file at a commit here passes; a hand-edited one fails.
+    #[test]
+    fn a_copy_with_no_revision_is_compared_by_content_adev_162() {
+        let root = crate::repo_root();
+        let (generated, vendored) = ios().files[0];
+        let committed = git_output(&root, &["show", &format!("HEAD:{GENERATED}/{generated}")])
+            .expect("the generated Swift file is committed");
+
+        let clean = scratch_client("clean", vendored, &committed);
+        match compare_anywhere_on_main(&root, ios(), &clean) {
+            Vendored::Compared { differences, .. } => {
+                assert!(differences.is_empty(), "{differences:?}")
+            }
+            Vendored::Unavailable(why) => panic!("{why}"),
+        }
+
+        let edited = scratch_client("edited", vendored, &format!("{committed}// by hand\n"));
+        match compare_anywhere_on_main(&root, ios(), &edited) {
+            Vendored::Compared { differences, .. } => {
+                assert_eq!(differences.len(), 1, "{differences:?}");
+                assert!(differences[0].contains("at no commit on main"));
+            }
+            Vendored::Unavailable(why) => panic!("{why}"),
+        }
+    }
+
+    /// ADEV-162: a vendored copy may say what it came from, in its own header, since this
+    /// repository's generated files cannot name the commit that contains them.
+    #[test]
+    fn a_copy_can_name_its_revision_in_its_header_adev_162() {
+        let copy = scratch_client(
+            "revision",
+            ios().files[0].1,
+            "// GENERATED by `cargo xtask gen-design`\n// astrid-core-revision: 2acba9417dc30ac5531418931f54526d09dfdd5e\n",
+        );
+        assert_eq!(
+            revision_of(ios(), &copy).as_deref(),
+            Some("2acba9417dc30ac5531418931f54526d09dfdd5e")
         );
     }
 }
