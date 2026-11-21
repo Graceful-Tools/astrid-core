@@ -253,6 +253,28 @@ pub enum Command {
         #[serde(default)]
         value: Option<serde_json::Value>,
     },
+    /// A project's goals and guardrails, cached (ADEV-187; web ADEV-179).
+    ///
+    /// The round trip that refreshes the cache, which answers with what is cached when offline.
+    /// Both lists empty means show nothing; `canEdit: false` means read-only.
+    GetProjectGoals {
+        project_id: String,
+    },
+    /// The goals of the project a list is in. `projectId` and `projectName` are null for a list in
+    /// no project. Read-only: there is no list write.
+    GetListGoals {
+        list_id: String,
+    },
+    /// Replace a project's goals and guardrails. A row with no `id` is new. Sent at once and
+    /// journalled only when offline. The answer is the server's echo, with its ids. A `403` (an
+    /// agent, or not an owner or admin) or a `400` (a limit, a duplicate id) is a plain failure.
+    SetProjectGoals {
+        project_id: String,
+        #[serde(default)]
+        goals: Vec<crate::services::goals::GoalDraft>,
+        #[serde(default)]
+        guardrails: Vec<crate::services::goals::GuardrailDraft>,
+    },
     /// What the "Wait on a task…" picker may offer for a query.
     ///
     /// The search is the SERVER's (`GET /api/v1/search`), which is permission-filtered in the

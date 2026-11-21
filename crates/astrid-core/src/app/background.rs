@@ -164,6 +164,11 @@ pub async fn outbox_loop(
 /// (AITD-454). Named rather than "something moved", so a shell re-reads one task after an edit
 /// instead of every task, thread and channel it holds.
 pub(crate) fn announce_delivery(app: &App, touched: crate::outbox::Delivery) {
+    // A goals write settled: the server's echo replaced the optimistic copy (ADEV-187).
+    for project_id in &touched.project_ids {
+        app.realtime()
+            .publish(crate::realtime::Change::ProjectGoals(project_id.clone()));
+    }
     // An empty one still goes out — a settings write settled, which nothing on screen reads back
     // — because the counts moved, and a shell showing them has to hear so.
     match crate::outbox::journal::stats(&app.store) {

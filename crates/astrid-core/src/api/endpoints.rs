@@ -353,6 +353,17 @@ pub fn project_fields(project_id: &str) -> String {
     format!("{}/fields", project(project_id))
 }
 
+/// A project's goals and guardrails: `GET`, and `PUT { goals, guardrails }` for an owner or admin
+/// (web ADEV-179).
+pub fn project_goals(project_id: &str) -> String {
+    format!("{}/goals", project(project_id))
+}
+
+/// The goals of the project a list is in (read-only; web ADEV-179).
+pub fn list_goals(list_id: &str) -> String {
+    format!("{}/goals", list(list_id))
+}
+
 pub fn channel_messages(channel_id: &str) -> String {
     format!(
         "{CHAT_CHANNELS}/{}/messages",
