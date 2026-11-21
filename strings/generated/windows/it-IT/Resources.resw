@@ -1739,7 +1739,7 @@
     <value>Chi</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>Completato</value>
+    <value>Fatto</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>Copia compito</value>
@@ -1757,7 +1757,7 @@
     <value>Modifica compito</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Incompleto</value>
+    <value>Da fare</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Nuovo compito</value>

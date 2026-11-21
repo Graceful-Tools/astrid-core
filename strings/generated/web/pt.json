@@ -578,7 +578,7 @@
   "tasks_description": "Descrição",
   "tasks_due_date": "Data",
   "tasks_edit_task": "Editar Tarefa",
-  "tasks_incomplete": "Incompleta",
+  "tasks_incomplete": "A fazer",
   "tasks_new_task": "Nova Tarefa",
   "tasks_no_description": "Sem descrição",
   "tasks_no_due_date": "Sem data de vencimento",
