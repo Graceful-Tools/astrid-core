@@ -578,7 +578,7 @@
   "tasks_description": "描述",
   "tasks_due_date": "日期",
   "tasks_edit_task": "编辑任务",
-  "tasks_incomplete": "未完成",
+  "tasks_incomplete": "待办",
   "tasks_new_task": "新任务",
   "tasks_no_description": "无描述",
   "tasks_no_due_date": "无截止日期",

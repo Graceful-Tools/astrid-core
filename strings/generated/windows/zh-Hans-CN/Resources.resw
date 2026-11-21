@@ -1745,7 +1745,7 @@
     <value>编辑任务</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>未完成</value>
+    <value>待办</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>新任务</value>

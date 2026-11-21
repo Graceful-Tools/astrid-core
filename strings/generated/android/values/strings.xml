@@ -588,13 +588,13 @@
     <string name="tasks_addTaskToList">Add a task to %1$s</string>
     <string name="tasks_add_task">Add task</string>
     <string name="tasks_assignee">Who</string>
-    <string name="tasks_completed">Completed</string>
+    <string name="tasks_completed">Done</string>
     <string name="tasks_copy_task">Copy Task</string>
     <string name="tasks_delete_task">Delete task</string>
     <string name="tasks_description">Description</string>
     <string name="tasks_due_date">Date</string>
     <string name="tasks_edit_task">Edit task</string>
-    <string name="tasks_incomplete">Incomplete</string>
+    <string name="tasks_incomplete">To-do</string>
     <string name="tasks_new_task">New task</string>
     <string name="tasks_no_description">No description</string>
     <string name="tasks_no_due_date">No due date</string>

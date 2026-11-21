@@ -1727,7 +1727,7 @@
     <value>Кто</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>Завершено</value>
+    <value>Сделано</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>Копировать задачу</value>
@@ -1745,7 +1745,7 @@
     <value>Изменить задачу</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Не завершено</value>
+    <value>К выполнению</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Новая задача</value>

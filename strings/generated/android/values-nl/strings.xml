@@ -585,13 +585,13 @@
     <string name="tasks_addTaskToList">Taak toevoegen aan %1$s</string>
     <string name="tasks_add_task">Taak toevoegen</string>
     <string name="tasks_assignee">Wie</string>
-    <string name="tasks_completed">Voltooid</string>
+    <string name="tasks_completed">Gedaan</string>
     <string name="tasks_copy_task">Taak kopiëren</string>
     <string name="tasks_delete_task">Taak verwijderen</string>
     <string name="tasks_description">Beschrijving</string>
     <string name="tasks_due_date">Datum</string>
     <string name="tasks_edit_task">Taak bewerken</string>
-    <string name="tasks_incomplete">Onvoltooid</string>
+    <string name="tasks_incomplete">Te doen</string>
     <string name="tasks_new_task">Nieuwe taak</string>
     <string name="tasks_no_description">Geen beschrijving</string>
     <string name="tasks_no_due_date">Geen vervaldatum</string>

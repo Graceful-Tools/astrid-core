@@ -1760,7 +1760,7 @@
     <value>Modifier la tâche</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Incomplète</value>
+    <value>À faire</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Nouvelle tâche</value>

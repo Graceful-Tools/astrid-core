@@ -1748,7 +1748,7 @@
     <value>Who</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>Completed</value>
+    <value>Done</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>Copy Task</value>
@@ -1766,7 +1766,7 @@
     <value>Edit task</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Incomplete</value>
+    <value>To-do</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>New task</value>
