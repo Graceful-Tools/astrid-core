@@ -1850,10 +1850,10 @@
     <value>Poor</value>
   </data>
   <data name="tasks_tradeoffRatings_veryGood" xml:space="preserve">
-    <value>Very good</value>
+    <value>Decisive</value>
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
-    <value>Very poor</value>
+    <value>Disqualifying</value>
   </data>
   <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
     <value>Full screen</value>
@@ -1961,10 +1961,10 @@
     <value>Poor</value>
   </data>
   <data name="tradeoff_very_good" xml:space="preserve">
-    <value>Very good</value>
+    <value>Decisive</value>
   </data>
   <data name="tradeoff_very_poor" xml:space="preserve">
-    <value>Very poor</value>
+    <value>Disqualifying</value>
   </data>
   <data name="update_action" xml:space="preserve">
     <value>Update</value>

@@ -622,8 +622,8 @@
     <string name="tasks_tradeoffRatings_good">Good</string>
     <string name="tasks_tradeoffRatings_mixed">Mixed</string>
     <string name="tasks_tradeoffRatings_poor">Poor</string>
-    <string name="tasks_tradeoffRatings_veryGood">Very good</string>
-    <string name="tasks_tradeoffRatings_veryPoor">Very poor</string>
+    <string name="tasks_tradeoffRatings_veryGood">Decisive</string>
+    <string name="tasks_tradeoffRatings_veryPoor">Disqualifying</string>
     <string name="tasks_tradeoff_grid_full_screen">Full screen</string>
     <string name="tasks_waiting_on_add">Wait on a task…</string>
     <string name="tasks_waiting_on_add_error">Could not wait on that task</string>
@@ -659,8 +659,8 @@
     <string name="tradeoff_good">Good</string>
     <string name="tradeoff_mixed">Mixed</string>
     <string name="tradeoff_poor">Poor</string>
-    <string name="tradeoff_very_good">Very good</string>
-    <string name="tradeoff_very_poor">Very poor</string>
+    <string name="tradeoff_very_good">Decisive</string>
+    <string name="tradeoff_very_poor">Disqualifying</string>
     <string name="update_action">Update</string>
     <string name="update_later">Not now</string>
     <string name="user_menu_refresh_data">Refresh Data</string>

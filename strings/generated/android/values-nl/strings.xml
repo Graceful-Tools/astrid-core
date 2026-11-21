@@ -619,8 +619,8 @@
     <string name="tasks_tradeoffRatings_good">Goed</string>
     <string name="tasks_tradeoffRatings_mixed">Gemengd</string>
     <string name="tasks_tradeoffRatings_poor">Slecht</string>
-    <string name="tasks_tradeoffRatings_veryGood">Zeer goed</string>
-    <string name="tasks_tradeoffRatings_veryPoor">Zeer slecht</string>
+    <string name="tasks_tradeoffRatings_veryGood">Doorslaggevend</string>
+    <string name="tasks_tradeoffRatings_veryPoor">Diskwalificerend</string>
     <string name="tasks_tradeoff_grid_full_screen">Volledig scherm</string>
     <string name="tasks_waiting_on_add">Op een taak wachten…</string>
     <string name="tasks_waiting_on_add_error">Kon niet op die taak wachten</string>
@@ -656,8 +656,8 @@
     <string name="tradeoff_good">Goed</string>
     <string name="tradeoff_mixed">Gemengd</string>
     <string name="tradeoff_poor">Slecht</string>
-    <string name="tradeoff_very_good">Zeer goed</string>
-    <string name="tradeoff_very_poor">Zeer slecht</string>
+    <string name="tradeoff_very_good">Doorslaggevend</string>
+    <string name="tradeoff_very_poor">Diskwalificerend</string>
     <string name="update_action">Bijwerken</string>
     <string name="update_later">Niet nu</string>
     <string name="user_menu_refresh_data">Gegevens vernieuwen</string>

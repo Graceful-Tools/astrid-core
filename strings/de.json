@@ -109,6 +109,6 @@
   "tasks.tradeoffRatings.good": "Gut",
   "tasks.tradeoffRatings.mixed": "Gemischt",
   "tasks.tradeoffRatings.poor": "Schlecht",
-  "tasks.tradeoffRatings.veryGood": "Sehr gut",
-  "tasks.tradeoffRatings.veryPoor": "Sehr schlecht"
+  "tasks.tradeoffRatings.veryGood": "Entscheidend",
+  "tasks.tradeoffRatings.veryPoor": "Ausschlusskriterium"
 }
