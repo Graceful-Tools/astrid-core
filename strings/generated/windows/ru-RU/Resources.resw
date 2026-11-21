@@ -1829,10 +1829,10 @@
     <value>Плохо</value>
   </data>
   <data name="tasks_tradeoffRatings_veryGood" xml:space="preserve">
-    <value>Очень хорошо</value>
+    <value>Решающее</value>
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
-    <value>Очень плохо</value>
+    <value>Исключающее</value>
   </data>
   <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
     <value>Во весь экран</value>
@@ -1940,10 +1940,10 @@
     <value>Плохо</value>
   </data>
   <data name="tradeoff_very_good" xml:space="preserve">
-    <value>Очень хорошо</value>
+    <value>Решающее</value>
   </data>
   <data name="tradeoff_very_poor" xml:space="preserve">
-    <value>Очень плохо</value>
+    <value>Исключающее</value>
   </data>
   <data name="update_action" xml:space="preserve">
     <value>Обновить</value>

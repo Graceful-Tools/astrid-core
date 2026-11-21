@@ -615,8 +615,8 @@
     <string name="tasks_tradeoffRatings_good">好</string>
     <string name="tasks_tradeoffRatings_mixed">普通</string>
     <string name="tasks_tradeoffRatings_poor">差</string>
-    <string name="tasks_tradeoffRatings_veryGood">很好</string>
-    <string name="tasks_tradeoffRatings_veryPoor">很差</string>
+    <string name="tasks_tradeoffRatings_veryGood">決定性</string>
+    <string name="tasks_tradeoffRatings_veryPoor">一票否決</string>
     <string name="tasks_tradeoff_grid_full_screen">全螢幕</string>
     <string name="tasks_waiting_on_add">新增等待的任務</string>
     <string name="tasks_waiting_on_add_error">無法等待該任務</string>
@@ -652,8 +652,8 @@
     <string name="tradeoff_good">好</string>
     <string name="tradeoff_mixed">普通</string>
     <string name="tradeoff_poor">差</string>
-    <string name="tradeoff_very_good">很好</string>
-    <string name="tradeoff_very_poor">很差</string>
+    <string name="tradeoff_very_good">決定性</string>
+    <string name="tradeoff_very_poor">一票否決</string>
     <string name="update_action">更新</string>
     <string name="update_later">稍後再說</string>
     <string name="user_menu_refresh_data">重新整理資料</string>

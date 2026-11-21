@@ -53,10 +53,10 @@ const fn style(label_key: &'static str, label: &'static str, rank: u8) -> Rating
 /// `--|-|~|\+\+|\+|🔴|🟡|🟢`. Longest first within a family, so `--` is never read as `-` and `++`
 /// never as `+`. Sort by [`RatingStyle::rank`] to draw the key.
 pub const RATINGS: &[(&str, RatingStyle)] = &[
-    ("--", style("veryPoor", "Very poor", 0)),
+    ("--", style("veryPoor", "Disqualifying", 0)),
     ("-", style("poor", "Poor", 1)),
     ("~", style("mixed", "Mixed", 2)),
-    ("++", style("veryGood", "Very good", 4)),
+    ("++", style("veryGood", "Decisive", 4)),
     ("+", style("good", "Good", 3)),
     ("🔴", style("poor", "Poor", 1)),
     ("🟡", style("mixed", "Mixed", 2)),

@@ -545,8 +545,6 @@
     "tradeoff.good",
     "tradeoff.mixed",
     "tradeoff.poor",
-    "tradeoff.very_good",
-    "tradeoff.very_poor",
     "update.action",
     "update.later",
     "user_menu.refresh_data",
@@ -565,7 +563,10 @@
     "waiting.prompt.until",
     "welcome.sign_in"
   ],
-  "authored": [],
+  "authored": [
+    "tradeoff.very_good",
+    "tradeoff.very_poor"
+  ],
   "englishOnly": [
     "settings.openclaw.agent_name_placeholder"
   ]

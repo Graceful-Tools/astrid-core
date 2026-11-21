@@ -620,8 +620,8 @@
     <string name="tasks_tradeoffRatings_good">Bon</string>
     <string name="tasks_tradeoffRatings_mixed">Mitigé</string>
     <string name="tasks_tradeoffRatings_poor">Mauvais</string>
-    <string name="tasks_tradeoffRatings_veryGood">Très bon</string>
-    <string name="tasks_tradeoffRatings_veryPoor">Très mauvais</string>
+    <string name="tasks_tradeoffRatings_veryGood">Décisif</string>
+    <string name="tasks_tradeoffRatings_veryPoor">Rédhibitoire</string>
     <string name="tasks_tradeoff_grid_full_screen">Plein écran</string>
     <string name="tasks_waiting_on_add">Attendre une tâche…</string>
     <string name="tasks_waiting_on_add_error">Impossible d\'attendre cette tâche</string>
@@ -657,8 +657,8 @@
     <string name="tradeoff_good">Bon</string>
     <string name="tradeoff_mixed">Mitigé</string>
     <string name="tradeoff_poor">Mauvais</string>
-    <string name="tradeoff_very_good">Très bon</string>
-    <string name="tradeoff_very_poor">Très mauvais</string>
+    <string name="tradeoff_very_good">Décisif</string>
+    <string name="tradeoff_very_poor">Rédhibitoire</string>
     <string name="update_action">Mettre à jour</string>
     <string name="update_later">Plus tard</string>
     <string name="user_menu_refresh_data">Actualiser les données</string>
