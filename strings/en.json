@@ -112,6 +112,6 @@
   "tasks.tradeoffRatings.good": "Good",
   "tasks.tradeoffRatings.mixed": "Mixed",
   "tasks.tradeoffRatings.poor": "Poor",
-  "tasks.tradeoffRatings.veryGood": "Very good",
-  "tasks.tradeoffRatings.veryPoor": "Very poor"
+  "tasks.tradeoffRatings.veryGood": "Decisive",
+  "tasks.tradeoffRatings.veryPoor": "Disqualifying"
 }

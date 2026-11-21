@@ -109,6 +109,6 @@
   "tasks.tradeoffRatings.good": "Bom",
   "tasks.tradeoffRatings.mixed": "Misto",
   "tasks.tradeoffRatings.poor": "Ruim",
-  "tasks.tradeoffRatings.veryGood": "Muito bom",
-  "tasks.tradeoffRatings.veryPoor": "Muito ruim"
+  "tasks.tradeoffRatings.veryGood": "Decisivo",
+  "tasks.tradeoffRatings.veryPoor": "Desqualificante"
 }

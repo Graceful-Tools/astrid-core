@@ -105,6 +105,6 @@
   "tasks.tradeoffRatings.good": "良い",
   "tasks.tradeoffRatings.mixed": "どちらとも言えない",
   "tasks.tradeoffRatings.poor": "悪い",
-  "tasks.tradeoffRatings.veryGood": "とても良い",
-  "tasks.tradeoffRatings.veryPoor": "とても悪い"
+  "tasks.tradeoffRatings.veryGood": "決め手",
+  "tasks.tradeoffRatings.veryPoor": "除外"
 }

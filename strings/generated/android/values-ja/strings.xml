@@ -615,8 +615,8 @@
     <string name="tasks_tradeoffRatings_good">良い</string>
     <string name="tasks_tradeoffRatings_mixed">どちらとも言えない</string>
     <string name="tasks_tradeoffRatings_poor">悪い</string>
-    <string name="tasks_tradeoffRatings_veryGood">とても良い</string>
-    <string name="tasks_tradeoffRatings_veryPoor">とても悪い</string>
+    <string name="tasks_tradeoffRatings_veryGood">決め手</string>
+    <string name="tasks_tradeoffRatings_veryPoor">除外</string>
     <string name="tasks_tradeoff_grid_full_screen">全画面表示</string>
     <string name="tasks_waiting_on_add">待機するタスクを追加</string>
     <string name="tasks_waiting_on_add_error">そのタスクを待機対象にできませんでした</string>
@@ -652,8 +652,8 @@
     <string name="tradeoff_good">良い</string>
     <string name="tradeoff_mixed">どちらとも言えない</string>
     <string name="tradeoff_poor">悪い</string>
-    <string name="tradeoff_very_good">非常に良い</string>
-    <string name="tradeoff_very_poor">非常に悪い</string>
+    <string name="tradeoff_very_good">決め手</string>
+    <string name="tradeoff_very_poor">除外</string>
     <string name="update_action">アップデート</string>
     <string name="update_later">後で</string>
     <string name="user_menu_refresh_data">データを更新</string>

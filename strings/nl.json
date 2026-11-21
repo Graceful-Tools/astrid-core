@@ -109,6 +109,6 @@
   "tasks.tradeoffRatings.good": "Goed",
   "tasks.tradeoffRatings.mixed": "Gemengd",
   "tasks.tradeoffRatings.poor": "Slecht",
-  "tasks.tradeoffRatings.veryGood": "Zeer goed",
-  "tasks.tradeoffRatings.veryPoor": "Zeer slecht"
+  "tasks.tradeoffRatings.veryGood": "Doorslaggevend",
+  "tasks.tradeoffRatings.veryPoor": "Diskwalificerend"
 }

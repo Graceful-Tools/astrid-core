@@ -105,6 +105,6 @@
   "tasks.tradeoffRatings.good": "好",
   "tasks.tradeoffRatings.mixed": "一般",
   "tasks.tradeoffRatings.poor": "差",
-  "tasks.tradeoffRatings.veryGood": "很好",
-  "tasks.tradeoffRatings.veryPoor": "很差"
+  "tasks.tradeoffRatings.veryGood": "决定性",
+  "tasks.tradeoffRatings.veryPoor": "一票否决"
 }
