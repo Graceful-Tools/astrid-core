@@ -36,6 +36,9 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::DueDateAtTime { .. }
         | Command::DueDateAllDay { .. }
         | Command::TaskBlockers { .. }
+        | Command::GetProjectGoals { .. }
+        | Command::GetListGoals { .. }
+        | Command::SetProjectGoals { .. }
         | Command::TaskProjectFields { .. }
         | Command::SetTaskProjectField { .. }
         | Command::AddTaskBlocker { .. }
