@@ -619,8 +619,8 @@
     <string name="tasks_tradeoffRatings_good">Buono</string>
     <string name="tasks_tradeoffRatings_mixed">Misto</string>
     <string name="tasks_tradeoffRatings_poor">Scarso</string>
-    <string name="tasks_tradeoffRatings_veryGood">Ottimo</string>
-    <string name="tasks_tradeoffRatings_veryPoor">Pessimo</string>
+    <string name="tasks_tradeoffRatings_veryGood">Decisivo</string>
+    <string name="tasks_tradeoffRatings_veryPoor">Escludente</string>
     <string name="tasks_tradeoff_grid_full_screen">Schermo intero</string>
     <string name="tasks_waiting_on_add">Attendi un\'attività…</string>
     <string name="tasks_waiting_on_add_error">Impossibile attendere quell\'attività</string>
@@ -656,8 +656,8 @@
     <string name="tradeoff_good">Buono</string>
     <string name="tradeoff_mixed">Misto</string>
     <string name="tradeoff_poor">Scarso</string>
-    <string name="tradeoff_very_good">Ottimo</string>
-    <string name="tradeoff_very_poor">Pessimo</string>
+    <string name="tradeoff_very_good">Decisivo</string>
+    <string name="tradeoff_very_poor">Escludente</string>
     <string name="update_action">Aggiorna</string>
     <string name="update_later">Non ora</string>
     <string name="user_menu_refresh_data">Aggiorna dati</string>

@@ -105,6 +105,6 @@
   "tasks.tradeoffRatings.good": "Хорошо",
   "tasks.tradeoffRatings.mixed": "Неоднозначно",
   "tasks.tradeoffRatings.poor": "Плохо",
-  "tasks.tradeoffRatings.veryGood": "Очень хорошо",
-  "tasks.tradeoffRatings.veryPoor": "Очень плохо"
+  "tasks.tradeoffRatings.veryGood": "Решающее",
+  "tasks.tradeoffRatings.veryPoor": "Исключающее"
 }

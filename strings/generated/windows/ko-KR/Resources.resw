@@ -1829,10 +1829,10 @@
     <value>나쁨</value>
   </data>
   <data name="tasks_tradeoffRatings_veryGood" xml:space="preserve">
-    <value>매우 좋음</value>
+    <value>결정적</value>
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
-    <value>매우 나쁨</value>
+    <value>탈락</value>
   </data>
   <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
     <value>전체 화면</value>
@@ -1940,10 +1940,10 @@
     <value>나쁨</value>
   </data>
   <data name="tradeoff_very_good" xml:space="preserve">
-    <value>매우 좋음</value>
+    <value>결정적</value>
   </data>
   <data name="tradeoff_very_poor" xml:space="preserve">
-    <value>매우 나쁨</value>
+    <value>탈락</value>
   </data>
   <data name="update_action" xml:space="preserve">
     <value>업데이트</value>

@@ -1841,10 +1841,10 @@
     <value>Schlecht</value>
   </data>
   <data name="tasks_tradeoffRatings_veryGood" xml:space="preserve">
-    <value>Sehr gut</value>
+    <value>Entscheidend</value>
   </data>
   <data name="tasks_tradeoffRatings_veryPoor" xml:space="preserve">
-    <value>Sehr schlecht</value>
+    <value>Ausschlusskriterium</value>
   </data>
   <data name="tasks_tradeoff_grid_full_screen" xml:space="preserve">
     <value>Vollbild</value>
@@ -1952,10 +1952,10 @@
     <value>Schlecht</value>
   </data>
   <data name="tradeoff_very_good" xml:space="preserve">
-    <value>Sehr gut</value>
+    <value>Entscheidend</value>
   </data>
   <data name="tradeoff_very_poor" xml:space="preserve">
-    <value>Sehr schlecht</value>
+    <value>Ausschlusskriterium</value>
   </data>
   <data name="update_action" xml:space="preserve">
     <value>Aktualisieren</value>

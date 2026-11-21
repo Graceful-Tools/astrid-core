@@ -110,6 +110,6 @@
   "tasks.tradeoffRatings.good": "Bon",
   "tasks.tradeoffRatings.mixed": "Mitigé",
   "tasks.tradeoffRatings.poor": "Mauvais",
-  "tasks.tradeoffRatings.veryGood": "Très bon",
-  "tasks.tradeoffRatings.veryPoor": "Très mauvais"
+  "tasks.tradeoffRatings.veryGood": "Décisif",
+  "tasks.tradeoffRatings.veryPoor": "Rédhibitoire"
 }

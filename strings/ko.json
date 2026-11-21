@@ -105,6 +105,6 @@
   "tasks.tradeoffRatings.good": "좋음",
   "tasks.tradeoffRatings.mixed": "보통",
   "tasks.tradeoffRatings.poor": "나쁨",
-  "tasks.tradeoffRatings.veryGood": "매우 좋음",
-  "tasks.tradeoffRatings.veryPoor": "매우 나쁨"
+  "tasks.tradeoffRatings.veryGood": "결정적",
+  "tasks.tradeoffRatings.veryPoor": "탈락"
 }
