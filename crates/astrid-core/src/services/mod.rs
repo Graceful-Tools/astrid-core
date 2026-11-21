@@ -25,6 +25,7 @@ pub mod conditional;
 pub mod connections;
 pub mod dependency;
 pub mod external;
+pub mod goals;
 pub mod list;
 pub mod list_defaults;
 pub mod members;
@@ -102,6 +103,11 @@ impl Context {
     /// What one task is waiting on, and what waits on it.
     pub fn dependencies(&self) -> TaskDependencyService {
         TaskDependencyService::new(self.clone())
+    }
+
+    /// A project's goals and guardrails (ADEV-187).
+    pub fn goals(&self) -> goals::GoalsService {
+        goals::GoalsService::new(self.clone())
     }
 
     /// A GitHub board's project fields on one task (AITD-491).

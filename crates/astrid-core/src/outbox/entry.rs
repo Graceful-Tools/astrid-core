@@ -90,6 +90,10 @@ pub mod kind {
     /// One GitHub project field on one task, set while offline (`services::project_fields`).
     /// Replays safely: the server writes one field per request and the value is absolute.
     pub const SET_TASK_FIELD: &str = "setTaskField";
+    /// A project's goals and guardrails, replaced while offline (`services::goals`). The write
+    /// replaces the whole value, so a replay settles on the same state. A `400`/`403` is
+    /// dead-lettered, not retried.
+    pub const SET_PROJECT_GOALS: &str = "setProjectGoals";
     /// Who is on a list, changed while offline (`services::members`). Online these are sent at
     /// once and never journalled, so a refusal reaches the person who asked.
     pub const INVITE_TO_LIST: &str = "inviteToList";

@@ -1164,6 +1164,43 @@
       ],
       "type": "object"
     },
+    "Goal": {
+      "description": "One goal, as the server answers it.",
+      "properties": {
+        "current": {
+          "description": "Where it is now, e.g. \"6.1%\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "measure": {
+          "description": "What is measured, e.g. \"IRR\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statement": {
+          "type": "string"
+        },
+        "target": {
+          "description": "Where the measure should get to, e.g. \"≥ 8%/yr\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "statement"
+      ],
+      "type": "object"
+    },
     "GridCell": {
       "description": "One criterion's cell in a trade-off grid.",
       "properties": {
@@ -1210,6 +1247,34 @@
         "cells"
       ],
       "type": "object"
+    },
+    "Guardrail": {
+      "description": "One guardrail, as the server answers it.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/GuardrailKind",
+          "default": "stated"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "GuardrailKind": {
+      "description": "Whether a person judges a guardrail, or a program checks it (ADEV-182).\n\nA kind this build does not know reads as `stated`: a guardrail shown as one a reader judges is\nbetter than a guardrail that vanishes because a newer server added a word.",
+      "enum": [
+        "enforced",
+        "stated"
+      ],
+      "type": "string"
     },
     "Inline": {
       "description": "One run inside a block.",
@@ -1965,6 +2030,51 @@
       "required": [
         "id"
       ],
+      "type": "object"
+    },
+    "ProjectGoals": {
+      "description": "What `GetProjectGoals` and `GetListGoals` answer: the route's body as-is.\n\n`list_id` is there for a list's answer only; `project_id` and `project_name` are `null` for a\nlist in no project.",
+      "properties": {
+        "canEdit": {
+          "default": false,
+          "description": "Owner or admin, and not an agent. `false` means read-only.",
+          "type": "boolean"
+        },
+        "goals": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Goal"
+          },
+          "type": "array"
+        },
+        "guardrails": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Guardrail"
+          },
+          "type": "array"
+        },
+        "listId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ProjectMember": {
@@ -3325,6 +3435,9 @@
     "project": {
       "$ref": "#/$defs/Project"
     },
+    "projectGoals": {
+      "$ref": "#/$defs/ProjectGoals"
+    },
     "reminderPick": {
       "$ref": "#/$defs/ReminderPick"
     },
@@ -3375,7 +3488,8 @@
     "listToggles",
     "listDefaultPicks",
     "reminderPick",
-    "githubApp"
+    "githubApp",
+    "projectGoals"
   ],
   "title": "WireModels",
   "type": "object"

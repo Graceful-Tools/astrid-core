@@ -65,6 +65,31 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             minute,
         } => due_date_at_time(app, &task_id, hour, minute),
         Command::DueDateAllDay { task_id } => due_date_all_day(app, &task_id),
+        Command::GetProjectGoals { project_id } => {
+            let answer = app.context.goals().refresh_project(&project_id).await;
+            goals_answer(app, &project_id, answer)
+        }
+        Command::GetListGoals { list_id } => {
+            let answer = app.context.goals().refresh_list(&list_id).await;
+            let project_id = answer
+                .as_ref()
+                .ok()
+                .and_then(|answer| answer.goals.project_id.clone())
+                .unwrap_or_default();
+            goals_answer(app, &project_id, answer)
+        }
+        Command::SetProjectGoals {
+            project_id,
+            goals,
+            guardrails,
+        } => {
+            let answer = app
+                .context
+                .goals()
+                .set_now(&project_id, goals, guardrails)
+                .await;
+            goals_answer(app, &project_id, answer)
+        }
         Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
         #[cfg(feature = "github-project-fields")]
         Command::TaskProjectFields { task_id } => {
@@ -336,6 +361,26 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("tasks"),
+    }
+}
+
+/// A goals answer, announcing `projectGoals` when it moved the cached value (ADEV-187).
+fn goals_answer(
+    app: &App,
+    project_id: &str,
+    answer: crate::services::Result<crate::services::goals::Answer>,
+) -> Response {
+    match answer {
+        Ok(answer) => {
+            if answer.changed && !project_id.is_empty() {
+                app.realtime()
+                    .publish(crate::realtime::Change::ProjectGoals(
+                        project_id.to_string(),
+                    ));
+            }
+            Response::ok(answer.goals)
+        }
+        Err(error) => Response::failed(error.into()),
     }
 }
 

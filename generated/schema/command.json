@@ -476,6 +476,78 @@
       ],
       "type": "string"
     },
+    "GoalDraft": {
+      "description": "A goal being written. A row with no `id` is new; the server assigns `g1`, `g2`…",
+      "properties": {
+        "current": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statement": {
+          "type": "string"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "type": "object"
+    },
+    "GuardrailDraft": {
+      "description": "A guardrail being written. No `id` is new (`r1`, `r2`…); no `kind` is `stated`.",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuardrailKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "type": "object"
+    },
+    "GuardrailKind": {
+      "description": "Whether a person judges a guardrail, or a program checks it (ADEV-182).\n\nA kind this build does not know reads as `stated`: a guardrail shown as one a reader judges is\nbetter than a guardrail that vanishes because a newer server added a word.",
+      "enum": [
+        "enforced",
+        "stated"
+      ],
+      "type": "string"
+    },
     "KnownLink": {
       "description": "One local task's remote twin.",
       "properties": {
@@ -2551,6 +2623,71 @@
         "kind",
         "taskId",
         "fieldId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A project's goals and guardrails, cached (ADEV-187; web ADEV-179).\n\nThe round trip that refreshes the cache, which answers with what is cached when offline.\nBoth lists empty means show nothing; `canEdit: false` means read-only.",
+      "properties": {
+        "kind": {
+          "const": "getProjectGoals",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The goals of the project a list is in. `projectId` and `projectName` are null for a list in\nno project. Read-only: there is no list write.",
+      "properties": {
+        "kind": {
+          "const": "getListGoals",
+          "type": "string"
+        },
+        "listId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "listId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Replace a project's goals and guardrails. A row with no `id` is new. Sent at once and\njournalled only when offline. The answer is the server's echo, with its ids. A `403` (an\nagent, or not an owner or admin) or a `400` (a limit, a duplicate id) is a plain failure.",
+      "properties": {
+        "goals": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GoalDraft"
+          },
+          "type": "array"
+        },
+        "guardrails": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GuardrailDraft"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "setProjectGoals",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId"
       ],
       "type": "object"
     },
