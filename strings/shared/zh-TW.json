@@ -484,7 +484,7 @@
   "tasks.description": "描述",
   "tasks.due_date": "日期",
   "tasks.edit_task": "編輯任務",
-  "tasks.incomplete": "未完成",
+  "tasks.incomplete": "待辦",
   "tasks.new_task": "新任務",
   "tasks.no_description": "無描述",
   "tasks.no_due_date": "無截止日期",

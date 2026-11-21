@@ -585,13 +585,13 @@
     <string name="tasks_addTaskToList">Aufgabe zu %1$s hinzufügen</string>
     <string name="tasks_add_task">Aufgabe hinzufügen</string>
     <string name="tasks_assignee">Wer</string>
-    <string name="tasks_completed">Abgeschlossen</string>
+    <string name="tasks_completed">Erledigt</string>
     <string name="tasks_copy_task">Aufgabe kopieren</string>
     <string name="tasks_delete_task">Aufgabe löschen</string>
     <string name="tasks_description">Beschreibung</string>
     <string name="tasks_due_date">Datum</string>
     <string name="tasks_edit_task">Aufgabe bearbeiten</string>
-    <string name="tasks_incomplete">Unvollständig</string>
+    <string name="tasks_incomplete">Zu erledigen</string>
     <string name="tasks_new_task">Neue Aufgabe</string>
     <string name="tasks_no_description">Keine Beschreibung</string>
     <string name="tasks_no_due_date">Kein Fälligkeitsdatum</string>

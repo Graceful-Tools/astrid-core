@@ -1739,7 +1739,7 @@
     <value>Wie</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>Voltooid</value>
+    <value>Gedaan</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>Taak kopiëren</value>
@@ -1757,7 +1757,7 @@
     <value>Taak bewerken</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Onvoltooid</value>
+    <value>Te doen</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Nieuwe taak</value>

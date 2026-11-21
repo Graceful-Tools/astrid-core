@@ -592,7 +592,7 @@
     <string name="tasks_description">Description</string>
     <string name="tasks_due_date">Date</string>
     <string name="tasks_edit_task">Modifier la tâche</string>
-    <string name="tasks_incomplete">Incomplète</string>
+    <string name="tasks_incomplete">À faire</string>
     <string name="tasks_new_task">Nouvelle tâche</string>
     <string name="tasks_no_description">Pas de description</string>
     <string name="tasks_no_due_date">Pas de date limite</string>

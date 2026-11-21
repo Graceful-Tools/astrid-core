@@ -1727,7 +1727,7 @@
     <value>누구</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>완료됨</value>
+    <value>완료</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>작업 복사</value>
@@ -1745,7 +1745,7 @@
     <value>작업 편집</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>미완료</value>
+    <value>할 일</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>새 작업</value>
