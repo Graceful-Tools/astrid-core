@@ -581,13 +581,13 @@
     <string name="tasks_addTaskToList">%1$sにタスクを追加</string>
     <string name="tasks_add_task">タスクを追加</string>
     <string name="tasks_assignee">誰</string>
-    <string name="tasks_completed">完了済み</string>
+    <string name="tasks_completed">完了</string>
     <string name="tasks_copy_task">タスクをコピー</string>
     <string name="tasks_delete_task">タスクを削除</string>
     <string name="tasks_description">説明</string>
     <string name="tasks_due_date">日付</string>
     <string name="tasks_edit_task">タスクを編集</string>
-    <string name="tasks_incomplete">未完了</string>
+    <string name="tasks_incomplete">やること</string>
     <string name="tasks_new_task">新しいタスク</string>
     <string name="tasks_no_description">説明なし</string>
     <string name="tasks_no_due_date">期限なし</string>

@@ -1727,7 +1727,7 @@
     <value>誰</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>完了済み</value>
+    <value>完了</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>タスクをコピー</value>
@@ -1745,7 +1745,7 @@
     <value>タスクを編集</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>未完了</value>
+    <value>やること</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>新しいタスク</value>

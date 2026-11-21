@@ -581,13 +581,13 @@
     <string name="tasks_addTaskToList">Добавить задачу в %1$s</string>
     <string name="tasks_add_task">Добавить задачу</string>
     <string name="tasks_assignee">Кто</string>
-    <string name="tasks_completed">Завершено</string>
+    <string name="tasks_completed">Сделано</string>
     <string name="tasks_copy_task">Копировать задачу</string>
     <string name="tasks_delete_task">Удалить задачу</string>
     <string name="tasks_description">Описание</string>
     <string name="tasks_due_date">Дата</string>
     <string name="tasks_edit_task">Изменить задачу</string>
-    <string name="tasks_incomplete">Не завершено</string>
+    <string name="tasks_incomplete">К выполнению</string>
     <string name="tasks_new_task">Новая задача</string>
     <string name="tasks_no_description">Нет описания</string>
     <string name="tasks_no_due_date">Без срока</string>

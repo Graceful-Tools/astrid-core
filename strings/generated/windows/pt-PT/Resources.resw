@@ -1757,7 +1757,7 @@
     <value>Editar Tarefa</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Incompleta</value>
+    <value>A fazer</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Nova Tarefa</value>

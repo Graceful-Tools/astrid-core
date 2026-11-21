@@ -585,13 +585,13 @@
     <string name="tasks_addTaskToList">Aggiungi un\'attività a %1$s</string>
     <string name="tasks_add_task">Aggiungi compito</string>
     <string name="tasks_assignee">Chi</string>
-    <string name="tasks_completed">Completato</string>
+    <string name="tasks_completed">Fatto</string>
     <string name="tasks_copy_task">Copia compito</string>
     <string name="tasks_delete_task">Elimina compito</string>
     <string name="tasks_description">Descrizione</string>
     <string name="tasks_due_date">Data</string>
     <string name="tasks_edit_task">Modifica compito</string>
-    <string name="tasks_incomplete">Incompleto</string>
+    <string name="tasks_incomplete">Da fare</string>
     <string name="tasks_new_task">Nuovo compito</string>
     <string name="tasks_no_description">Nessuna descrizione</string>
     <string name="tasks_no_due_date">Nessuna scadenza</string>

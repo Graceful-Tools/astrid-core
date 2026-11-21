@@ -581,13 +581,13 @@
     <string name="tasks_addTaskToList">%1$s에 작업 추가</string>
     <string name="tasks_add_task">작업 추가</string>
     <string name="tasks_assignee">누구</string>
-    <string name="tasks_completed">완료됨</string>
+    <string name="tasks_completed">완료</string>
     <string name="tasks_copy_task">작업 복사</string>
     <string name="tasks_delete_task">작업 삭제</string>
     <string name="tasks_description">설명</string>
     <string name="tasks_due_date">날짜</string>
     <string name="tasks_edit_task">작업 편집</string>
-    <string name="tasks_incomplete">미완료</string>
+    <string name="tasks_incomplete">할 일</string>
     <string name="tasks_new_task">새 작업</string>
     <string name="tasks_no_description">설명 없음</string>
     <string name="tasks_no_due_date">기한 없음</string>

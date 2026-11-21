@@ -1739,7 +1739,7 @@
     <value>Quién</value>
   </data>
   <data name="tasks_completed" xml:space="preserve">
-    <value>Completada</value>
+    <value>Hecha</value>
   </data>
   <data name="tasks_copy_task" xml:space="preserve">
     <value>Copiar Tarea</value>
@@ -1757,7 +1757,7 @@
     <value>Editar tarea</value>
   </data>
   <data name="tasks_incomplete" xml:space="preserve">
-    <value>Incompleta</value>
+    <value>Por hacer</value>
   </data>
   <data name="tasks_new_task" xml:space="preserve">
     <value>Nueva tarea</value>
