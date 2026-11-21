@@ -69,6 +69,8 @@ pub struct Delivery {
     /// Tasks whose comment threads moved.
     pub comment_task_ids: Vec<String>,
     pub channel_ids: Vec<String>,
+    /// Projects whose goals and guardrails moved (ADEV-187).
+    pub project_ids: Vec<String>,
     /// An entry settled whose kind this build cannot describe — one a newer build journalled.
     /// The shell refreshes everything it shows, as it did for every delivery before.
     pub undescribed: bool,
@@ -81,6 +83,7 @@ impl Delivery {
             && self.list_ids.is_empty()
             && self.comment_task_ids.is_empty()
             && self.channel_ids.is_empty()
+            && self.project_ids.is_empty()
             && !self.undescribed
     }
 
@@ -97,6 +100,9 @@ impl Delivery {
         }
         for id in other.channel_ids {
             push_unique(&mut self.channel_ids, id);
+        }
+        for id in other.project_ids {
+            push_unique(&mut self.project_ids, id);
         }
         self.undescribed |= other.undescribed;
     }
@@ -162,6 +168,11 @@ impl Delivery {
                 if let Some(task_id) = task_id {
                     let task_id = store.resolve_id(&task_id).unwrap_or(task_id);
                     push_unique(&mut self.comment_task_ids, task_id);
+                }
+            }
+            kind::SET_PROJECT_GOALS => {
+                if let Some(project_id) = field("projectId") {
+                    push_unique(&mut self.project_ids, project_id);
                 }
             }
             kind::SEND_CHAT_MESSAGE => {

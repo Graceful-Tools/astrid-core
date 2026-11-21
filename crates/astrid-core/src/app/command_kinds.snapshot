@@ -75,6 +75,8 @@ features
 feedbackListId
 filterOptions
 forgetChatMessage
+getListGoals
+getProjectGoals
 googleSyncMode
 hasSeenTour
 hotkey
@@ -177,6 +179,7 @@ setListProject
 setManualOrder
 setMemberRole
 setMyTasksFilters
+setProjectGoals
 setTaskLists
 setTaskProjectField
 setTaskStatus

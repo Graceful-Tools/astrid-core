@@ -195,6 +195,8 @@ pub enum Change {
     Chat(String),
     AgentTyping(Typing),
     Settings,
+    /// A project's goals and guardrails moved in the cache (ADEV-187). Ask `getProjectGoals`.
+    ProjectGoals(String),
     /// A reminder has come due while the app was running.
     ///
     /// Carries nothing: the shell asks `remindersDue` for the list, so there is one answer to
@@ -262,6 +264,7 @@ impl Change {
                 "agentName": typing.agent_name, "active": typing.active
             }),
             Change::Settings => serde_json::json!({ "change": "settings" }),
+            Change::ProjectGoals(id) => serde_json::json!({ "change": "projectGoals", "id": id }),
             Change::RemindersDue => serde_json::json!({ "change": "remindersDue" }),
             Change::NeedsSync => serde_json::json!({ "change": "needsSync" }),
             Change::Synced { task_ids, list_ids } => serde_json::json!({

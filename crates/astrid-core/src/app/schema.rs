@@ -120,6 +120,9 @@ pub struct WireModels {
     list_default_picks: astrid_rules::rows::list_default_picks::ListDefaultPicks,
     reminder_pick: astrid_rules::rows::reminder_picks::ReminderPick,
     github_app: astrid_rules::rows::github_app::GithubApp,
+
+    // ── Goals and guardrails, which the clients show and edit (ADEV-187) ──────────────────────
+    project_goals: crate::services::goals::ProjectGoals,
 }
 
 /// Every property name the schema knows, anywhere in it — the question a client's bindings gate

@@ -99,6 +99,7 @@ pub async fn perform(client: &ApiClient, store: &Store, entry: &Entry) -> Outcom
         kind::UPDATE_SMART_TASKS => {
             send_body(client, client.patch(endpoints::SMART_TASKS), entry).await
         }
+        kind::SET_PROJECT_GOALS => set_project_goals(client, store, entry).await,
         kind::ADD_TASK_BLOCKER => add_task_blocker(client, store, entry).await,
         kind::REMOVE_TASK_BLOCKER => remove_task_blocker(client, store, entry).await,
         #[cfg(feature = "github-project-fields")]
@@ -283,6 +284,33 @@ async fn set_task_field(client: &ApiClient, store: &Store, entry: &Entry) -> Out
         }
         Err(error) if matches!(error.status(), Some(400 | 403 | 404)) => {
             Outcome::Dead(format!("the field edit was refused: {error}"))
+        }
+        Err(error) => from_error(error),
+    }
+}
+
+/// A project's goals and guardrails, replaced (ADEV-187).
+///
+/// The server's echo is what is kept, not the request: it assigned the ids. A `400` (a limit, a
+/// duplicate id), `403` (an agent, or no longer an owner or admin) or `404` will say the same in
+/// five minutes, so it is dead-lettered rather than retried.
+async fn set_project_goals(client: &ApiClient, store: &Store, entry: &Entry) -> Outcome {
+    let project_id = match id(entry, "projectId") {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let request = client
+        .put(endpoints::project_goals(project_id))
+        .value(body(entry));
+    match client.send(request).await {
+        Ok(value) => {
+            if let Ok(goals) = serde_json::from_value(value) {
+                crate::services::goals::store_project(store, project_id, &goals);
+            }
+            Outcome::done()
+        }
+        Err(error) if matches!(error.status(), Some(400 | 403 | 404)) => {
+            Outcome::Dead(format!("the goals edit was refused: {error}"))
         }
         Err(error) => from_error(error),
     }
