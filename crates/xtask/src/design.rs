@@ -1543,9 +1543,10 @@ fn pill_sizes<'a>(
 
 /// VS Code's workbench colours: (theme key, token). Without this the extension has no colour
 /// theme at all, so a partner's accent never reaches the workbench. The extension's own webviews
-/// are not here: they take the editor's colours through `--vscode-*` (DS10). Nor is syntax
-/// colouring — `tokens.json` has no code palette, so code stays `editor.foreground` rather than
-/// this emitter inventing eight colours no other client has.
+/// are not here: they read `--vscode-*` for the window and `web/astrid-tokens.css` for product
+/// meanings under these themes (DS10, ADEV-198). Nor is syntax colouring — `tokens.json` has no
+/// code palette, so this emitter invents none; astrid-vscode puts VS Code's own Light+/Dark+ syntax
+/// colours beside the included file instead.
 const VSCODE_COLOURS: &[(&str, &str)] = &[
     ("foreground", "text-primary"),
     ("descriptionForeground", "text-secondary"),
@@ -1753,6 +1754,28 @@ const CLIENTS: &[Client] = &[
             "android/AstridTokens.kt",
             "app/src/main/java/com/astrid/design/AstridTokens.kt",
         )],
+        assets: None,
+    },
+    // ADEV-198: the workbench themes Astrid Code defaults to, and the tokens its webviews size
+    // themselves by. Vendored by astrid-vscode's `scripts/vendor-design.mjs`.
+    Client {
+        name: "astrid-vscode",
+        revision_file: Some("design/REVISION"),
+        files: &[
+            (
+                "vscode/astrid-light-color-theme.json",
+                "design/astrid-light-color-theme.json",
+            ),
+            (
+                "vscode/astrid-dark-color-theme.json",
+                "design/astrid-dark-color-theme.json",
+            ),
+            (
+                "vscode/astrid-ocean-color-theme.json",
+                "design/astrid-ocean-color-theme.json",
+            ),
+            ("web/astrid-tokens.css", "design/astrid-tokens.css"),
+        ],
         assets: None,
     },
 ];
@@ -2922,6 +2945,42 @@ mod tests {
             "astrid-android",
         ] {
             assert!(names.contains(&expected), "{expected} is not checked");
+        }
+    }
+
+    /// ADEV-198: astrid-vscode ships the generated workbench themes and the web tokens (Astrid Code
+    /// defaults to them), so its copies are checked against the revision it records.
+    #[test]
+    fn astrid_vscode_vendored_design_is_checked_adev_198() {
+        let client = CLIENTS
+            .iter()
+            .find(|client| client.name == "astrid-vscode")
+            .expect("astrid-vscode is not checked");
+        assert_eq!(client.revision_file, Some("design/REVISION"));
+        let mut expected: Vec<(String, String)> = ["light", "dark", "ocean"]
+            .iter()
+            .map(|name| {
+                let file = format!("astrid-{name}-color-theme.json");
+                (format!("vscode/{file}"), format!("design/{file}"))
+            })
+            .collect();
+        expected.push((
+            "web/astrid-tokens.css".to_string(),
+            "design/astrid-tokens.css".to_string(),
+        ));
+        let files: Vec<(String, String)> = client
+            .files
+            .iter()
+            .map(|(generated, vendored)| (generated.to_string(), vendored.to_string()))
+            .collect();
+        assert_eq!(files, expected);
+        // Every file it names is one this repository generates.
+        let root = crate::repo_root();
+        let source = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&source, &core_theme_names()).expect("design/tokens.json is valid");
+        let generated: Vec<String> = outputs(&tokens).into_iter().map(|(path, _)| path).collect();
+        for (file, _) in &files {
+            assert!(generated.contains(file), "{file} is not generated");
         }
     }
 

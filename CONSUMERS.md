@@ -28,6 +28,7 @@ by `<checkout>/<copy>`, not by its repository.
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
 | `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
+| `astrid-vscode/design` | astrid-vscode (private) | the generated VS Code themes and web tokens, hash-gated (ADEV-198) | `design/REVISION` | `59fa85dc92431ccaf55ca83cbbfb80ae3bfb4fe3` |
 | `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
 
 **A pin only moves forward** (ACTD-2). `check-pins` compares each row with the same row in the
@@ -64,14 +65,14 @@ no copy to pin. A client that starts vendoring `strings/generated` adds its row 
 **`astrid-android/design` has no row yet.** It vendors `AstridTokens.kt` and does not record the
 revision it came from, so a row would have to be a guess. It is nevertheless checked:
 `cargo xtask check-design` compares the vendored file by content (see below), which needs no row.
-The row follows when the client keeps a `REVISION` beside its copy. astrid-vscode vendors no
-design output today (its webviews take the editor's colours, DS10), so it has nothing to check;
-when it ships the generated themes it joins `CLIENTS`.
+The row follows when the client keeps a `REVISION` beside its copy. astrid-vscode vendors the
+generated workbench themes and `web/astrid-tokens.css` under `design/`, with a `design/REVISION`,
+and is in `CLIENTS` (ADEV-198).
 
 ### `cargo xtask check-design` checks every client's copy (ADEV-162)
 
-`check-design [client checkouts…]` compares what each of astrid-web, astrid-windows, astrid-ios
-and astrid-android vendors with this repository's generated files, by content. The
+`check-design [client checkouts…]` compares what each of astrid-web, astrid-windows, astrid-ios,
+astrid-android and astrid-vscode vendors with this repository's generated files, by content. The
 client list is `CLIENTS` in `crates/xtask/src/design.rs`. How the revision is found, in order:
 
 1. the client's `REVISION` file (web, Windows);
