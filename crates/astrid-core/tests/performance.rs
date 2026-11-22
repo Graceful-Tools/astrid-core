@@ -24,9 +24,19 @@ const TASKS: usize = 10_000;
 
 /// The bound every measurement below is checked against.
 ///
-/// Half a second for ten thousand tasks. A machine three times slower than this one still passes;
-/// an implementation that went quadratic does not.
-const BUDGET: Duration = Duration::from_millis(500);
+/// Half a second for ten thousand tasks on a developer machine, which does the board's id pass in
+/// about 250ms. On CI the bound is four times that: GitHub's hosted macOS runner, with a debug
+/// build and shared cores, takes about 500ms for the same pass, so a 500ms bound there failed on
+/// noise: these tests went red 21 times between 2026-10-23 and 2026-11-21, the latest at 506ms. Two seconds
+/// still catches what these tests are for: a quadratic pass over ten thousand tasks costs tens of
+/// seconds, not a few hundred milliseconds.
+fn budget() -> Duration {
+    if std::env::var_os("CI").is_some() {
+        Duration::from_millis(2_000)
+    } else {
+        Duration::from_millis(500)
+    }
+}
 
 /// Held for the whole of each test, so they run one at a time.
 ///
@@ -102,7 +112,7 @@ async fn a_window_of_rows_is_fast_on_a_huge_list() {
 
     assert_eq!(answer["value"]["rows"].as_array().expect("rows").len(), 50);
     assert!(
-        elapsed < BUDGET,
+        elapsed < budget(),
         "a window of 50 rows out of {TASKS} took {elapsed:?}"
     );
 }
@@ -124,7 +134,7 @@ async fn my_tasks_is_fast_on_a_huge_account() {
 
     assert_eq!(answer["value"]["rows"].as_array().expect("rows").len(), 50);
     assert!(
-        elapsed < BUDGET,
+        elapsed < budget(),
         "the first window of My Tasks out of {TASKS} took {elapsed:?}"
     );
 }
@@ -149,7 +159,7 @@ async fn scrolling_does_not_get_slower_further_down() {
     .await;
 
     assert_eq!(answer["value"]["rows"].as_array().expect("rows").len(), 50);
-    assert!(deep < BUDGET, "a window at offset 5000 took {deep:?}");
+    assert!(deep < budget(), "a window at offset 5000 took {deep:?}");
     // Generous, because both are small and the ratio of two small numbers is noise. What it rules
     // out is the deep window costing a hundred times the first.
     assert!(
@@ -171,7 +181,10 @@ async fn search_over_the_whole_account_is_fast() {
     .await;
 
     assert!(answer["value"]["total"].as_u64().expect("a total") >= 1);
-    assert!(elapsed < BUDGET, "searching {TASKS} tasks took {elapsed:?}");
+    assert!(
+        elapsed < budget(),
+        "searching {TASKS} tasks took {elapsed:?}"
+    );
 }
 
 /// The board groups every card on the project into columns.
@@ -189,7 +202,7 @@ async fn a_board_of_ten_thousand_cards_is_fast() {
     let columns = answer["value"]["columns"].as_array().expect("columns");
     assert_eq!(columns.len(), 5);
     assert!(
-        elapsed < BUDGET,
+        elapsed < budget(),
         "a board of {TASKS} cards took {elapsed:?}"
     );
 
@@ -211,7 +224,7 @@ async fn a_board_of_ten_thousand_cards_is_fast() {
         .expect("ids");
     assert_eq!(inbox.first().and_then(|id| id.as_str()), Some("t9999"));
     assert!(
-        elapsed < BUDGET,
+        elapsed < budget(),
         "every id of a board of {TASKS} cards took {elapsed:?}"
     );
 }
@@ -229,5 +242,5 @@ async fn one_write_does_not_cost_the_whole_account() {
     .await;
 
     assert_eq!(answer["ok"], true);
-    assert!(elapsed < BUDGET, "completing one task took {elapsed:?}");
+    assert!(elapsed < budget(), "completing one task took {elapsed:?}");
 }
