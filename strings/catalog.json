@@ -1,6 +1,12 @@
 {
   "note": "GENERATED first by scripts/seed-strings.mjs, then maintained by hand. See strings/README.md.",
   "keys": {
+    "board.empty.custom": {},
+    "board.empty.doing": {},
+    "board.empty.done": {},
+    "board.empty.inbox": {},
+    "board.empty.ready": {},
+    "board.empty.waiting": {},
     "defaults.all_day": {},
     "filter.any": {},
     "filter.assigned_by": {},

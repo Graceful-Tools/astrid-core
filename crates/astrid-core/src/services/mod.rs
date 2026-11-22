@@ -24,6 +24,7 @@ pub mod comment;
 pub mod conditional;
 pub mod connections;
 pub mod dependency;
+pub mod empathy_art;
 pub mod external;
 pub mod goals;
 pub mod list;
@@ -129,6 +130,14 @@ impl Context {
     /// the one that puts something on disk beside the database.
     pub fn attachments(&self, cache_dir: impl AsRef<std::path::Path>) -> AttachmentService {
         AttachmentService::new(self.clone(), cache_dir)
+    }
+
+    /// The frames an empty board column shows (ADEV-221): fetched and kept under `cache_dir`.
+    pub fn empathy_art(
+        &self,
+        cache_dir: impl AsRef<std::path::Path>,
+    ) -> empathy_art::EmpathyArtService {
+        empathy_art::EmpathyArtService::new(self.clone(), cache_dir)
     }
 
     /// Mirroring lists into and out of other people's task systems.

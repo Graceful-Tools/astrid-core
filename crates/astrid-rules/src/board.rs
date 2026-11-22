@@ -55,6 +55,40 @@ pub struct BoardColumn {
     pub name: String,
     pub description: String,
     pub kind: ColumnKind,
+    /// The catalog key of what the column says when it holds no cards (ADEV-221, web's
+    /// `boardColumnEmptyKey`). Decided by the column's id and kind, never its name, so a rename
+    /// keeps its message.
+    pub empty_message_key: &'static str,
+}
+
+/// The message an empty column says, by which column it is: Inbox, Done and the three default
+/// roles each speak to their own state, and every other column (custom, preset) gets the generic
+/// one. Named here, beside the decision, so `copy::keys()` reads them from one place.
+pub const EMPTY_MESSAGE_KEYS: [&str; 6] = [
+    "board.empty.inbox",
+    "board.empty.ready",
+    "board.empty.doing",
+    "board.empty.waiting",
+    "board.empty.done",
+    "board.empty.custom",
+];
+
+const EMPTY_INBOX: &str = EMPTY_MESSAGE_KEYS[0];
+const EMPTY_DONE: &str = EMPTY_MESSAGE_KEYS[4];
+const EMPTY_CUSTOM: &str = EMPTY_MESSAGE_KEYS[5];
+
+/// The empty-column message key for a column with this id and kind (ADEV-221).
+pub fn empty_message_key(id: &str, kind: ColumnKind) -> &'static str {
+    match kind {
+        ColumnKind::Inbox => EMPTY_INBOX,
+        ColumnKind::Done => EMPTY_DONE,
+        ColumnKind::Status => match id {
+            READY_STATUS_ROLE => EMPTY_MESSAGE_KEYS[1],
+            DOING_STATUS_ROLE => EMPTY_MESSAGE_KEYS[2],
+            WAITING_STATUS_ROLE => EMPTY_MESSAGE_KEYS[3],
+            _ => EMPTY_CUSTOM,
+        },
+    }
 }
 
 /// One of the three roles every board shares.
@@ -239,6 +273,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
                 .unwrap_or(name.into()),
             description: description.to_string(),
             kind: ColumnKind::Status,
+            empty_message_key: empty_message_key(role, ColumnKind::Status),
         }
     };
     // Waiting first, then the inbox column (called "Ideas/Inbox"), then Ready and Doing (ADEV-128,
@@ -254,6 +289,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
         name: "Ideas/Inbox".into(),
         description: "Move them to \"Ready\" when they are... ready!".into(),
         kind: ColumnKind::Inbox,
+        empty_message_key: EMPTY_INBOX,
     });
     all.extend(
         DEFAULT_STATES
@@ -268,6 +304,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
             name: state.name.clone(),
             description: state.description.clone().unwrap_or_default(),
             kind: ColumnKind::Status,
+            empty_message_key: empty_message_key(&state.role, ColumnKind::Status),
         });
     }
 
@@ -276,6 +313,7 @@ pub fn columns(custom_states: Option<&serde_json::Value>) -> Vec<BoardColumn> {
         name: "Done".into(),
         description: "Complete — congrats!".into(),
         kind: ColumnKind::Done,
+        empty_message_key: EMPTY_DONE,
     });
     all
 }
@@ -776,6 +814,33 @@ mod tests {
 
     fn ids(columns: &[BoardColumn]) -> Vec<&str> {
         columns.iter().map(|column| column.id.as_str()).collect()
+    }
+
+    /// ADEV-221: an empty column says what web's `boardColumnEmptyKey` says — by id and kind, so a
+    /// rename keeps its message, and a custom or preset column gets the generic one.
+    #[test]
+    fn an_empty_column_names_its_own_message_adev_221() {
+        let custom = json!([
+            { "role": "waiting", "name": "On hold" },
+            { "role": "review", "name": "Review" },
+            { "role": "testing", "name": "Testing" },
+        ]);
+        let said: Vec<(String, &str)> = columns(Some(&custom))
+            .into_iter()
+            .map(|column| (column.id, column.empty_message_key))
+            .collect();
+        assert_eq!(
+            said,
+            vec![
+                ("waiting".to_string(), "board.empty.waiting"),
+                (VIRTUAL_INBOX_COLUMN_ID.to_string(), "board.empty.inbox"),
+                ("ready".to_string(), "board.empty.ready"),
+                ("doing".to_string(), "board.empty.doing"),
+                ("review".to_string(), "board.empty.custom"),
+                ("testing".to_string(), "board.empty.custom"),
+                (VIRTUAL_DONE_COLUMN_ID.to_string(), "board.empty.done"),
+            ]
+        );
     }
 
     #[test]

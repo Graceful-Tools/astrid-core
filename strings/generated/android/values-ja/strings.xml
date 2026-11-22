@@ -45,6 +45,12 @@
     <string name="auth_sign_in_header">サインインして始めましょう！</string>
     <string name="auth_sign_in_prompt_title">サインイン</string>
     <string name="auth_sign_in_short">サインイン</string>
+    <string name="board_empty_custom">まだ何もありません！タスクをドラッグして進めましょう。</string>
+    <string name="board_empty_doing">進行中のタスクはありません。準備完了から選んで始めましょう！</string>
+    <string name="board_empty_done">完了したタスクはまだありません。1つ完了して、ここでお祝いしましょう！</string>
+    <string name="board_empty_inbox">整理する新着はありません！ステータスのないタスクはここに入ります。</string>
+    <string name="board_empty_ready">待機中のタスクはありません！開始できる状態になったらここに移動しましょう。</string>
+    <string name="board_empty_waiting">保留中のタスクはありません！日付や他のタスクを待っているタスクはここに表示されます。</string>
     <string name="board_status_doing">作業中</string>
     <string name="board_status_done">完了</string>
     <string name="board_status_inbox">アイデア/受信箱</string>
