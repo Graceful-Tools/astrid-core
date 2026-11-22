@@ -318,6 +318,7 @@
         "value": [
           {
             "description": "Paused until the circumstances are right.",
+            "emptyMessageKey": "board.empty.waiting",
             "id": "waiting",
             "kind": "status",
             "name": "Waiting",
@@ -325,6 +326,7 @@
           },
           {
             "description": "Move them to \"Ready\" when they are... ready!",
+            "emptyMessageKey": "board.empty.inbox",
             "id": "__virtual_inbox__",
             "kind": "inbox",
             "name": "Ideas/Inbox",
@@ -334,6 +336,7 @@
           },
           {
             "description": "Time to get to work!",
+            "emptyMessageKey": "board.empty.ready",
             "id": "ready",
             "kind": "status",
             "name": "Ready",
@@ -343,6 +346,7 @@
           },
           {
             "description": "Active work in progress!",
+            "emptyMessageKey": "board.empty.doing",
             "id": "doing",
             "kind": "status",
             "name": "Doing",
@@ -352,6 +356,7 @@
           },
           {
             "description": "",
+            "emptyMessageKey": "board.empty.custom",
             "id": "review",
             "kind": "status",
             "name": "Review",
@@ -359,6 +364,7 @@
           },
           {
             "description": "Complete — congrats!",
+            "emptyMessageKey": "board.empty.done",
             "id": "__virtual_done__",
             "kind": "done",
             "name": "Done",
@@ -478,6 +484,7 @@
         "value": [
           {
             "description": "Paused until the circumstances are right.",
+            "emptyMessageKey": "board.empty.waiting",
             "id": "waiting",
             "kind": "status",
             "name": "Waiting",
@@ -485,6 +492,7 @@
           },
           {
             "description": "Move them to \"Ready\" when they are... ready!",
+            "emptyMessageKey": "board.empty.inbox",
             "id": "__virtual_inbox__",
             "kind": "inbox",
             "name": "Ideas/Inbox",
@@ -492,6 +500,7 @@
           },
           {
             "description": "Time to get to work!",
+            "emptyMessageKey": "board.empty.ready",
             "id": "ready",
             "kind": "status",
             "name": "Ready",
@@ -501,6 +510,7 @@
           },
           {
             "description": "Active work in progress!",
+            "emptyMessageKey": "board.empty.doing",
             "id": "doing",
             "kind": "status",
             "name": "Doing",
@@ -508,6 +518,7 @@
           },
           {
             "description": "",
+            "emptyMessageKey": "board.empty.custom",
             "id": "review",
             "kind": "status",
             "name": "Review",
@@ -517,6 +528,7 @@
           },
           {
             "description": "Complete — congrats!",
+            "emptyMessageKey": "board.empty.done",
             "id": "__virtual_done__",
             "kind": "done",
             "name": "Done",
@@ -638,6 +650,7 @@
         "value": [
           {
             "description": "Paused until the circumstances are right.",
+            "emptyMessageKey": "board.empty.waiting",
             "id": "waiting",
             "kind": "status",
             "name": "Waiting",
@@ -645,6 +658,7 @@
           },
           {
             "description": "Move them to \"Ready\" when they are... ready!",
+            "emptyMessageKey": "board.empty.inbox",
             "id": "__virtual_inbox__",
             "kind": "inbox",
             "name": "Ideas/Inbox",
@@ -654,6 +668,7 @@
           },
           {
             "description": "Time to get to work!",
+            "emptyMessageKey": "board.empty.ready",
             "id": "ready",
             "kind": "status",
             "name": "Ready",
@@ -663,6 +678,7 @@
           },
           {
             "description": "Active work in progress!",
+            "emptyMessageKey": "board.empty.doing",
             "id": "doing",
             "kind": "status",
             "name": "Doing",
@@ -670,6 +686,7 @@
           },
           {
             "description": "",
+            "emptyMessageKey": "board.empty.custom",
             "id": "review",
             "kind": "status",
             "name": "Review",
@@ -677,6 +694,7 @@
           },
           {
             "description": "Complete — congrats!",
+            "emptyMessageKey": "board.empty.done",
             "id": "__virtual_done__",
             "kind": "done",
             "name": "Done",
@@ -796,6 +814,7 @@
         "value": [
           {
             "description": "Paused until the circumstances are right.",
+            "emptyMessageKey": "board.empty.waiting",
             "id": "waiting",
             "kind": "status",
             "name": "Waiting",
@@ -803,6 +822,7 @@
           },
           {
             "description": "Move them to \"Ready\" when they are... ready!",
+            "emptyMessageKey": "board.empty.inbox",
             "id": "__virtual_inbox__",
             "kind": "inbox",
             "name": "Ideas/Inbox",
@@ -812,6 +832,7 @@
           },
           {
             "description": "Time to get to work!",
+            "emptyMessageKey": "board.empty.ready",
             "id": "ready",
             "kind": "status",
             "name": "Ready",
@@ -821,6 +842,7 @@
           },
           {
             "description": "Active work in progress!",
+            "emptyMessageKey": "board.empty.doing",
             "id": "doing",
             "kind": "status",
             "name": "Doing",
@@ -830,6 +852,7 @@
           },
           {
             "description": "",
+            "emptyMessageKey": "board.empty.custom",
             "id": "review",
             "kind": "status",
             "name": "Review",
@@ -837,6 +860,7 @@
           },
           {
             "description": "Complete — congrats!",
+            "emptyMessageKey": "board.empty.done",
             "id": "__virtual_done__",
             "kind": "done",
             "name": "Done",

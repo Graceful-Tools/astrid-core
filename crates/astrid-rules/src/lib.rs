@@ -22,6 +22,7 @@ pub mod capabilities;
 pub mod copy;
 pub mod decisions;
 pub mod editing;
+pub mod empathy;
 pub mod envelope;
 pub mod filters;
 pub mod identifier;

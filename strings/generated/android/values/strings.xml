@@ -45,6 +45,12 @@
     <string name="auth_sign_in_header">Sign in to get started!</string>
     <string name="auth_sign_in_prompt_title">Sign In</string>
     <string name="auth_sign_in_short">Sign In</string>
+    <string name="board_empty_custom">Nothing here yet! Drag a task in to move it along.</string>
+    <string name="board_empty_doing">Nothing in progress. Pick something from Ready and get going!</string>
+    <string name="board_empty_done">No finished tasks yet. Complete one and celebrate it here!</string>
+    <string name="board_empty_inbox">Nothing new to sort! Tasks without a status land here.</string>
+    <string name="board_empty_ready">Nothing queued up! Move a task here when it\'s ready to start.</string>
+    <string name="board_empty_waiting">Nothing on hold! Tasks waiting on a date or another task show up here.</string>
     <string name="board_status_doing">Doing</string>
     <string name="board_status_done">Done</string>
     <string name="board_status_inbox">Ideas/Inbox</string>

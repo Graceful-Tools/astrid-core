@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Nada aqui ainda! Arraste uma tarefa para fazê-la avançar.",
+  "board.empty.doing": "Nada em andamento. Escolha algo em Pronto e mãos à obra!",
+  "board.empty.done": "Ainda não há tarefas concluídas. Conclua uma e comemore aqui!",
+  "board.empty.inbox": "Nada novo para organizar! Tarefas sem status ficam aqui.",
+  "board.empty.ready": "Nada na fila! Mova uma tarefa para cá quando ela estiver pronta para começar.",
+  "board.empty.waiting": "Nada em espera! Tarefas aguardando uma data ou outra tarefa aparecem aqui.",
   "defaults.all_day": "Dia inteiro",
   "filter.any": "Qualquer",
   "filter.assigned_by": "Atribuído por",
