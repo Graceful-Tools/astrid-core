@@ -166,6 +166,24 @@ impl LeadingControl {
         LeadingControl::for_task(assignee_id, current_user_id)
     }
 
+    /// Whether completing the task should ask first (ADEV-201) — astrid-web's
+    /// `completionNeedsConfirmation`. Reopening never asks; an unknown reader asks (nothing shows
+    /// the task is theirs); otherwise it asks unless the task is the reader's own, so an
+    /// unassigned task asks too.
+    pub fn completion_needs_confirmation(
+        assignee_id: Option<&str>,
+        current_user_id: Option<&str>,
+        completed: bool,
+    ) -> bool {
+        if completed {
+            return false;
+        }
+        let Some(reader) = current_user_id.filter(|id| !id.is_empty()) else {
+            return true;
+        };
+        assignee_id != Some(reader)
+    }
+
     /// Complete the task, or open the picker?
     ///
     /// iOS's `TaskLeadingControl.action(surface:kind:currentUserId:)`, which this
@@ -343,6 +361,10 @@ pub struct TaskRow {
     /// the row it was handed would be deciding what the core already decided. Meaningless when
     /// `action` is not `openPicker`, and false there.
     pub picker_shows_project_state: bool,
+    /// Whether completing this task should ask first —
+    /// [`LeadingControl::completion_needs_confirmation`], carried so a client reads it rather than
+    /// recomputing it (ADEV-201). False on a completed task, whose action is a reopen.
+    pub completion_needs_confirmation: bool,
     /// How far to indent, from the subtask chain.
     pub depth: usize,
     /// True when this row still exists only on this device.
@@ -538,6 +560,11 @@ impl TaskRow {
             leading,
             action,
             picker_shows_project_state,
+            completion_needs_confirmation: LeadingControl::completion_needs_confirmation(
+                assignee_id,
+                context.current_user_id,
+                task.completed,
+            ),
             depth: context.depths.get(&task.id).copied().unwrap_or(0),
             is_pending: crate::model::is_temp_id(&task.id),
             is_private: task.is_private,

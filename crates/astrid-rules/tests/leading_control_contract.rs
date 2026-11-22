@@ -120,3 +120,48 @@ fn a_built_row_draws_and_acts_as_web_does() {
         }
     }
 }
+
+/// ADEV-201: whether completing asks first is carried on the row. Web's rule
+/// (`completionNeedsConfirmation`): completed → false; no reader → true; otherwise assignee ≠
+/// reader. Expected values are derived from each fixture case's inputs.
+#[test]
+fn adev_201_a_row_carries_whether_completing_asks() {
+    let now = date::parse("2026-11-20T12:00:00Z").expect("an instant");
+    let depths = HashMap::new();
+    let counts = HashMap::new();
+    for case in cases() {
+        let completed = case["completed"].as_bool().unwrap();
+        let reader = case["currentUserId"].as_str();
+        let expected = if completed {
+            false
+        } else if reader.is_none() {
+            true
+        } else {
+            case["assigneeId"].as_str() != reader
+        };
+        let task: Task = serde_json::from_value(json!({
+            "id": "t1",
+            "title": "A task",
+            "assigneeId": case["assigneeId"],
+            "completed": completed,
+        }))
+        .expect("a task");
+        let context = RowContext {
+            surface: Surface::ListRow,
+            current_user_id: reader,
+            now,
+            offset: Offset::UTC,
+            lists: &[],
+            users: &[],
+            depths: &depths,
+            subtask_counts: &counts,
+        };
+        let row = TaskRow::build(&task, &context);
+        assert_eq!(
+            row.completion_needs_confirmation,
+            expected,
+            "{}",
+            label(&case)
+        );
+    }
+}
