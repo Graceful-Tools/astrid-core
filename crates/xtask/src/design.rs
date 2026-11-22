@@ -1489,6 +1489,22 @@ fn windows_xaml(tokens: &Tokens) -> String {
             number(step)
         ));
     }
+    for step in tokens
+        .raw
+        .get("space")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        xaml.push_str(&format!(
+            "    <Thickness x:Key=\"AstridInset{0}\">{0}</Thickness>\n",
+            number(step)
+        ));
+    }
+    xaml.push_str(&windows_layout(&object(
+        &object(&tokens.raw, "layout"),
+        "compact",
+    )));
     for (name, motion) in object(&tokens.raw, "motion") {
         let base = capitalised(&camel(&name));
         xaml.push_str(&format!(
@@ -1520,6 +1536,55 @@ fn windows_xaml(tokens: &Tokens) -> String {
     }
     xaml.push_str("</ResourceDictionary>\n");
     xaml
+}
+
+/// The compact `layout.*` tokens (Windows is a pointer layout): a radius is a `CornerRadius`, a
+/// padding (`x`/`y`, or `x`/`top`/`bottom`, or uniform) is a `Thickness` in WinUI's
+/// left,top,right,bottom order, and any other length an `x:Double`.
+fn windows_layout(compact: &Map<String, Value>) -> String {
+    let mut out = String::new();
+    let mut paddings: std::collections::BTreeMap<String, Map<String, Value>> = Default::default();
+    for (key, value) in compact {
+        if let Some((base, side)) = key.split_once("-padding") {
+            let side = side.trim_start_matches('-');
+            paddings
+                .entry(format!("{base}-padding"))
+                .or_default()
+                .insert(side.to_string(), value.clone());
+        } else if key.ends_with("-radius") {
+            out.push_str(&format!(
+                "    <CornerRadius x:Key=\"{}\">{}</CornerRadius>\n",
+                xaml_name(key),
+                number(value)
+            ));
+        } else {
+            out.push_str(&xaml_size(key, value));
+        }
+    }
+    for (name, sides) in paddings {
+        let get = |side: &str, fallback: &str| {
+            sides
+                .get(side)
+                .or_else(|| sides.get(fallback))
+                .or_else(|| sides.get(""))
+                .map(number)
+                .unwrap_or_else(|| "0".to_string())
+        };
+        let (x, y) = (get("x", ""), get("y", ""));
+        let (top, bottom) = (get("top", "y"), get("bottom", "y"));
+        let thickness = if x == top && x == bottom {
+            x
+        } else if top == y && bottom == y {
+            format!("{x},{y}")
+        } else {
+            format!("{x},{top},{x},{bottom}")
+        };
+        out.push_str(&format!(
+            "    <Thickness x:Key=\"{}\">{thickness}</Thickness>\n",
+            xaml_name(&name)
+        ));
+    }
+    out
 }
 
 /// The pill's lengths and ratios as XAML names, none if the source has no pill.
@@ -2621,6 +2686,21 @@ mod tests {
         }
         assert!(xaml.contains("<CornerRadius x:Key=\"AstridRadiusSmall\">6</CornerRadius>"));
         assert!(xaml.contains("x:Key=\"AstridSpringDamping\""));
+        // ADEV-215: the compact layout tokens and a Thickness form of the space scale.
+        for line in [
+            "<x:Double x:Key=\"AstridRowMinHeight\">52</x:Double>",
+            "<CornerRadius x:Key=\"AstridRowRadius\">8</CornerRadius>",
+            "<CornerRadius x:Key=\"AstridDetailPanelRadius\">14</CornerRadius>",
+            "<Thickness x:Key=\"AstridRowPadding\">12,9</Thickness>",
+            "<Thickness x:Key=\"AstridBoardCardPadding\">8</Thickness>",
+            "<Thickness x:Key=\"AstridBoardColumnHeaderPadding\">10,10,10,8</Thickness>",
+            "<Thickness x:Key=\"AstridBoardColumnBodyPadding\">10,0</Thickness>",
+            "<Thickness x:Key=\"AstridBoardPadding\">16</Thickness>",
+            "<x:Double x:Key=\"AstridSubtaskIndent\">16</x:Double>",
+            "<Thickness x:Key=\"AstridInset8\">8</Thickness>",
+        ] {
+            assert!(xaml.contains(line), "{line}");
+        }
         assert!(
             xaml.contains("SystemColorWindowTextColor"),
             "high contrast uses system colours"
