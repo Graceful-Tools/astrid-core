@@ -367,9 +367,11 @@ jobs:
       # revision out of this repository's history, which only this job fetches whole. Every client
       # that vendors tokens is named (ADEV-162); one whose checkout is not here is reported
       # unchecked, and one that records no revision is compared by content with our history.
+      # astrid-vscode joined with ADEV-198; until the token reaches it (task fd7cf5c6) it reports
+      # unchecked, as in check-pins.
       - name: Check every client's design output is ours
         working-directory: astrid-core
-        run: cargo xtask check-design ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android
+        run: cargo xtask check-design ../astrid-web ../astrid-windows ../astrid-ios ../astrid-android ../astrid-vscode
 
   contracts:
     name: cross-platform contracts
