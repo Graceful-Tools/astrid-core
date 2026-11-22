@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Ancora niente qui! Trascina un'attività per farla avanzare.",
+  "board.empty.doing": "Niente in corso. Scegli qualcosa da Pronto e mettiti al lavoro!",
+  "board.empty.done": "Ancora nessuna attività completata. Completane una e festeggia qui!",
+  "board.empty.inbox": "Niente di nuovo da smistare! Le attività senza stato arrivano qui.",
+  "board.empty.ready": "Niente in coda! Sposta qui un'attività quando è pronta a partire.",
+  "board.empty.waiting": "Niente in pausa! Le attività in attesa di una data o di un'altra attività compaiono qui.",
   "defaults.all_day": "Tutto il giorno",
   "filter.any": "Qualsiasi",
   "filter.assigned_by": "Assegnato da",

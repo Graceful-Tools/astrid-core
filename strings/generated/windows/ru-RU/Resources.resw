@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Войти</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Здесь пока пусто! Перетащите сюда задачу, чтобы продвинуть её.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Ничего не в работе. Выберите что-нибудь из «Готово к работе» и начинайте!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Завершённых задач пока нет. Завершите одну и отпразднуйте это здесь!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Нечего сортировать! Задачи без статуса попадают сюда.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>В очереди пусто! Переместите сюда задачу, когда она будет готова к старту.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Ничего не отложено! Задачи, ожидающие даты или другой задачи, появятся здесь.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>В работе</value>
   </data>

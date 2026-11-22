@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Nothing here yet! Drag a task in to move it along.",
+  "board.empty.doing": "Nothing in progress. Pick something from Ready and get going!",
+  "board.empty.done": "No finished tasks yet. Complete one and celebrate it here!",
+  "board.empty.inbox": "Nothing new to sort! Tasks without a status land here.",
+  "board.empty.ready": "Nothing queued up! Move a task here when it's ready to start.",
+  "board.empty.waiting": "Nothing on hold! Tasks waiting on a date or another task show up here.",
   "defaults.all_day": "All day",
   "filter.any": "Any",
   "filter.assigned_by": "Assigned by",

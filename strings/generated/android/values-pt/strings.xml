@@ -45,6 +45,12 @@
     <string name="auth_sign_in_header">Faça login para começar!</string>
     <string name="auth_sign_in_prompt_title">Entrar</string>
     <string name="auth_sign_in_short">Entrar</string>
+    <string name="board_empty_custom">Nada aqui ainda! Arraste uma tarefa para fazê-la avançar.</string>
+    <string name="board_empty_doing">Nada em andamento. Escolha algo em Pronto e mãos à obra!</string>
+    <string name="board_empty_done">Ainda não há tarefas concluídas. Conclua uma e comemore aqui!</string>
+    <string name="board_empty_inbox">Nada novo para organizar! Tarefas sem status ficam aqui.</string>
+    <string name="board_empty_ready">Nada na fila! Mova uma tarefa para cá quando ela estiver pronta para começar.</string>
+    <string name="board_empty_waiting">Nada em espera! Tarefas aguardando uma data ou outra tarefa aparecem aqui.</string>
     <string name="board_status_doing">Fazendo</string>
     <string name="board_status_done">Concluído</string>
     <string name="board_status_inbox">Ideias/Caixa de entrada</string>
