@@ -1502,6 +1502,23 @@ fn windows_xaml(tokens: &Tokens) -> String {
             ));
         }
     }
+    // The type scale: a size and a weight per style (`AstridTypeCompactRowTitleSize`). A weight is
+    // a double here; the shell's `FontWeight` takes the number through a converter.
+    for (density, styles) in object(&tokens.raw, "type") {
+        for (name, style) in styles.as_object().into_iter().flatten() {
+            let base = format!(
+                "AstridType{}{}",
+                capitalised(&camel(&density)),
+                capitalised(&camel(name))
+            );
+            for (suffix, key) in [("Size", "size"), ("Weight", "weight")] {
+                xaml.push_str(&format!(
+                    "    <x:Double x:Key=\"{base}{suffix}\">{}</x:Double>\n",
+                    number(&style[key])
+                ));
+            }
+        }
+    }
     let pill = object(&tokens.raw, "pill");
     let style = &tokens.raw["type"]["comfortable"]
         [pill.get("type").and_then(Value::as_str).unwrap_or_default()];
@@ -2628,6 +2645,34 @@ mod tests {
         assert!(outputs(&tokens)
             .iter()
             .any(|(path, _)| path == "windows/AstridTokens.xaml"));
+    }
+
+    /// ADEV-217: the type scale reaches Windows too, as a size and a weight per style, outside the
+    /// theme dictionaries, so the shell's `FontSize` literals have a resource to name.
+    #[test]
+    fn xaml_has_the_type_scale_as_size_and_weight_doubles() {
+        let root = crate::repo_root();
+        let text = std::fs::read_to_string(root.join(SOURCE)).expect("design/tokens.json");
+        let tokens = parse(&text, &core_theme_names()).expect("valid");
+        let xaml = windows_xaml(&tokens);
+        assert!(xaml.contains("<x:Double x:Key=\"AstridTypeCompactDetailBodySize\">13</x:Double>"));
+        assert!(xaml.contains("<x:Double x:Key=\"AstridTypeCompactRowTitleWeight\">500</x:Double>"));
+        for (density, styles) in object(&tokens.raw, "type") {
+            for (name, _) in styles.as_object().into_iter().flatten() {
+                let base = format!(
+                    "AstridType{}{}",
+                    capitalised(&camel(&density)),
+                    capitalised(&camel(name))
+                );
+                for suffix in ["Size", "Weight"] {
+                    assert_eq!(
+                        xaml.matches(&format!("x:Key=\"{base}{suffix}\"")).count(),
+                        1,
+                        "{base}{suffix} is emitted once, outside the theme dictionaries"
+                    );
+                }
+            }
+        }
     }
 
     /// The brushes of one theme dictionary in the generated XAML: (key, colour).
