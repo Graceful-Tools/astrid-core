@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Noch nichts hier! Ziehe eine Aufgabe hinein, um sie voranzubringen.",
+  "board.empty.doing": "Nichts in Arbeit. Wähle etwas aus „Bereit“ und leg los!",
+  "board.empty.done": "Noch keine erledigten Aufgaben. Schließe eine ab und feiere sie hier!",
+  "board.empty.inbox": "Nichts Neues zu sortieren! Aufgaben ohne Status landen hier.",
+  "board.empty.ready": "Nichts in der Warteschlange! Verschiebe eine Aufgabe hierher, wenn sie startklar ist.",
+  "board.empty.waiting": "Nichts pausiert! Aufgaben, die auf ein Datum oder eine andere Aufgabe warten, erscheinen hier.",
   "defaults.all_day": "Ganztägig",
   "filter.any": "Alle",
   "filter.assigned_by": "Zugewiesen von",

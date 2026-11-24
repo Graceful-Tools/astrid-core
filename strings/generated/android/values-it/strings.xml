@@ -45,6 +45,12 @@
     <string name="auth_sign_in_header">Accedi per iniziare!</string>
     <string name="auth_sign_in_prompt_title">Accedi</string>
     <string name="auth_sign_in_short">Accedi</string>
+    <string name="board_empty_custom">Ancora niente qui! Trascina un\'attività per farla avanzare.</string>
+    <string name="board_empty_doing">Niente in corso. Scegli qualcosa da Pronto e mettiti al lavoro!</string>
+    <string name="board_empty_done">Ancora nessuna attività completata. Completane una e festeggia qui!</string>
+    <string name="board_empty_inbox">Niente di nuovo da smistare! Le attività senza stato arrivano qui.</string>
+    <string name="board_empty_ready">Niente in coda! Sposta qui un\'attività quando è pronta a partire.</string>
+    <string name="board_empty_waiting">Niente in pausa! Le attività in attesa di una data o di un\'altra attività compaiono qui.</string>
     <string name="board_status_doing">In corso</string>
     <string name="board_status_done">Fatto</string>
     <string name="board_status_inbox">Idee/Posta in arrivo</string>

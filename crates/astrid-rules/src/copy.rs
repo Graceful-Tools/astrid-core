@@ -35,6 +35,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::board::EMPTY_MESSAGE_KEYS;
 use crate::decisions::{RATING_KEY_PREFIX, RATING_LABEL_KEYS};
 use crate::model::TaskList;
 use crate::parse::quick_add::PLACEHOLDER_KEYS;
@@ -128,6 +129,9 @@ pub fn keys() -> Vec<String> {
             .iter()
             .map(|leaf| format!("{RATING_KEY_PREFIX}.{leaf}")),
     );
+
+    // What an empty board column says (ADEV-221).
+    keys.extend(EMPTY_MESSAGE_KEYS.iter().map(|key| (*key).to_string()));
 
     keys.into_iter().collect()
 }

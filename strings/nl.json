@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Hier is nog niets! Sleep een taak hierheen om hem verder te helpen.",
+  "board.empty.doing": "Niets in uitvoering. Kies iets uit Klaar en ga aan de slag!",
+  "board.empty.done": "Nog geen afgeronde taken. Rond er een af en vier het hier!",
+  "board.empty.inbox": "Niets nieuws om te sorteren! Taken zonder status komen hier terecht.",
+  "board.empty.ready": "Niets in de wachtrij! Verplaats een taak hierheen als die klaar is om te starten.",
+  "board.empty.waiting": "Niets in de wacht! Taken die op een datum of een andere taak wachten, verschijnen hier.",
   "defaults.all_day": "Hele dag",
   "filter.any": "Alle",
   "filter.assigned_by": "Toegewezen door",
