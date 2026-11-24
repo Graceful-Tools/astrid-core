@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Se connecter</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Rien ici pour l'instant ! Faites glisser une tâche pour la faire avancer.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Rien en cours. Choisissez quelque chose dans Prêt et lancez-vous !</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Aucune tâche terminée pour l'instant. Terminez-en une et fêtez ça ici !</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Rien de nouveau à trier ! Les tâches sans statut arrivent ici.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>Rien en attente ! Déplacez une tâche ici quand elle est prête à démarrer.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Rien en pause ! Les tâches qui attendent une date ou une autre tâche apparaissent ici.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>En cours</value>
   </data>

@@ -1,4 +1,10 @@
 {
+  "board.empty.custom": "Rien ici pour l'instant ! Faites glisser une tâche pour la faire avancer.",
+  "board.empty.doing": "Rien en cours. Choisissez quelque chose dans Prêt et lancez-vous !",
+  "board.empty.done": "Aucune tâche terminée pour l'instant. Terminez-en une et fêtez ça ici !",
+  "board.empty.inbox": "Rien de nouveau à trier ! Les tâches sans statut arrivent ici.",
+  "board.empty.ready": "Rien en attente ! Déplacez une tâche ici quand elle est prête à démarrer.",
+  "board.empty.waiting": "Rien en pause ! Les tâches qui attendent une date ou une autre tâche apparaissent ici.",
   "defaults.all_day": "Toute la journée",
   "filter.any": "Tous",
   "filter.assigned_by": "Assigné par",
