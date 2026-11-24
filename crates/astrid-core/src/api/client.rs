@@ -428,6 +428,40 @@ impl ApiClient {
         Ok(response)
     }
 
+    /// GET a public static file by absolute URL, with no session (ADEV-221).
+    ///
+    /// The empathy-art frames are `/images/…` files, outside `/api/v1`, so [`ApiClient::build`]
+    /// refuses them — correctly, for everything that carries a session. This is the one door for a
+    /// file that is public by design: the URL must be `https` (or under this client's own base,
+    /// for a local server), and neither the cookie nor the client id is sent.
+    pub async fn fetch_public(&self, url: &str) -> Result<HttpResponse, ApiError> {
+        let own_origin = url.starts_with(&format!("{}/", self.base_url));
+        if !(own_origin || url.starts_with("https://")) || url.contains("..") {
+            return Err(ApiError::Refused(format!(
+                "not a public https file URL: {url}"
+            )));
+        }
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: Method::Get,
+                url: url.to_string(),
+                headers: vec![(
+                    platform_header::HEADER_NAME.to_string(),
+                    self.platform.wire().to_string(),
+                )],
+                body: None,
+            })
+            .await?;
+        if !response.is_success() {
+            return Err(ApiError::Http {
+                status: response.status,
+                message: response.text(),
+            });
+        }
+        Ok(response)
+    }
+
     /// Send a conditional GET: `None` **is** the 304.
     ///
     /// Task 5751fcb8. A 304 is not an error and it is not a success either — `is_success()` is

@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>サインイン</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>まだ何もありません！タスクをドラッグして進めましょう。</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>進行中のタスクはありません。準備完了から選んで始めましょう！</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>完了したタスクはまだありません。1つ完了して、ここでお祝いしましょう！</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>整理する新着はありません！ステータスのないタスクはここに入ります。</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>待機中のタスクはありません！開始できる状態になったらここに移動しましょう。</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>保留中のタスクはありません！日付や他のタスクを待っているタスクはここに表示されます。</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>作業中</value>
   </data>
