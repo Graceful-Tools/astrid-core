@@ -19,17 +19,17 @@ by `<checkout>/<copy>`, not by its repository.
 
 | Consumer | Repository | Takes | Pinned in | Revision |
 |---|---|---|---|---|
-| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `a718622ea1e110f3f0d0e28eefa4315fc7ff8e53` |
-| `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `a24ae98eb58c5c29f43411c1303731d4e3d9b5df` |
-| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
-| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
-| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `4b7df692d1cac2e0cff150c23314079accdc3598` |
+| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `4a6368a643f845a61f8fce5ceca3e21fc859dc9f` |
+| `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2e5019420aca654895582be8583209655bbb7ad8` |
+| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `7b4dd9f5141bcd1431725a5481fd478bd4a2ab1f` |
+| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `8205b54603991221f61696af9348ef45e3832a4a` |
+| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `59c385a363e4e443992c230309abd4fa18e7c89d` |
+| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `2e5019420aca654895582be8583209655bbb7ad8` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
-| `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
-| `astrid-vscode/design` | astrid-vscode (private) | the generated VS Code themes and web tokens, hash-gated (ADEV-198) | `design/REVISION` | `59fa85dc92431ccaf55ca83cbbfb80ae3bfb4fe3` |
-| `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
+| `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `51b148237f1888f49dfd386aaaa83cd0ff2e3a55` |
+| `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
+| `astrid-vscode/design` | astrid-vscode (private) | the generated VS Code themes and web tokens, hash-gated (ADEV-198) | `design/REVISION` | `51b148237f1888f49dfd386aaaa83cd0ff2e3a55` |
+| `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
 
 **A pin only moves forward** (ACTD-2). `check-pins` compares each row with the same row in the
 table as `main` has it, and fails a move to a revision that does not descend from the old one: an
@@ -37,6 +37,16 @@ agent with a stale core checkout can otherwise pin a consumer *behind* a change 
 pinned, and nothing else notices. To back out a regression on purpose, say so in this file:
 `<!-- pin-rollback: <consumer> — <why> -->`. The check then reports the move as a deliberate
 rollback instead of failing it.
+
+<!-- pin-rollback: astrid-web/astrid-rules — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-web/strings — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-windows/core — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-windows/design — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-ios/core — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-android/core — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-vscode/astrid-rules — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-vscode/design — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
+<!-- pin-rollback: astrid-code/astrid-rules — history rewrite 2026-11-24: the old pin no longer exists; the new pin is the same tree under its rewritten id, not a rollback -->
 
 **Full forty-character shas, never short ones.** A short sha is ambiguous as the history grows,
 and `git merge-base --is-ancestor` on an abbreviation that has become ambiguous fails in a way
