@@ -123,7 +123,8 @@ fn a_built_row_draws_and_acts_as_web_does() {
 
 /// ADEV-201: whether completing asks first is carried on the row. Web's rule
 /// (`completionNeedsConfirmation`): completed → false; no reader → true; otherwise assignee ≠
-/// reader. Expected values are derived from each fixture case's inputs.
+/// reader. The expected value is web's own answer, the fixture's `asksBeforeCompleting` column
+/// (ADEV-255), not one worked out here — a derivation in this file could drift from web unnoticed.
 #[test]
 fn adev_201_a_row_carries_whether_completing_asks() {
     let now = date::parse("2026-11-20T12:00:00Z").expect("an instant");
@@ -132,13 +133,9 @@ fn adev_201_a_row_carries_whether_completing_asks() {
     for case in cases() {
         let completed = case["completed"].as_bool().unwrap();
         let reader = case["currentUserId"].as_str();
-        let expected = if completed {
-            false
-        } else if reader.is_none() {
-            true
-        } else {
-            case["assigneeId"].as_str() != reader
-        };
+        let expected = case["asksBeforeCompleting"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("asksBeforeCompleting on {}", label(&case)));
         let task: Task = serde_json::from_value(json!({
             "id": "t1",
             "title": "A task",
