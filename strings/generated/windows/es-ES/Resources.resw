@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Iniciar sesión</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>¡Aún no hay nada aquí! Arrastra una tarea para hacerla avanzar.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Nada en curso. ¡Elige algo de Listo y manos a la obra!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Aún no hay tareas terminadas. ¡Completa una y celébrala aquí!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>¡Nada nuevo que ordenar! Las tareas sin estado llegan aquí.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>¡Nada en cola! Mueve una tarea aquí cuando esté lista para empezar.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>¡Nada en pausa! Las tareas que esperan una fecha u otra tarea aparecen aquí.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>En curso</value>
   </data>

@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Inloggen</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Hier is nog niets! Sleep een taak hierheen om hem verder te helpen.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Niets in uitvoering. Kies iets uit Klaar en ga aan de slag!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Nog geen afgeronde taken. Rond er een af en vier het hier!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Niets nieuws om te sorteren! Taken zonder status komen hier terecht.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>Niets in de wachtrij! Verplaats een taak hierheen als die klaar is om te starten.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Niets in de wacht! Taken die op een datum of een andere taak wachten, verschijnen hier.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>Bezig</value>
   </data>

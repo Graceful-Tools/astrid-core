@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Accedi</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Ancora niente qui! Trascina un'attività per farla avanzare.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Niente in corso. Scegli qualcosa da Pronto e mettiti al lavoro!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Ancora nessuna attività completata. Completane una e festeggia qui!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Niente di nuovo da smistare! Le attività senza stato arrivano qui.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>Niente in coda! Sposta qui un'attività quando è pronta a partire.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Niente in pausa! Le attività in attesa di una data o di un'altra attività compaiono qui.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>In corso</value>
   </data>

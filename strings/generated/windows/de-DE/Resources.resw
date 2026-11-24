@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Anmelden</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Noch nichts hier! Ziehe eine Aufgabe hinein, um sie voranzubringen.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Nichts in Arbeit. Wähle etwas aus „Bereit“ und leg los!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>Noch keine erledigten Aufgaben. Schließe eine ab und feiere sie hier!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Nichts Neues zu sortieren! Aufgaben ohne Status landen hier.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>Nichts in der Warteschlange! Verschiebe eine Aufgabe hierher, wenn sie startklar ist.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Nichts pausiert! Aufgaben, die auf ein Datum oder eine andere Aufgabe warten, erscheinen hier.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>In Arbeit</value>
   </data>

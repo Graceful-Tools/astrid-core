@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>Sign In</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>Nothing here yet! Drag a task in to move it along.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>Nothing in progress. Pick something from Ready and get going!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>No finished tasks yet. Complete one and celebrate it here!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>Nothing new to sort! Tasks without a status land here.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>Nothing queued up! Move a task here when it's ready to start.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>Nothing on hold! Tasks waiting on a date or another task show up here.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>Doing</value>
   </data>

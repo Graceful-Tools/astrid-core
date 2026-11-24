@@ -142,6 +142,24 @@
   <data name="auth_sign_in_short" xml:space="preserve">
     <value>로그인</value>
   </data>
+  <data name="board_empty_custom" xml:space="preserve">
+    <value>아직 아무것도 없어요! 작업을 끌어다 놓아 진행시키세요.</value>
+  </data>
+  <data name="board_empty_doing" xml:space="preserve">
+    <value>진행 중인 작업이 없어요. 준비됨에서 하나 골라 시작해 보세요!</value>
+  </data>
+  <data name="board_empty_done" xml:space="preserve">
+    <value>아직 끝낸 작업이 없어요. 하나 완료하고 여기서 축하하세요!</value>
+  </data>
+  <data name="board_empty_inbox" xml:space="preserve">
+    <value>정리할 새 항목이 없어요! 상태가 없는 작업은 여기에 들어와요.</value>
+  </data>
+  <data name="board_empty_ready" xml:space="preserve">
+    <value>대기 중인 작업이 없어요! 시작할 준비가 되면 작업을 여기로 옮기세요.</value>
+  </data>
+  <data name="board_empty_waiting" xml:space="preserve">
+    <value>보류 중인 작업이 없어요! 날짜나 다른 작업을 기다리는 작업이 여기에 표시돼요.</value>
+  </data>
   <data name="board_status_doing" xml:space="preserve">
     <value>진행 중</value>
   </data>
