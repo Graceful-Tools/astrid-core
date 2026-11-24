@@ -19,17 +19,17 @@ by `<checkout>/<copy>`, not by its repository.
 
 | Consumer | Repository | Takes | Pinned in | Revision |
 |---|---|---|---|---|
-| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `a718622ea1e110f3f0d0e28eefa4315fc7ff8e53` |
+| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `6407fc87975dd0dba2ebe2c597bfdf499eefba7b` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `a24ae98eb58c5c29f43411c1303731d4e3d9b5df` |
-| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
-| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `2b5034870c7b5215e9ad61f424abc4319ed76078` |
-| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `4b7df692d1cac2e0cff150c23314079accdc3598` |
+| `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `011faef1b179a0ef800d805d9e740723b776e7d9` |
+| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `017f9b9cdf841ee1e9d0156329d775ca99258bd7` |
+| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `c5b88fa883a3e8b570c5ed0beec07cc5e00a343d` |
+| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
-| `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `d8c3e5beed5d321eae860f33e86bcc19e3af89f2` |
-| `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
-| `astrid-vscode/design` | astrid-vscode (private) | the generated VS Code themes and web tokens, hash-gated (ADEV-198) | `design/REVISION` | `59fa85dc92431ccaf55ca83cbbfb80ae3bfb4fe3` |
-| `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `4b7df692d1cac2e0cff150c23314079accdc3598` |
+| `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `017f9b9cdf841ee1e9d0156329d775ca99258bd7` |
+| `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
+| `astrid-vscode/design` | astrid-vscode (private) | the generated VS Code themes and web tokens, hash-gated (ADEV-198) | `design/REVISION` | `51b148237f1888f49dfd386aaaa83cd0ff2e3a55` |
+| `astrid-code/astrid-rules` | astrid-code (private) | `astrid-rules`, as WebAssembly | `extensions/astrid/dist/astrid-rules/REVISION` | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
 
 **A pin only moves forward** (ACTD-2). `check-pins` compares each row with the same row in the
 table as `main` has it, and fails a move to a revision that does not descend from the old one: an
