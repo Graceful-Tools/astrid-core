@@ -77,6 +77,17 @@ mod tests {
         assert_eq!(reply["value"]["decision"], "never", "{reply}");
     }
 
+    /// The Node package evaluates an estimate (ADEV-273); the browser build refuses it by name.
+    #[cfg(feature = "tradeoff")]
+    #[test]
+    fn the_node_build_answers_the_tradeoff_policy_adev_273() {
+        let reply: serde_json::Value = serde_json::from_str(&run_json(
+            r#"{"kind":"tradeoffEvaluate","project":{"tradeoff":{}},"estimate":null}"#,
+        ))
+        .unwrap();
+        assert_eq!(reply["value"]["label"], "needs-review", "{reply}");
+    }
+
     #[test]
     fn a_bad_request_is_an_envelope_not_a_panic() {
         let reply: serde_json::Value = serde_json::from_str(&run_json("not json")).unwrap();

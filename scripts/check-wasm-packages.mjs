@@ -38,6 +38,28 @@ expect(nodeOrch.ok === true, `node/ must answer orchestrationMay (astrid-web's s
 const webOrch = ask('web', webPkg, orchestration)
 expect(webOrch.ok === false && /unknown variant `orchestrationMay`/.test(webOrch.error?.message ?? ''),
   `web/ must not carry the orchestration policy: ${JSON.stringify(webOrch)}`)
+// The same for `tradeoffEvaluate` (ADEV-273): the server evaluates an estimate, the browser build
+// refuses the kind by name. The `policy` sort arm is a comparison and is in both builds, so it is
+// asked of both through an ordinary `rows` request.
+const tradeoff = JSON.stringify({ kind: 'tradeoffEvaluate', project: { tradeoff: {} }, estimate: null })
+const nodeTradeoff = ask('node', nodePkg, tradeoff)
+expect(nodeTradeoff.ok === true, `node/ must answer tradeoffEvaluate (astrid-web's server asks it): ${JSON.stringify(nodeTradeoff)}`)
+const webTradeoff = ask('web', webPkg, tradeoff)
+expect(webTradeoff.ok === false && /unknown variant `tradeoffEvaluate`/.test(webTradeoff.error?.message ?? ''),
+  `web/ must not carry the trade-off policy: ${JSON.stringify(webTradeoff)}`)
+const policySort = JSON.stringify({
+  kind: 'rows', now: '2026-11-25T12:00:00.000Z', idsOnly: true,
+  list: { id: 'l', sortBy: 'policy', filterCompletion: 'all' },
+  tasks: [
+    { id: 'b', title: 'b' },
+    { id: 'a', title: 'a', estimate: { label: 'do-now', sortKey: [0] } },
+  ],
+})
+for (const [name, pkg] of [['node', nodePkg], ['web', webPkg]]) {
+  const reply = ask(name, pkg, policySort)
+  expect(reply.ok === true && JSON.stringify(reply.ids ?? reply.value?.ids) === '["a","b"]',
+    `${name}/ must sort by policy (the arm is in every build): ${JSON.stringify(reply)}`)
+}
 for (const [name, pkg] of [['node', nodePkg], ['web', webPkg]]) {
   const reply = ask(name, pkg, ordinary)
   expect(reply.ok === true, `${name}/ must answer an ordinary rule: ${JSON.stringify(reply)}`)

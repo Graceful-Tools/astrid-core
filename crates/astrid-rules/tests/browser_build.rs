@@ -117,6 +117,38 @@ fn orchestration_is_answered_only_where_the_feature_is_on_awtd_1685() {
     }
 }
 
+/// ADEV-273: evaluating an estimate is the server's question, so the browser build refuses
+/// `tradeoffEvaluate` by name — but the `policy` sort is a comparison and answers in every build.
+#[test]
+fn tradeoff_is_answered_only_where_the_feature_is_on_and_the_policy_sort_everywhere_adev_273() {
+    let reply = answer(json!({ "kind": "tradeoffEvaluate", "estimate": null }));
+    let kinds = astrid_rules::rules::kinds();
+    assert_eq!(
+        kinds.iter().any(|k| k == "tradeoffEvaluate"),
+        cfg!(feature = "tradeoff")
+    );
+    if cfg!(feature = "tradeoff") {
+        assert_eq!(reply["ok"], json!(true), "{reply}");
+    } else {
+        assert_eq!(reply["ok"], json!(false), "{reply}");
+        assert!(
+            reply["error"].to_string().contains("tradeoffEvaluate"),
+            "{reply}"
+        );
+    }
+
+    let sorted = answer(json!({
+        "kind": "rows", "now": "2026-11-25T12:00:00.000Z", "idsOnly": true,
+        "list": { "id": "l", "sortBy": "policy", "filterCompletion": "all" },
+        "tasks": [
+            { "id": "b", "title": "b" },
+            { "id": "a", "title": "a", "estimate": { "label": "do-now", "sortKey": [0] } }
+        ]
+    }));
+    assert_eq!(sorted["ok"], json!(true), "{sorted}");
+    assert_eq!(sorted["value"]["ids"], json!(["a", "b"]), "{sorted}");
+}
+
 /// AWTD2-162, step 2: one rule from each group, and the feature that owns it. In a build with the
 /// group on the rule answers; in a build without, it is refused BY NAME (the same `unknown variant`
 /// a client sees for a kind its pinned core predates) and `kinds()` does not list it. Asserting both

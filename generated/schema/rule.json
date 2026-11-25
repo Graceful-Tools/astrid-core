@@ -27,6 +27,21 @@
           "const": "spend",
           "description": "Spend money or act as a person outside the repositories.",
           "type": "string"
+        },
+        {
+          "const": "promoteIdea",
+          "description": "Move a `do-now` idea from the Inbox to Ready (ADEV-273).",
+          "type": "string"
+        },
+        {
+          "const": "experimentStart",
+          "description": "Call an experiment service's `start`.",
+          "type": "string"
+        },
+        {
+          "const": "experimentStop",
+          "description": "Call an experiment service's `stop`.",
+          "type": "string"
         }
       ]
     },
@@ -162,6 +177,26 @@
             }
           ]
         },
+        "experimentStart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "experimentStop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "merge": {
           "anyOf": [
             {
@@ -174,6 +209,16 @@
         },
         "migrate": {
           "$ref": "#/$defs/MigrationOverride"
+        },
+        "promoteIdea": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Autonomy"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "release": {
           "anyOf": [
@@ -494,6 +539,21 @@
       ],
       "type": "string"
     },
+    "Direction": {
+      "description": "Which way a goal improves.",
+      "oneOf": [
+        {
+          "const": "up",
+          "description": "A larger value is better (the default).",
+          "type": "string"
+        },
+        {
+          "const": "down",
+          "description": "A smaller value is better.",
+          "type": "string"
+        }
+      ]
+    },
     "DurationUnit": {
       "enum": [
         "hour",
@@ -554,6 +614,209 @@
         }
       ]
     },
+    "Estimate": {
+      "description": "An estimate, as the server stores it. A `None` section is one the estimator did not return.",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "costMicrocents": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goalImpacts": {
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/GoalImpact"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "guardrailImpacts": {
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/GuardrailImpact"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "guardrailsStated": {
+          "default": false,
+          "description": "The project states guardrails, so an estimate with no `guardrailImpacts` has not been\nchecked against them.",
+          "type": "boolean"
+        },
+        "risk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Risk"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "default": null,
+          "description": "`builtin_llm` for the built-in estimator; anything else is a service the owner connected.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stale": {
+          "default": false,
+          "description": "The caller's staleness window has passed.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "EstimateSummary": {
+      "description": "The server's evaluation of a task's current estimate, stored beside it: the label to draw and\nthe key the `policy` sort compares. A comparison reads it; nothing here is evaluated on a\nclient.",
+      "properties": {
+        "label": {
+          "description": "`do-now` | `experiment-first` | `needs-review` | `dont`. Text, so a label a newer server\ninvents cannot make the whole task unreadable.",
+          "type": "string"
+        },
+        "sortKey": {
+          "description": "Compared lexicographically, smaller first (`astrid_rules::tradeoff::Evaluation::sort_key`).",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "sortKey"
+      ],
+      "type": "object"
+    },
+    "ExperimentFirstOverride": {
+      "description": "[`ExperimentFirst`], each field optional.",
+      "properties": {
+        "confidenceBelow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "riskAtLeast": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GoalImpact": {
+      "description": "An estimate's effect on one goal.",
+      "properties": {
+        "delta": {
+          "description": "The expected change.",
+          "format": "double",
+          "type": "number"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "default": "up"
+        },
+        "goalId": {
+          "type": "string"
+        },
+        "high": {
+          "format": "double",
+          "type": "number"
+        },
+        "low": {
+          "description": "The interval around it.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "goalId",
+        "delta",
+        "low",
+        "high"
+      ],
+      "type": "object"
+    },
+    "GuardrailImpact": {
+      "description": "An estimate's effect on one guardrail.",
+      "properties": {
+        "breachProbability": {
+          "$ref": "#/$defs/Probability"
+        },
+        "guardrailId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "guardrailId",
+        "breachProbability"
+      ],
+      "type": "object"
+    },
+    "GuardrailOverride": {
+      "description": "[`GuardrailThresholds`], each field optional.",
+      "properties": {
+        "refuseAtBreachProbability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewAtBreachProbability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Identifiers": {
       "description": "What a reader can see, for [`Rule::RenderMarkdown`]: [`crate::identifier::LinkContext`] in the\nweb's names (`lib/task-identifier-links.ts`, `IdentifierLinkContext`).",
       "properties": {
@@ -580,6 +843,40 @@
         }
       },
       "type": "object"
+    },
+    "Label": {
+      "description": "What an estimate earns. Ordered most to least permissive, so the stricter of two is the\ngreater, and the order is the first element of the sort key.",
+      "oneOf": [
+        {
+          "const": "do-now",
+          "description": "Build it.",
+          "type": "string"
+        },
+        {
+          "const": "experiment-first",
+          "description": "Run an experiment before building.",
+          "type": "string"
+        },
+        {
+          "const": "needs-review",
+          "description": "A person decides.",
+          "type": "string"
+        },
+        {
+          "const": "dont",
+          "description": "Do not.",
+          "type": "string"
+        }
+      ]
+    },
+    "Level": {
+      "description": "A three-step scale: risk, and confidence.",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "type": "string"
     },
     "LinkContext": {
       "description": "What the reader can see, which is what decides whether a reference becomes a link.\n\nDeserialised because the stateless door takes one (task `c2109ff8`): the VS Code extension\nand web both render task text and both need the same answer about which references link.",
@@ -1035,6 +1332,16 @@
         },
         "routing": {
           "$ref": "#/$defs/RoutingOverride"
+        },
+        "tradeoff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TradeoffOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "type": "object"
@@ -1098,6 +1405,11 @@
         "PUBLIC"
       ],
       "type": "string"
+    },
+    "Probability": {
+      "description": "A probability: a number from 0 to 1. Anything else is refused when the policy is read.",
+      "format": "double",
+      "type": "number"
     },
     "Project": {
       "properties": {
@@ -1551,6 +1863,44 @@
       ],
       "type": "object"
     },
+    "Risk": {
+      "description": "The estimate's risk. A numeric `score` may ride along; the rule reads only the level, the\nvocabulary policies are written in (`docs/GOAL_SIGNALS.md` §8.4).",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/Level"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
+    "RiskOverride": {
+      "description": "[`RiskThresholds`], each field optional.",
+      "properties": {
+        "refuseAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RoutingOverride": {
       "description": "[`Routing`], each field absent (inherit), `null` (any) or set.",
       "properties": {
@@ -1776,6 +2126,17 @@
             "string",
             "null"
           ]
+        },
+        "estimate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EstimateSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the trade-off policy made of the task's current estimate (ADEV-273,\n`docs/GOAL_SIGNALS.md` §5). Absent means unlabelled: no policy, no estimate, or a server\nthat predates it."
         },
         "fields": {
           "additionalProperties": true,
@@ -2454,6 +2815,40 @@
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "TradeoffOverride": {
+      "description": "What a project or a list stores under `tradeoff`: any subset of a [`TradeoffPolicy`].",
+      "properties": {
+        "experimentFirst": {
+          "$ref": "#/$defs/ExperimentFirstOverride"
+        },
+        "goalOrder": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "guardrail": {
+          "$ref": "#/$defs/GuardrailOverride"
+        },
+        "minConfidenceToAct": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskOverride"
         }
       },
       "type": "object"
@@ -3401,9 +3796,32 @@
         "agent": {
           "type": "string"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Level"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "orchestrationMay",
           "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Label"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The label and confidence of the estimate behind `action: \"promoteIdea\"` — read only\nfor it, and a promote that passes neither is answered `never` (`noEstimate`). Both\nmust be given for either to count (ADEV-273)."
         },
         "list": {
           "anyOf": [
@@ -3443,6 +3861,52 @@
         "kind",
         "agent",
         "action"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "T2 of [`crate::tradeoff`]: the label an estimate earns under the resolved policy's\n`tradeoff`, why, and its sort key. Answers `null` when no layer stores a trade-off policy\n(no policy, so nothing is drawn). A missing or `null` `estimate` is row 1: `needs-review`.\nGone without the `tradeoff` feature (the browser build) (ADEV-273).",
+      "properties": {
+        "estimate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Estimate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "tradeoffEvaluate",
+          "type": "string"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
       ],
       "type": "object"
     },

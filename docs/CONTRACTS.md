@@ -1822,49 +1822,69 @@ may loosen its project's policy as well as tighten it, a task on several lists i
 board being worked, and choosing which list a piece of work belongs on waits for a caller that
 sends a classifier.
 
-## Goal signals (ADEV-269, 2026-11-25): decided, not implemented
+## Goal signals (ADEV-269, 2026-11-25): D72, D73 and D75 shipped; D74 decided, not implemented
 
 Four core-first decisions for "Goals, Guardrails and Signals". The design is
 [GOAL_SIGNALS.md](./GOAL_SIGNALS.md); the spec of record is astrid-web's
-`docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. **Nothing here is in the crates yet, and no fixture
-locks it.** Each entry names the task that builds it; that task replaces "decided" with what it
-shipped and the fixture that locks it. Jon decided the frame (goals stay per project, open
+`docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. D72, D73 and D75 are in the crates (ADEV-273) and locked
+by fixtures; **D74 is still only decided**, and the task that builds it (5a) replaces "decided"
+with what it shipped and the fixture that locks it. Jon decided the frame (goals stay per project, open
 contracts only, a policy recommends and acts only where allowed). The rest was decided by the
 agent and is open to his override (GOAL_SIGNALS.md §8).
 
 ### D72 — the trade-off policy: four labels and a lexicographic order, answered by the core
 
-**Core-first; decided, not implemented (task 4a).** A `tradeoff` key in the orchestration policy
-(D71), resolved default, project, list. `astrid_rules::tradeoff` reads an estimate (per-goal
+**Core-first; shipped (ADEV-273).** A `tradeoff` key in the orchestration policy (D71), resolved
+default, project, list, field by field: a layer that names only `risk.reviewAt` inherits the rest
+from the defaults (`risk` review `medium` / refuse `high`, guardrail review `0.1` / refuse `0.5`,
+`experimentFirst` confidence below `medium` and risk at least `medium`, `minConfidenceToAct`
+`medium`, an empty `goalOrder`). `astrid_rules::tradeoff::evaluate` reads an estimate (per-goal
 impact with a range, per-guardrail breach probability, a risk level, a confidence) and answers a
-label, the reasons for it, and a sort key.
+label, the reasons for it, and a sort key. The door's rule is `tradeoffEvaluate`.
 
 1. **Labels are fixed:** `do-now`, `experiment-first`, `needs-review`, `dont`, evaluated
-   strictest first. A missing or stale estimate is `needs-review`.
-2. **Unknown is never good.** A section the estimator did not return counts against the idea.
-3. **A built-in estimate is capped at `experiment-first`.**
-4. **The order is a tuple, not a score:** label, guardrails at review, impact band per goal in
-   the policy's `goalOrder`, risk level, cost, age. Nothing is weighted or totalled, so web's
-   DECISIONS.md rule 7 (no score column) is not reopened.
-5. **No policy stored answers "no policy"**, and a client draws nothing.
-6. **A bad stored value is refused**, as in D71.
+   strictest first. A missing or stale estimate is `needs-review`. The rule reads no clock: the
+   caller passes `stale: true` once its window has passed (so `evaluate` takes no `now`).
+2. **Unknown is never good.** No `risk`, or no `guardrailImpacts` for a project that states
+   guardrails (`guardrailsStated: true`), is `needs-review`; no `confidence` is read as low; no
+   `goalImpacts` leaves nothing to improve, so `needs-review`.
+3. **A built-in estimate (`source: "builtin_llm"`) is capped at `experiment-first`.** It can
+   still be `dont` or `needs-review`.
+4. **The order is a tuple of integers, smaller first, not a score:** label, guardrails at review,
+   the impact band of each goal in the policy's `goalOrder`, risk level, cost, newer first.
+   A goal's band is `0` when even its pessimistic end gains (`low` for an `up` goal, `high` for a
+   `down` goal), `1` when the expectation gains, `2` for no effect or no estimate, `3` when the
+   expectation loses. Unknown cost sorts last; an estimate that is missing or stale sorts after
+   every readable `needs-review` one. Nothing is weighted or totalled, so web's DECISIONS.md
+   rule 7 (no score column) is not reopened.
+5. **No policy stored answers `null`**, and a client draws nothing.
+6. **A bad stored value is refused**, as in D71: a level outside `low|medium|high`, or a
+   probability outside 0–1, is a `badRequest`.
+7. **Build:** the `tradeoff` feature (default on, implies `orchestration`) gates the
+   `tradeoffEvaluate` rule; the Node package has it, the browser build refuses it by name.
 
-To be locked by `contracts/fixtures/tradeoff.json`.
+Locked by `contracts/fixtures/tradeoff.json` (`tests/tradeoff_contract.rs`).
 
 ### D73 — three autonomy actions: promote an idea, start an experiment, stop one
 
-**Core-first; decided, not implemented (task 4a).** `Action` gains `PromoteIdea`,
-`ExperimentStart` and `ExperimentStop`, stored as `autonomy.promoteIdea`,
-`autonomy.experimentStart` and `autonomy.experimentStop`. Each defaults to `never` (D71.2) and is
-answered by `may` like the others.
+**Core-first; shipped (ADEV-273).** `Action` gains `PromoteIdea`, `ExperimentStart` and
+`ExperimentStop`, stored as `autonomy.promoteIdea`, `autonomy.experimentStart` and
+`autonomy.experimentStop`. Each defaults to `never` (D71.2) and is answered by `may` like the
+others, so the resolved policy `orchestrationPolicy` answers carries three more keys under
+`autonomy`.
 
 1. **Floor:** `PromoteIdea` is `never` unless the caller passes a label of `do-now` and a
-   confidence at or above the policy's `minConfidenceToAct`. No estimate is `never`.
-2. A built-in estimate requested by an agent is the existing `Spend`.
+   confidence at or above the policy's `minConfidenceToAct` (`medium` when no trade-off policy is
+   stored). On `orchestrationMay` they are `label` and `confidence`, and both must be present for
+   either to count. The reasons are `noEstimate`, `notDoNow` and `belowConfidence`; past the
+   floor the answer is the policy's own (`reason: "policy"`). `may` takes the estimate as a fifth
+   argument, `Option<EstimateRef>`.
+2. A built-in estimate requested by an agent is the existing `Spend`. A built-in estimate cannot
+   reach `do-now` (D72.3), so it never promotes.
 3. `ask` is the server's approval card, bound to a digest of the estimate or experiment snapshot
    where D71's binds a commit.
 
-To be locked by new cases in `contracts/fixtures/orchestration.json`.
+Locked by new cases in `contracts/fixtures/orchestration.json`.
 
 ### D74 — the Pending results lane: a second preset, with rules
 
@@ -1887,13 +1907,17 @@ To be locked by `contracts/fixtures/results.json` and new cases in `board.json` 
 
 ### D75 — a `policy` sort that compares a stored key
 
-**Core-first; decided, not implemented (task 4a).** `filters::sort_by_setting` gains `"policy"`.
-It compares the sort key the server stored with each task's current estimate (D72); a task with
-none sorts after those with one, in auto order.
+**Core-first; shipped (ADEV-273).** `filters::sort_by_setting` gains `"policy"`. It compares the
+sort key the server stored with each task's current estimate (D72); a task with none sorts after
+those with one, in auto order. A finished task sinks, as in every value-based order, and equal
+keys tie through `display_order`.
 
 1. **The arm compares and never evaluates**, so the browser build carries no trade-off rules and
-   its size budget is unchanged.
+   its size budget is unchanged. It is in every build.
 2. **A client pinned before this reads `policy` as Auto**, through `sort_by_setting`'s last arm.
-3. A row's wire type gains an optional estimate summary (label and sort key).
+3. A task's wire type gains an optional `estimate: { label, sortKey }` (`model::EstimateSummary`;
+   `sortKey` is `i64[]`). Absent means unlabelled.
 
-To be locked by new cases in `contracts/fixtures/filters.json`.
+Locked by the `sort/policy-…` cases of `contracts/fixtures/tradeoff.json`, **not** `filters.json`:
+that file is generated from web's implementation (`lib/task-sort.ts`), which has no policy sort,
+and `check-contracts` would refuse a core-only edit to it.

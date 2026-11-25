@@ -37,6 +37,7 @@ pub use list::{
 };
 pub use notification::{Inbox, Notification, NotificationTask};
 pub use project::{Project, ProjectMember};
+pub use task::EstimateSummary;
 pub use task::{
     Attachment, Comment, CommentType, CustomRepeatingPattern, MonthWeekday, Priority, ReminderType,
     RepeatFromMode, Repeating, SecureFile, Task, TaskDraft, TaskRemote,

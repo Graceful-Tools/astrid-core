@@ -49,6 +49,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::tradeoff::{Label, Level, TradeoffOverride, TradeoffPolicy};
 use crate::waiting::{hand_back, HandBack};
 
 /// What an agent may do about one action class. Ordered from most to least autonomous, so the
@@ -87,6 +88,12 @@ pub enum Action {
     Release,
     /// Spend money or act as a person outside the repositories.
     Spend,
+    /// Move a `do-now` idea from the Inbox to Ready (ADEV-273).
+    PromoteIdea,
+    /// Call an experiment service's `start`.
+    ExperimentStart,
+    /// Call an experiment service's `stop`.
+    ExperimentStop,
 }
 
 /// What a migration does to existing data.
@@ -134,6 +141,9 @@ pub struct AutonomyPolicy {
     pub migrate: MigrationAutonomy,
     pub release: Autonomy,
     pub spend: Autonomy,
+    pub promote_idea: Autonomy,
+    pub experiment_start: Autonomy,
+    pub experiment_stop: Autonomy,
 }
 
 /// Who receives a question or an approval request (O5).
@@ -150,13 +160,17 @@ pub enum Escalation {
 }
 
 /// A policy with every field decided: what [`resolve`] answers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Policy {
     pub routing: Routing,
     pub autonomy: AutonomyPolicy,
     pub escalation: Escalation,
+    /// How an estimate is labelled and ordered. Absent when no layer stores one: no policy, so no
+    /// label is drawn (ADEV-273, [`crate::tradeoff`] T1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tradeoff: Option<TradeoffPolicy>,
 }
 
 impl Default for Policy {
@@ -173,8 +187,12 @@ impl Default for Policy {
                 },
                 release: Autonomy::Never,
                 spend: Autonomy::Never,
+                promote_idea: Autonomy::Never,
+                experiment_start: Autonomy::Never,
+                experiment_stop: Autonomy::Never,
             },
             escalation: Escalation::ListOwner,
+            tradeoff: None,
         }
     }
 }
@@ -183,7 +201,7 @@ impl Default for Policy {
 ///
 /// For the two routing fields `null` is a value — "any agent" — so it overrides an inherited one;
 /// only an absent key inherits.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyOverride {
@@ -193,6 +211,8 @@ pub struct PolicyOverride {
     pub autonomy: AutonomyOverride,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalation: Option<Escalation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tradeoff: Option<TradeoffOverride>,
 }
 
 /// [`Routing`], each field absent (inherit), `null` (any) or set.
@@ -240,6 +260,12 @@ pub struct AutonomyOverride {
     pub release: Option<Autonomy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spend: Option<Autonomy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promote_idea: Option<Autonomy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_start: Option<Autonomy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_stop: Option<Autonomy>,
 }
 
 impl Policy {
@@ -258,8 +284,14 @@ impl Policy {
         set(&mut a.migrate.destructive, o.migrate.destructive);
         set(&mut a.release, o.release);
         set(&mut a.spend, o.spend);
+        set(&mut a.promote_idea, o.promote_idea);
+        set(&mut a.experiment_start, o.experiment_start);
+        set(&mut a.experiment_stop, o.experiment_stop);
         if let Some(escalation) = &layer.escalation {
             self.escalation = escalation.clone();
+        }
+        if let Some(tradeoff) = &layer.tradeoff {
+            self.tradeoff = Some(self.tradeoff.take().unwrap_or_default().with(tradeoff));
         }
         self
     }
@@ -344,6 +376,12 @@ pub enum MayReason {
     UnclassifiedMigration,
     /// The list does not admit this agent.
     NotAdmitted,
+    /// `PromoteIdea` with no estimate to act on.
+    NoEstimate,
+    /// `PromoteIdea` on an estimate whose label is not `do-now`.
+    NotDoNow,
+    /// `PromoteIdea` on an estimate less confident than `minConfidenceToAct`.
+    BelowConfidence,
 }
 
 /// What [`may`] answers.
@@ -356,13 +394,24 @@ pub struct MayAnswer {
     pub reason: MayReason,
 }
 
+/// The estimate an agent acts on, as [`may`] reads it: the label it earned and how confident the
+/// estimator was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EstimateRef {
+    pub label: Label,
+    pub confidence: Level,
+}
+
 /// O4: may `agent` do `action` on its own, under this policy? `migration` is read only for
-/// [`Action::Migrate`].
+/// [`Action::Migrate`], and `estimate` only for [`Action::PromoteIdea`], which is `never` unless
+/// the estimate's label is `do-now` and its confidence reaches `minConfidenceToAct` — and a caller
+/// that passes none is answered `never` (ADEV-273, D73).
 pub fn may(
     policy: &Policy,
     agent: &str,
     action: Action,
     migration: Option<MigrationKind>,
+    estimate: Option<EstimateRef>,
 ) -> MayAnswer {
     let a = &policy.autonomy;
     let (decision, reason) = if !policy.admits(agent) {
@@ -373,6 +422,22 @@ pub fn may(
             Action::Deploy => (a.deploy, MayReason::Policy),
             Action::Release => (a.release, MayReason::Policy),
             Action::Spend => (a.spend, MayReason::Policy),
+            Action::ExperimentStart => (a.experiment_start, MayReason::Policy),
+            Action::ExperimentStop => (a.experiment_stop, MayReason::Policy),
+            Action::PromoteIdea => {
+                let bar = policy
+                    .tradeoff
+                    .as_ref()
+                    .map_or(TradeoffPolicy::default().min_confidence_to_act, |t| {
+                        t.min_confidence_to_act
+                    });
+                match estimate {
+                    None => (Autonomy::Never, MayReason::NoEstimate),
+                    Some(e) if e.label != Label::DoNow => (Autonomy::Never, MayReason::NotDoNow),
+                    Some(e) if e.confidence < bar => (Autonomy::Never, MayReason::BelowConfidence),
+                    Some(_) => (a.promote_idea, MayReason::Policy),
+                }
+            }
             Action::Migrate => match migration {
                 Some(MigrationKind::Additive) => (a.migrate.additive, MayReason::Policy),
                 kind => {
@@ -478,7 +543,7 @@ mod tests {
             Action::Spend,
         ] {
             assert_eq!(
-                may(&policy, "claude", action, None).decision,
+                may(&policy, "claude", action, None, None).decision,
                 Autonomy::Never
             );
         }
@@ -487,7 +552,8 @@ mod tests {
                 &policy,
                 "claude",
                 Action::Migrate,
-                Some(MigrationKind::Additive)
+                Some(MigrationKind::Additive),
+                None
             )
             .decision,
             Autonomy::Never
@@ -528,7 +594,7 @@ mod tests {
     #[test]
     fn astrids_policy_ships_additive_migrations_and_asks_for_destructive_ones_awtd_1685() {
         let policy = resolve(Some(&astrid()), None);
-        let migrate = |kind| may(&policy, "claude", Action::Migrate, kind);
+        let migrate = |kind| may(&policy, "claude", Action::Migrate, kind, None);
         assert_eq!(
             migrate(Some(MigrationKind::Additive)).decision,
             Autonomy::Allowed
@@ -557,6 +623,7 @@ mod tests {
             "claude",
             Action::Migrate,
             Some(MigrationKind::Destructive),
+            None,
         );
         assert_eq!(answer.decision, Autonomy::Never);
         assert_eq!(answer.reason, MayReason::DestructiveFloor);
@@ -583,7 +650,7 @@ mod tests {
         assert!(route(&set, "copilot").take);
         assert_eq!(route(&set, "codex").reason, RouteReason::NotAdmitted);
         assert_eq!(
-            may(&set, "codex", Action::Merge, None).reason,
+            may(&set, "codex", Action::Merge, None, None).reason,
             MayReason::NotAdmitted
         );
     }
@@ -626,6 +693,72 @@ mod tests {
         );
         assert_eq!(escalate(&creator, "owner", Some("ana")).notify, ["ana"]);
         assert_eq!(escalate(&creator, "owner", None).notify, ["owner"]);
+    }
+
+    fn promote(policy: &Policy, estimate: Option<EstimateRef>) -> MayAnswer {
+        may(policy, "claude", Action::PromoteIdea, None, estimate)
+    }
+
+    fn do_now(confidence: Level) -> Option<EstimateRef> {
+        Some(EstimateRef {
+            label: Label::DoNow,
+            confidence,
+        })
+    }
+
+    #[test]
+    fn the_new_actions_default_to_never_adev_273() {
+        let policy = resolve(None, None);
+        for action in [Action::ExperimentStart, Action::ExperimentStop] {
+            assert_eq!(
+                may(&policy, "claude", action, None, None).decision,
+                Autonomy::Never
+            );
+        }
+        assert_eq!(
+            promote(&policy, do_now(Level::High)).decision,
+            Autonomy::Never
+        );
+    }
+
+    #[test]
+    fn promote_idea_needs_a_do_now_label_and_enough_confidence_adev_273() {
+        let policy = resolve(
+            Some(&layer(json!({
+                "autonomy": { "promoteIdea": "allowed", "experimentStart": "ask" },
+                "tradeoff": { "minConfidenceToAct": "high" }
+            }))),
+            None,
+        );
+        assert_eq!(promote(&policy, None).reason, MayReason::NoEstimate);
+        let review = Some(EstimateRef {
+            label: Label::NeedsReview,
+            confidence: Level::High,
+        });
+        assert_eq!(promote(&policy, review).reason, MayReason::NotDoNow);
+        let unsure = promote(&policy, do_now(Level::Medium));
+        assert_eq!(unsure.decision, Autonomy::Never);
+        assert_eq!(unsure.reason, MayReason::BelowConfidence);
+        let sure = promote(&policy, do_now(Level::High));
+        assert_eq!(sure.decision, Autonomy::Allowed);
+        assert_eq!(
+            may(&policy, "claude", Action::ExperimentStart, None, None).decision,
+            Autonomy::Ask
+        );
+    }
+
+    #[test]
+    fn a_tradeoff_key_resolves_default_project_list_and_absent_means_no_policy_adev_273() {
+        assert_eq!(resolve(None, None).tradeoff, None);
+        let project = layer(
+            json!({ "tradeoff": { "goalOrder": ["g2", "g1"], "risk": { "reviewAt": "low" } } }),
+        );
+        let list = layer(json!({ "tradeoff": { "risk": { "refuseAt": "medium" } } }));
+        let tradeoff = resolve(Some(&project), Some(&list)).tradeoff.unwrap();
+        assert_eq!(tradeoff.goal_order, ["g2", "g1"]);
+        assert_eq!(tradeoff.risk.review_at, Level::Low);
+        assert_eq!(tradeoff.risk.refuse_at, Level::Medium);
+        assert_eq!(tradeoff.min_confidence_to_act, Level::Medium);
     }
 
     #[test]

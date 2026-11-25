@@ -15,6 +15,7 @@ repository.workspace = true
 default = [
     "markdown",
     "orchestration",
+    "tradeoff",
     "rules-repeating",
     "rules-waiting",
     "rules-decisions",
@@ -59,6 +60,12 @@ markdown = ["dep:pulldown-cmark"]
 # the browser build: no page decides what an agent may do, and the browser's size is a budget
 # (README, docs/BROWSER_DOOR.md).
 orchestration = []
+# The trade-off policy (ADEV-273): what label an estimate earns and how two ideas order — the
+# `tradeoffEvaluate` rule. Its types ride in `orchestration` (a policy's `tradeoff` key), so this
+# needs it. ON by default and for astrid-web's Node package, where the server evaluates; OFF in the
+# browser build, which refuses it by name. The `policy` sort arm of `filters::sort_by_setting` is a
+# comparison and is in every build.
+tradeoff = ["orchestration"]
 # No Astrid server in the binary: a `renderMarkdown` request that names no `origin` leaves a
 # relative link relative instead of resolving it on astrid.cc (AWTD-1630). Turned on by
 # astrid-core's feature of the same name (astrid-web AWTD-1627).

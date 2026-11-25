@@ -327,6 +327,22 @@ pub fn sort_by_setting<T: std::borrow::Borrow<Task>>(
             // Set to manual with nothing arranged yet: newest first, the same as `createdAt`.
             None => tasks.sort_by_key(|task| std::cmp::Reverse(created_at_of(task))),
         },
+        // The trade-off policy's order (ADEV-273, docs/GOAL_SIGNALS.md §5). It compares the key the
+        // server stored with the estimate and never evaluates, so it needs no policy and is in
+        // every build. A task with no key goes after every task with one, in auto's order; equal
+        // keys tie through `display_order`. A client pinned before this reads the name as Auto.
+        "policy" => tasks.sort_by(|a, b| {
+            let (a, b) = (a.borrow(), b.borrow());
+            fn key(task: &Task) -> Option<&Vec<i64>> {
+                task.estimate.as_ref().map(|e| &e.sort_key)
+            }
+            self::completed_last(a, b).then_with(|| match (key(a), key(b)) {
+                (Some(a_key), Some(b_key)) => a_key.cmp(b_key).then_with(|| display_order(a, b)),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => auto_order(a, b),
+            })
+        }),
         // "auto", and anything a newer build introduced.
         _ => tasks.sort_by(|a, b| auto_order(a.borrow(), b.borrow())),
     }
@@ -913,6 +929,55 @@ mod tests {
         let mut tasks = vec![old, recent];
         sort_by_setting(&mut tasks, Some("manual"), None);
         assert_eq!(ids(&tasks), vec!["recent", "old"]);
+    }
+
+    fn estimated(id: &str, label: &str, key: &[i64]) -> Task {
+        let mut task = task(id);
+        task.estimate = Some(crate::model::task::EstimateSummary {
+            label: label.into(),
+            sort_key: key.to_vec(),
+        });
+        task
+    }
+
+    /// ADEV-273: the `policy` sort compares the stored key — lexicographically, smaller first —
+    /// and never evaluates; a task with no key goes after every task with one, in auto's order.
+    #[test]
+    fn policy_compares_the_stored_key_and_leaves_unlabelled_tasks_last_adev_273() {
+        let mut urgent = task("unlabelled-urgent");
+        urgent.priority = Priority::High;
+        let mut tasks = vec![
+            task("unlabelled-plain"),
+            estimated("review", "needs-review", &[2, 0]),
+            urgent,
+            estimated("later", "do-now", &[0, 1, 5]),
+            estimated("first", "do-now", &[0, 0, 9]),
+        ];
+        sort_by_setting(&mut tasks, Some("policy"), None);
+        assert_eq!(
+            ids(&tasks),
+            vec![
+                "first",
+                "later",
+                "review",
+                "unlabelled-urgent",
+                "unlabelled-plain"
+            ]
+        );
+    }
+
+    /// Equal keys tie through the display order, and a finished task still sinks.
+    #[test]
+    fn policy_breaks_ties_by_display_order_and_sinks_finished_tasks_adev_273() {
+        let mut soon = estimated("soon", "do-now", &[0]);
+        soon.due_date_time = Some(at("2026-09-08T12:00:00Z"));
+        let mut later = estimated("later", "do-now", &[0]);
+        later.due_date_time = Some(at("2026-09-30T12:00:00Z"));
+        let mut done = estimated("done", "do-now", &[0, 0]);
+        done.completed = true;
+        let mut tasks = vec![later, done, soon];
+        sort_by_setting(&mut tasks, Some("policy"), None);
+        assert_eq!(ids(&tasks), vec!["soon", "later", "done"]);
     }
 
     /// A sort order from a newer build falls back to auto rather than leaving the list in whatever
