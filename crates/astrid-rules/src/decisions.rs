@@ -22,7 +22,7 @@
 //! by alternative, in the order it tries them, lookaheads included. Where that order matters it is
 //! said so at the code.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------------------------
 // Ratings
@@ -299,7 +299,8 @@ pub fn column_letter(index: u32) -> String {
 // ---------------------------------------------------------------------------------------------
 
 /// One option a Decision offers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionOption {
     /// The marker as the asker wrote it, upper case: `A`, or `1`. A reply leading with it still

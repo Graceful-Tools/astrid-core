@@ -35,7 +35,7 @@ rules-repeating = ["jiff/tzdb-bundle-always"]
 # questions `questionAsk`, `questionAnswer`, `questionsWaitingOn`, `questionMarker` (AWTD-1687):
 # server-side writes.
 rules-waiting = []
-# `decision`, `tradeoffGrid`, `ratingKey`: read by the comment views that draw a Decision card.
+# `decision`, `decisionReply`, `decisionChoice`, `tradeoffGrid`, `ratingKey`: read by the comment views that draw a Decision card.
 rules-decisions = []
 # The native shells' presentation rules: `repeatSummary`, `customAgentName`, `brandColors`,
 # `listProjectMoves`, `sidebar`, `listDefaultPicks`, `nesting`, `mentionTrigger`, `mentionInsert`,
