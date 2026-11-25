@@ -1881,6 +1881,10 @@ lane.
 4. **A stale source before the deadline stays put.**
 5. **§8's R7 changes:** "a task in a preset needs no wait condition" becomes true of `testing`
    only. The task that builds this amends §8.
+6. **Never added automatically (Jon, 2026-11-25).** `results` is a preset and only a preset: no
+   default board, template or rule adds the column, and rules 1 to 4 apply only to a task in
+   one. `available_presets` offers it to a board that lacks it; adding it is one write, as for
+   `testing`. A task with result conditions on a board without the column is an ordinary task.
 
 To be locked by `contracts/fixtures/results.json` and new cases in `board.json` and
 `statuses.json`.
