@@ -1184,6 +1184,17 @@
             "null"
           ]
         },
+        "metric": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GoalMetric"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The typed number behind the free text. Absent on a prose goal."
+        },
         "statement": {
           "type": "string"
         },
@@ -1198,6 +1209,69 @@
       "required": [
         "id",
         "statement"
+      ],
+      "type": "object"
+    },
+    "GoalMetric": {
+      "description": "A goal's measure as numbers (ADEV-270 on web, ADEV-275 here). `current` and `measured_at` are the\nserver's: a write never changes them, but a client that holds the block sends it back whole.",
+      "properties": {
+        "baseline": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "current": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "direction": {
+          "$ref": "#/$defs/MetricDirection"
+        },
+        "measuredAt": {
+          "description": "ISO timestamp.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "staleAfterHours": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "direction"
       ],
       "type": "object"
     },
@@ -1251,6 +1325,9 @@
     "Guardrail": {
       "description": "One guardrail, as the server answers it.",
       "properties": {
+        "check": {
+          "description": "What a program evaluates for an enforced guardrail (a `policy` or `metric` check). Kept as\nthe server sent it: the core does not judge it, and a check type it does not know survives."
+        },
         "id": {
           "type": "string"
         },
@@ -1817,6 +1894,30 @@
         "isMine",
         "isPending",
         "isSystem"
+      ],
+      "type": "object"
+    },
+    "MetricDirection": {
+      "description": "Which way is better for a goal's metric (ADEV-275; web `GoalMetric.direction`).",
+      "enum": [
+        "up",
+        "down"
+      ],
+      "type": "string"
+    },
+    "MetricSource": {
+      "description": "Where a goal's metric is read from.",
+      "properties": {
+        "connectorId": {
+          "type": "string"
+        },
+        "metricKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connectorId",
+        "metricKey"
       ],
       "type": "object"
     },

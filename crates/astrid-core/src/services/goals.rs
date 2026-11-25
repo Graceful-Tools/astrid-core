@@ -49,8 +49,51 @@ pub enum GuardrailKind {
     Stated,
 }
 
-/// One goal, as the server answers it.
+/// Which way is better for a goal's metric (ADEV-275; web `GoalMetric.direction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub enum MetricDirection {
+    #[default]
+    Up,
+    Down,
+}
+
+/// Where a goal's metric is read from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct MetricSource {
+    pub connector_id: String,
+    pub metric_key: String,
+}
+
+/// A goal's measure as numbers (ADEV-270 on web, ADEV-275 here). `current` and `measured_at` are the
+/// server's: a write never changes them, but a client that holds the block sends it back whole.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct GoalMetric {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    pub direction: MetricDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<f64>,
+    /// ISO timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MetricSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_after_hours: Option<f64>,
+}
+
+/// One goal, as the server answers it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Goal {
@@ -65,6 +108,9 @@ pub struct Goal {
     /// Where it is now, e.g. "6.1%".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current: Option<String>,
+    /// The typed number behind the free text. Absent on a prose goal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<GoalMetric>,
 }
 
 /// One guardrail, as the server answers it.
@@ -76,13 +122,17 @@ pub struct Guardrail {
     pub statement: String,
     #[serde(default)]
     pub kind: GuardrailKind,
+    /// What a program evaluates for an enforced guardrail (a `policy` or `metric` check). Kept as
+    /// the server sent it: the core does not judge it, and a check type it does not know survives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<Value>,
 }
 
 /// What `GetProjectGoals` and `GetListGoals` answer: the route's body as-is.
 ///
 /// `list_id` is there for a list's answer only; `project_id` and `project_name` are `null` for a
 /// list in no project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectGoals {
@@ -109,7 +159,7 @@ impl ProjectGoals {
 }
 
 /// A goal being written. A row with no `id` is new; the server assigns `g1`, `g2`…
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GoalDraft {
@@ -122,6 +172,9 @@ pub struct GoalDraft {
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current: Option<String>,
+    /// Sent back whole by a client that holds it. Left out, the server keeps the stored block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<GoalMetric>,
 }
 
 /// A guardrail being written. No `id` is new (`r1`, `r2`…); no `kind` is `stated`.
@@ -134,6 +187,8 @@ pub struct GuardrailDraft {
     pub statement: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<GuardrailKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<Value>,
 }
 
 pub fn project_key(project_id: &str) -> String {
@@ -233,6 +288,7 @@ pub fn optimistic(
                 measure: trimmed(g.measure.clone()),
                 target: trimmed(g.target.clone()),
                 current: trimmed(g.current.clone()),
+                metric: g.metric.clone(),
             })
             .collect(),
         guardrails: guardrails
@@ -242,6 +298,7 @@ pub fn optimistic(
                 id,
                 statement: r.statement.trim().to_string(),
                 kind: r.kind.unwrap_or_default(),
+                check: r.check.clone(),
             })
             .collect(),
         ..base.clone()
@@ -463,6 +520,71 @@ mod tests {
         assert_eq!(shown.goals[0].target.as_deref(), Some("8%"));
         assert_eq!(shown.guardrails[0].kind, GuardrailKind::Stated);
         assert_eq!(shown.guardrails[0].id, "r1");
+    }
+
+    /// ADEV-275: a goal's `metric` block survives a read, and a write of the same goal sends it back.
+    #[test]
+    fn adev_275_a_goals_metric_round_trips() {
+        let wire = json!({
+            "id": "g1", "statement": "Grow", "target": "8", "current": "6",
+            "metric": {
+                "unit": "%", "direction": "down", "target": 8.0, "baseline": 12.5, "current": 6.1,
+                "measuredAt": "2026-11-25T10:00:00.000Z",
+                "source": { "connectorId": "c1", "metricKey": "irr" },
+                "staleAfterHours": 24.0,
+                "futureField": true
+            }
+        });
+        let goal: Goal = serde_json::from_value(wire).expect("decodes");
+        let metric = goal.metric.as_ref().expect("metric kept");
+        assert_eq!(metric.direction, MetricDirection::Down);
+        assert_eq!(metric.target, Some(8.0));
+        assert_eq!(metric.current, Some(6.1));
+        assert_eq!(
+            metric.source.as_ref().map(|s| s.metric_key.as_str()),
+            Some("irr")
+        );
+        let back = serde_json::to_value(&goal).expect("encodes");
+        assert_eq!(back["metric"]["direction"], "down");
+        assert_eq!(back["metric"]["staleAfterHours"], 24.0);
+        assert_eq!(back["metric"]["source"]["connectorId"], "c1");
+    }
+
+    /// ADEV-275: a goal with no metric reads and writes exactly as before.
+    #[test]
+    fn adev_275_a_prose_goal_has_no_metric_key() {
+        let goal: Goal = serde_json::from_value(json!({ "id": "g1", "statement": "x" })).unwrap();
+        assert!(goal.metric.is_none());
+        assert!(serde_json::to_value(&goal).unwrap().get("metric").is_none());
+    }
+
+    /// ADEV-275: an offline edit keeps the metric the editor still holds, and a guardrail keeps its
+    /// check, whatever kind of check a newer server sent.
+    #[test]
+    fn adev_275_an_offline_edit_keeps_metric_and_check() {
+        let metric = GoalMetric {
+            direction: MetricDirection::Up,
+            target: Some(10.0),
+            ..GoalMetric::default()
+        };
+        let check = json!({ "type": "metric", "goalId": "g1", "atLeast": 5 });
+        let shown = optimistic(
+            &ProjectGoals::default(),
+            &[GoalDraft {
+                metric: Some(metric.clone()),
+                ..goal(None, "Grow")
+            }],
+            &[GuardrailDraft {
+                statement: "Floor".into(),
+                kind: Some(GuardrailKind::Enforced),
+                check: Some(check.clone()),
+                ..GuardrailDraft::default()
+            }],
+        );
+        assert_eq!(shown.goals[0].metric, Some(metric));
+        assert_eq!(shown.guardrails[0].check, Some(check));
+        let sent = serde_json::to_value(GuardrailDraft::default()).unwrap();
+        assert!(sent.get("check").is_none());
     }
 
     /// ADEV-187: a kind from a newer server still shows its guardrail.
