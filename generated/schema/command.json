@@ -497,6 +497,17 @@
             "null"
           ]
         },
+        "metric": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GoalMetric"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sent back whole by a client that holds it. Left out, the server keeps the stored block."
+        },
         "statement": {
           "type": "string"
         },
@@ -512,9 +523,73 @@
       ],
       "type": "object"
     },
+    "GoalMetric": {
+      "description": "A goal's measure as numbers (ADEV-270 on web, ADEV-275 here). `current` and `measured_at` are the\nserver's: a write never changes them, but a client that holds the block sends it back whole.",
+      "properties": {
+        "baseline": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "current": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "direction": {
+          "$ref": "#/$defs/MetricDirection"
+        },
+        "measuredAt": {
+          "description": "ISO timestamp.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "staleAfterHours": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "direction"
+      ],
+      "type": "object"
+    },
     "GuardrailDraft": {
       "description": "A guardrail being written. No `id` is new (`r1`, `r2`…); no `kind` is `stated`.",
       "properties": {
+        "check": true,
         "id": {
           "type": [
             "string",
@@ -757,6 +832,30 @@
           "description": "How a repeating task here advances when it is completed (web AWTD-1118, spec §10)."
         }
       },
+      "type": "object"
+    },
+    "MetricDirection": {
+      "description": "Which way is better for a goal's metric (ADEV-275; web `GoalMetric.direction`).",
+      "enum": [
+        "up",
+        "down"
+      ],
+      "type": "string"
+    },
+    "MetricSource": {
+      "description": "Where a goal's metric is read from.",
+      "properties": {
+        "connectorId": {
+          "type": "string"
+        },
+        "metricKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connectorId",
+        "metricKey"
+      ],
       "type": "object"
     },
     "MonthWeekday": {
