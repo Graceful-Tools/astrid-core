@@ -45,6 +45,8 @@ workflow.
 cargo test --workspace                                   # the inner loop
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
+cargo test -p astrid-rules --no-default-features          # every rules-* feature off, as CI runs it
+cargo clippy -p astrid-rules --no-default-features --all-targets -- -D warnings
 cargo xtask check-contracts                              # against ../astrid-web
 cargo xtask check-design                                 # design/generated is current (design/README.md)
 cargo xtask check-strings                                # the string catalog covers this core (strings/README.md)
@@ -55,9 +57,11 @@ cargo build -p astrid-rules --target wasm32-unknown-unknown   # the pure rules s
 
 ## Quality gate
 
-All seven commands above, green, before pushing (the wasm build needs `rustup target add
+All the commands above, green, before pushing (the wasm build needs `rustup target add
 wasm32-unknown-unknown` once). CI runs them on Windows, macOS and Linux and
-checks the fixtures against astrid-web's `main`.
+checks the fixtures against astrid-web's `main`. A test that sends a `rules-*` variant through
+the door sits behind that feature (`#[cfg(feature = "rules-decisions")]`), or the
+`--no-default-features` run cannot parse the rule (ADEV-262, after #121 went red on all three OSes).
 
 **`main` refuses a red merge (ADEV-17, 2026-11-15).** The `protect_main` ruleset requires
 `core (linux|macos|windows)`, `astrid-rules (wasm32)` (the size budget), `astrid-core (android,
