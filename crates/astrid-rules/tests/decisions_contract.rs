@@ -201,48 +201,55 @@ fn a_criterion_column_is_lettered_as_a_spreadsheet_letters_it() {
 }
 
 // The rules door (ADEV-259): iOS and Android kept hand-copied mirrors of `reply` and
-// `chosen_number` because neither was a rule.
+// `chosen_number` because neither was a rule. The
+// variants exist only with `rules-decisions`, so CI's `--no-default-features` run skips these.
 
-fn door(rule: Value) -> Value {
-    let rule: astrid_rules::rules::Rule = serde_json::from_value(rule).expect("the rule parses");
-    serde_json::to_value(astrid_rules::rules::run(rule)).unwrap()["value"].clone()
-}
+#[cfg(feature = "rules-decisions")]
+mod door {
+    use super::*;
 
-#[test]
-fn adev_259_the_door_answers_the_reply_a_card_posts() {
-    let fixture = fixture();
-    let canonical = fixture["decisions"][0]["parsed"]["options"]
-        .as_array()
-        .unwrap();
-    let expected = fixture["replyFormat"].as_array().unwrap();
-    assert!(!canonical.is_empty());
-    for (option, expected) in canonical.iter().zip(expected) {
-        let answer = door(serde_json::json!({ "kind": "decisionReply", "option": option }));
-        assert_eq!(&answer, expected);
+    fn door(rule: Value) -> Value {
+        let rule: astrid_rules::rules::Rule =
+            serde_json::from_value(rule).expect("the rule parses");
+        serde_json::to_value(astrid_rules::rules::run(rule)).unwrap()["value"].clone()
     }
-}
 
-#[test]
-fn adev_259_the_door_answers_the_option_a_reply_picks() {
-    let fixture = fixture();
-    let numbered_text = fixture["decisions"][0]["text"].as_str().unwrap();
-    for (text, key) in [
-        (numbered_text, "chosenNumbered"),
-        (LETTERED_TEXT, "chosenLettered"),
-    ] {
-        for case in fixture["replies"].as_array().unwrap() {
-            let answer = door(serde_json::json!({
-                "kind": "decisionChoice", "text": text, "reply": case["reply"],
-            }));
-            assert_eq!(answer, case[key], "{} against {key}", case["reply"]);
+    #[test]
+    fn adev_259_the_door_answers_the_reply_a_card_posts() {
+        let fixture = fixture();
+        let canonical = fixture["decisions"][0]["parsed"]["options"]
+            .as_array()
+            .unwrap();
+        let expected = fixture["replyFormat"].as_array().unwrap();
+        assert!(!canonical.is_empty());
+        for (option, expected) in canonical.iter().zip(expected) {
+            let answer = door(serde_json::json!({ "kind": "decisionReply", "option": option }));
+            assert_eq!(&answer, expected);
         }
     }
-}
 
-#[test]
-fn adev_259_a_text_that_is_not_a_decision_chooses_nothing() {
-    let answer = door(serde_json::json!({
-        "kind": "decisionChoice", "text": "just prose", "reply": "1",
-    }));
-    assert!(answer.is_null());
+    #[test]
+    fn adev_259_the_door_answers_the_option_a_reply_picks() {
+        let fixture = fixture();
+        let numbered_text = fixture["decisions"][0]["text"].as_str().unwrap();
+        for (text, key) in [
+            (numbered_text, "chosenNumbered"),
+            (LETTERED_TEXT, "chosenLettered"),
+        ] {
+            for case in fixture["replies"].as_array().unwrap() {
+                let answer = door(serde_json::json!({
+                    "kind": "decisionChoice", "text": text, "reply": case["reply"],
+                }));
+                assert_eq!(answer, case[key], "{} against {key}", case["reply"]);
+            }
+        }
+    }
+
+    #[test]
+    fn adev_259_a_text_that_is_not_a_decision_chooses_nothing() {
+        let answer = door(serde_json::json!({
+            "kind": "decisionChoice", "text": "just prose", "reply": "1",
+        }));
+        assert!(answer.is_null());
+    }
 }
