@@ -148,6 +148,21 @@ person's model key.
 experiment or a verification to report.")` beside `testing`. Like `testing` it is opt-in per
 board and its role is fixed, not minted.
 
+**No board has it until a person adds it** (Jon, 2026-11-25: "we should not insert the
+Pending results for all boards unless the user configures a verification or experimentation
+column, but we should support it with easy configuration out of the box"). In core that means:
+
+- `results` is in `PRESET_STATES` and nowhere else. It is not a default column, no board
+  template carries it, and no rule adds a column to a board: not `results::settle`, not a
+  write that links an experiment.
+- `available_presets` is the whole of the "easy configuration": it offers `results` to any
+  board that lacks it, and adding it is the same single write as adding `testing`. Whether to
+  show the offer (web shows it only where goal signals are on, and once in context when a task
+  is first linked to an experiment) is the client's, since core does not know the gate.
+- The rules below apply to a task **in** a `results` column. On a board without one, a task
+  with result conditions is an ordinary task: `results::settle` is not asked about it, and
+  nothing completes it or hands it back.
+
 **`testing` is unchanged.** R7 says a task in a preset "is not Waiting and needs no wait
 condition", and boards rely on that. `results` is the first preset with rules, so R7's
 sentence becomes true of `testing` only; CONTRACTS.md §8 is amended in the task that builds
@@ -236,7 +251,8 @@ Decided here under the autonomy rule, each open to Jon's override:
    A weighted score is additive later; it would need rule 7 of web's DECISIONS.md revisited
    first.
 2. **Decided (agent, 2026-11-25): a new `results` preset, not rules on `testing`.** Changing
-   `testing` would refuse moves that boards make today.
+   `testing` would refuse moves that boards make today. **Amended by Jon, 2026-11-25:** the
+   preset is never added to a board automatically; a person adds it, in one step (§4).
 3. **Decided (agent, 2026-11-25): passing results complete the task by rule.** The
    alternative, handing every result to a person, makes the lane a second inbox.
 4. **Decided (agent, 2026-11-25): the rule reads `risk.level`, not `risk.score`.** Services
