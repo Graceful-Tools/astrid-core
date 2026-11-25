@@ -1821,3 +1821,79 @@ Jon's override (ORCHESTRATION_POLICY.md §8): autonomy is per policy rather than
 may loosen its project's policy as well as tighten it, a task on several lists is asked with the
 board being worked, and choosing which list a piece of work belongs on waits for a caller that
 sends a classifier.
+
+## Goal signals (ADEV-269, 2026-11-25): decided, not implemented
+
+Four core-first decisions for "Goals, Guardrails and Signals". The design is
+[GOAL_SIGNALS.md](./GOAL_SIGNALS.md); the spec of record is astrid-web's
+`docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. **Nothing here is in the crates yet, and no fixture
+locks it.** Each entry names the task that builds it; that task replaces "decided" with what it
+shipped and the fixture that locks it. Jon decided the frame (goals stay per project, open
+contracts only, a policy recommends and acts only where allowed). The rest was decided by the
+agent and is open to his override (GOAL_SIGNALS.md §8).
+
+### D72 — the trade-off policy: four labels and a lexicographic order, answered by the core
+
+**Core-first; decided, not implemented (task 4a).** A `tradeoff` key in the orchestration policy
+(D71), resolved default, project, list. `astrid_rules::tradeoff` reads an estimate (per-goal
+impact with a range, per-guardrail breach probability, a risk level, a confidence) and answers a
+label, the reasons for it, and a sort key.
+
+1. **Labels are fixed:** `do-now`, `experiment-first`, `needs-review`, `dont`, evaluated
+   strictest first. A missing or stale estimate is `needs-review`.
+2. **Unknown is never good.** A section the estimator did not return counts against the idea.
+3. **A built-in estimate is capped at `experiment-first`.**
+4. **The order is a tuple, not a score:** label, guardrails at review, impact band per goal in
+   the policy's `goalOrder`, risk level, cost, age. Nothing is weighted or totalled, so web's
+   DECISIONS.md rule 7 (no score column) is not reopened.
+5. **No policy stored answers "no policy"**, and a client draws nothing.
+6. **A bad stored value is refused**, as in D71.
+
+To be locked by `contracts/fixtures/tradeoff.json`.
+
+### D73 — three autonomy actions: promote an idea, start an experiment, stop one
+
+**Core-first; decided, not implemented (task 4a).** `Action` gains `PromoteIdea`,
+`ExperimentStart` and `ExperimentStop`, stored as `autonomy.promoteIdea`,
+`autonomy.experimentStart` and `autonomy.experimentStop`. Each defaults to `never` (D71.2) and is
+answered by `may` like the others.
+
+1. **Floor:** `PromoteIdea` is `never` unless the caller passes a label of `do-now` and a
+   confidence at or above the policy's `minConfidenceToAct`. No estimate is `never`.
+2. A built-in estimate requested by an agent is the existing `Spend`.
+3. `ask` is the server's approval card, bound to a digest of the estimate or experiment snapshot
+   where D71's binds a commit.
+
+To be locked by new cases in `contracts/fixtures/orchestration.json`.
+
+### D74 — the Pending results lane: a second preset, with rules
+
+**Core-first; decided, not implemented (task 5a).** `PRESET_STATES` gains role `results`
+("Pending results"). `testing` is unchanged. `astrid_rules::results` is modelled on the Waiting
+lane.
+
+1. **Entry needs a condition:** an experiment that has not concluded, or a verification whose
+   deadline is ahead. Otherwise `RESULTS_NEEDS_CONDITION`. Entry unassigns and remembers the
+   holder.
+2. **Passed goes to Done**, through `TaskService::complete`.
+3. **Regressing, inconclusive at the deadline, or a source silent past it, hands back** to the
+   policy's escalation target (the Waiting lane's R4 write). Nothing rolls back.
+4. **A stale source before the deadline stays put.**
+5. **§8's R7 changes:** "a task in a preset needs no wait condition" becomes true of `testing`
+   only. The task that builds this amends §8.
+
+To be locked by `contracts/fixtures/results.json` and new cases in `board.json` and
+`statuses.json`.
+
+### D75 — a `policy` sort that compares a stored key
+
+**Core-first; decided, not implemented (task 4a).** `filters::sort_by_setting` gains `"policy"`.
+It compares the sort key the server stored with each task's current estimate (D72); a task with
+none sorts after those with one, in auto order.
+
+1. **The arm compares and never evaluates**, so the browser build carries no trade-off rules and
+   its size budget is unchanged.
+2. **A client pinned before this reads `policy` as Auto**, through `sort_by_setting`'s last arm.
+3. A row's wire type gains an optional estimate summary (label and sort key).
+
+To be locked by new cases in `contracts/fixtures/filters.json`.

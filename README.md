@@ -264,6 +264,7 @@ crates/xtask/   cargo xtask check-contracts
 contracts/      the fixtures generated from astrid-web, and the exporter (see contracts/README.md)
 docs/CONTRACTS.md   the decisions and known divergences between clients
 docs/ORCHESTRATION_POLICY.md   who takes a task, what an agent may do alone, who it asks (AWTD-1685)
+docs/GOAL_SIGNALS.md   decided, not built: the trade-off policy, the Pending results lane, the policy sort (ADEV-269)
 docs/CROSS_CLIENT_REVIEW_2026-11.md   what each client still re-implements, theming, white-label gaps
 ```
 
