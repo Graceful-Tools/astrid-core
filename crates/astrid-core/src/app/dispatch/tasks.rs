@@ -746,6 +746,19 @@ pub(super) fn task_detail(app: &App, task_id: &str) -> Response {
     let me = app.context.account().current_user_id().ok().flatten();
     let is_copy_only = rows::copy_only(&task, &lists, me.as_deref());
 
+    // The leading control and what a tap on it does, from the functions a row uses (ADEV-263), so
+    // a shell never works out whose task this is. Additive: absent means an older core.
+    let leading = if is_copy_only {
+        rows::LeadingControl::Copy
+    } else {
+        rows::LeadingControl::for_task(task.assignee_id.as_deref(), me.as_deref())
+    };
+    let leading_action = match leading.action(rows::Surface::Detail, me.as_deref()) {
+        rows::LeadingAction::Complete => "complete",
+        rows::LeadingAction::OpenPicker => "openPicker",
+        rows::LeadingAction::Copy => "copy",
+    };
+
     // The BOARD STATE row (task 5221e43f): the task's board's columns as chips, Done left out,
     // only for a board task and never for a read-only viewer. The rule is shared
     // with the web and both Apple clients and asked here, not restated. `null` means no row.
@@ -852,6 +865,8 @@ pub(super) fn task_detail(app: &App, task_id: &str) -> Response {
         // A task in a public list the reader cannot edit (task f6bc59e8): the header offers a
         // copy where the checkbox would be, and the text is not for editing.
         "isCopyOnly": is_copy_only,
+        "leading": super::row_json::leading_json(&leading),
+        "action": leading_action,
         "boardState": board_state,
         // Whether to DRAW the identifier here, and whether to offer "Copy task id" — the shared
         // show-rule (`rows::identifier`, fixture `task-identifiers.json`), asked once so the shell

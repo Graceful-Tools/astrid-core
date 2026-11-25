@@ -1295,6 +1295,38 @@ async fn a_public_task_the_reader_cannot_edit_is_a_copy_control_task_f6bc59e8() 
     assert_eq!(mine["value"]["rows"][0]["action"], "complete");
 }
 
+/// The detail answers the leading control and what a tap on it does, from the same rule a row
+/// uses (ADEV-263): someone else's task opens the picker, your own completes.
+#[tokio::test]
+async fn the_detail_sends_the_leading_control_and_its_action_adev_263() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .set_metadata("account.current-user", r#"{"id":"me","name":"Jon"}"#)
+        .expect("stores");
+    for (id, assignee) in [
+        ("mine", Some("me")),
+        ("theirs", Some("them")),
+        ("nobodys", None),
+    ] {
+        let mut task = json!({ "id": id, "title": id, "creatorId": "me" });
+        if let Some(assignee) = assignee {
+            task["assigneeId"] = json!(assignee);
+        }
+        app.store
+            .upsert_task(&serde_json::from_value(task).expect("a task"))
+            .expect("stores");
+    }
+
+    let theirs = call(&app, json!({ "kind": "taskDetail", "taskId": "theirs" })).await;
+    assert_eq!(theirs["value"]["action"], "openPicker", "{theirs}");
+    assert_eq!(theirs["value"]["leading"]["kind"], "avatar", "{theirs}");
+    let mine = call(&app, json!({ "kind": "taskDetail", "taskId": "mine" })).await;
+    assert_eq!(mine["value"]["action"], "complete", "{mine}");
+    assert_eq!(mine["value"]["leading"]["kind"], "checkbox", "{mine}");
+    let nobodys = call(&app, json!({ "kind": "taskDetail", "taskId": "nobodys" })).await;
+    assert_eq!(nobodys["value"]["action"], "openPicker", "{nobodys}");
+}
+
 /// A shell that applies a list's defaults itself — the Apple apps, until their services are this
 /// crate's — must be able to say so, or a task it made with no date would be given the list's.
 /// The same switch lets a sync provider import a task exactly as it was.
