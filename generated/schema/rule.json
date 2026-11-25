@@ -458,6 +458,34 @@
       },
       "type": "object"
     },
+    "DecisionOption": {
+      "description": "One option a Decision offers.",
+      "properties": {
+        "letter": {
+          "description": "The marker as the asker wrote it, upper case: `A`, or `1`. A reply leading with it still\nchooses this option, whatever number it ended up with.",
+          "type": "string"
+        },
+        "number": {
+          "description": "Its place in the list, from 1 — what the card shows and what [`reply`] leads with.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recommended": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "letter",
+        "number",
+        "text",
+        "recommended"
+      ],
+      "type": "object"
+    },
     "DeleteTaskMode": {
       "description": "`list.supports.deleteTask`. A GitHub board takes the item off the project and leaves the issue.\nA value this build does not know reads as the classic one.",
       "enum": [
@@ -3531,6 +3559,44 @@
       "required": [
         "kind",
         "text"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The comment a tap on `option`'s card posts — [`crate::decisions::reply`] (ADEV-259).",
+      "properties": {
+        "kind": {
+          "const": "decisionReply",
+          "type": "string"
+        },
+        "option": {
+          "$ref": "#/$defs/DecisionOption"
+        }
+      },
+      "required": [
+        "kind",
+        "option"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The number of the option `reply` picks from the Decision asked in `text`, or `null` when\n`text` is not a Decision or the reply picks nothing — [`crate::decisions::chosen_number`]\nover [`crate::decisions::parse`] (ADEV-259).",
+      "properties": {
+        "kind": {
+          "const": "decisionChoice",
+          "type": "string"
+        },
+        "reply": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "reply"
       ],
       "type": "object"
     },

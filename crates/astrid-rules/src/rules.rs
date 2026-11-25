@@ -368,6 +368,16 @@ pub enum Rule {
     /// means it is not one, and the shell draws the markdown it already has.
     #[cfg(feature = "rules-decisions")]
     Decision { text: String },
+    /// The comment a tap on `option`'s card posts — [`crate::decisions::reply`] (ADEV-259).
+    #[cfg(feature = "rules-decisions")]
+    DecisionReply {
+        option: crate::decisions::DecisionOption,
+    },
+    /// The number of the option `reply` picks from the Decision asked in `text`, or `null` when
+    /// `text` is not a Decision or the reply picks nothing — [`crate::decisions::chosen_number`]
+    /// over [`crate::decisions::parse`] (ADEV-259).
+    #[cfg(feature = "rules-decisions")]
+    DecisionChoice { text: String, reply: String },
     /// Is this table a trade-off grid, and what does each cell rate —
     /// [`crate::decisions::read_grid`]. `rows` is each body row's cell text, first column included.
     #[cfg(feature = "rules-decisions")]
@@ -1225,6 +1235,13 @@ pub fn run(rule: Rule) -> Response {
         }
         #[cfg(feature = "rules-decisions")]
         Rule::Decision { text } => Response::ok(crate::decisions::parse(&text)),
+        #[cfg(feature = "rules-decisions")]
+        Rule::DecisionReply { option } => Response::ok(crate::decisions::reply(&option)),
+        #[cfg(feature = "rules-decisions")]
+        Rule::DecisionChoice { text, reply } => Response::ok(
+            crate::decisions::parse(&text)
+                .and_then(|decision| crate::decisions::chosen_number(&reply, &decision.options)),
+        ),
         #[cfg(feature = "rules-decisions")]
         Rule::TradeoffGrid { rows } => Response::ok(crate::decisions::read_grid(&rows)),
         #[cfg(feature = "rules-decisions")]
