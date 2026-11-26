@@ -276,6 +276,31 @@ pub enum Rule {
     /// R4: what handing a task back to a person writes — [`crate::waiting::hand_back`].
     #[cfg(feature = "rules-waiting")]
     HandBack { assignee_id: String },
+    /// P1/P2/P6 of [`crate::results`]: whether a write that may move `task` into, within or out of
+    /// Pending results is allowed, and what it stores. `conditions` are the task's result
+    /// conditions after the write. Refused with `RESULTS_NEEDS_CONDITION` (ADEV-274).
+    #[cfg(feature = "rules-waiting")]
+    ResultsWrite {
+        task: Box<Task>,
+        #[serde(default)]
+        conditions: Vec<crate::results::ResultCondition>,
+        #[serde(default)]
+        change: crate::results::ResultsChange,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: Timestamp,
+    },
+    /// P3–P5 of [`crate::results`]: complete, hand back to `escalate_to_assignee_id`, or stay.
+    #[cfg(feature = "rules-waiting")]
+    ResultsSettle {
+        task: Box<Task>,
+        #[serde(default)]
+        conditions: Vec<crate::results::ResultCondition>,
+        escalate_to_assignee_id: String,
+        #[cfg_attr(feature = "schema", schemars(with = "date::Timestamp"))]
+        #[serde(with = "date::required")]
+        now: Timestamp,
+    },
     /// Q1 of [`crate::questions`]: record a question to a person and hand the task to them
     /// (AWTD-1687). Answers `{ question, handBack, notify }`; refused with a `QUESTION_*` code.
     #[cfg(feature = "rules-waiting")]
@@ -1177,6 +1202,30 @@ pub fn run(rule: Rule) -> Response {
         )),
         #[cfg(feature = "rules-waiting")]
         Rule::HandBack { assignee_id } => Response::ok(crate::waiting::hand_back(&assignee_id)),
+        #[cfg(feature = "rules-waiting")]
+        Rule::ResultsWrite {
+            task,
+            conditions,
+            change,
+            now,
+        } => match crate::results::resolve_status_write(&task, &conditions, &change, now) {
+            Ok(resolved) => Response::ok(resolved),
+            Err(crate::results::ResultsError::ResultsNeedsCondition) => {
+                Response::failed(Failure::results_needs_condition())
+            }
+        },
+        #[cfg(feature = "rules-waiting")]
+        Rule::ResultsSettle {
+            task,
+            conditions,
+            escalate_to_assignee_id,
+            now,
+        } => Response::ok(crate::results::settle(
+            &task,
+            &conditions,
+            &escalate_to_assignee_id,
+            now,
+        )),
         #[cfg(feature = "rules-waiting")]
         Rule::QuestionAsk(input) => match crate::questions::ask(&input) {
             Ok(asked) => Response::ok(asked),

@@ -21,6 +21,7 @@ use std::path::Path;
 /// (task 3564db06), because the renderer it needs lives in that test.
 pub const CORE_OWNED: &[&str] = &[
     "waiting.json",
+    "results.json",
     "list-default-picks.json",
     "board-rows.json",
     "list-project-moves.json",
@@ -679,31 +680,309 @@ fn waiting_cases() -> Vec<Case> {
             "presets/a-board-with-no-columns-of-its-own",
             "R7",
             json!({ "kind": "boardPresets" }),
-            ok(
-                json!([{ "role": "testing", "name": "Testing", "description": "Deploying, in canary, or in an experiment." }]),
-            ),
+            ok(json!([testing_preset(), results_preset()])),
         ),
         case(
             "presets/a-board-with-other-columns",
             "R7",
             json!({ "kind": "boardPresets", "customStates": [{ "role": "custom-review", "name": "Review", "order": 0 }, { "role": "doing", "name": "In progress", "order": 1 }] }),
-            ok(
-                json!([{ "role": "testing", "name": "Testing", "description": "Deploying, in canary, or in an experiment." }]),
-            ),
+            ok(json!([testing_preset(), results_preset()])),
         ),
         case(
             "presets/a-board-that-added-testing",
             "R7",
             json!({ "kind": "boardPresets", "customStates": [{ "role": "testing", "name": "Testing", "description": "Deploying, in canary, or in an experiment.", "order": 0 }] }),
+            ok(json!([results_preset()])),
+        ),
+        case(
+            "presets/a-board-that-added-pending-results",
+            "R7",
+            json!({ "kind": "boardPresets", "customStates": [{ "role": "results", "name": "Pending results", "order": 0 }] }),
+            ok(json!([testing_preset()])),
+        ),
+        case(
+            "presets/a-board-with-both-presets",
+            "R7",
+            json!({ "kind": "boardPresets", "customStates": [{ "role": "testing", "name": "Testing", "order": 0 }, { "role": "results", "name": "Pending results", "order": 1 }] }),
             ok(json!([])),
         ),
         case(
             "presets/a-board-with-its-own-column-named-testing",
             "R7",
             json!({ "kind": "boardPresets", "customStates": [{ "role": "custom-testing", "name": "testing", "order": 0 }] }),
-            ok(json!([])),
+            ok(json!([results_preset()])),
         ),
     ]
+}
+
+fn testing_preset() -> Value {
+    json!({ "role": "testing", "name": "Testing", "description": "Deploying, in canary, or in an experiment." })
+}
+
+fn results_preset() -> Value {
+    json!({ "role": "results", "name": "Pending results", "description": "Built and released; waiting for an experiment or a verification to report." })
+}
+
+fn results_write(task: Value, conditions: Value, change: Value) -> Value {
+    json!({ "kind": "resultsWrite", "task": task, "conditions": conditions, "change": change, "now": NOW })
+}
+
+fn results_settle(task: Value, conditions: Value) -> Value {
+    json!({ "kind": "resultsSettle", "task": task, "conditions": conditions, "escalateToAssigneeId": "jon", "now": NOW })
+}
+
+fn open_experiment() -> Value {
+    json!({ "kind": "experiment", "state": "open" })
+}
+
+fn verification(state: &str, verdict: Option<&str>, decide_by: &str) -> Value {
+    json!({ "kind": "verification", "state": state, "verdict": verdict, "decideBy": decide_by })
+}
+
+fn experiment_found(verdict: &str, decide_by: Option<&str>) -> Value {
+    json!({ "kind": "experiment", "state": "concluded", "verdict": verdict, "decideBy": decide_by })
+}
+
+fn in_results() -> Value {
+    json!({ "id": "t", "statusRole": "results", "assigneeId": null })
+}
+
+fn handed_back(reason: &str) -> Value {
+    ok(
+        json!({ "action": "handBack", "reason": reason, "statusRole": null, "assigneeId": "jon", "completed": false }),
+    )
+}
+
+fn results_refused() -> Value {
+    json!({ "ok": false, "error": { "kind": "refused", "code": "RESULTS_NEEDS_CONDITION" } })
+}
+
+fn results_cases() -> Vec<Case> {
+    let to_results = json!({ "statusRole": "results" });
+    vec![
+        // ── P1, P2 ─────────────────────────────────────────────────────────────────────────
+        case(
+            "enter/an-open-experiment-unassigns-and-remembers-the-holder",
+            "P1/P2",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing", "assigneeId": "agent" }),
+                json!([open_experiment()]),
+                to_results.clone(),
+            ),
+            ok(
+                json!({ "statusRole": "results", "assignee": "clear", "transition": "enter", "rememberAssigneeId": "agent" }),
+            ),
+        ),
+        case(
+            "enter/a-verification-with-its-deadline-ahead",
+            "P1",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing" }),
+                json!([verification("open", None, "2026-11-26T00:00:00.000Z")]),
+                to_results.clone(),
+            ),
+            ok(json!({ "statusRole": "results", "assignee": "keep", "transition": "enter" })),
+        ),
+        case(
+            "enter/keep-assignee-keeps-it",
+            "P2",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing", "assigneeId": "jon" }),
+                json!([open_experiment()]),
+                json!({ "statusRole": "results", "keepAssignee": true }),
+            ),
+            ok(json!({ "statusRole": "results", "assignee": "keep", "transition": "enter" })),
+        ),
+        case(
+            "enter/no-condition-is-refused",
+            "P1",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing" }),
+                json!([]),
+                to_results.clone(),
+            ),
+            results_refused(),
+        ),
+        case(
+            "enter/a-concluded-experiment-is-refused",
+            "P1",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing" }),
+                json!([experiment_found("improving", None)]),
+                to_results.clone(),
+            ),
+            results_refused(),
+        ),
+        case(
+            "enter/a-verification-past-its-deadline-is-refused",
+            "P1",
+            results_write(
+                json!({ "id": "t", "statusRole": "doing" }),
+                json!([verification("open", None, "2026-11-12T11:00:00.000Z")]),
+                to_results.clone(),
+            ),
+            results_refused(),
+        ),
+        // ── P6 ─────────────────────────────────────────────────────────────────────────────
+        case(
+            "leave/by-hand-is-always-allowed",
+            "P6",
+            results_write(in_results(), json!([]), json!({ "statusRole": "doing" })),
+            ok(json!({ "statusRole": "doing", "assignee": "keep", "transition": "none" })),
+        ),
+        case(
+            "leave/an-unrelated-write-is-not-the-lanes-business",
+            "P6",
+            results_write(
+                json!({ "id": "t", "statusRole": "ready" }),
+                json!([]),
+                json!({}),
+            ),
+            ok(json!({ "statusRole": "ready", "assignee": "keep", "transition": "none" })),
+        ),
+        case(
+            "stay/a-task-already-in-the-lane",
+            "P6",
+            results_write(in_results(), json!([]), to_results.clone()),
+            ok(json!({ "statusRole": "results", "assignee": "keep", "transition": "stay" })),
+        ),
+        // ── P3 ─────────────────────────────────────────────────────────────────────────────
+        case(
+            "settle/every-condition-improving-completes",
+            "P3",
+            results_settle(
+                in_results(),
+                json!([
+                    experiment_found("improving", None),
+                    verification("concluded", Some("improving"), "2026-12-01T00:00:00.000Z")
+                ]),
+            ),
+            ok(json!({ "action": "complete" })),
+        ),
+        // ── P4 ─────────────────────────────────────────────────────────────────────────────
+        case(
+            "settle/regressing-hands-back-at-once",
+            "P4",
+            results_settle(
+                in_results(),
+                json!([
+                    experiment_found("regressing", Some("2026-12-01T00:00:00.000Z")),
+                    open_experiment()
+                ]),
+            ),
+            handed_back("regressing"),
+        ),
+        case(
+            "settle/inconclusive-at-the-deadline-hands-back",
+            "P4",
+            results_settle(
+                in_results(),
+                json!([experiment_found(
+                    "inconclusive",
+                    Some("2026-11-12T12:00:00.000Z")
+                )]),
+            ),
+            handed_back("inconclusive"),
+        ),
+        case(
+            "settle/a-silent-source-at-the-deadline-hands-back",
+            "P4",
+            results_settle(
+                in_results(),
+                json!([verification("open", None, "2026-11-12T11:00:00.000Z")]),
+            ),
+            handed_back("silent"),
+        ),
+        case(
+            "settle/nothing-measuring-it-hands-back",
+            "P4",
+            results_settle(in_results(), json!([])),
+            handed_back("noCondition"),
+        ),
+        // ── P5 ─────────────────────────────────────────────────────────────────────────────
+        case(
+            "settle/inconclusive-before-the-deadline-stays",
+            "P5",
+            results_settle(
+                in_results(),
+                json!([experiment_found(
+                    "inconclusive",
+                    Some("2026-11-13T00:00:00.000Z")
+                )]),
+            ),
+            ok(json!({ "action": "stay" })),
+        ),
+        case(
+            "settle/a-stale-source-before-the-deadline-stays",
+            "P5",
+            results_settle(
+                in_results(),
+                json!([{ "kind": "verification", "state": "open", "decideBy": "2026-11-13T00:00:00.000Z", "fetchedAt": "2026-11-01T00:00:00.000Z" }]),
+            ),
+            ok(json!({ "action": "stay" })),
+        ),
+        case(
+            "settle/an-experiment-with-no-deadline-waits",
+            "P5",
+            results_settle(in_results(), json!([open_experiment()])),
+            ok(json!({ "action": "stay" })),
+        ),
+        case(
+            "settle/mixed-conditions-wait-for-the-latest-deadline",
+            "P5",
+            results_settle(
+                in_results(),
+                json!([
+                    experiment_found("improving", None),
+                    verification("open", None, "2026-11-30T00:00:00.000Z")
+                ]),
+            ),
+            ok(json!({ "action": "stay" })),
+        ),
+        case(
+            "settle/mixed-conditions-hand-back-once-the-latest-deadline-has-come",
+            "P4/P5",
+            results_settle(
+                in_results(),
+                json!([
+                    experiment_found("improving", None),
+                    verification("open", None, "2026-11-12T12:00:00.000Z")
+                ]),
+            ),
+            handed_back("silent"),
+        ),
+        // ── outside the lane ───────────────────────────────────────────────────────────────
+        case(
+            "settle/a-task-outside-the-lane-stays",
+            "P6",
+            results_settle(
+                json!({ "id": "t", "statusRole": "doing" }),
+                json!([experiment_found("regressing", None)]),
+            ),
+            ok(json!({ "action": "stay" })),
+        ),
+        case(
+            "settle/a-finished-task-stays",
+            "P6",
+            results_settle(
+                json!({ "id": "t", "statusRole": "results", "completed": true }),
+                json!([experiment_found("regressing", None)]),
+            ),
+            ok(json!({ "action": "stay" })),
+        ),
+    ]
+}
+
+/// The text of `results.json` (ADEV-274).
+pub fn results_fixture() -> Result<String, String> {
+    render(
+        results_cases(),
+        "crates/astrid-rules/src/results.rs",
+        json!({
+            "resultsNeedsCondition": "RESULTS_NEEDS_CONDITION",
+            "canonicalSource": "astrid-core crates/astrid-rules/src/results.rs — core-first (ADEV-274, D74). The Pending results preset is in waiting.json's `presets/` cases. board.json and statuses.json are generated by astrid-web and are not edited here.",
+        }),
+    )
 }
 
 /// Whether `actual` says at least what `expected` says: every key of an expected object present
@@ -2308,6 +2587,7 @@ pub fn questions_fixture() -> Result<String, String> {
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
         ("waiting.json", waiting_fixture()?),
+        ("results.json", results_fixture()?),
         ("list-default-picks.json", list_default_picks_fixture()?),
         ("callout-placement.json", callout_placement_fixture()?),
         ("board-rows.json", board_rows_fixture()?),

@@ -114,13 +114,26 @@ const DEFAULT_STATES: [(&str, &str, &str); 3] = [
 /// (`custom-…`) so the deploy check can find a task in it on any board that added it.
 pub const TESTING_STATUS_ROLE: &str = "testing";
 
-/// Columns a board may add from a preset, not shown by default (R7). A task in one is not Waiting
-/// and needs no wait condition. Canonical here; web's board settings offer these as presets.
-const PRESET_STATES: [(&str, &str, &str); 1] = [(
-    TESTING_STATUS_ROLE,
-    "Testing",
-    "Deploying, in canary, or in an experiment.",
-)];
+/// The role of the optional Pending results preset (ADEV-274, D74). Fixed like Testing's, and the
+/// first preset with rules of its own: [`crate::results`].
+pub const RESULTS_STATUS_ROLE: &str = "results";
+
+/// Columns a board may add from a preset, not shown by default (R7), and added to a board only by
+/// someone who asks for it (ADEV-286). A task in Testing is not Waiting and needs no wait
+/// condition; a task in Pending results needs a result condition ([`crate::results`]). Canonical
+/// here; web's board settings offer these as presets.
+const PRESET_STATES: [(&str, &str, &str); 2] = [
+    (
+        TESTING_STATUS_ROLE,
+        "Testing",
+        "Deploying, in canary, or in an experiment.",
+    ),
+    (
+        RESULTS_STATUS_ROLE,
+        "Pending results",
+        "Built and released; waiting for an experiment or a verification to report.",
+    ),
+];
 
 /// One optional preset column.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1009,7 +1022,7 @@ mod tests {
         assert!(!columns(None)
             .iter()
             .any(|column| column.id == TESTING_STATUS_ROLE));
-        assert_eq!(available_presets(None).len(), 1);
+        assert_eq!(available_presets(None).len(), 2);
         let added = add_preset_state(None, TESTING_STATUS_ROLE).expect("adds");
         assert_eq!(added.state.role, "testing");
         assert_eq!(
@@ -1017,7 +1030,11 @@ mod tests {
             Some("Deploying, in canary, or in an experiment.")
         );
         let stored = states_to_json(&added.states);
-        assert!(available_presets(Some(&stored)).is_empty());
+        let left: Vec<_> = available_presets(Some(&stored))
+            .into_iter()
+            .map(|preset| preset.role)
+            .collect();
+        assert_eq!(left, ["results"]);
         assert_eq!(
             add_preset_state(Some(&stored), TESTING_STATUS_ROLE)
                 .unwrap_err()
@@ -1025,7 +1042,7 @@ mod tests {
             StateErrorKind::Duplicate
         );
         let named = json!([{ "role": "custom-testing", "name": "testing", "order": 0 }]);
-        assert!(available_presets(Some(&named)).is_empty());
+        assert_eq!(available_presets(Some(&named))[0].role, "results");
         assert_eq!(
             add_preset_state(None, "nope").unwrap_err().kind,
             StateErrorKind::NotFound

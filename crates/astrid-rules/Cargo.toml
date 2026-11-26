@@ -32,7 +32,7 @@ default = [
 # keeps jiff's bundled zone table in the binary (`tzdb-bundle-always`: wasm and Windows have no
 # zoneinfo directory to read, and a build must answer the same on every host).
 rules-repeating = ["jiff/tzdb-bundle-always"]
-# `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`, and the recorded
+# `waitingWrite`, `waitingWake`, `waitingSettle`, `waitingHandoff`, `handBack`, `resultsWrite`, `resultsSettle` (ADEV-274), and the recorded
 # questions `questionAsk`, `questionAnswer`, `questionsWaitingOn`, `questionMarker` (AWTD-1687):
 # server-side writes.
 rules-waiting = []
