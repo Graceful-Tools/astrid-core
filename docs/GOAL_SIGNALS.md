@@ -4,8 +4,9 @@
 live in the core. The spec of record, with the data model, the three HTTP contracts, the
 server's behaviour, the surfaces and the gate, is astrid-web's
 `docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. The decision records are
-[CONTRACTS.md D72–D75](./CONTRACTS.md). **Status: decided, not implemented.** Nothing in this
-note is in the crates yet; each section names the task that builds it.*
+[CONTRACTS.md D72–D75](./CONTRACTS.md). **Status: §2, §3 and §5 are implemented (ADEV-273, task 4a);
+§4 (the Pending results lane) is decided, not implemented.** Each section names the task that
+builds it.*
 
 ## 1. Why
 
@@ -66,8 +67,12 @@ These are thresholds, not a rule language. A stored value outside the vocabulary
 - `confidence`: `low` | `medium` | `high`.
 - `source`, `createdAt`, and the goals' `direction` (`up` | `down`).
 
-`now` is an argument, as everywhere in `astrid-rules`. An estimate older than the caller's
-staleness window is passed as stale; the rule does not own the window.
+The rule reads no clock, as everywhere in `astrid-rules`. An estimate older than the caller's
+staleness window is passed as `stale: true`; the rule does not own the window, so `evaluate`
+takes no `now`. The caller also says whether the project states guardrails
+(`guardrailsStated`), since "no impact returned" is unknown only when something was asked.
+The per-goal band in the order (§ "The order") is read from the pessimistic end of the
+interval in the goal's better direction: `low` for an `up` goal, `high` for a `down` goal.
 
 ### The label
 

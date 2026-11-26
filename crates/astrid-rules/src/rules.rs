@@ -330,6 +330,26 @@ pub enum Rule {
         action: crate::orchestration::Action,
         #[serde(default)]
         migration: Option<crate::orchestration::MigrationKind>,
+        /// The label and confidence of the estimate behind `action: "promoteIdea"` — read only
+        /// for it, and a promote that passes neither is answered `never` (`noEstimate`). Both
+        /// must be given for either to count (ADEV-273).
+        #[serde(default)]
+        label: Option<crate::tradeoff::Label>,
+        #[serde(default)]
+        confidence: Option<crate::tradeoff::Level>,
+    },
+    /// T2 of [`crate::tradeoff`]: the label an estimate earns under the resolved policy's
+    /// `tradeoff`, why, and its sort key. Answers `null` when no layer stores a trade-off policy
+    /// (no policy, so nothing is drawn). A missing or `null` `estimate` is row 1: `needs-review`.
+    /// Gone without the `tradeoff` feature (the browser build) (ADEV-273).
+    #[cfg(feature = "tradeoff")]
+    TradeoffEvaluate {
+        #[serde(default)]
+        project: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        list: Option<crate::orchestration::PolicyOverride>,
+        #[serde(default)]
+        estimate: Option<crate::tradeoff::Estimate>,
     },
     /// O5: who receives a question or approval request, and the hand-back write —
     /// [`crate::orchestration::escalate`]. Answers `{ notify, handBack }`.
@@ -1199,11 +1219,27 @@ pub fn run(rule: Rule) -> Response {
             agent,
             action,
             migration,
+            label,
+            confidence,
         } => Response::ok(crate::orchestration::may(
             &crate::orchestration::resolve(project.as_ref(), list.as_ref()),
             &agent,
             action,
             migration,
+            label
+                .zip(confidence)
+                .map(|(label, confidence)| crate::orchestration::EstimateRef { label, confidence }),
+        )),
+        #[cfg(feature = "tradeoff")]
+        Rule::TradeoffEvaluate {
+            project,
+            list,
+            estimate,
+        } => Response::ok(crate::tradeoff::evaluate(
+            crate::orchestration::resolve(project.as_ref(), list.as_ref())
+                .tradeoff
+                .as_ref(),
+            estimate.as_ref(),
         )),
         #[cfg(feature = "orchestration")]
         Rule::OrchestrationEscalate {

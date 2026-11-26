@@ -28,6 +28,7 @@ pub const CORE_OWNED: &[&str] = &[
     "callout-placement.json",
     "sidebar-projects.json",
     "orchestration.json",
+    "tradeoff.json",
     "questions.json",
 ];
 
@@ -1530,6 +1531,21 @@ fn orchestration_cases() -> Vec<Case> {
     let merge_asks = || json!({ "autonomy": { "merge": "ask" } });
     let set = || json!({ "routing": { "agents": ["claude", "copilot"] } });
     let routed = || json!({ "routing": { "assignTo": "codex", "agents": ["claude"] } });
+    // A project that lets agents promote an idea, on a policy that asks for high confidence.
+    let promoter = || {
+        json!({
+            "autonomy": { "promoteIdea": "allowed" },
+            "tradeoff": { "minConfidenceToAct": "high" }
+        })
+    };
+    let promote_req = |label: &str, confidence: &str| {
+        orch(
+            "orchestrationMay",
+            promoter(),
+            Value::Null,
+            json!({ "agent": "claude", "action": "promoteIdea", "label": label, "confidence": confidence }),
+        )
+    };
     let route = |project: Value, agent: &str| {
         orch(
             "orchestrationRoute",
@@ -1556,7 +1572,8 @@ fn orchestration_cases() -> Vec<Case> {
                 "autonomy": {
                     "merge": "never", "deploy": "never",
                     "migrate": { "additive": "never", "destructive": "never" },
-                    "release": "never", "spend": "never"
+                    "release": "never", "spend": "never",
+                    "promoteIdea": "never", "experimentStart": "never", "experimentStop": "never"
                 },
                 "escalation": { "to": "listOwner" }
             })),
@@ -1757,6 +1774,100 @@ fn orchestration_cases() -> Vec<Case> {
             ok(json!({ "notify": ["owner"] })),
         ),
         case(
+            "resolve/a-tradeoff-key-is-laid-over-the-defaults-field-by-field",
+            "orchestrationPolicy",
+            orch(
+                "orchestrationPolicy",
+                json!({ "tradeoff": { "goalOrder": ["g2", "g1"], "risk": { "reviewAt": "low" } } }),
+                json!({ "tradeoff": { "risk": { "refuseAt": "medium" } } }),
+                json!({}),
+            ),
+            ok(json!({ "tradeoff": {
+                "goalOrder": ["g2", "g1"],
+                "risk": { "reviewAt": "low", "refuseAt": "medium" },
+                "guardrail": { "reviewAtBreachProbability": 0.1, "refuseAtBreachProbability": 0.5 },
+                "experimentFirst": { "confidenceBelow": "medium", "riskAtLeast": "medium" },
+                "minConfidenceToAct": "medium"
+            } })),
+        ),
+        case(
+            "may/the-new-actions-default-to-never",
+            "orchestrationMay",
+            may_req(
+                none.clone(),
+                none.clone(),
+                "claude",
+                "experimentStart",
+                none.clone(),
+            ),
+            decided("never", "policy"),
+        ),
+        case(
+            "may/an-agent-may-start-an-experiment-when-the-policy-allows-it",
+            "orchestrationMay",
+            may_req(
+                json!({ "autonomy": { "experimentStart": "allowed", "experimentStop": "ask" } }),
+                none.clone(),
+                "claude",
+                "experimentStart",
+                none.clone(),
+            ),
+            decided("allowed", "policy"),
+        ),
+        case(
+            "may/stopping-an-experiment-can-ask",
+            "orchestrationMay",
+            may_req(
+                json!({ "autonomy": { "experimentStart": "allowed", "experimentStop": "ask" } }),
+                none.clone(),
+                "claude",
+                "experimentStop",
+                none.clone(),
+            ),
+            decided("ask", "policy"),
+        ),
+        case(
+            "may/promote-idea-without-an-estimate-is-never",
+            "orchestrationMay",
+            may_req(
+                promoter(),
+                none.clone(),
+                "claude",
+                "promoteIdea",
+                none.clone(),
+            ),
+            decided("never", "noEstimate"),
+        ),
+        case(
+            "may/promote-idea-needs-the-do-now-label",
+            "orchestrationMay",
+            promote_req("experiment-first", "high"),
+            decided("never", "notDoNow"),
+        ),
+        case(
+            "may/promote-idea-needs-the-confidence-the-policy-asks",
+            "orchestrationMay",
+            promote_req("do-now", "medium"),
+            decided("never", "belowConfidence"),
+        ),
+        case(
+            "may/promote-idea-on-a-confident-do-now-follows-the-policy",
+            "orchestrationMay",
+            promote_req("do-now", "high"),
+            decided("allowed", "policy"),
+        ),
+        case(
+            "may/promote-idea-with-the-default-autonomy-stays-never",
+            "orchestrationMay",
+            orch(
+                "orchestrationMay",
+                none.clone(),
+                none.clone(),
+                json!({ "agent": "claude", "action": "promoteIdea", "label": "do-now", "confidence": "high" }),
+            ),
+            decided("never", "policy"),
+        ),
+        case(
             "refused/an-unknown-autonomy-word",
             "orchestrationMay",
             may_req(
@@ -1780,6 +1891,260 @@ pub fn orchestration_fixture() -> Result<String, String> {
             "canonicalSource": "astrid-core crates/astrid-rules/src/orchestration.rs — core-first (AWTD-1685); design in docs/ORCHESTRATION_POLICY.md, decision docs/CONTRACTS.md D71. astrid-web stores the policy on Project and the override on TaskList, and its server asks these rules wherever an agent acts.",
             "astridPolicy": astrid_policy(),
             "astridPolicySource": "astrid-web docs/FIXALL_WORKFLOW.md → Autonomy (Jon, 2026-11-15): additive migrations ship, destructive ones and anything outward-facing wait for Jon. `jon` stands for his user id.",
+        }),
+    )
+}
+
+/// The trade-off policy (ADEV-273): the label an estimate earns, and the `policy` sort that
+/// compares the key the server stored. Both are core-first: no client has them yet.
+fn tradeoff_cases() -> Vec<Case> {
+    let policy = || json!({ "tradeoff": { "goalOrder": ["g2", "g1"] } });
+    let good = || {
+        json!({
+            "goalImpacts": [
+                { "goalId": "g1", "delta": 5.0, "low": 2.0, "high": 8.0 },
+                { "goalId": "g2", "delta": 1.0, "low": -1.0, "high": 3.0 }
+            ],
+            "guardrailImpacts": [{ "guardrailId": "r1", "breachProbability": 0.01 }],
+            "risk": { "level": "low" },
+            "confidence": "high",
+            "source": "service",
+            "createdAt": "2026-11-20T00:00:00Z"
+        })
+    };
+    let edited = |edit: Value| {
+        let mut estimate = good();
+        if let (Value::Object(estimate), Value::Object(edit)) = (&mut estimate, edit) {
+            estimate.extend(edit);
+        }
+        estimate
+    };
+    let evaluate = |project: Value, estimate: Value| json!({ "kind": "tradeoffEvaluate", "project": project, "list": null, "estimate": estimate });
+    let label = |label: &str| ok(json!({ "label": label }));
+    let rows = |tasks: Value| {
+        json!({
+            "kind": "rows", "now": NOW, "idsOnly": true,
+            "list": { "id": "l", "sortBy": "policy", "filterCompletion": "all" },
+            "tasks": tasks
+        })
+    };
+    vec![
+        case(
+            "evaluate/no-policy-answers-null",
+            "tradeoffEvaluate",
+            evaluate(Value::Null, good()),
+            ok(Value::Null),
+        ),
+        case(
+            "evaluate/a-clear-estimate-is-do-now",
+            "tradeoffEvaluate",
+            evaluate(policy(), good()),
+            ok(json!({
+                "label": "do-now",
+                "reasons": [
+                    { "code": "goalImproves", "goalId": "g1", "delta": 5.0 },
+                    { "code": "goalImproves", "goalId": "g2", "delta": 1.0 }
+                ]
+            })),
+        ),
+        case(
+            "evaluate/no-estimate-needs-review",
+            "tradeoffEvaluate",
+            evaluate(policy(), Value::Null),
+            ok(json!({ "label": "needs-review", "reasons": [{ "code": "noEstimate" }] })),
+        ),
+        case(
+            "evaluate/a-stale-estimate-needs-review",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "stale": true }))),
+            ok(json!({ "label": "needs-review", "reasons": [{ "code": "stale" }] })),
+        ),
+        case(
+            "evaluate/a-guardrail-at-the-review-threshold-needs-review",
+            "tradeoffEvaluate",
+            evaluate(
+                policy(),
+                edited(
+                    json!({ "guardrailImpacts": [{ "guardrailId": "r1", "breachProbability": 0.1 }] }),
+                ),
+            ),
+            ok(json!({
+                "label": "needs-review",
+                "reasons": [{ "code": "guardrailAtReview", "guardrailId": "r1", "breachProbability": 0.1, "threshold": 0.1 }]
+            })),
+        ),
+        case(
+            "evaluate/a-guardrail-at-the-refuse-threshold-is-dont",
+            "tradeoffEvaluate",
+            evaluate(
+                policy(),
+                edited(
+                    json!({ "guardrailImpacts": [{ "guardrailId": "r1", "breachProbability": 0.5 }] }),
+                ),
+            ),
+            ok(json!({
+                "label": "dont",
+                "reasons": [{ "code": "guardrailAtRefuse", "guardrailId": "r1", "breachProbability": 0.5, "threshold": 0.5 }]
+            })),
+        ),
+        case(
+            "evaluate/risk-at-the-review-level-needs-review",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "risk": { "level": "medium" } }))),
+            label("needs-review"),
+        ),
+        case(
+            "evaluate/risk-at-the-refuse-level-is-dont",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "risk": { "level": "high" } }))),
+            label("dont"),
+        ),
+        case(
+            "evaluate/low-confidence-runs-an-experiment-first",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "confidence": "low" }))),
+            ok(
+                json!({ "label": "experiment-first", "reasons": [{ "code": "confidenceLow", "confidence": "low" }] }),
+            ),
+        ),
+        case(
+            "evaluate/the-policys-experiment-first-bar",
+            "tradeoffEvaluate",
+            evaluate(
+                json!({ "tradeoff": {
+                    "risk": { "reviewAt": "high" },
+                    "experimentFirst": { "confidenceBelow": "high", "riskAtLeast": "medium" }
+                } }),
+                edited(json!({ "confidence": "medium", "risk": { "level": "medium" } })),
+            ),
+            ok(json!({
+                "label": "experiment-first",
+                "reasons": [{ "code": "experimentFirst", "confidence": "medium", "risk": "medium" }]
+            })),
+        ),
+        case(
+            "evaluate/an-unreturned-risk-is-unknown-and-never-good",
+            "tradeoffEvaluate",
+            evaluate(policy(), {
+                let mut estimate = good();
+                estimate.as_object_mut().map(|o| o.remove("risk"));
+                estimate
+            }),
+            ok(json!({ "label": "needs-review", "reasons": [{ "code": "riskUnknown" }] })),
+        ),
+        case(
+            "evaluate/unchecked-guardrails-on-a-project-that-states-them-need-review",
+            "tradeoffEvaluate",
+            evaluate(policy(), {
+                let mut estimate = edited(json!({ "guardrailsStated": true }));
+                estimate
+                    .as_object_mut()
+                    .map(|o| o.remove("guardrailImpacts"));
+                estimate
+            }),
+            ok(json!({ "label": "needs-review", "reasons": [{ "code": "guardrailsUnknown" }] })),
+        ),
+        case(
+            "evaluate/no-goal-improving-needs-review",
+            "tradeoffEvaluate",
+            evaluate(
+                policy(),
+                edited(
+                    json!({ "goalImpacts": [{ "goalId": "g1", "delta": -1.0, "low": -2.0, "high": 0.0 }] }),
+                ),
+            ),
+            ok(json!({ "label": "needs-review", "reasons": [{ "code": "noGoalImproves" }] })),
+        ),
+        case(
+            "evaluate/a-goal-that-improves-downward",
+            "tradeoffEvaluate",
+            evaluate(
+                policy(),
+                edited(json!({ "goalImpacts": [
+                    { "goalId": "g1", "delta": -1.0, "low": -2.0, "high": 0.0, "direction": "down" }
+                ] })),
+            ),
+            label("do-now"),
+        ),
+        case(
+            "evaluate/a-builtin-estimate-is-capped-at-experiment-first",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "source": "builtin_llm" }))),
+            ok(json!({
+                "label": "experiment-first",
+                "reasons": [
+                    { "code": "builtinCapped" },
+                    { "code": "goalImproves", "goalId": "g1", "delta": 5.0 },
+                    { "code": "goalImproves", "goalId": "g2", "delta": 1.0 }
+                ]
+            })),
+        ),
+        case(
+            "evaluate/a-builtin-estimate-can-still-be-refused",
+            "tradeoffEvaluate",
+            evaluate(
+                policy(),
+                edited(json!({ "source": "builtin_llm", "risk": { "level": "high" } })),
+            ),
+            label("dont"),
+        ),
+        case(
+            "evaluate/the-sort-key-is-a-tuple-not-a-score",
+            "tradeoffEvaluate",
+            evaluate(policy(), edited(json!({ "costMicrocents": 250 }))),
+            // [label do-now 0, guardrails at review 0, g2 band 1 (expected gain only), g1 band 0
+            // (gains even at the low end), risk low 0, cost 250, newer: minus the epoch millis].
+            ok(json!({ "sortKey": [0, 0, 1, 0, 0, 250, -1_795_132_800_000_i64] })),
+        ),
+        case(
+            "evaluate/a-stored-value-outside-the-vocabulary-is-refused",
+            "tradeoffEvaluate",
+            evaluate(
+                json!({ "tradeoff": { "risk": { "reviewAt": "scary" } } }),
+                good(),
+            ),
+            json!({ "ok": false }),
+        ),
+        case(
+            "evaluate/a-probability-outside-0-to-1-is-refused",
+            "tradeoffEvaluate",
+            evaluate(
+                json!({ "tradeoff": { "guardrail": { "refuseAtBreachProbability": 1.5 } } }),
+                good(),
+            ),
+            json!({ "ok": false }),
+        ),
+        case(
+            "sort/policy-compares-the-stored-keys-and-leaves-unlabelled-tasks-last",
+            "rows",
+            rows(json!([
+                { "id": "unlabelled", "title": "unlabelled" },
+                { "id": "review", "title": "review", "estimate": { "label": "needs-review", "sortKey": [2, 0] } },
+                { "id": "later", "title": "later", "estimate": { "label": "do-now", "sortKey": [0, 1, 5] } },
+                { "id": "first", "title": "first", "estimate": { "label": "do-now", "sortKey": [0, 0, 9] } }
+            ])),
+            ok(json!({ "ids": ["first", "later", "review", "unlabelled"] })),
+        ),
+        case(
+            "sort/policy-sinks-a-finished-task-and-ties-by-display-order",
+            "rows",
+            rows(json!([
+                { "id": "done", "title": "done", "completed": true, "estimate": { "label": "do-now", "sortKey": [0] } },
+                { "id": "b", "title": "b", "dueDateTime": "2026-12-02T09:00:00Z", "estimate": { "label": "do-now", "sortKey": [0, 1] } },
+                { "id": "a", "title": "a", "dueDateTime": "2026-12-01T09:00:00Z", "estimate": { "label": "do-now", "sortKey": [0, 1] } }
+            ])),
+            ok(json!({ "ids": ["a", "b", "done"] })),
+        ),
+    ]
+}
+
+/// The text of `tradeoff.json` (ADEV-273).
+pub fn tradeoff_fixture() -> Result<String, String> {
+    render(
+        tradeoff_cases(),
+        "crates/astrid-rules/src/tradeoff.rs, crates/astrid-rules/src/filters/mod.rs (the `policy` sort)",
+        json!({
+            "canonicalSource": "astrid-core crates/astrid-rules/src/tradeoff.rs — core-first (ADEV-273); design in docs/GOAL_SIGNALS.md §2 and §5, decision records docs/CONTRACTS.md D72 and D75. The server stores each estimate's sort key and compares it; the `policy` sort cases are here rather than in filters.json because that file is generated from web's implementation, which has no policy sort yet.",
         }),
     )
 }
@@ -1949,6 +2314,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("list-project-moves.json", list_project_moves_fixture()?),
         ("sidebar-projects.json", sidebar_projects_fixture()?),
         ("orchestration.json", orchestration_fixture()?),
+        ("tradeoff.json", tradeoff_fixture()?),
         ("questions.json", questions_fixture()?),
     ])
 }

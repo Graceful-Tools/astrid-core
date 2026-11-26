@@ -25,6 +25,9 @@ markdown = ["astrid-rules/markdown"]
 # `markdown`: astrid-web's server asks it wherever an agent acts, and no page does, so the browser
 # downloads none of it.
 orchestration = ["astrid-rules/orchestration"]
+# The trade-off policy (ADEV-273): the server evaluates an estimate through it. Off in the browser,
+# which refuses `tradeoffEvaluate` by name; the `policy` sort arm is in both builds.
+tradeoff = ["astrid-rules/tradeoff"]
 
 # The rule groups of `astrid-rules` (docs/BROWSER_DOOR.md), OFF for the browser like the two above:
 # it answers only what astrid-web's client-side code calls through core. Each forwards to the
@@ -38,6 +41,7 @@ rules-shell = ["astrid-rules/rules-shell"]
 full = [
     "markdown",
     "orchestration",
+    "tradeoff",
     "rules-repeating",
     "rules-waiting",
     "rules-decisions",

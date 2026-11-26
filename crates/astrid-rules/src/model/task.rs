@@ -557,6 +557,25 @@ pub struct Task {
     /// nulled when the parent is deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_task_id: Option<String>,
+    /// What the trade-off policy made of the task's current estimate (ADEV-273,
+    /// `docs/GOAL_SIGNALS.md` §5). Absent means unlabelled: no policy, no estimate, or a server
+    /// that predates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<EstimateSummary>,
+}
+
+/// The server's evaluation of a task's current estimate, stored beside it: the label to draw and
+/// the key the `policy` sort compares. A comparison reads it; nothing here is evaluated on a
+/// client.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct EstimateSummary {
+    /// `do-now` | `experiment-first` | `needs-review` | `dont`. Text, so a label a newer server
+    /// invents cannot make the whole task unreadable.
+    pub label: String,
+    /// Compared lexicographically, smaller first (`astrid_rules::tradeoff::Evaluation::sort_key`).
+    pub sort_key: Vec<i64>,
 }
 
 fn default_true() -> bool {
@@ -660,6 +679,7 @@ impl Task {
             source_list_id: None,
             client_request_id: None,
             parent_task_id: None,
+            estimate: None,
         }
     }
 

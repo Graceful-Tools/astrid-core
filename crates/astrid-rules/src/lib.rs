@@ -47,4 +47,6 @@ pub mod rules;
 pub mod smart_tasks;
 pub mod theme;
 pub mod title_display;
+#[cfg(feature = "orchestration")]
+pub mod tradeoff;
 pub mod waiting;

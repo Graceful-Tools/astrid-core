@@ -975,6 +975,28 @@
       ],
       "type": "string"
     },
+    "EstimateSummary": {
+      "description": "The server's evaluation of a task's current estimate, stored beside it: the label to draw and\nthe key the `policy` sort compares. A comparison reads it; nothing here is evaluated on a\nclient.",
+      "properties": {
+        "label": {
+          "description": "`do-now` | `experiment-first` | `needs-review` | `dont`. Text, so a label a newer server\ninvents cannot make the whole task unreadable.",
+          "type": "string"
+        },
+        "sortKey": {
+          "description": "Compared lexicographically, smaller first (`astrid_rules::tradeoff::Evaluation::sort_key`).",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "sortKey"
+      ],
+      "type": "object"
+    },
     "Failure": {
       "description": "Why a command did not work.\n\nOne shape for every failure — a kind, a message, and the two optional details that some kinds\ncarry — rather than a tagged union whose payload differs per case. The shell reads this in C#,\nwhere a shape that changes per variant is a `switch` over `JsonElement` at every call site.",
       "properties": {
@@ -2699,6 +2721,17 @@
             "string",
             "null"
           ]
+        },
+        "estimate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EstimateSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the trade-off policy made of the task's current estimate (ADEV-273,\n`docs/GOAL_SIGNALS.md` §5). Absent means unlabelled: no policy, no estimate, or a server\nthat predates it."
         },
         "fields": {
           "additionalProperties": true,

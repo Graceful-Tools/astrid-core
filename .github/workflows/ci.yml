@@ -156,12 +156,13 @@ jobs:
       - name: Clippy
         run: cargo clippy -p astrid-rules --target wasm32-unknown-unknown -- -D warnings
 
-      # The Node package's build: `astrid-rules-wasm --features markdown,orchestration`
+      # The Node package's build: `astrid-rules-wasm --features markdown,orchestration,tradeoff`
       # (scripts/build-wasm.sh). astrid-web's server renders markdown and asks the orchestration
-      # policy through it, and nothing else in CI compiles that combination, so the tests that it
-      # still answers `renderMarkdown` (AWTD2-162) and `orchestrationMay` (AWTD-1685) run here.
+      # policy and the trade-off policy through it, and nothing else in CI compiles that
+      # combination, so the tests that it still answers `renderMarkdown` (AWTD2-162),
+      # `orchestrationMay` (AWTD-1685) and `tradeoffEvaluate` (ADEV-273) run here.
       - name: Test the Node build (with the markdown renderer)
-        run: cargo test -p astrid-rules-wasm --features markdown,orchestration
+        run: cargo test -p astrid-rules-wasm --features markdown,orchestration,tradeoff
 
       # The build above IS the markdown-free one -- `astrid-rules-wasm` takes the crate with
       # `default-features = false` -- but only through a dependency edge, and nothing else in the
