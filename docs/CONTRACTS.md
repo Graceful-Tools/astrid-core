@@ -32,12 +32,16 @@ client together, and the entry says which behaviour this crate currently follows
 
 ## 1. Repeating-task rollover
 
-Canonical: this crate's `nextOccurrence`, which web's server runs (see the note at the top). The
-fixture is generated from `astrid-web/types/repeating.ts` (`calculateTaskNextOccurrence`) and
-`astrid-web/lib/repeating-task-handler.ts`.
+Canonical: this crate's `nextOccurrence`, which web's server runs (see the note at the top). Since
+ADEV-306 (2026-11-26, step B for this rule) web has no TypeScript copy of the whole rule: a change
+starts here, and the fixture's `completions` and `zonedProgressions` are generated from this crate's
+own build as vendored in `astrid-web/packages/astrid-rules`. The fixture's older `simple` and
+`custom` sections still come from `astrid-web/types/repeating.ts`.
 Apple: asks this crate (`rules` → `completion` / `nextOccurrence`) since 2026-09-28.
-Web: its server asks this crate (`rules` → `nextOccurrence`, WebAssembly) since AWTD-1063, with
-the TypeScript as fail-safe; the browser computes no rollover.
+Web: its server asks this crate (`rules` → `nextOccurrence`, WebAssembly) since AWTD-1063. When the
+core cannot answer, the completion is refused with a retryable 503, never a guessed date. The
+browser computes no rollover and its build omits `nextOccurrence` (it has no caller, and the rule
+would bring the zone table back).
 Here: `astrid_core::repeating`.
 
 **Under the follow-iOS rule (2026-10-03), D1–D5 needed no change here:** the Apple apps already
