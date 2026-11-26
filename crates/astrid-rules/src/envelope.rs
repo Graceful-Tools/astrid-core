@@ -101,6 +101,16 @@ impl Failure {
         }
     }
 
+    /// P1 of `crate::results`: a move into Pending results with nothing to wait for. `refused`
+    /// with `code: "RESULTS_NEEDS_CONDITION"`, a shell's cue to show the picker (ADEV-274).
+    pub fn results_needs_condition() -> Self {
+        let error = crate::results::ResultsError::ResultsNeedsCondition;
+        Failure {
+            code: Some(error.code().to_string()),
+            ..Self::of(FailureKind::Refused, error.message())
+        }
+    }
+
     /// R8 of `crate::waiting`: a handoff whose source is already finished. `refused`, with
     /// `code: "HANDOFF_SOURCE_DONE"` (AWTD-1686).
     pub fn handoff_source_done() -> Self {

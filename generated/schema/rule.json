@@ -392,6 +392,22 @@
       ],
       "type": "string"
     },
+    "ConditionKind": {
+      "description": "What a result condition is.",
+      "enum": [
+        "experiment",
+        "verification"
+      ],
+      "type": "string"
+    },
+    "ConditionState": {
+      "description": "Whether the source has concluded.",
+      "enum": [
+        "open",
+        "concluded"
+      ],
+      "type": "string"
+    },
     "CountForm": {
       "description": "What a number in a message is counting — and so which of CLDR's two sets of rules applies.\n\nThey are genuinely different rules, not two uses of one: English's *cardinal* 3 is `other`\n(\"3 weeks\") while its *ordinal* 3 is `few` (\"3rd\"). Nothing can pick the right form without\nbeing told which question is being asked, and the arm that chose the key already knows.",
       "oneOf": [
@@ -1863,6 +1879,68 @@
       ],
       "type": "object"
     },
+    "ResultCondition": {
+      "description": "One thing a task waits on for its result, as the server stores it.",
+      "properties": {
+        "decideBy": {
+          "description": "When the owner wants the answer by.",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetchedAt": {
+          "description": "When the server last heard from the source. Carried for the client's \"stale\" badge; no rule\nreads it (P5).",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ConditionKind"
+        },
+        "state": {
+          "$ref": "#/$defs/ConditionState"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Verdict"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What it found. Absent on a concluded condition reads as `inconclusive`."
+        }
+      },
+      "required": [
+        "kind",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ResultsChange": {
+      "description": "What a write asks for, as far as the lane cares.",
+      "properties": {
+        "keepAssignee": {
+          "default": false,
+          "description": "Keep the assignee when entering. Default: clear it.",
+          "type": "boolean"
+        },
+        "statusRole": {
+          "default": null,
+          "description": "The lane asked for: a role, `null` for Inbox, absent for \"not a move\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Risk": {
       "description": "The estimate's risk. A numeric `score` may ride along; the rule reads only the level, the\nvocabulary policies are written in (`docs/GOAL_SIGNALS.md` §8.4).",
       "properties": {
@@ -2972,6 +3050,15 @@
         "id"
       ],
       "type": "object"
+    },
+    "Verdict": {
+      "description": "What a concluded source found.",
+      "enum": [
+        "improving",
+        "regressing",
+        "inconclusive"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3634,6 +3721,69 @@
       "required": [
         "kind",
         "assigneeId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "P1/P2/P6 of [`crate::results`]: whether a write that may move `task` into, within or out of\nPending results is allowed, and what it stores. `conditions` are the task's result\nconditions after the write. Refused with `RESULTS_NEEDS_CONDITION` (ADEV-274).",
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/ResultsChange"
+        },
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/ResultCondition"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "resultsWrite",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "now"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "P3–P5 of [`crate::results`]: complete, hand back to `escalate_to_assignee_id`, or stay.",
+      "properties": {
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/ResultCondition"
+          },
+          "type": "array"
+        },
+        "escalateToAssigneeId": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "resultsSettle",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "escalateToAssigneeId",
+        "now"
       ],
       "type": "object"
     },

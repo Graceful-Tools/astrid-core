@@ -5,8 +5,8 @@ live in the core. The spec of record, with the data model, the three HTTP contra
 server's behaviour, the surfaces and the gate, is astrid-web's
 `docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. The decision records are
 [CONTRACTS.md D72–D75](./CONTRACTS.md). **Status: §2, §3 and §5 are implemented (ADEV-273, task 4a);
-§4 (the Pending results lane) is decided, not implemented.** Each section names the task that
-builds it.*
+§4 (the Pending results lane) is implemented (ADEV-274, task 5a).** Each section names the task
+that builds it.*
 
 ## 1. Why
 
