@@ -90,6 +90,22 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
                 .await;
             goals_answer(app, &project_id, answer)
         }
+        Command::GetTaskGoalLinks { task_id } => {
+            let answer = app.context.goal_signals().refresh_links(&task_id).await;
+            signals_answer(app, &task_id, answer)
+        }
+        Command::GetTaskEstimate { task_id } => {
+            let answer = app.context.goal_signals().refresh_estimates(&task_id).await;
+            signals_answer(app, &task_id, answer)
+        }
+        Command::GetTaskExperiment { task_id } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .refresh_experiments(&task_id)
+                .await;
+            signals_answer(app, &task_id, answer)
+        }
         Command::TaskBlockers { task_id } => task_blockers(app, &task_id).await,
         #[cfg(feature = "github-project-fields")]
         Command::TaskProjectFields { task_id } => {
@@ -361,6 +377,26 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
         // `super::run` is one exhaustive match over every variant and the groups it routes are
         // disjoint, so the compiler has already proved nothing else reaches this arm.
         _ => misrouted("tasks"),
+    }
+}
+
+/// A goal-signals answer, announcing `taskGoalSignals` when it moved the cached value (ADEV-285).
+fn signals_answer<T: serde::Serialize>(
+    app: &App,
+    task_id: &str,
+    answer: crate::services::Result<crate::services::goal_signals::Answer<T>>,
+) -> Response {
+    match answer {
+        Ok(answer) => {
+            if answer.changed {
+                app.realtime()
+                    .publish(crate::realtime::Change::TaskGoalSignals(
+                        task_id.to_string(),
+                    ));
+            }
+            Response::ok(answer.value)
+        }
+        Err(error) => Response::failed(error.into()),
     }
 }
 

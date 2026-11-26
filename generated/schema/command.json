@@ -2824,6 +2824,57 @@
       "type": "object"
     },
     {
+      "description": "Which of its project's goals a task serves, its own links and its lists' (ADEV-285; web\nADEV-271). Read-only and cached; offline, the cache answers. A refusal (the capability\noff, not granted) is a failure: draw no section.",
+      "properties": {
+        "kind": {
+          "const": "getTaskGoalLinks",
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "taskId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A task's latest estimate and history, with the trade-off label and its reasons (`label` is\nnull where no policy is stated). Read-only and cached (ADEV-285; web ADEV-278).",
+      "properties": {
+        "kind": {
+          "const": "getTaskEstimate",
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "taskId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A task's experiment links and verification windows, and whether it is in the Pending\nresults column. The service's verdict and numbers as sent. Read-only and cached\n(ADEV-285; web ADEV-279).",
+      "properties": {
+        "kind": {
+          "const": "getTaskExperiment",
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "taskId"
+      ],
+      "type": "object"
+    },
+    {
       "description": "What the \"Wait on a task…\" picker may offer for a query.\n\nThe search is the SERVER's (`GET /api/v1/search`), which is permission-filtered in the\nquery — unlike [`Command::SearchTasks`], which reads this machine's cache. A picker that\nfiltered a loaded page locally would offer only what happened to be on screen, which is\nthe bug web fixed as `5df85b9f`. Two characters is the threshold; below it the answer is\nempty rather than everything.",
       "properties": {
         "kind": {
