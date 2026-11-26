@@ -31,6 +31,7 @@ pub const CORE_OWNED: &[&str] = &[
     "orchestration.json",
     "tradeoff.json",
     "questions.json",
+    "search.json",
 ];
 
 const NOW: &str = "2026-11-12T12:00:00.000Z";
@@ -2583,6 +2584,162 @@ pub fn questions_fixture() -> Result<String, String> {
     )
 }
 
+/// The queries `search.json` records, each with the part of the parse a person wrote down
+/// (defaults — empty text, null, `[]` — are left out). Generation fails when the core parses
+/// otherwise. These were web's queries while web's parser generated the fixture (AWTD-1062); the
+/// core is canonical since ADEV-305, so the fixture is generated here and web copies it.
+fn search_cases() -> Vec<(&'static str, Value, bool)> {
+    vec![
+        ("", json!({}), true),
+        ("   ", json!({}), true),
+        ("rollover", json!({ "text": "rollover" }), false),
+        ("buy oat milk", json!({ "text": "buy oat milk" }), false),
+        (
+            "assignee:me priority:high overdue rollover",
+            json!({ "text": "overdue rollover", "assignee": "me", "priorities": ["high"] }),
+            false,
+        ),
+        ("owner:@dana", json!({ "assignee": "dana" }), false),
+        (
+            "assignee:dana@example.test",
+            json!({ "assignee": "dana@example.test" }),
+            false,
+        ),
+        ("list:Work", json!({ "listNames": ["Work"] }), false),
+        (
+            "list:\"Bugs and Polish\" crash",
+            json!({ "text": "crash", "listNames": ["Bugs and Polish"] }),
+            false,
+        ),
+        (
+            "label:bug tag:polish",
+            json!({ "labelNames": ["bug", "polish"] }),
+            false,
+        ),
+        (
+            "priority:high p:3 p:urgent",
+            json!({ "priorities": ["high", "high", "high"] }),
+            false,
+        ),
+        (
+            "priority:none p:0 p:low p:1 p:med p:medium p:2",
+            json!({ "priorities": ["none", "none", "low", "low", "medium", "medium", "medium"] }),
+            false,
+        ),
+        (
+            "priority:sky-high",
+            json!({ "text": "priority:sky-high" }),
+            false,
+        ),
+        ("due:today", json!({ "due": "today" }), false),
+        ("due:overdue due:late", json!({ "due": "overdue" }), false),
+        ("due:week due:this-week", json!({ "due": "week" }), false),
+        ("due:month due:this-month", json!({ "due": "month" }), false),
+        ("due:none due:never", json!({ "due": "none" }), false),
+        ("due:someday", json!({ "text": "due:someday" }), false),
+        ("is:open is:incomplete", json!({ "state": "open" }), false),
+        (
+            "is:done is:complete is:completed",
+            json!({ "state": "done" }),
+            false,
+        ),
+        (
+            "is:canceled is:cancelled",
+            json!({ "state": "canceled" }),
+            false,
+        ),
+        ("is:whatever", json!({ "text": "is:whatever" }), false),
+        ("is:", json!({ "text": "is:" }), false),
+        (":leading", json!({ "text": ":leading" }), false),
+        (
+            "status:ready status:Doing",
+            json!({ "statuses": ["ready", "doing"] }),
+            false,
+        ),
+        ("status:none", json!({ "statuses": ["none"] }), false),
+        ("status:", json!({ "text": "status:" }), false),
+        ("AST-142", json!({ "identifier": "AST-142" }), false),
+        (
+            "ast-142 and some words",
+            json!({ "text": "and some words", "identifier": "AST-142" }),
+            false,
+        ),
+        ("a-1", json!({ "text": "a-1" }), false),
+        ("toolong-1", json!({ "text": "toolong-1" }), false),
+        ("AST-142-extra", json!({ "text": "AST-142-extra" }), false),
+        ("hostname:foo", json!({ "text": "hostname:foo" }), false),
+        (
+            "\"quoted words\" and:not-a-key",
+            json!({ "text": "quoted words and:not-a-key" }),
+            false,
+        ),
+        (
+            "assignee:me list:Work label:bug priority:high due:week is:open status:ready text",
+            json!({
+                "text": "text", "assignee": "me", "listNames": ["Work"], "labelNames": ["bug"],
+                "priorities": ["high"], "due": "week", "state": "open", "statuses": ["ready"],
+            }),
+            false,
+        ),
+    ]
+}
+
+/// The text of `search.json` (ADEV-305): every query sent through the rules door's `searchParse`,
+/// the very function web's server and the Apple apps ask. The shape is the one web used to
+/// generate (`queries[].{query, parsed, isEmpty}`, `priorityNumbers`), so web's copy and
+/// `tests/search_contract.rs` read it unchanged.
+pub fn search_fixture() -> Result<String, String> {
+    let mut queries = Vec::new();
+    for (query, expect, is_empty) in search_cases() {
+        let answer: Value = serde_json::from_str(&astrid_rules::rules::run_json(
+            &json!({ "kind": "searchParse", "query": query }).to_string(),
+        ))
+        .map_err(|error| format!("search {query:?}: the door answered non-JSON: {error}"))?;
+        let Some(Value::Object(mut parsed)) = answer.get("value").cloned() else {
+            return Err(format!("search {query:?}: the door answered {answer}"));
+        };
+        let reported = parsed.remove("isEmpty");
+        if reported != Some(json!(is_empty)) {
+            return Err(format!(
+                "search {query:?}: expected isEmpty {is_empty} but the rule answered {reported:?}"
+            ));
+        }
+        let parsed = Value::Object(parsed);
+        // Everything a case does not name must be the default, so nothing passes unremarked.
+        let mut want = json!({
+            "text": "", "assignee": null, "listNames": [], "labelNames": [], "priorities": [],
+            "due": null, "state": null, "statuses": [], "identifier": null,
+        });
+        if let (Value::Object(want), Value::Object(expect)) = (&mut want, expect) {
+            want.extend(expect);
+        }
+        if parsed != want {
+            return Err(format!(
+                "search {query:?}: expected {want} but the rule parsed {parsed}"
+            ));
+        }
+        queries.push(json!({ "query": query, "parsed": parsed, "isEmpty": is_empty }));
+    }
+    let priority_numbers: serde_json::Map<String, Value> = ["none", "low", "medium", "high"]
+        .into_iter()
+        .map(|word| {
+            (
+                word.to_string(),
+                json!(astrid_rules::parse::search::priority_to_number(word)),
+            )
+        })
+        .collect();
+    let fixture = json!({
+        "$comment": "GENERATED by astrid-core `cargo xtask gen-core-contracts` — do not edit. Source of truth: astrid-core (a core-first contract; contracts/README.md).",
+        "generatedFrom": "crates/astrid-rules/src/parse/search.rs, through the rules door's searchParse",
+        "priorityNumbers": priority_numbers,
+        "queries": queries,
+    });
+    serde_json::to_string_pretty(&fixture)
+        .map(|text| text + "\n")
+        .map_err(|error| error.to_string())
+}
+
 /// Every core-owned fixture, by file name, with its text.
 pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
@@ -2596,6 +2753,7 @@ pub fn generate_all() -> Result<Vec<(&'static str, String)>, String> {
         ("orchestration.json", orchestration_fixture()?),
         ("tradeoff.json", tradeoff_fixture()?),
         ("questions.json", questions_fixture()?),
+        ("search.json", search_fixture()?),
     ])
 }
 
