@@ -237,10 +237,9 @@ key sorts after every task with one, in `auto_order` among themselves.
   the cache answers; a refusal is a failure, so a shell draws no section) and announce
   `taskGoalSignals` when a cache moved. Nothing is computed here: label, reasons, verdict and
   numbers are the server's. A native client can now draw the label chip, the estimate summary
-  and the Pending results card. **Not yet:** the `policy` sort's per-task `sortKey` rides on
-  `GET tasks?include=estimate`, which the task list read does not request, so a native client
-  still shows a `policy` sort as Auto until that follow-up lands. Each client's half is filed
-  on its own board.
+  and the Pending results card. The `policy` sort's per-task `sortKey` rides on
+  `GET tasks?include=estimate`, which the sync walk now requests (ADEV-324), so a native client
+  orders by Policy. Each client's half is filed on its own board.
 
 ## 7. What stays outside the core
 
