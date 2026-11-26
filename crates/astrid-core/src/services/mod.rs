@@ -26,6 +26,7 @@ pub mod connections;
 pub mod dependency;
 pub mod empathy_art;
 pub mod external;
+pub mod goal_signals;
 pub mod goals;
 pub mod list;
 pub mod list_defaults;
@@ -109,6 +110,11 @@ impl Context {
     /// A project's goals and guardrails (ADEV-187).
     pub fn goals(&self) -> goals::GoalsService {
         goals::GoalsService::new(self.clone())
+    }
+
+    /// A task's goal links, estimate and experiment results, read-only (ADEV-285).
+    pub fn goal_signals(&self) -> goal_signals::GoalSignalsService {
+        goal_signals::GoalSignalsService::new(self.clone())
     }
 
     /// A GitHub board's project fields on one task (AITD-491).

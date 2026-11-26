@@ -19,6 +19,7 @@ mod board;
 mod chat;
 mod comments;
 mod connections;
+mod goal_signals;
 mod goals;
 mod list_filters;
 mod lists;
