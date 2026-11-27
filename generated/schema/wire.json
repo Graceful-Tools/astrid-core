@@ -975,6 +975,61 @@
       ],
       "type": "string"
     },
+    "Estimate": {
+      "description": "One estimate, as the server answers it. A missing section is \"not estimated\", never zero.",
+      "properties": {
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "costMicrocents": true,
+        "createdAt": {
+          "default": "",
+          "type": "string"
+        },
+        "effortHours": true,
+        "goalImpacts": true,
+        "guardrailImpacts": true,
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "`do-now`, `experiment-first`, `needs-review` or `dont`. `None` where no `tradeoff` policy is\nstated (a label this build does not know is kept, and a shell draws no chip for it).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labelReasons": {
+          "description": "Each reason is `{ code, …values }`, worded by the client."
+        },
+        "rationale": {
+          "description": "Plain text: show it as text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reach": true,
+        "risk": true,
+        "rough": {
+          "default": false,
+          "description": "The built-in estimator's answer: show ranges under a \"rough estimate\" tag.",
+          "type": "boolean"
+        },
+        "source": {
+          "default": "",
+          "description": "`builtin_llm`, `service:<key>` or `human`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "EstimateSummary": {
       "description": "The server's evaluation of a task's current estimate, stored beside it: the label to draw and\nthe key the `policy` sort compares. A comparison reads it; nothing here is evaluated on a\nclient.",
       "properties": {
@@ -994,6 +1049,87 @@
       "required": [
         "label",
         "sortKey"
+      ],
+      "type": "object"
+    },
+    "ExperimentLink": {
+      "description": "An experiment link or a post-deploy verification window. The service's numbers are kept as\ngiven: Astrid computes no statistics.",
+      "properties": {
+        "connectorId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decideBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetchedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "findings": true,
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "description": "`experiment` or `verification`.",
+          "type": "string"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics": true,
+        "recommendation": {
+          "description": "`{ action, reason }`."
+        },
+        "stale": {
+          "default": false,
+          "description": "No data since `fetched_at` for 48 hours.",
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "default": "",
+          "description": "`pending`, `running`, `concluded`, `stopped` or `unknown`.",
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": {
+          "description": "`improving`, `flat`, `regressing` or `inconclusive`; `None` until there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
       ],
       "type": "object"
     },
@@ -1230,6 +1366,49 @@
       },
       "required": [
         "id",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "GoalLink": {
+      "description": "Which of its project's goals a task serves, directly or through a list.",
+      "properties": {
+        "goalId": {
+          "type": "string"
+        },
+        "listId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "projectName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": "",
+          "description": "`person`, `agent` or `report`.",
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "via": {
+          "default": "",
+          "description": "`task` for the task's own link, `list` for one inherited from a list.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "goalId",
         "statement"
       ],
       "type": "object"
@@ -2940,6 +3119,72 @@
       ],
       "type": "object"
     },
+    "TaskEstimates": {
+      "properties": {
+        "history": {
+          "default": [],
+          "description": "Newest first, at most 20.",
+          "items": {
+            "$ref": "#/$defs/Estimate"
+          },
+          "type": "array"
+        },
+        "latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Estimate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "taskId": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TaskExperiments": {
+      "properties": {
+        "experiments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExperimentLink"
+          },
+          "type": "array"
+        },
+        "inResultsColumn": {
+          "default": false,
+          "description": "The task sits in the Pending results column.",
+          "type": "boolean"
+        },
+        "taskId": {
+          "default": "",
+          "description": "Not on the server's answer: the core adds it so a cached answer says whose it is.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TaskGoalLinks": {
+      "properties": {
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GoalLink"
+          },
+          "type": "array"
+        },
+        "taskId": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TaskList": {
       "properties": {
         "admins": {
@@ -3590,6 +3835,15 @@
     "task": {
       "$ref": "#/$defs/Task"
     },
+    "taskEstimates": {
+      "$ref": "#/$defs/TaskEstimates"
+    },
+    "taskExperiments": {
+      "$ref": "#/$defs/TaskExperiments"
+    },
+    "taskGoalLinks": {
+      "$ref": "#/$defs/TaskGoalLinks"
+    },
     "taskList": {
       "$ref": "#/$defs/TaskList"
     },
@@ -3623,7 +3877,10 @@
     "listDefaultPicks",
     "reminderPick",
     "githubApp",
-    "projectGoals"
+    "projectGoals",
+    "taskGoalLinks",
+    "taskEstimates",
+    "taskExperiments"
   ],
   "title": "WireModels",
   "type": "object"

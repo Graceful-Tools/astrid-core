@@ -5,7 +5,7 @@ live in the core. The spec of record, with the data model, the three HTTP contra
 server's behaviour, the surfaces and the gate, is astrid-web's
 `docs/specs/GOALS_GUARDRAILS_SIGNALS.md`. The decision records are
 [CONTRACTS.md D72–D75](./CONTRACTS.md). **Status: §2, §3 and §5 are implemented (ADEV-273, task 4a);
-§4 (the Pending results lane) is implemented (ADEV-274, task 5a).** Each section names the task
+§4 (the Pending results lane) is implemented (ADEV-274, task 5a); the native read of links, estimates and results (§6) is implemented (ADEV-285, task 7).** Each section names the task
 that builds it.*
 
 ## 1. Why
@@ -231,10 +231,15 @@ key sorts after every task with one, in `auto_order` among themselves.
 - **Off in the browser build**, refused by name, as `orchestration` is.
   `scripts/check-wasm-packages.mjs` asserts both halves.
 - The `policy` sort arm is in every build, the browser's included: it is a comparison.
-- Native clients get all of it through `astrid-core`. They draw nothing new until task 7
-  reads links, estimates and results into the cache (`services/goals.rs` and a new
-  read-only service). Until then a native client shows a `results` column as any preset
-  column and a `policy` sort as Auto.
+- Native clients get all of it through `astrid-core`. Task 7 (ADEV-285) adds the read-only
+  `services/goal_signals.rs`: `getTaskGoalLinks`, `getTaskEstimate` and `getTaskExperiment`
+  read web's `GET tasks/{id}/goals`, `/estimates` and `/experiment` into the cache (offline
+  the cache answers; a refusal is a failure, so a shell draws no section) and announce
+  `taskGoalSignals` when a cache moved. Nothing is computed here: label, reasons, verdict and
+  numbers are the server's. A native client can now draw the label chip, the estimate summary
+  and the Pending results card. The `policy` sort's per-task `sortKey` rides on
+  `GET tasks?include=estimate`, which the sync walk now requests (ADEV-324), so a native client
+  orders by Policy. Each client's half is filed on its own board.
 
 ## 7. What stays outside the core
 

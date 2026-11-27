@@ -197,6 +197,9 @@ pub enum Change {
     Settings,
     /// A project's goals and guardrails moved in the cache (ADEV-187). Ask `getProjectGoals`.
     ProjectGoals(String),
+    /// A task's goal links, estimate or experiment results moved in the cache (ADEV-285). Ask
+    /// `getTaskGoalLinks`, `getTaskEstimate` or `getTaskExperiment`.
+    TaskGoalSignals(String),
     /// A reminder has come due while the app was running.
     ///
     /// Carries nothing: the shell asks `remindersDue` for the list, so there is one answer to
@@ -265,6 +268,9 @@ impl Change {
             }),
             Change::Settings => serde_json::json!({ "change": "settings" }),
             Change::ProjectGoals(id) => serde_json::json!({ "change": "projectGoals", "id": id }),
+            Change::TaskGoalSignals(id) => {
+                serde_json::json!({ "change": "taskGoalSignals", "id": id })
+            }
             Change::RemindersDue => serde_json::json!({ "change": "remindersDue" }),
             Change::NeedsSync => serde_json::json!({ "change": "needsSync" }),
             Change::Synced { task_ids, list_ids } => serde_json::json!({

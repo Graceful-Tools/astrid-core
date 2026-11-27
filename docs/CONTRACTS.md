@@ -18,7 +18,8 @@ client together, and the entry says which behaviour this crate currently follows
 > search parsing (`searchParse`) and the project board (`board` / `boardMove`). Web's TypeScript
 > copy of each is now its browser's rule and its server's fail-safe, nothing more. A change to one
 > of these rules is made here and in web's TypeScript as one pair of PRs. The fixture is still
-> generated from web, so web's half lands first, as §7 says. Each TypeScript copy retires on the
+> generated from web, so web's half lands first, as §7 says (`search.json` is the exception: since
+> ADEV-305 it is generated here and web has no search TypeScript). Each TypeScript copy retires on the
 > dated checklist in astrid-web
 > [`docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md).
 > At that point the rule's fixture is generated from here.
@@ -1936,3 +1937,25 @@ keys tie through `display_order`.
 Locked by the `sort/policy-…` cases of `contracts/fixtures/tradeoff.json`, **not** `filters.json`:
 that file is generated from web's implementation (`lib/task-sort.ts`), which has no policy sort,
 and `check-contracts` would refuse a core-only edit to it.
+
+---
+
+## Search parsing is canonical here, with no TypeScript beside it (ADEV-305, 2026-11-26)
+
+Canonical: `astrid_rules::parse::search`, asked through the rules door's `searchParse`. Fixture:
+`contracts/fixtures/search.json`, generated **here** by `cargo xtask gen-core-contracts` from the
+door's own answers (it was generated from web's `lib/search-query-parser.ts`, and `check-contracts`
+now treats it as core-owned). Web copies it at the revision it pins.
+
+This is step B of astrid-web's `docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md` for
+`searchParse`:
+
+- **Web has no TypeScript parse any more.** `GET /api/v1/search` asks the core and nothing else. It
+  has no browser caller, so there is no second implementation to keep in step.
+- **When the core cannot parse** (not loaded, threw, an error envelope, or an answer that is not a
+  parse), the route answers **503** with a retryable error. It never guesses a parse: a wrong
+  `assignee:` or `list:` filter returns the wrong tasks, which is worse than asking the caller to
+  try again.
+- **The grammar is unchanged.** Every query in the fixture parses as it did when web generated it;
+  only the generator moved. A change to the grammar is made in `parse::search`, regenerated here,
+  and copied by web.

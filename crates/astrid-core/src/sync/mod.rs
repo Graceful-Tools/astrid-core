@@ -798,6 +798,10 @@ impl TaskWalk {
             // resolve membership from the list, not from a copy stapled to every task. Older
             // servers ignore the parameter and send them anyway.
             .query("leanListMembers", Some("1".to_string()))
+            // Each row's trade-off label and sort key, which the `policy` sort compares and the
+            // list route sends only on request (ADEV-324). Older servers ignore it, and a row
+            // without one is unlabelled.
+            .query("include", Some("estimate".to_string()))
             .query("updatedSince", self.since.clone());
         request = match &self.cursor {
             Some(value) => request.query("cursor", Some(value.clone())),
@@ -1049,6 +1053,39 @@ mod tests {
 
     fn empty_task_pages(transport: StubTransport) -> StubTransport {
         transport.push_json("/api/v1/tasks", 200, json!({ "tasks": [] }))
+    }
+
+    /// ADEV-324: the `policy` sort compares the `sortKey` on each row's estimate, and the list
+    /// route sends it only on `?include=estimate`. Without the request a native client held no
+    /// key and showed `policy` as Auto.
+    #[tokio::test]
+    async fn adev_324_the_task_walk_asks_for_the_estimate_and_keeps_it() {
+        let (fixture, transport) = fixture_with_transport(
+            StubTransport::new()
+                .push_json("/api/v1/lists", 200, json!({ "lists": [] }))
+                .push_json(
+                    "/api/v1/tasks",
+                    200,
+                    json!({ "tasks": [{
+                        "id": "t1",
+                        "title": "Ship it",
+                        "estimate": { "label": "do-now", "sortKey": [0, 1, 5] }
+                    }] }),
+                )
+                .push_json("/api/v1/tasks", 200, json!({ "tasks": [] })),
+        );
+
+        fixture.sync.sync().await;
+
+        let urls = task_urls(&transport);
+        assert!(!urls.is_empty());
+        assert!(
+            urls.iter().all(|url| url.contains("include=estimate")),
+            "every task page asks for the estimate: {urls:?}"
+        );
+        let held = fixture.store.tasks().expect("reads");
+        let estimate = held[0].estimate.as_ref().expect("the estimate is kept");
+        assert_eq!(estimate.sort_key, vec![0, 1, 5]);
     }
 
     #[tokio::test]

@@ -275,6 +275,23 @@ pub enum Command {
         #[serde(default)]
         guardrails: Vec<crate::services::goals::GuardrailDraft>,
     },
+    /// Which of its project's goals a task serves, its own links and its lists' (ADEV-285; web
+    /// ADEV-271). Read-only and cached; offline, the cache answers. A refusal (the capability
+    /// off, not granted) is a failure: draw no section.
+    GetTaskGoalLinks {
+        task_id: String,
+    },
+    /// A task's latest estimate and history, with the trade-off label and its reasons (`label` is
+    /// null where no policy is stated). Read-only and cached (ADEV-285; web ADEV-278).
+    GetTaskEstimate {
+        task_id: String,
+    },
+    /// A task's experiment links and verification windows, and whether it is in the Pending
+    /// results column. The service's verdict and numbers as sent. Read-only and cached
+    /// (ADEV-285; web ADEV-279).
+    GetTaskExperiment {
+        task_id: String,
+    },
     /// What the "Wait on a task…" picker may offer for a query.
     ///
     /// The search is the SERVER's (`GET /api/v1/search`), which is permission-filtered in the
