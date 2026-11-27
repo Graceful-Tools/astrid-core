@@ -83,7 +83,7 @@ pub struct HandoffFlow {
 
 fn random_token() -> Result<String, HandoffError> {
     let mut bytes = [0u8; ENTROPY_BYTES];
-    getrandom::getrandom(&mut bytes).map_err(|_| HandoffError::Entropy)?;
+    getrandom::fill(&mut bytes).map_err(|_| HandoffError::Entropy)?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 

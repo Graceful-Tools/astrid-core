@@ -23,6 +23,17 @@ use super::{Context, Result, ServiceError};
 use astrid_rules::board::ColumnKind;
 use astrid_rules::empathy;
 
+/// Lowercase hex SHA-256. sha2 0.11's digest no longer formats with `{:x}`.
+fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
+}
+
 /// The manifest `version` this code understands. A newer one is left alone, not half-read.
 pub const MANIFEST_VERSION: u32 = 1;
 
@@ -124,7 +135,7 @@ impl EmpathyArtService {
                 continue;
             }
             let body = client.fetch_public(&frame.url).await?.body;
-            let digest = format!("{:x}", Sha256::digest(&body));
+            let digest = sha256_hex(&body);
             if !digest.eq_ignore_ascii_case(&frame.sha256) {
                 return Err(ServiceError::LocalFile(format!(
                     "{} does not match the manifest's sha256",
@@ -237,7 +248,7 @@ mod tests {
                     metaphor: metaphor.clone(),
                     state: state.clone(),
                     url: format!("https://astrid.cc/images/empathy-art/{metaphor}-{state}.webp"),
-                    sha256: format!("{:x}", Sha256::digest(&body)),
+                    sha256: sha256_hex(&body),
                     bytes: body.len() as u64,
                 });
             }
@@ -374,7 +385,7 @@ mod tests {
             .iter_mut()
             .find(|f| f.metaphor == today() && f.state == "ready")
             .expect("present");
-        frame.sha256 = format!("{:x}", Sha256::digest(&changed));
+        frame.sha256 = sha256_hex(&changed);
         let url = frame.url.clone();
         let transport = StubTransport::new()
             .push_json(MANIFEST_PATH, 200, serde_json::to_value(&next).expect("ok"))
@@ -411,7 +422,7 @@ mod tests {
         let cache = a_cache_dir();
         let good = manifest("r1");
         let mut bad = good.clone();
-        bad.frames[0].sha256 = format!("{:x}", Sha256::digest(b"something else"));
+        bad.frames[0].sha256 = sha256_hex(b"something else");
         let (service, _) = service(&cache, stub(&bad));
         assert!(service.sync().await.is_err());
         assert_eq!(
