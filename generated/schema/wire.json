@@ -1742,6 +1742,30 @@
       ],
       "type": "object"
     },
+    "ListGoalLinks": {
+      "description": "The goals a list serves (`GET /api/v1/lists/{id}/goal-links`; ADEV-328). `project_id` is\n`None` for a list in no project, which has no goals to link.",
+      "properties": {
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GoalLink"
+          },
+          "type": "array"
+        },
+        "listId": {
+          "default": "",
+          "type": "string"
+        },
+        "projectId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ListInvite": {
       "properties": {
         "createdAt": {
@@ -3799,6 +3823,9 @@
     "listDefaultPicks": {
       "$ref": "#/$defs/ListDefaultPicks"
     },
+    "listGoalLinks": {
+      "$ref": "#/$defs/ListGoalLinks"
+    },
     "listPicks": {
       "$ref": "#/$defs/ListPicks"
     },
@@ -3879,6 +3906,7 @@
     "githubApp",
     "projectGoals",
     "taskGoalLinks",
+    "listGoalLinks",
     "taskEstimates",
     "taskExperiments"
   ],

@@ -364,7 +364,14 @@ pub fn list_goals(list_id: &str) -> String {
     format!("{}/goals", list(list_id))
 }
 
-/// A task's goal links, its own and its lists' (`GET`; web ADEV-271).
+/// A list's own goal links: `GET`, and `PUT { goalIds }` / `DELETE { goalId }` for a list admin
+/// (web ADEV-271; ADEV-328).
+pub fn list_goal_links(list_id: &str) -> String {
+    format!("{}/goal-links", list(list_id))
+}
+
+/// A task's goal links, its own and its lists' (`GET`), and `PUT { goalIds, projectId? }` /
+/// `DELETE { goalId, projectId? }` for its own (web ADEV-271; ADEV-328).
 pub fn task_goals(task_id: &str) -> String {
     format!("{}/goals", task(task_id))
 }

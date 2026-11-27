@@ -94,6 +94,54 @@ pub(super) async fn run(app: &App, command: Command) -> Response {
             let answer = app.context.goal_signals().refresh_links(&task_id).await;
             signals_answer(app, &task_id, answer)
         }
+        Command::SetTaskGoalLinks {
+            task_id,
+            goal_ids,
+            project_id,
+        } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .set_task_links(&task_id, goal_ids, project_id)
+                .await;
+            signals_answer(app, &task_id, answer)
+        }
+        Command::UnlinkTaskGoal {
+            task_id,
+            goal_id,
+            project_id,
+        } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .unlink_task_goal(&task_id, &goal_id, project_id)
+                .await;
+            signals_answer(app, &task_id, answer)
+        }
+        Command::GetListGoalLinks { list_id } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .refresh_list_links(&list_id)
+                .await;
+            answer_value(answer)
+        }
+        Command::SetListGoalLinks { list_id, goal_ids } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .set_list_links(&list_id, goal_ids)
+                .await;
+            answer_value(answer)
+        }
+        Command::UnlinkListGoal { list_id, goal_id } => {
+            let answer = app
+                .context
+                .goal_signals()
+                .unlink_list_goal(&list_id, &goal_id)
+                .await;
+            answer_value(answer)
+        }
         Command::GetTaskEstimate { task_id } => {
             let answer = app.context.goal_signals().refresh_estimates(&task_id).await;
             signals_answer(app, &task_id, answer)
@@ -396,6 +444,17 @@ fn signals_answer<T: serde::Serialize>(
             }
             Response::ok(answer.value)
         }
+        Err(error) => Response::failed(error.into()),
+    }
+}
+
+/// A list's goal links. Nothing is announced: a task's inherited links are re-read when its
+/// detail opens, and the list editor draws the answer it was given (ADEV-328).
+fn answer_value<T: serde::Serialize>(
+    answer: crate::services::Result<crate::services::goal_signals::Answer<T>>,
+) -> Response {
+    match answer {
+        Ok(answer) => Response::ok(answer.value),
         Err(error) => Response::failed(error.into()),
     }
 }

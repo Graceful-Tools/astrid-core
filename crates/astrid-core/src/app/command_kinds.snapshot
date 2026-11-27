@@ -75,6 +75,7 @@ features
 feedbackListId
 filterOptions
 forgetChatMessage
+getListGoalLinks
 getListGoals
 getProjectGoals
 getTaskEstimate
@@ -177,12 +178,14 @@ setGoogleSyncMode
 setHotkey
 setInvitationRole
 setListFavorite
+setListGoalLinks
 setListImage
 setListProject
 setManualOrder
 setMemberRole
 setMyTasksFilters
 setProjectGoals
+setTaskGoalLinks
 setTaskLists
 setTaskProjectField
 setTaskStatus
@@ -216,6 +219,8 @@ toggleAssignee
 tourSeen
 transferListOwnership
 unlinkList
+unlinkListGoal
+unlinkTaskGoal
 updateList
 updateOAuthClient
 updateProfile
