@@ -364,6 +364,21 @@ pub fn list_goals(list_id: &str) -> String {
     format!("{}/goals", list(list_id))
 }
 
+/// A task's goal links, its own and its lists' (`GET`; web ADEV-271).
+pub fn task_goals(task_id: &str) -> String {
+    format!("{}/goals", task(task_id))
+}
+
+/// A task's estimates, latest and history (`GET`; web ADEV-278).
+pub fn task_estimates(task_id: &str) -> String {
+    format!("{}/estimates", task(task_id))
+}
+
+/// A task's experiment links and verification windows (`GET`; web ADEV-279).
+pub fn task_experiment(task_id: &str) -> String {
+    format!("{}/experiment", task(task_id))
+}
+
 pub fn channel_messages(channel_id: &str) -> String {
     format!(
         "{CHAT_CHANNELS}/{}/messages",
