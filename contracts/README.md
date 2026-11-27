@@ -34,7 +34,7 @@ rather than going unnoticed at runtime.
 |---|---|---|
 | `shortcuts.json` | `hooks/useKeyboardShortcuts.ts` — the `KEYBOARD_SHORTCUTS` table plus the `if (selectedTask)` guard read from the dispatch switch | `astrid_core::keyboard` |
 | `repeating.json` | `types/repeating.ts` — **executed**, not parsed: every case is run through web's own calculator and the results recorded; `completions` (43) and `zonedProgressions` (4) are whole `nextOccurrence` requests with the person's zone, what astrid-web's server sends (AWTD-1063) | `astrid_core::repeating`, and the rules door's `nextOccurrence` |
-| `permissions.json` | `lib/list-permissions.ts` — **executed**: a case matrix run through web's own rules — including the server-only project, status-list and legacy-array branches — recording all eight predicates per case | `astrid_core::permissions` |
+| `permissions.json` | **core-first** since astrid-web ADEV-304 (2026-11-26): astrid-core `crates/astrid-rules/src/permissions/mod.rs`, **executed** through the rules door (`listAccess`) by `cargo xtask gen-core-contracts` from `crates/xtask/src/permissions_cases.json`: 73 cases — ownership, memberships of every role and casing, the public fallbacks, and the server-only project, status-list and legacy-array branches — recording all eight predicates per case. The cases and expectations are web's last export of `lib/list-permissions.ts`, the TypeScript rule web then deleted: its browser and server both ask this crate | `astrid_core::permissions`, the rules door's `listAccess`; web's `lib/list-permissions.ts`; the Apple apps |
 | `board.json` | `lib/project-status.ts` — **executed**: three board configurations by eight cards, recording which column each card is in, what every move writes, and what a new card carries | `astrid_core::board` |
 | `statuses.json` | `lib/project-custom-states.ts` — **executed**: add, rename, reorder and remove over four boards, recording the role each add mints, every refusal and its message, and the exact array stored afterwards | `astrid_core::board` (the writers) |
 | `editing.json` | `lib/editing-session.ts` — **executed**: eleven scripted sequences of begin/end/cancel/commitAll, recording after each step which editor is open, what to commit and what to revert (PRODUCT_CONTRACT.md §6) | `astrid_core::editing` |
@@ -71,7 +71,9 @@ A rule that is **canonical in astrid-core from its first day** has no web implem
 execute, so its fixture is generated here. The first is `waiting.json` (the Waiting lane, Jon
 2026-11-12); `list-default-picks.json` is the second, and shows the other way a rule becomes
 core-first — web *has* the options, but as inline JSX rather than as a table an exporter can read,
-so there is no function to execute. The direction is the only thing reversed:
+so there is no function to execute. A third way is retirement: `permissions.json` was web-generated
+until web deleted its TypeScript rule (ADEV-304), and moved here unchanged. The direction is the
+only thing reversed:
 
 ```bash
 # here
