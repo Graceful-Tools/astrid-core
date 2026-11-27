@@ -23,6 +23,11 @@ client together, and the entry says which behaviour this crate currently follows
 > dated checklist in astrid-web
 > [`docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md`](https://github.com/Graceful-Tools/astrid-web/blob/main/docs/architecture/CORE_RULES_FALLBACK_RETIREMENT.md).
 > At that point the rule's fixture is generated from here.
+>
+> **List permissions reached that point** (astrid-web ADEV-304, 2026-11-26): `listAccess` is
+> canonical here outright, web's TypeScript rule is deleted (its browser and server both ask this
+> crate, and a question it can't answer is refused), and `permissions.json` is generated here —
+> §5.
 
 > **Core-first: the Waiting lane is canonical here from day one** (Jon, 2026-11-12). There is no
 > web implementation to run: the rules are `astrid_rules::waiting` (R1–R5) and the presets in
@@ -302,13 +307,20 @@ draw what they always drew. In a `require-base-url` build it stays relative. Tha
 
 ## 5. List permissions
 
-Canonical: this crate's `listAccess`, which web's server runs (see the note at the top). The
-fixture is generated from `astrid-web/lib/list-permissions.ts`.
-Apple: `astrid-ios/Astrid App/Models/TaskList.swift` (`role(for:)`) and `Core/Lists/ListPermissions.swift`.
+Canonical: **this crate's `listAccess`** (astrid-web ADEV-304, 2026-11-26). Web has no
+permission rule of its own any more: `lib/list-permissions.ts` keeps its function names and asks
+this crate, through the WebAssembly build on its server and the browser build in its client, and
+refuses whatever this crate cannot answer. The fixture is **core-first**: generated here by
+`cargo xtask gen-core-contracts` from `crates/xtask/src/permissions_cases.json` (each case's list
+and the answers a person wrote down; generation fails when the rule answers otherwise) and copied
+by web (`scripts/build-astrid-rules.sh`). A behaviour change starts here: change the rule and the
+case's `expect` together, regenerate, then re-pin web.
+Apple: asks this crate (`rules` → `listAccess`) since 2026-09-28.
 Here: `astrid_core::permissions`, locked by `contracts/fixtures/permissions.json`.
 
-**This crate follows web**, which the fixture makes literal: the expected answers are produced by
-running web's own functions over the case matrix.
+The cases and their expectations were carried over unchanged from web's last export of
+`lib/list-permissions.ts`, so the history below ("follows web") describes how the answers were
+settled, not who decides them now.
 
 Precedence is the part worth stating, because it is invisible from any single predicate: ownership
 beats an admin membership, an admin membership beats a plain one, and **any** membership beats the
