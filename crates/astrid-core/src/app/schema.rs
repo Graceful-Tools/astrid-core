@@ -124,6 +124,7 @@ pub struct WireModels {
     // ── Goals and guardrails, which the clients show and edit (ADEV-187) ──────────────────────
     project_goals: crate::services::goals::ProjectGoals,
     task_goal_links: crate::services::goal_signals::TaskGoalLinks,
+    list_goal_links: crate::services::goal_signals::ListGoalLinks,
     task_estimates: crate::services::goal_signals::TaskEstimates,
     task_experiments: crate::services::goal_signals::TaskExperiments,
 }

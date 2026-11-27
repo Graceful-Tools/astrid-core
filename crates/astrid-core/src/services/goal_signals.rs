@@ -13,14 +13,19 @@
 //! the capability is off, `403 not_granted` without the flag, a task the caller cannot see) is an
 //! error, and the cache is left alone: a shell draws no section for it.
 //!
-//! **Nothing here writes**, and nothing here computes. The label, its reasons and the experiment's
+//! **The only writes are goal links** (ADEV-328; web ADEV-276): a task's own links and a list's,
+//! `PUT`/`DELETE` on the same routes. Each is sent at once and never journalled, as web's chips
+//! are: offline or refused, it fails and the cache keeps what the server last said. The server's
+//! answer is the whole new set, so it replaces the cache. Nothing here computes.
+//!
+//! Beyond that, nothing here writes. The label, its reasons and the experiment's
 //! verdict are the server's, kept as sent. Sections whose shape the server owns (impacts, risk,
 //! metrics, findings, reasons) are kept as [`Value`], so a field a newer server adds survives a
 //! round trip through the cache. The order of ideas by the `policy` sort is
 //! `astrid_rules::filters`, not here.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{Context, Result, ServiceError};
 use crate::api::{endpoints, ApiError};
@@ -52,6 +57,20 @@ pub struct GoalLink {
 pub struct TaskGoalLinks {
     #[serde(default)]
     pub task_id: String,
+    #[serde(default)]
+    pub links: Vec<GoalLink>,
+}
+
+/// The goals a list serves (`GET /api/v1/lists/{id}/goal-links`; ADEV-328). `project_id` is
+/// `None` for a list in no project, which has no goals to link.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ListGoalLinks {
+    #[serde(default)]
+    pub list_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
     #[serde(default)]
     pub links: Vec<GoalLink>,
 }
@@ -169,6 +188,10 @@ pub fn links_key(task_id: &str) -> String {
     format!("taskGoalLinks:{task_id}")
 }
 
+pub fn list_links_key(list_id: &str) -> String {
+    format!("listGoalLinks:{list_id}")
+}
+
 pub fn estimates_key(task_id: &str) -> String {
     format!("taskEstimates:{task_id}")
 }
@@ -239,6 +262,13 @@ impl GoalSignalsService {
         read(&self.context.store, &links_key(task_id)).unwrap_or_else(|| TaskGoalLinks {
             task_id: task_id.to_string(),
             ..TaskGoalLinks::default()
+        })
+    }
+
+    pub fn cached_list_links(&self, list_id: &str) -> ListGoalLinks {
+        read(&self.context.store, &list_links_key(list_id)).unwrap_or_else(|| ListGoalLinks {
+            list_id: list_id.to_string(),
+            ..ListGoalLinks::default()
         })
     }
 
@@ -323,4 +353,98 @@ impl GoalSignalsService {
             Err(error) => Err(refusal(error)),
         }
     }
+    /// Fetch the list's goal links and cache the answer. Offline, the cache is the answer.
+    pub async fn refresh_list_links(&self, list_id: &str) -> Result<Answer<ListGoalLinks>> {
+        let client = &self.context.client;
+        match client
+            .send(client.get(endpoints::list_goal_links(list_id)))
+            .await
+        {
+            Ok(answer) => Ok(self.store_list_links(list_id, &answer)?),
+            Err(ApiError::Transport(_)) => Ok(Answer {
+                value: self.cached_list_links(list_id),
+                changed: false,
+            }),
+            Err(error) => Err(refusal(error)),
+        }
+    }
+
+    /// Replace the task's own links in one project (`[]` clears them). `project_id` is needed
+    /// only when the task's lists span several projects.
+    pub async fn set_task_links(
+        &self,
+        task_id: &str,
+        goal_ids: Vec<String>,
+        project_id: Option<String>,
+    ) -> Result<Answer<TaskGoalLinks>> {
+        let body = with_project(json!({ "goalIds": goal_ids }), project_id);
+        let client = &self.context.client;
+        let request = client.put(endpoints::task_goals(task_id)).value(body);
+        let answer = client.send(request).await.map_err(refusal)?;
+        self.store_task_links(task_id, &answer)
+    }
+
+    /// Remove one of the task's own links. One inherited from a list is removed on the list.
+    pub async fn unlink_task_goal(
+        &self,
+        task_id: &str,
+        goal_id: &str,
+        project_id: Option<String>,
+    ) -> Result<Answer<TaskGoalLinks>> {
+        let body = with_project(json!({ "goalId": goal_id }), project_id);
+        let client = &self.context.client;
+        let request = client.delete(endpoints::task_goals(task_id)).value(body);
+        let answer = client.send(request).await.map_err(refusal)?;
+        self.store_task_links(task_id, &answer)
+    }
+
+    /// Replace the list's links. The server refuses anyone but a list admin (`403`).
+    pub async fn set_list_links(
+        &self,
+        list_id: &str,
+        goal_ids: Vec<String>,
+    ) -> Result<Answer<ListGoalLinks>> {
+        let client = &self.context.client;
+        let request = client
+            .put(endpoints::list_goal_links(list_id))
+            .value(json!({ "goalIds": goal_ids }));
+        let answer = client.send(request).await.map_err(refusal)?;
+        self.store_list_links(list_id, &answer)
+    }
+
+    /// Remove one of the list's links. A list admin only, like [`Self::set_list_links`].
+    pub async fn unlink_list_goal(
+        &self,
+        list_id: &str,
+        goal_id: &str,
+    ) -> Result<Answer<ListGoalLinks>> {
+        let client = &self.context.client;
+        let request = client
+            .delete(endpoints::list_goal_links(list_id))
+            .value(json!({ "goalId": goal_id }));
+        let answer = client.send(request).await.map_err(refusal)?;
+        self.store_list_links(list_id, &answer)
+    }
+
+    fn store_task_links(&self, task_id: &str, answer: &Value) -> Result<Answer<TaskGoalLinks>> {
+        let mut value: TaskGoalLinks = Self::decode(answer)?;
+        value.task_id = task_id.to_string();
+        let changed = write(&self.context.store, &links_key(task_id), &value);
+        Ok(Answer { value, changed })
+    }
+
+    fn store_list_links(&self, list_id: &str, answer: &Value) -> Result<Answer<ListGoalLinks>> {
+        let mut value: ListGoalLinks = Self::decode(answer)?;
+        value.list_id = list_id.to_string();
+        let changed = write(&self.context.store, &list_links_key(list_id), &value);
+        Ok(Answer { value, changed })
+    }
+}
+
+/// A goal-link body, with `projectId` only when the caller named one.
+fn with_project(mut body: Value, project_id: Option<String>) -> Value {
+    if let (Some(project_id), Some(map)) = (project_id, body.as_object_mut()) {
+        map.insert("projectId".into(), Value::String(project_id));
+    }
+    body
 }

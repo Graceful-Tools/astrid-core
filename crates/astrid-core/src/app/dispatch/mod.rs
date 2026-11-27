@@ -40,6 +40,11 @@ pub(crate) async fn run(app: &App, command: Command) -> Response {
         | Command::GetListGoals { .. }
         | Command::SetProjectGoals { .. }
         | Command::GetTaskGoalLinks { .. }
+        | Command::SetTaskGoalLinks { .. }
+        | Command::UnlinkTaskGoal { .. }
+        | Command::GetListGoalLinks { .. }
+        | Command::SetListGoalLinks { .. }
+        | Command::UnlinkListGoal { .. }
         | Command::GetTaskEstimate { .. }
         | Command::GetTaskExperiment { .. }
         | Command::TaskProjectFields { .. }

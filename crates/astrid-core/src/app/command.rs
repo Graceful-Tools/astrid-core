@@ -281,6 +281,43 @@ pub enum Command {
     GetTaskGoalLinks {
         task_id: String,
     },
+    /// Replace a task's own goal links in one project (`[]` clears them; ADEV-328, web ADEV-276).
+    /// `projectId` only when the task's lists span several projects. Sent at once, never
+    /// journalled: offline or refused (a goal the project does not state, no write access) it
+    /// fails and the cache is left alone. Answers the new links, as `getTaskGoalLinks` does, and
+    /// announces `taskGoalSignals`.
+    SetTaskGoalLinks {
+        task_id: String,
+        #[serde(default)]
+        goal_ids: Vec<String>,
+        #[serde(default)]
+        project_id: Option<String>,
+    },
+    /// Remove one of a task's own goal links (ADEV-328). One inherited from a list is unlinked on
+    /// the list. Otherwise as `setTaskGoalLinks`.
+    UnlinkTaskGoal {
+        task_id: String,
+        goal_id: String,
+        #[serde(default)]
+        project_id: Option<String>,
+    },
+    /// The goals a list serves, `{ listId, projectId, links }` (ADEV-328). Cached; offline, the
+    /// cache answers. `projectId` is null for a list in no project.
+    GetListGoalLinks {
+        list_id: String,
+    },
+    /// Replace a list's goal links. A list admin only (`403` otherwise); sent at once, never
+    /// journalled (ADEV-328).
+    SetListGoalLinks {
+        list_id: String,
+        #[serde(default)]
+        goal_ids: Vec<String>,
+    },
+    /// Remove one of a list's goal links. A list admin only (ADEV-328).
+    UnlinkListGoal {
+        list_id: String,
+        goal_id: String,
+    },
     /// A task's latest estimate and history, with the trade-off label and its reasons (`label` is
     /// null where no policy is stated). Read-only and cached (ADEV-285; web ADEV-278).
     GetTaskEstimate {
