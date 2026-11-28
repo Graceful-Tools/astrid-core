@@ -19,12 +19,12 @@ by `<checkout>/<copy>`, not by its repository.
 
 | Consumer | Repository | Takes | Pinned in | Revision |
 |---|---|---|---|---|
-| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `ae86e89cf074bef8f8fb95edeb4e8683f9ec4924` |
+| `astrid-web/astrid-rules` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | `astrid-rules`, as WebAssembly | `packages/astrid-rules/REVISION` | `4d7711ff8d5a1fea901810f6bdc81a3b2ed7afc1` |
 | `astrid-web/astrid-design` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated design tokens | `packages/astrid-design/REVISION` | `2e5019420aca654895582be8583209655bbb7ad8` |
 | `astrid-web/strings` | [astrid-web](https://github.com/Graceful-Tools/astrid-web) | the generated string catalog (`strings/generated`, web output) | `lib/i18n/core-strings/REVISION` | `7b4dd9f5141bcd1431725a5481fd478bd4a2ab1f` |
-| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `8205b54603991221f61696af9348ef45e3832a4a` |
-| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `59c385a363e4e443992c230309abd4fa18e7c89d` |
-| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `ae86e89cf074bef8f8fb95edeb4e8683f9ec4924` |
+| `astrid-windows/core` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the whole core, through a C ABI | `crates/astrid-ffi/Cargo.toml` (`rev =`) | `f668b3c6469c234f8cb4ecbaad12c1eaae09781a` |
+| `astrid-windows/design` | [astrid-windows](https://github.com/Graceful-Tools/astrid-windows) | the generated design tokens, hash-gated | `design/REVISION` | `58fe8cb7ccc354b351ee33dd93b77a28e0843086` |
+| `astrid-ios/core` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `c29913bb20fee9d74f222f5780fe349ef0a34784` |
 | `astrid-ios/design` | [astrid-ios](https://github.com/Graceful-Tools/astrid-ios) | the generated `AstridTokens.swift` | nothing records it — see below | `2acba9417dc30ac5531418931f54526d09dfdd5e` |
 | `astrid-android/core` | [astrid-android](https://github.com/Graceful-Tools/astrid-android) | the whole core, through UniFFI (`crates/astrid-uniffi`) | `core/Cargo.toml` (`rev =`) | `ccfe7f784a16c7adf11c1ea7ee7f0bd81c2f35d1` |
 | `astrid-vscode/astrid-rules` | astrid-vscode (private) | `astrid-rules`, as WebAssembly | `vendor/astrid-rules/REVISION` | `082c6fc1969b37ab77ef1475e6e1d05590e3ced8` |
