@@ -444,6 +444,130 @@ async fn a_board_answers_with_its_columns_and_their_cards() {
     assert_eq!(columns[0]["total"], 0);
 }
 
+/// ADEV-347: every column of the board answer carries the catalog key of what it says when empty
+/// and its frame (null until the art is synced), in rows and in ids-only answers alike.
+#[tokio::test]
+async fn adev_347_a_column_carries_its_empty_message_key_and_frame() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .upsert_projects(&[serde_json::from_value(
+            serde_json::json!({ "id": "p1", "name": "Ship it" }),
+        )
+        .expect("a project")])
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(serde_json::json!({
+                "id": "l1", "name": "Work", "projectId": "p1"
+            }))
+            .expect("a list"),
+        )
+        .expect("stores");
+
+    for ids_only in [false, true] {
+        let board = call(
+            &app,
+            json!({ "kind": "board", "listId": "l1", "idsOnly": ids_only }),
+        )
+        .await;
+        let columns = board["value"]["columns"].as_array().expect("columns");
+        let key = |id: &str| {
+            columns
+                .iter()
+                .find(|column| column["id"] == id)
+                .unwrap_or_else(|| panic!("a {id} column"))["emptyMessageKey"]
+                .clone()
+        };
+        assert_eq!(key("ready"), "board.empty.ready");
+        assert_eq!(key("doing"), "board.empty.doing");
+        assert_eq!(key("waiting"), "board.empty.waiting");
+        assert_eq!(key("__virtual_inbox__"), "board.empty.inbox");
+        assert_eq!(key("__virtual_done__"), "board.empty.done");
+        for column in columns {
+            assert!(
+                column["emptyFramePath"].is_null(),
+                "nothing is synced, so no column has a frame: {column}"
+            );
+        }
+    }
+}
+
+/// ADEV-347: once the art is cached, an empty column answers the local path of its frame, and a
+/// column holding a card answers null.
+#[tokio::test]
+async fn adev_347_an_empty_column_answers_its_cached_frame() {
+    let app = app_with(StubTransport::new());
+    app.store
+        .upsert_projects(&[serde_json::from_value(
+            serde_json::json!({ "id": "p1", "name": "Ship it" }),
+        )
+        .expect("a project")])
+        .expect("stores");
+    app.store
+        .upsert_list(
+            &serde_json::from_value(serde_json::json!({
+                "id": "l1", "name": "Work", "projectId": "p1"
+            }))
+            .expect("a list"),
+        )
+        .expect("stores");
+    call(
+        &app,
+        json!({ "kind": "createTask", "title": "Write it down", "listIds": ["l1"] }),
+    )
+    .await;
+
+    // A cache holding every metaphor's frame for every state, so whichever metaphor today picks
+    // is there.
+    let dir = app.attachment_cache().join("empathy-art");
+    std::fs::create_dir_all(&dir).expect("makes the cache");
+    let sha = "0123456789abcdef".repeat(4);
+    let mut frames = Vec::new();
+    for metaphor in astrid_rules::empathy::METAPHORS {
+        for state in astrid_rules::empathy::STATES {
+            std::fs::write(
+                dir.join(format!("{metaphor}-{state}-{}.webp", &sha[..12])),
+                b"x",
+            )
+            .expect("writes a frame");
+            frames.push(json!({
+                "metaphor": metaphor, "state": state,
+                "url": "https://astrid.cc/x.webp", "sha256": sha, "bytes": 1
+            }));
+        }
+    }
+    std::fs::write(
+        dir.join("manifest.json"),
+        json!({
+            "version": 1, "revision": "r1",
+            "metaphors": astrid_rules::empathy::METAPHORS,
+            "states": astrid_rules::empathy::STATES,
+            "frames": frames,
+        })
+        .to_string(),
+    )
+    .expect("writes the manifest");
+
+    let board = call(&app, json!({ "kind": "board", "listId": "l1" })).await;
+    let columns = board["value"]["columns"].as_array().expect("columns");
+    let frame = |id: &str| {
+        columns
+            .iter()
+            .find(|column| column["id"] == id)
+            .unwrap_or_else(|| panic!("a {id} column"))["emptyFramePath"]
+            .clone()
+    };
+    let doing = frame("doing");
+    assert!(
+        doing.as_str().is_some_and(|path| path.ends_with(".webp")),
+        "an empty column answers a local path: {doing}"
+    );
+    assert!(
+        frame("__virtual_inbox__").is_null(),
+        "a column holding a card has no frame"
+    );
+}
+
 /// A card typed into a column is BORN in that column — role and all, in one request (task
 /// 95c7a68f).
 ///

@@ -357,6 +357,8 @@ fn draw_board(
                     "name": column.name,
                     "description": column.description,
                     "kind": column.kind,
+                    "emptyMessageKey": column.empty_message_key,
+                    "emptyFramePath": empty_frame_path(app, list_id, column, held.len()),
                     "total": held.len(),
                     "ids": window.iter().map(|task| task.id.as_str()).collect::<Vec<_>>(),
                 })
@@ -401,6 +403,8 @@ fn draw_board(
                 "name": column.name,
                 "description": column.description,
                 "kind": column.kind,
+                "emptyMessageKey": column.empty_message_key,
+                "emptyFramePath": empty_frame_path(app, list_id, column, held.len()),
                 "total": held.len(),
                 "cards": serialize_rows(&TaskRow::build_all(window, &context)),
             })
@@ -412,6 +416,34 @@ fn draw_board(
         "listId": list_id,
         "columns": drawn,
     }))
+}
+
+/// The local frame an empty column shows, or null (ADEV-347, ADEV-221).
+///
+/// Only a column holding no cards has one, and only once the art has been synced to this
+/// installation's cache: `EmpathyArtService::frame_path` never touches the network. A board with
+/// no opened list has no list to pick the day's metaphor by, so it answers null too. The brand
+/// gate is the cache itself: a build that is not presenting Astrid's mascot never syncs the art,
+/// so there is nothing here for it to answer.
+fn empty_frame_path(
+    app: &App,
+    list_id: Option<&str>,
+    column: &crate::board::BoardColumn,
+    total: usize,
+) -> Option<String> {
+    if total != 0 {
+        return None;
+    }
+    app.context
+        .empathy_art(app.attachment_cache())
+        .frame_path(
+            true,
+            list_id?,
+            &column.id,
+            column.kind,
+            app.clock.now().as_millisecond(),
+        )
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 /// One row of a project's multi-list board: `list_id`'s cards under the project's columns
